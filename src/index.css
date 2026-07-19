@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+}
+
+.font-body { font-family: 'Work Sans', sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
