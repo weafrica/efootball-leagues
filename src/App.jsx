@@ -462,6 +462,18 @@ export default function App() {
     showToast(`${team.name} removed from the league.`);
   };
 
+  const updateLeaguePhoto = async (league, file) => {
+    const ext = file.name.split(".").pop();
+    const path = `${league.id}-${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+    const { data: pub } = supabase.storage.from("league-photos").getPublicUrl(path);
+    const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
+    if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
+    await loadLeagues();
+    showToast("League photo updated.");
+  };
+
   const deleteLeague = async (league) => {
     if (!window.confirm(`Delete "${league.name}"? This removes all clubs, fixtures and members permanently.`)) return;
     const { error } = await supabase.from("leagues").delete().eq("id", league.id);
@@ -503,7 +515,7 @@ export default function App() {
               <LeagueDetail league={activeLeague} session={session} isAdmin={isAdmin} joined={isMemberOf(activeLeague)}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
                 onBack={() => setView("home")} onJoin={() => joinLeague(activeLeague.id)}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} c={c} />
             )}
@@ -521,14 +533,39 @@ export default function App() {
 
 function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
   return (
-    <div className="min-h-screen flex flex-col items-center px-6 py-12" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
-      <button onClick={toggleTheme} className="fixed top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
-        {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-      </button>
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[70vh]">
-        <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-5" style={{ background: c.green }}><Trophy size={26} color={c.accent} /></div>
-        <h1 className="text-4xl font-extrabold uppercase tracking-tight text-center leading-none mb-2">Matchday</h1>
-        <p className="font-body text-center max-w-xs mb-8" style={{ color: c.textDim }}>Sign in to create leagues, join fixtures, and track your table.</p>
+    <div className="min-h-screen flex flex-col items-center px-6 py-10" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
+      <style>{`
+        @keyframes medallionGlow { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.85; } }
+        .medallion-glow { animation: medallionGlow 4.5s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .medallion-glow { animation: none; opacity: 0.7; } }
+      `}</style>
+
+      <div className="w-full flex items-center justify-between max-w-md">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={14} color={c.accent} /></div>
+          <span className="font-extrabold text-sm uppercase tracking-wider">Matchday</span>
+        </div>
+        <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
+          {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center min-h-[70vh] w-full">
+        <div className="font-mono text-[11px] uppercase tracking-[0.35em] mb-6" style={{ color: c.accent }}>Season 2026</div>
+
+        <div className="relative w-64 h-64 sm:w-72 sm:h-72 mb-8">
+          <div className="medallion-glow absolute -inset-6 rounded-full" style={{ background: `radial-gradient(circle, ${c.accent}55 0%, ${c.accent}00 70%)`, filter: "blur(18px)" }} />
+          <div className="absolute inset-0 rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 1px ${c.accent}66, 0 20px 60px -10px rgba(0,0,0,0.5)` }}>
+            <img src="/hero-emblem.png" alt="" className="w-full h-full object-cover" style={{ transform: "scale(1.12)" }} />
+            <div className="absolute inset-0" style={{ background: `radial-gradient(circle, transparent 45%, ${c.bg}CC 92%)` }} />
+            <div className="absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 40px 10px ${c.bg}` }} />
+          </div>
+        </div>
+
+        <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight text-center leading-[0.95] mb-3">
+          Run your table.<br />Own your league.
+        </h1>
+        <p className="font-body text-center max-w-xs mb-8" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself.</p>
         <button onClick={onSignIn} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
           <GoogleIcon /> Continue with Google
         </button>
@@ -719,12 +756,17 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, onOpen, onCreate, onJ
             const stageLabel = l.format === "survivor" ? (l.final_stage_started ? " · Final stage" : ` · Stage ${l.current_stage}`) : "";
             return (
               <div key={l.id} onClick={() => onOpen(l.id)} className="rounded-xl p-4 flex items-center justify-between cursor-pointer border" style={{ background: c.surface, borderColor: c.border }}>
-                <div>
-                  <div className="font-semibold text-lg leading-tight">{l.name}</div>
-                  <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>
-                    {l.fixtures.length === 0
-                      ? `${formatLabel} · Registration open · ${l.teams.length} club${l.teams.length === 1 ? "" : "s"} joined`
-                      : `${formatLabel}${stageLabel} · ${l.teams.length} clubs · ${played}/${l.fixtures.length} played${leader && leader.p > 0 ? ` · ${leader.name} leads` : ""}`}
+                <div className="flex items-center gap-3 min-w-0">
+                  {l.photo_url && (
+                    <img src={l.photo_url} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" style={{ border: `1px solid ${c.border}` }} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-lg leading-tight truncate">{l.name}</div>
+                    <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>
+                      {l.fixtures.length === 0
+                        ? `${formatLabel} · Registration open · ${l.teams.length} club${l.teams.length === 1 ? "" : "s"} joined`
+                        : `${formatLabel}${stageLabel} · ${l.teams.length} clubs · ${played}/${l.fixtures.length} played${leader && leader.p > 0 ? ` · ${leader.name} leads` : ""}`}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -869,7 +911,43 @@ function CreateLeague({ onCancel, onCreate, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, onBack, onJoin, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onAdvance, onGenerateFixtures, onDelete, onShare, c }) {
+function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    await onUpdatePhoto(league, file);
+    setUploading(false);
+  };
+
+  if (!league.photo_url && !canManage) return null;
+
+  return (
+    <div className="relative mb-5 rounded-xl overflow-hidden" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+      {league.photo_url ? (
+        <img src={league.photo_url} alt="" className="w-full h-40 sm:h-48 object-cover" />
+      ) : (
+        <div className="w-full h-28 flex items-center justify-center font-body text-sm" style={{ color: c.textFaint }}>No league photo yet</div>
+      )}
+      {canManage && (
+        <>
+          <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+          <button onClick={() => inputRef.current?.click()} disabled={uploading}
+            className="absolute bottom-2 right-2 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+            style={{ background: c.bg, color: c.text, opacity: uploading ? 0.6 : 0.92 }}>
+            <Settings2 size={12} /> {uploading ? "Uploading…" : league.photo_url ? "Change photo" : "Add photo"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, onBack, onJoin, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onAdvance, onGenerateFixtures, onDelete, onShare, c }) {
   const [tab, setTab] = useState("table");
   const isCreator = session && league.created_by === session.user.id;
   const canManage = isCreator || isAdmin;
@@ -915,6 +993,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           )}
         </div>
       </div>
+
+      <LeaguePhotoBanner league={league} canManage={canManage} onUpdatePhoto={onUpdatePhoto} c={c} />
 
       <div className="flex items-start justify-between mb-5">
         <div>
