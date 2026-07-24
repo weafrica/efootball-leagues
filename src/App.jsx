@@ -556,6 +556,18 @@ function timeAgo(iso) {
 // same color, and different people are visually distinguishable in a thread,
 // the way any social feed tells commenters apart at a glance.
 const AVATAR_HUES = [142, 168, 25, 45, 200, 280, 340, 10];
+
+// Days remaining until a ladder challenge deadline (accept-by or log-by).
+// The actual expiry/penalty is enforced server-side (process_stale_ladder_challenges);
+// this is purely the countdown shown in the UI. Returns null once it's passed
+// (server will have already resolved it by the time that's visible here).
+function ladderDaysLeft(fromISO, windowDays) {
+  if (!fromISO) return null;
+  const deadline = new Date(fromISO).getTime() + windowDays * 24 * 60 * 60 * 1000;
+  const ms = deadline - Date.now();
+  if (ms <= 0) return 0;
+  return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
 function avatarColor(seed) {
   const s = seed || "?";
   let hash = 0;
@@ -1000,6 +1012,7 @@ export default function App() {
   // sent it or the one who received it.
   const loadChallenges = useCallback(async () => {
     if (!session) return;
+    await supabase.rpc("process_stale_ladder_challenges");
     const { data, error } = await supabase.from("challenges")
       .select("*")
       .or(`challenger_id.eq.${session.user.id},opponent_id.eq.${session.user.id}`)
@@ -1013,6 +1026,7 @@ export default function App() {
   // app. RLS only allows reading this while signed in; the login screen
   // shows its own top-5 public view instead (see PublicLadderPreview).
   const loadLadder = useCallback(async () => {
+    await supabase.rpc("process_stale_ladder_challenges");
     const { data, error } = await supabase.from("ladder_ranks").select("*").order("rank_position", { ascending: true });
     if (error) { console.error("Couldn't load the ladder:", error.message); setLadder([]); return; }
     setLadder(data || []);
@@ -3715,11 +3729,26 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
       <div className="flex items-center gap-3">
         <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
         <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate">{counterpartUsername}</div>
+          <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
+            {counterpartUsername}
+            {ch.is_ladder && (
+              <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                <Swords size={9} /> Ladder
+              </span>
+            )}
+          </div>
           {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
           {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
+          {ch.status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.created_at, 7); return d !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>
+              {iAmChallenger ? `Walkover in ${d}d if they don't respond` : `Accept within ${d}d or you forfeit the spot`}
+            </div>
+          ); })()}
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "expired" && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>Expired, no result logged — you both dropped a spot</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
@@ -3727,8 +3756,17 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
           {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
           )}
+          {ch.status === "accepted" && ch.result_status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.result_reported_at, 2); return d !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 1 ? c.red : c.textFaint }}>
+              {iReported ? `Auto-confirms in ${d}d if they don't respond` : `Confirm within ${d}d or it auto-confirms`}
+            </div>
+          ); })()}
           {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
+          {ch.status === "accepted" && !ch.result_status && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.responded_at, 7); return d !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>{d}d left to log a result, or you both drop a spot</div>
+          ); })()}
           {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
+          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover — they didn't respond in time" : "Expired — you didn't respond in time"}</div>}
         </div>
         {ch.status === "pending" && !iAmChallenger && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -3759,7 +3797,13 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
         {ch.status === "accepted" && ch.result_status === "confirmed" && (
           <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
         )}
+        {ch.status === "accepted" && ch.result_status === "expired" && (
+          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        )}
         {ch.status === "declined" && (
+          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        )}
+        {ch.status === "expired" && (
           <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
         )}
       </div>
