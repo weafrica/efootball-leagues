@@ -8,3 +8,9 @@ body {
 
 .font-body { font-family: 'Work Sans', sans-serif; }
 .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+@keyframes matchday-flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; }
+  20%, 22%, 24%, 55% { opacity: 0.35; }
+}
+.animate-flicker { animation: matchday-flicker 2.4s infinite; }

@@ -1307,11 +1307,12 @@ export default function App() {
     loadOpenChallenges();
   }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges]);
 
-  // While the Challenges screen is open, poll the random-challenge pool every
-  // few seconds — it's a race to accept, so members want to see it move
-  // without having to manually refresh.
+  // While the Challenges screen — or Home, where the random-challenge
+  // notification banner lives — is open, poll the random-challenge pool
+  // every few seconds. It's a race to accept, so members want to see it
+  // move without having to manually refresh.
   useEffect(() => {
-    if (view !== "challenges") return;
+    if (view !== "challenges" && view !== "home") return;
     const id = setInterval(loadOpenChallenges, 4000);
     return () => clearInterval(id);
   }, [view, loadOpenChallenges]);
@@ -2155,12 +2156,14 @@ export default function App() {
   }
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
 
+  const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); };
+
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       <Header view={view} setView={setView} activeLeague={activeLeague} theme={theme} toggleTheme={toggleTheme} c={c} onSignOut={signOut} userEmail={session.user.email}
         avatarUrl={profile?.avatar_url}
         onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
-        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); }}
+        onOpenChallenges={openChallengesScreen}
         challengeBadge={incomingPendingCount}
         onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
@@ -2184,6 +2187,7 @@ export default function App() {
             {view === "home" && (
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} myPaymentStatus={myPaymentStatus}
                 canManageLeague={canManageLeague} session={session} onToggleLeagueReaction={toggleLeagueReaction}
+                openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
                 onCreate={() => setView("create")} onJoin={startJoin} c={c} />
             )}
@@ -3769,9 +3773,13 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
+
+  // Open random challenges anyone but the signed-in member can still grab —
+  // same "unaccepted and up for grabs" definition ChallengesScreen uses.
+  const grabbableChallenges = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id);
 
   // Leagues that need the viewer's attention (something to review, or their
   // own payment needs sorting out) float to the top of each section; the
@@ -3789,15 +3797,31 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
+      {grabbableChallenges.length > 0 && (
+        <button onClick={onOpenChallenges} className="animate-flicker w-full flex items-center gap-2.5 mt-4 px-4 py-2.5 rounded-full font-body text-xs font-semibold text-left"
+          style={{ background: c.accent, color: c.accentText }}>
+          <Shuffle size={14} className="shrink-0" />
+          <span className="flex-1 min-w-0 truncate">
+            {grabbableChallenges.length === 1 ? "1 random challenge" : `${grabbableChallenges.length} random challenges`} waiting — first to accept gets it!
+          </span>
+          <ChevronRight size={14} className="shrink-0" />
+        </button>
+      )}
+
       <section className="pt-10 pb-6">
         <div className="font-mono text-xs tracking-[0.2em] uppercase mb-2" style={{ color: c.accent }}>Season 2026</div>
         <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight leading-[0.95]">Run your table.<br />Own your league.</h1>
         <p className="font-body mt-3 max-w-md" style={{ color: c.textDim }}>
           {isAdmin ? "Leagues you create here are public. " : ""}Create an eFootball league, invite people to join, log results — the table updates itself.
         </p>
-        <button onClick={onCreate} className="mt-5 inline-flex items-center gap-2 font-body font-semibold px-5 py-2.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-          <Plus size={16} strokeWidth={2.5} /> New league
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 mt-5">
+          <button onClick={onCreate} className="inline-flex items-center gap-2 font-body font-semibold px-5 py-2.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+            <Plus size={16} strokeWidth={2.5} /> New league
+          </button>
+          <button onClick={onOpenChallenges} title="Send or grab a random challenge" className="inline-flex items-center gap-2 font-body font-semibold px-5 py-2.5 rounded-full border" style={{ borderColor: c.borderStrong, color: c.text }}>
+            <Shuffle size={16} strokeWidth={2.5} /> Random challenge
+          </button>
+        </div>
       </section>
 
       {leagues.length === 0 && (
