@@ -881,6 +881,7 @@ export default function App() {
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
+  const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const c = THEMES[theme];
 
@@ -1108,6 +1109,21 @@ export default function App() {
     setOpenChallenges(data || []);
   }, [session, showToast]);
 
+  // Community feed at the bottom of the Challenges screen: the last 100
+  // confirmed results from every member on the platform, direct challenges
+  // and random challenges combined. Reads from the public_challenge_results
+  // view (see README) so it isn't limited to the signed-in member's own
+  // rows the way loadChallenges/loadOpenChallenges are.
+  const loadRecentResults = useCallback(async () => {
+    if (!session) return;
+    const { data, error } = await supabase.from("public_challenge_results")
+      .select("*")
+      .order("result_confirmed_at", { ascending: false })
+      .limit(100);
+    if (error) { setRecentResults([]); return; }
+    setRecentResults(data || []);
+  }, [session]);
+
   // Fires one challenge open to every other member. Anyone can grab it —
   // whoever does first wins it and it's gone for the rest.
   const sendRandomChallenge = async () => {
@@ -1217,6 +1233,15 @@ export default function App() {
     const id = setInterval(loadOpenChallenges, 4000);
     return () => clearInterval(id);
   }, [view, loadOpenChallenges]);
+
+  // Same idea for the community results feed, on a slower clock — new
+  // confirmed results trickle in rather than needing a race-to-accept refresh.
+  useEffect(() => {
+    if (view !== "challenges") return;
+    loadRecentResults();
+    const id = setInterval(loadRecentResults, 20000);
+    return () => clearInterval(id);
+  }, [view, loadRecentResults]);
 
   // Handle a shared deep link like ?league=<id> once leagues have loaded.
   useEffect(() => {
@@ -2046,14 +2071,14 @@ export default function App() {
       <Header view={view} setView={setView} activeLeague={activeLeague} theme={theme} toggleTheme={toggleTheme} c={c} onSignOut={signOut} userEmail={session.user.email}
         avatarUrl={profile?.avatar_url}
         onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
-        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); }}
+        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); }}
         challengeBadge={incomingPendingCount}
         onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onBack={() => setView("home")} c={c} />
         ) : view === "challenges" ? (
-          <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges}
+          <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
             onSendChallenge={sendChallenge} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)}
             onRemove={removeChallenge}
             onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
@@ -2784,10 +2809,11 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
+  const [resultsQuery, setResultsQuery] = useState("");
 
   if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
 
@@ -2826,6 +2852,20 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
     await onSendRandom();
     setSendingRandom(false);
   };
+
+  // Community results feed: last 100 confirmed results platform-wide. Filter
+  // client-side by username, and flag which rows involve the signed-in
+  // member so their own results stand out scrolling past everyone else's.
+  const rq = resultsQuery.trim().toLowerCase();
+  const filteredResults = (recentResults || []).filter((r) => {
+    if (!rq) return true;
+    return (r.player_one || "").toLowerCase().includes(rq) || (r.player_two || "").toLowerCase().includes(rq);
+  });
+  const resultsToday = (recentResults || []).filter((r) => {
+    const d = new Date(r.result_confirmed_at);
+    const now = new Date();
+    return d.toDateString() === now.toDateString();
+  }).length;
 
   return (
     <div className="pt-6">
@@ -2912,6 +2952,73 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
             onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof} c={c} />)}
         </div>
       )}
+
+      <div className="mt-8 flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
+          <History size={12} /> Community results
+        </div>
+        {recentResults && recentResults.length > 0 && (
+          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+            {resultsToday > 0 ? `${resultsToday} today` : `${recentResults.length} shown`}
+          </div>
+        )}
+      </div>
+      <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
+        The last 100 confirmed results across Matchday — direct and random challenges, everyone included.
+      </div>
+
+      {recentResults === null ? (
+        <Loader c={c} />
+      ) : recentResults.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          No confirmed results yet — once challenge results get confirmed, they'll show up here for everyone.
+        </div>
+      ) : (
+        <>
+          <div className="relative mb-2.5">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+            <input value={resultsQuery} onChange={(e) => setResultsQuery(e.target.value)} placeholder="Filter by username"
+              className="w-full border rounded-lg pl-8 pr-3 py-1.5 font-body text-xs outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          </div>
+          {filteredResults.length === 0 ? (
+            <div className="font-body text-xs py-2 text-center" style={{ color: c.textFaint }}>No results match "{resultsQuery}".</div>
+          ) : (
+            <div className="flex flex-col gap-1.5 max-h-[28rem] overflow-y-auto pr-0.5">
+              {filteredResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// One row in the platform-wide "Community results" feed at the bottom of the
+// Challenges screen — every confirmed result from every member, not just the
+// signed-in member's own. Winner's name is bolded, loser's dimmed, draws
+// stay neutral; rows the signed-in member played in get a subtle highlight
+// so their own results are easy to spot scrolling past everyone else's.
+function CommunityResultRow({ result: r, myId, c }) {
+  const p1Wins = r.score_one > r.score_two;
+  const p2Wins = r.score_two > r.score_one;
+  const involvesMe = myId && (r.player_one_id === myId || r.player_two_id === myId);
+  const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
+
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}` }}>
+      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
+        {r.kind === "open" ? <Shuffle size={12} /> : <Trophy size={12} />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm flex items-center gap-1.5 min-w-0">
+          <span className="truncate" style={nameStyle(p1Wins)}>{r.player_one}</span>
+          <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}–{r.score_two}</span>
+          <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}
+        </div>
+      </div>
     </div>
   );
 }
