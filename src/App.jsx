@@ -2734,10 +2734,30 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
   const myOpenBroadcast = (openChallenges || []).find((ch) => ch.creator_id === myId && ch.status === "open");
   // Everyone else's open broadcasts, oldest-first exception aside — newest first, ready to grab.
   const grabbable = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== myId);
-  // My own resolved broadcasts (sent or grabbed) worth keeping visible briefly.
+  // My own resolved-but-not-yet-played broadcasts (sent or grabbed) worth keeping visible here.
+  // Once a result is recorded the challenge is "played" — it moves down into
+  // "Your challenges" alongside direct challenges instead, and disappears from here.
   const myResolvedOpen = (openChallenges || [])
-    .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
+    .filter((ch) => (ch.status === "accepted" || ch.status === "cancelled") && (ch.creator_id === myId || ch.accepted_by === myId))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  // My own played random challenges, merged into "Your challenges" below.
+  const myPlayedOpen = (openChallenges || [])
+    .filter((ch) => ch.status === "played" && (ch.creator_id === myId || ch.accepted_by === myId));
+
+  // Combine direct challenges and played random challenges into one list for
+  // "Your challenges", so a played random match shows up there instead of
+  // lingering in the random-challenge section above.
+  const combined = [
+    ...sorted.map((ch) => ({ kind: "direct", ch })),
+    ...myPlayedOpen.map((ch) => ({ kind: "random", ch })),
+  ].sort((a, b) => {
+    const rank = (item) => (item.kind === "direct" && item.ch.status === "pending" && item.ch.opponent_id === myId ? 0
+      : item.kind === "direct" && item.ch.status === "accepted" ? 1
+      : item.kind === "random" ? 1
+      : item.kind === "direct" && item.ch.status === "pending" ? 2 : 3);
+    const date = (item) => item.kind === "direct" ? item.ch.created_at : (item.ch.played_at || item.ch.created_at);
+    return rank(a) - rank(b) || new Date(date(b)) - new Date(date(a));
+  });
 
   const fireRandom = async () => {
     setSendingRandom(true);
@@ -2819,13 +2839,16 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
       </div>
 
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your challenges</div>
-      {sorted.length === 0 ? (
+      {combined.length === 0 ? (
         <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
           No challenges yet — search above for someone to challenge.
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove} c={c} />)}
+          {combined.map((item) => item.kind === "direct"
+            ? <ChallengeRow key={item.ch.id} challenge={item.ch} myId={myId} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove} c={c} />
+            : <PlayedRandomChallengeRow key={item.ch.id} challenge={item.ch} myId={myId} onRemove={onRemoveOpen} c={c} />
+          )}
         </div>
       )}
     </div>
@@ -2859,25 +2882,21 @@ function OpenChallengeRow({ challenge: ch, onAccept, c }) {
   );
 }
 
-// A resolved (accepted/played/cancelled) broadcast, shown to whichever side is
-// looking at it — the creator or whoever grabbed it.
+// A resolved-but-not-yet-played broadcast (accepted or cancelled), shown to
+// whichever side is looking at it — the creator or whoever grabbed it. Once
+// a result is recorded it becomes "played" and moves into the combined
+// "Your challenges" list instead (see PlayedRandomChallengeRow), so this
+// component never needs to render that status.
 function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onRecordResult, c }) {
   const iAmCreator = ch.creator_id === myId;
   const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
   const counterpartPhone = iAmCreator ? ch.accepted_by_phone : ch.creator_phone;
-  const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
-  const opponentScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
   return (
     <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
       <MemberAvatar url={null} username={counterpartUsername || ch.creator_username} size={34} c={c} />
       <div className="flex-1 min-w-0">
         <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
         {ch.status === "accepted" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-        {ch.status === "played" && (
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textDim }}>
-            Played — you {myScore} – {opponentScore} them
-          </div>
-        )}
         {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
       </div>
       {ch.status === "accepted" && (
@@ -2891,20 +2910,38 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onRecordResul
           <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
         </div>
       )}
-      {ch.status === "played" && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          {ch.result_photo_url && (
-            <a href={ch.result_photo_url} target="_blank" rel="noopener noreferrer" title="View photo proof"
-              className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
-              <Eye size={14} />
-            </a>
-          )}
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        </div>
-      )}
       {ch.status === "cancelled" && (
         <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
       )}
+    </div>
+  );
+}
+
+// A played random challenge, shown in the combined "Your challenges" list
+// alongside direct challenges — the scoreline plus a link to the photo proof.
+function PlayedRandomChallengeRow({ challenge: ch, myId, onRemove, c }) {
+  const iAmCreator = ch.creator_id === myId;
+  const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
+  const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
+  const opponentScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
+  return (
+    <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
+      <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textDim }}>
+          Random challenge — you {myScore} – {opponentScore} them
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {ch.result_photo_url && (
+          <a href={ch.result_photo_url} target="_blank" rel="noopener noreferrer" title="View photo proof"
+            className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+            <Eye size={14} />
+          </a>
+        )}
+        <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+      </div>
     </div>
   );
 }
