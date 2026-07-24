@@ -531,6 +531,25 @@ function splitCommentsByRoot(comments) {
   return { results, regular };
 }
 
+// Given a pending result submission, finds the user_id of the player on the
+// *other* side of that fixture — the one who should be confirming or
+// disputing it, as opposed to the submitter or an uninvolved third party.
+// Goes submission -> submitter's member row -> submitter's team_id -> the
+// fixture's other team_id -> that team's member row -> its user_id. Returns
+// null if any link is missing (spectator submitted it, team unclaimed, etc.),
+// in which case only an admin override applies.
+function findSubmissionOpponentId(league, submission) {
+  const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
+  if (!fixture) return null;
+  const submitterMember = (league.members || []).find((m) => m.user_id === submission.submitted_by);
+  const submitterTeamId = submitterMember?.team_id;
+  const opponentTeamId = [fixture.home_team_id, fixture.away_team_id]
+    .find((tid) => tid && tid !== submitterTeamId);
+  if (!opponentTeamId) return null;
+  const opponentMember = (league.members || []).find((m) => m.team_id === opponentTeamId);
+  return opponentMember?.user_id || null;
+}
+
 function fmtDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -1838,7 +1857,7 @@ export default function App() {
       home_score: homeScore, away_score: awayScore, photo_path: path,
     });
     if (error) {
-      if (error.code === "23505") showToast("Someone already submitted a result for this match — it's waiting on admin review.");
+      if (error.code === "23505") showToast("Someone already submitted a result for this match — it's waiting on their opponent (or an admin) to review.");
       else showToast(`Couldn't submit result: ${error.message}`);
       return false;
     }
@@ -1921,6 +1940,50 @@ export default function App() {
       await loadLeagues();
       showToast("Result rejected — posted to comments.");
     });
+  };
+
+  // The opponent's side of a pending submission — same two outcomes as the
+  // admin approve/reject above, but scoped so only the player on the other
+  // side of that specific fixture can act (enforced server-side in
+  // respond_to_result_submission, not just by which button the UI shows).
+  // Confirming behaves like approveResult (fixture gets updated, photo proof
+  // gets posted to comments); disputing behaves like rejectResult. Either
+  // way the confirmation/dispute comment posts under the opponent's own
+  // identity — since they're the one actually clicking the button, that
+  // doesn't need the security-definer identity trick approveResult uses.
+  const respondToResultSubmission = (league, submission, accept) => {
+    const post = async () => {
+      const { error } = await supabase.rpc("respond_to_result_submission", {
+        p_submission_id: submission.id, p_accept: accept,
+      });
+      if (error) { showToast(`Couldn't ${accept ? "confirm" : "dispute"} result: ${error.message}`); return; }
+
+      const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
+      const homeName = league.teams.find((t) => t.id === fixture?.home_team_id)?.name || "Home";
+      const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
+      let photoUrl = null;
+      if (submission.photo_path) {
+        const { data } = await supabase.storage.from("result-proofs")
+          .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
+        photoUrl = data?.signedUrl || null;
+      }
+      await postComment(
+        league,
+        accept
+          ? `Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName} (confirmed by opponent)`
+          : `${submission.submitted_by_username}'s result was disputed by their opponent — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+        null, null, photoUrl, true,
+      );
+
+      await loadLeagues();
+      showToast(accept ? "Result confirmed — posted to comments." : "Result disputed — they'll need to resubmit.");
+    };
+
+    if (accept) { post(); return; }
+    requestConfirm([
+      `Dispute this result submitted by ${submission.submitted_by_username}? They'll be able to resubmit.`,
+      `Are you sure? The match will stay unplayed until someone resubmits.`,
+    ], post);
   };
 
   const advanceKnockout = async (league) => {
@@ -2260,6 +2323,7 @@ export default function App() {
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
+                onRespondToResultSubmission={respondToResultSubmission}
                 onPostComment={postComment} onDeleteComment={deleteComment} onToggleReaction={toggleCommentReaction}
                 onToggleLeagueReaction={toggleLeagueReaction} c={c} />
             )}
@@ -4780,11 +4844,13 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
 // their photo proof, and Approve/Reject actions. Approving locks in the
 // fixture score and auto-posts a comment under the player's name (handled
 // server-side); rejecting just leaves the fixture open for a resubmission.
-function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c }) {
+function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
+  title = `${submissions.length} result${submissions.length === 1 ? "" : "s"} awaiting your review`,
+  approveLabel = "Approve", rejectLabel = "Reject" }) {
   return (
     <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
-        <Camera size={13} /> {submissions.length} result{submissions.length === 1 ? "" : "s"} awaiting your review
+        <Camera size={13} /> {title}
       </div>
       <div className="space-y-2">
         {submissions.map((s) => {
@@ -4807,10 +4873,10 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                   <Eye size={12} /> View photo proof
                 </button>
                 <button onClick={() => onApprove(league, s)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.greenSoft, color: c.greenText }}>
-                  <ThumbsUp size={12} /> Approve
+                  <ThumbsUp size={12} /> {approveLabel}
                 </button>
                 <button onClick={() => onReject(league, s)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.redSoft, color: c.red }}>
-                  <ThumbsDown size={12} /> Reject
+                  <ThumbsDown size={12} /> {rejectLabel}
                 </button>
               </div>
             </div>
@@ -4962,7 +5028,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const isCreator = session && league.created_by === session.user.id;
@@ -4982,6 +5048,12 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
     return subs.filter((s) => s.status === "rejected").sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
   };
   const pendingResults = (league.result_submissions || []).filter((s) => s.status === "pending");
+  // The subset of those where the signed-in member is specifically the
+  // opponent (not the submitter, not an uninvolved member) — these get their
+  // own confirm/dispute panel, separate from the admin override panel below.
+  const myPendingResults = session
+    ? pendingResults.filter((s) => s.submitted_by !== session.user.id && findSubmissionOpponentId(league, s) === session.user.id)
+    : [];
   const isKnockout = league.format === "knockout";
   const isSurvivor = league.format === "survivor";
   const isGroupsKnockout = league.format === "groups_knockout";
@@ -5146,8 +5218,18 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
         </div>
       )}
 
+      {myPendingResults.length > 0 && (
+        <PendingResultsPanel league={league} submissions={myPendingResults}
+          title={`${myPendingResults.length} result${myPendingResults.length === 1 ? "" : "s"} awaiting your confirmation`}
+          approveLabel="Confirm" rejectLabel="Dispute"
+          onDownloadProof={onDownloadResultProof}
+          onApprove={(l, s) => onRespondToResultSubmission(l, s, true)}
+          onReject={(l, s) => onRespondToResultSubmission(l, s, false)} c={c} />
+      )}
+
       {canManage && pendingResults.length > 0 && (
         <PendingResultsPanel league={league} submissions={pendingResults}
+          title={`${pendingResults.length} result${pendingResults.length === 1 ? "" : "s"} awaiting review (admin override)`}
           onDownloadProof={onDownloadResultProof} onApprove={onApproveResult} onReject={onRejectResult} c={c} />
       )}
 
