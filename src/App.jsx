@@ -882,6 +882,7 @@ export default function App() {
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
   const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
+  const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const c = THEMES[theme];
 
@@ -1128,6 +1129,59 @@ export default function App() {
     setRecentResults(data || []);
   }, [session]);
 
+  // Comment wall shown under Challenges — a single platform-wide board (not
+  // tied to any one league or challenge) for banter, callouts, and general
+  // chat. Backed by its own tables so it's independent of the per-league
+  // comments system: open to any signed-in member, no join/membership
+  // concept applies here the way it does inside a league.
+  const loadBoardComments = useCallback(async () => {
+    if (!session) return;
+    const { data, error } = await supabase.from("challenge_board_comments")
+      .select("*, challenge_board_comment_likes(*)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) { console.error("Couldn't load the challenge board:", error.message); setBoardComments([]); return; }
+    setBoardComments(data || []);
+  }, [session]);
+
+  const postBoardComment = async (body) => {
+    const trimmed = (body || "").trim();
+    if (!trimmed) return false;
+    const username = profile?.efootball_username || session.user.email;
+    const { error } = await supabase.from("challenge_board_comments").insert({
+      user_id: session.user.id, username, body: trimmed,
+    });
+    if (error) { showToast(`Couldn't post comment: ${error.message}`); return false; }
+    await loadBoardComments();
+    return true;
+  };
+
+  const deleteBoardComment = (comment) => {
+    requestConfirm(["Delete this comment? This can't be undone."], async () => {
+      const { error } = await supabase.from("challenge_board_comments").delete().eq("id", comment.id);
+      if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
+      await loadBoardComments();
+      showToast("Comment deleted.");
+    });
+  };
+
+  const toggleBoardCommentReaction = async (comment, reaction) => {
+    const mine = (comment.challenge_board_comment_likes || []).find((l) => l.user_id === session.user.id);
+    if (reaction === null) {
+      if (!mine) return true;
+      const { error } = await supabase.from("challenge_board_comment_likes").delete().eq("id", mine.id);
+      if (error) { showToast(`Couldn't remove reaction: ${error.message}`); return false; }
+    } else if (mine) {
+      const { error } = await supabase.from("challenge_board_comment_likes").update({ reaction }).eq("id", mine.id);
+      if (error) { showToast(`Couldn't update reaction: ${error.message}`); return false; }
+    } else {
+      const { error } = await supabase.from("challenge_board_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction });
+      if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
+    }
+    await loadBoardComments();
+    return true;
+  };
+
   // Fires one challenge open to every other member. Anyone can grab it —
   // whoever does first wins it and it's gone for the rest.
   const sendRandomChallenge = async () => {
@@ -1246,6 +1300,13 @@ export default function App() {
     const id = setInterval(loadRecentResults, 20000);
     return () => clearInterval(id);
   }, [view, loadRecentResults]);
+
+  useEffect(() => {
+    if (view !== "challenges") return;
+    loadBoardComments();
+    const id = setInterval(loadBoardComments, 15000);
+    return () => clearInterval(id);
+  }, [view, loadBoardComments]);
 
   // Handle a shared deep link like ?league=<id> once leagues have loaded.
   useEffect(() => {
@@ -2075,7 +2136,7 @@ export default function App() {
       <Header view={view} setView={setView} activeLeague={activeLeague} theme={theme} toggleTheme={toggleTheme} c={c} onSignOut={signOut} userEmail={session.user.email}
         avatarUrl={profile?.avatar_url}
         onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
-        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); }}
+        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); }}
         challengeBadge={incomingPendingCount}
         onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
@@ -2083,6 +2144,8 @@ export default function App() {
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onBack={() => setView("home")} c={c} />
         ) : view === "challenges" ? (
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
+            boardComments={boardComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
+            onPostBoardComment={postBoardComment} onDeleteBoardComment={deleteBoardComment} onToggleBoardCommentReaction={toggleBoardCommentReaction}
             onSendChallenge={sendChallenge} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)}
             onRemove={removeChallenge}
             onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
@@ -2813,7 +2876,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -2993,6 +3056,9 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
           )}
         </>
       )}
+
+      <ChallengeBoard session={session} comments={boardComments} isAdmin={isAdmin} myUsername={myUsername}
+        onPost={onPostBoardComment} onDelete={onDeleteBoardComment} onToggleReaction={onToggleBoardCommentReaction} c={c} />
     </div>
   );
 }
@@ -3021,6 +3087,243 @@ function CommunityResultRow({ result: r, myId, c }) {
         </div>
         <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
           {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const BOARD_PAGE_SIZE = 8;
+
+// A single platform-wide comment wall at the very bottom of the Challenges
+// screen — banter, callouts, "who's on tonight" — open to any signed-in
+// member regardless of which challenges they're personally involved in.
+// Deliberately flat (no reply threads) and text-only: this is a chat wall,
+// not the per-league discussion system, so it stays simple on purpose.
+function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c }) {
+  const [text, setText] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
+  const [pending, setPending] = useState([]); // optimistic comments, cleared once the real row lands
+  const textareaRef = useRef(null);
+  const source = comments || [];
+
+  useEffect(() => {
+    if (pending.length === 0) return;
+    setPending((prev) => prev.filter((p) => !source.some((real) =>
+      real.user_id === p.user_id && real.body === p.body
+      && Math.abs(new Date(real.created_at) - new Date(p.created_at)) < 15000
+    )));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
+
+  const all = useMemo(() =>
+    [...source, ...pending].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+    [source, pending]);
+  const visible = all.slice(0, visibleCount);
+  const hiddenCount = all.length - visible.length;
+
+  const submit = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || posting) return;
+    setPosting(true);
+    const tempId = `temp-${Date.now()}`;
+    const optimistic = {
+      id: tempId, user_id: session.user.id, username: myUsername,
+      body: trimmed, created_at: new Date().toISOString(),
+      challenge_board_comment_likes: [], pending: true,
+    };
+    setPending((prev) => [...prev, optimistic]);
+    setText("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    const ok = await onPost(trimmed);
+    setPosting(false);
+    if (!ok) { setPending((prev) => prev.filter((p) => p.id !== tempId)); setText(trimmed); }
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+  };
+
+  return (
+    <div className="mt-8 pt-6 border-t" style={{ borderColor: c.border }}>
+      <style>{`
+        @keyframes boardPopIn { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 1; transform: translateY(0); } }
+        .board-pop-in { animation: boardPopIn 0.22s ease-out; }
+        @keyframes boardReactPop { 0% { transform: scale(1); } 35% { transform: scale(1.4); } 100% { transform: scale(1); } }
+        .board-react-pop { animation: boardReactPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); display: inline-block; }
+        @keyframes boardPickerIn { 0% { opacity: 0; transform: scale(0.85) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+        .board-reaction-picker { animation: boardPickerIn 0.12s ease-out; }
+        .board-textarea:focus { border-color: ${c.accent} !important; }
+        .board-reaction-emoji-btn:hover { transform: scale(1.3); }
+        @media (prefers-reduced-motion: reduce) {
+          .board-pop-in, .board-react-pop, .board-reaction-picker { animation: none; }
+          .board-reaction-emoji-btn:hover { transform: none; }
+        }
+      `}</style>
+
+      <div className="flex items-center gap-2 mb-3 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
+        <MessageCircle size={13} /> Challenge board {all.length > 0 && `(${all.length})`}
+      </div>
+
+      {comments === null ? (
+        <Loader c={c} />
+      ) : (
+        <>
+          {all.length === 0 ? (
+            <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+              <MessageCircle size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
+              <div className="font-body text-sm">No comments yet — say something to get things going.</div>
+            </div>
+          ) : (
+            <div className="space-y-2.5 mb-3">
+              {visible.map((cm) => (
+                <BoardCommentRow key={cm.id} comment={cm} session={session} isAdmin={isAdmin}
+                  onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} />
+              ))}
+            </div>
+          )}
+
+          {hiddenCount > 0 && (
+            <button onClick={() => setVisibleCount((v) => v + BOARD_PAGE_SIZE)}
+              className="mb-4 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors"
+              style={{ background: c.surface, color: c.textDim }}>
+              Show {Math.min(hiddenCount, BOARD_PAGE_SIZE)} more comment{Math.min(hiddenCount, BOARD_PAGE_SIZE) === 1 ? "" : "s"}
+            </button>
+          )}
+
+          <div className="flex items-end gap-2">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
+              style={{ background: avatarColor(myUsername || "?"), color: "#fff" }}>
+              {(myUsername || "?")[0]?.toUpperCase()}
+            </div>
+            <textarea ref={textareaRef} value={text}
+              onChange={(e) => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
+              onKeyDown={onKeyDown}
+              placeholder="Say something…" rows={1} maxLength={1000}
+              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
+              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+            <button onClick={submit} disabled={!text.trim() || posting}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
+              style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              <Send size={15} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// A single row on the challenge board: avatar, username, timestamp, delete
+// (own comments, or any comment if you're an admin), body text, and an
+// emoji reaction picker — same reaction set and interaction pattern as the
+// per-league comments, just backed by challenge_board_comment_likes instead.
+function BoardCommentRow({ comment: cm, session, isAdmin, onDelete, onToggleReaction, c }) {
+  const isOwn = session && cm.user_id === session.user.id;
+  const realReactions = cm.challenge_board_comment_likes || [];
+
+  const [pendingReaction, setPendingReaction] = useState(undefined);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [popKey, setPopKey] = useState(0);
+  const pickerRef = useRef(null);
+
+  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
+  useEffect(() => {
+    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
+  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reactions = useMemo(() => {
+    if (pendingReaction === undefined) return realReactions;
+    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
+    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
+  }, [realReactions, pendingReaction, session]);
+
+  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
+  const summary = useMemo(() => {
+    const counts = new Map();
+    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [reactions]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
+    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onEscape);
+    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
+  }, [pickerOpen]);
+
+  const react = async (emoji) => {
+    if (!session || cm.pending) return;
+    setPickerOpen(false);
+    setPendingReaction(emoji);
+    setPopKey((k) => k + 1);
+    const ok = await onToggleReaction(cm, emoji);
+    if (!ok) setPendingReaction(undefined);
+  };
+
+  const handleMainClick = async () => {
+    if (!session || cm.pending) return;
+    if (myReaction) {
+      setPendingReaction(null);
+      const ok = await onToggleReaction(cm, null);
+      if (!ok) setPendingReaction(undefined);
+    } else {
+      setPickerOpen((v) => !v);
+    }
+  };
+
+  return (
+    <div className={cm.pending ? "opacity-60" : "board-pop-in"}>
+      <div className="flex items-start gap-2.5 group">
+        <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
+          style={{ background: avatarColor(cm.username), color: "#fff", width: 28, height: 28, fontSize: 12 }}>
+          {cm.username?.[0]?.toUpperCase() || "?"}
+        </div>
+        <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: c.surface }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
+                {cm.pending ? "sending…" : timeAgo(cm.created_at)}
+              </span>
+              {!cm.pending && (isOwn || isAdmin) && (
+                <button onClick={() => onDelete(cm)} title="Delete"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
+                  <Trash2 size={11} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
+          {!cm.pending && (
+            <div className="relative mt-1.5" ref={pickerRef}>
+              <button onClick={handleMainClick} disabled={!session}
+                className="flex items-center gap-1 font-mono text-[10px] transition-colors"
+                style={{ color: myReaction ? c.accent : c.textFaint }}>
+                <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
+                  {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
+                </span>
+                {reactions.length > 0 && (
+                  <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
+                )}
+              </button>
+
+              {pickerOpen && (
+                <div className="board-reaction-picker absolute top-full left-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
+                  style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
+                  {REACTIONS.map((r) => (
+                    <button key={r.key} onClick={() => react(r.key)} title={r.key}
+                      className="board-reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
+                      {r.emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
