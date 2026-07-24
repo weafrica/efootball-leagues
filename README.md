@@ -37,7 +37,13 @@ select id from auth.users where email = 'your-email@gmail.com';
 ```
 3. Reload your app — leagues you create will now be public to everyone; leagues other users create stay private to them and whoever they invite.
 
-### 5. (Optional) Custom domain
+### 5. Turn on the Ladder
+A permanent, never-resetting ranking sits in front of the home page and on the sign-in screen — everyone fights for #1, and you can only challenge one of the 3 names directly above you. Beat them and you take their spot.
+1. Go to Supabase → SQL Editor
+2. Paste in the contents of `supabase/ladder-migration.sql` (in this repo) and run it — safe to run more than once
+3. That's it — new members are added to the bottom of the ladder automatically when they set up their profile, and existing members get slotted in by join date
+
+### 6. (Optional) Custom domain
 In Vercel: Project → Settings → Domains → add your own domain and follow the DNS instructions shown.
 
 ## Local testing (optional)
