@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
+import { supabase } from "./supabaseClient";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
-  MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
+  MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -302,108 +302,19 @@ function computeKnockoutRanking(league) {
 }
 
 
-// Seasons are 3-month windows that start from the date of the very first
-// match ever played on the platform — not a fixed calendar quarter — so
-// "Season 1" kicks off the moment anyone plays their first match, and
-// every result from that day onward counts toward it (instead of results
-// from before some arbitrary Jan/Apr/Jul/Oct boundary getting cut off).
-// Nothing is ever deleted or archived to make this work: a season is just
-// a date filter over fixtures that were already played, so every past
-// season stays fully browsable forever via the season picker in the
-// Leaderboard.
-const SEASON_LENGTH_MS = 91 * 24 * 60 * 60 * 1000; // ~3 months per season
-
-// A fixture's effective "played on" date. played_at is set going forward by
-// recordResult and (once the SQL function is updated per the migration
-// notes) approve_result_submission; fixtures saved before that column
-// existed fall back to their row's created_at so old results still land in
-// roughly the right season instead of vanishing from every season filter.
-function fixturePlayedDate(f) { return f.played_at || f.created_at; }
-
-// The date of the first match anyone ever played, across every league —
-// this is what Season 1 starts from. Returns null if nothing's been played
-// yet (nothing to anchor a season to).
-function seasonAnchor(leagues) {
-  let earliest = null;
-  (leagues || []).forEach((l) => (l.fixtures || []).forEach((f) => {
-    if (!f.played) return;
-    const raw = fixturePlayedDate(f);
-    if (!raw) return;
-    const dt = new Date(raw);
-    if (!earliest || dt < earliest) earliest = dt;
-  }));
-  return earliest;
-}
-function seasonIndexForDate(date, anchor) { return Math.floor((new Date(date) - anchor) / SEASON_LENGTH_MS); }
-function seasonBounds(idx, anchor) {
-  return { start: new Date(anchor.getTime() + idx * SEASON_LENGTH_MS), end: new Date(anchor.getTime() + (idx + 1) * SEASON_LENGTH_MS) };
-}
-function seasonKey(idx) { return `S${idx + 1}`; }
-function seasonLabel(idx, anchor) {
-  const { start, end } = seasonBounds(idx, anchor);
-  const lastDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const fmt = { day: "numeric", month: "short", year: "numeric" };
-  return `Season ${idx + 1} · ${start.toLocaleDateString(undefined, fmt)} – ${lastDay.toLocaleDateString(undefined, fmt)}`;
-}
-function currentSeason(anchor) { return anchor ? seasonIndexForDate(new Date(), anchor) : 0; }
-function daysUntilSeasonReset(anchor) {
-  if (!anchor) return null;
-  const { end } = seasonBounds(currentSeason(anchor), anchor);
-  return Math.max(1, Math.ceil((end - new Date()) / (24 * 60 * 60 * 1000)));
-}
-
-// Every season index that has at least one played fixture in it, newest
-// first, plus the current season even if it's still empty — this feeds the
-// Leaderboard's season picker.
-function listSeasons(leagues) {
-  const anchor = seasonAnchor(leagues);
-  if (!anchor) return [];
-  const cur = currentSeason(anchor);
-  const seasons = [];
-  for (let i = 0; i <= cur; i++) seasons.push(i);
-  return seasons.reverse();
-}
-
-// Every played match across every league, scoped the same way the
-// leaderboard standings are (pass `bounds` to limit to one season, or
-// null/undefined for all-time) — newest first. Feeds the "Past matches"
-// list under the rankings.
-function computeRecentMatches(leagues, bounds) {
-  const rows = [];
-  (leagues || []).forEach((l) => {
-    (l.fixtures || []).forEach((f) => {
-      if (!f.played || f.away_team_id === null) return;
-      const at = new Date(fixturePlayedDate(f));
-      if (bounds && (at < bounds.start || at >= bounds.end)) return;
-      const home = (l.teams || []).find((t) => t.id === f.home_team_id);
-      const away = (l.teams || []).find((t) => t.id === f.away_team_id);
-      if (!home || !away) return;
-      rows.push({ id: f.id, leagueName: l.name, homeName: home.name, awayName: away.name, homeScore: f.home_score, awayScore: f.away_score, playedAt: at, round: f.round });
-    });
-  });
-  return rows.sort((a, b) => b.playedAt - a.playedAt);
-}
-
 // Platform-wide leaderboard: aggregates every played fixture for every
 // person across every league they've fielded a team in (grouped by user_id,
 // not team, so someone's record follows them between leagues). Only people
 // who've actually played a match show up — reactions/comments don't count
-// toward this, match results do. Pass `bounds` ({start, end} Dates) to scope
-// it to one season; pass null/undefined for the all-time board.
-function computeGlobalLeaderboard(leagues, bounds) {
+// toward this, match results do.
+function computeGlobalLeaderboard(leagues) {
   const byUser = new Map();
   (leagues || []).forEach((l) => {
     (l.members || []).forEach((m) => {
       if (!m.team_id) return;
       const team = l.teams.find((t) => t.id === m.team_id);
       if (!team) return;
-      const played = l.fixtures.filter((f) => {
-        if (!f.played || f.away_team_id === null) return false;
-        if (f.home_team_id !== team.id && f.away_team_id !== team.id) return false;
-        if (!bounds) return true;
-        const at = new Date(fixturePlayedDate(f));
-        return at >= bounds.start && at < bounds.end;
-      });
+      const played = l.fixtures.filter((f) => f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id));
       if (played.length === 0) return;
       let acc = byUser.get(m.user_id);
       if (!acc) { acc = { userId: m.user_id, name: m.display_name, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 }; byUser.set(m.user_id, acc); }
@@ -418,26 +329,6 @@ function computeGlobalLeaderboard(leagues, bounds) {
     });
   });
   return [...byUser.values()].map((r) => ({ ...r, gd: r.gf - r.ga, winRate: r.p ? r.w / r.p : 0, pts: r.w * 3 + r.d }));
-}
-
-// Picks out the top scorer and the best defensive record (fewest goals
-// conceded) from a set of leaderboard/standings rows that already expose
-// { name, gf, ga }. Requires at least one goal-scoring row to name a top
-// scorer, and at least two qualifying rows before naming a separate
-// defensive team (otherwise it would just be the same person twice). Ties
-// break alphabetically so the result is stable rather than
-// order-of-insertion dependent.
-function goalExtremes(rows) {
-  if (!rows || rows.length === 0) return { top: null, least: null };
-  const byMost = [...rows].sort((a, b) => b.gf - a.gf || a.name.localeCompare(b.name));
-  const byFewestConceded = [...rows].sort((a, b) => a.ga - b.ga || a.name.localeCompare(b.name));
-  const top = byMost[0];
-  let least = byFewestConceded[0];
-  if (rows.length < 2) return { top, least: null };
-  if (least === top || (least.userId !== undefined && least.userId === top.userId) || (least.id !== undefined && least.id === top.id)) {
-    least = byFewestConceded[1];
-  }
-  return { top, least };
 }
 
 
@@ -800,68 +691,6 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
   );
 }
 
-// Lets either side of an accepted challenge log the final score. No photo
-// proof here (unlike league results) — it's a friendly 1v1, and the other
-// player has to confirm the number before it counts anyway, so a bad-faith
-// score just gets disputed instead of quietly landing.
-function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCancel, onSubmit, c }) {
-  const [mine, setMine] = useState(0);
-  const [theirs, setTheirs] = useState(0);
-  const [file, setFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  const submit = async () => {
-    if (!file || saving) return;
-    setSaving(true);
-    await onSubmit(mine, theirs, file);
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onCancel}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2">
-            <Trophy size={18} style={{ color: c.accent }} />
-            <h2 className="text-xl font-extrabold uppercase tracking-tight">Log result</h2>
-          </div>
-          <button onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
-        </div>
-        <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>vs {opponentUsername}</div>
-
-        <div className="flex items-center gap-2 mb-5">
-          <div className="flex-1 min-w-0">
-            <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{myUsername} (you)</div>
-            <input type="number" min={0} value={mine} onChange={(e) => setMine(Number(e.target.value))}
-              className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
-          </div>
-          <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
-          <div className="flex-1 min-w-0">
-            <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{opponentUsername}</div>
-            <input type="number" min={0} value={theirs} onChange={(e) => setTheirs(Number(e.target.value))}
-              className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
-          </div>
-        </div>
-
-        <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Photo proof (required)</label>
-        <label className="flex items-center gap-2 border border-dashed rounded-lg px-4 py-3 mb-1 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
-          <Camera size={15} style={{ color: c.textFaint }} />
-          {file ? file.name : "Upload a screenshot of the final scoreboard"}
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-        </label>
-        <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
-          {opponentUsername} will see this photo and needs to confirm the score before it counts.
-        </div>
-
-        <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
-          style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-          {saving ? "Logging…" : "Log result"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [profile, setProfile] = useState(undefined);
@@ -874,15 +703,9 @@ export default function App() {
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
   const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
-  const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } — logging a score for an accepted challenge
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
-  const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
-  const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
-  const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
-  const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
-  const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const c = THEMES[theme];
 
@@ -918,16 +741,11 @@ export default function App() {
     localStorage.setItem(THEME_KEY, next);
   };
 
-  // `stay` is set right before the redirect fires, not baked into the
-  // client at load time — the Google sign-in flow leaves the page and
-  // comes back, so the preference has to already be sitting in
-  // localStorage by the time the returning page reads the session back out.
-  const signInWithGoogle = async (stay = true) => {
-    setStaySignedInPreference(stay);
+  const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.href } });
   };
 
-  const signOut = async () => { await supabase.auth.signOut(); clearAllAuthStorage(); setView("home"); };
+  const signOut = async () => { await supabase.auth.signOut(); setView("home"); };
 
   const loadLeagues = useCallback(async () => {
     const { data, error } = await supabase
@@ -974,312 +792,13 @@ export default function App() {
     showToast(`${label} deleted.`);
   };
 
-  // Every other member on the platform, for the "who do you want to challenge"
-  // picker — just enough to browse and pick someone (username + photo), never
-  // phone numbers. Calls a SECURITY DEFINER function since normal client
-  // queries can only read the signed-in member's own profiles row.
-  const loadChallengeMembers = useCallback(async () => {
-    const { data, error } = await supabase.rpc("list_challengeable_members");
-    if (error) { showToast("Couldn't load members."); setChallengeMembers([]); return; }
-    setChallengeMembers(data || []);
-  }, [showToast]);
-
-  // Every challenge the signed-in member is involved in, either as the one who
-  // sent it or the one who received it.
-  const loadChallenges = useCallback(async () => {
-    if (!session) return;
-    const { data, error } = await supabase.from("challenges")
-      .select("*")
-      .or(`challenger_id.eq.${session.user.id},opponent_id.eq.${session.user.id}`)
-      .order("created_at", { ascending: false });
-    if (error) { showToast("Couldn't load challenges."); setChallenges([]); return; }
-    setChallenges(data || []);
-  }, [session, showToast]);
-
-  // Sends a challenge to another member. Snapshots the challenger's own
-  // username/phone onto the row right away (same pattern used everywhere
-  // else in the app — a team's display_name/phone are snapshotted at join
-  // time too) — the opponent's phone stays off the row entirely until they
-  // accept, so nobody's number is exposed before they've agreed to it.
-  const sendChallenge = async (opponent) => {
-    const { error } = await supabase.from("challenges").insert({
-      challenger_id: session.user.id,
-      challenger_username: profile.efootball_username,
-      challenger_phone: profile.phone,
-      opponent_id: opponent.user_id,
-      opponent_username: opponent.username,
-    });
-    if (error) { showToast(`Couldn't send challenge: ${error.message}`); return; }
-    await loadChallenges();
-    showToast(`Challenge sent to ${opponent.username}.`);
-  };
-
-  // Accepting fills in the opponent's own phone right at the moment they agree
-  // to it — the only way their number ever lands on the row. Declining just
-  // flips the status so the challenger can see it was seen and passed on.
-  const respondChallenge = async (challenge, accept) => {
-    const update = accept
-      ? { status: "accepted", opponent_phone: profile.phone, responded_at: new Date().toISOString() }
-      : { status: "declined", responded_at: new Date().toISOString() };
-    const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
-    if (error) { showToast(`Couldn't respond: ${error.message}`); return; }
-    await loadChallenges();
-    showToast(accept ? `Challenge accepted — say hi on WhatsApp.` : "Challenge declined.");
-  };
-
-  // Withdraws a still-pending challenge (challenger's side), or clears a
-  // declined/accepted one off the list once it's been seen — either way just
-  // removes the row for both sides.
-  const removeChallenge = async (challenge) => {
-    const { error } = await supabase.from("challenges").delete().eq("id", challenge.id);
-    if (error) { showToast(`Couldn't remove challenge: ${error.message}`); return; }
-    setChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
-  };
-
-  // Either side of an accepted challenge can log the score first — it lands as
-  // "pending" until the other player confirms it (see confirmChallengeResult).
-  // Scores are stored from the challenger's perspective (challenger_score /
-  // opponent_score) regardless of who reports them, so the row has one
-  // unambiguous scoreline no matter which side typed it in.
-  const reportChallengeResult = async (challenge, myScore, theirScore, file) => {
-    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${session.user.id}/challenge-${challenge.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
-    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
-
-    const iAmChallenger = challenge.challenger_id === session.user.id;
-    const update = {
-      challenger_score: iAmChallenger ? myScore : theirScore,
-      opponent_score: iAmChallenger ? theirScore : myScore,
-      result_status: "pending",
-      result_reported_by: session.user.id,
-      result_reported_at: new Date().toISOString(),
-      result_photo_path: path,
-    };
-    const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
-    if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
-    await loadChallenges();
-    showToast("Result logged — waiting for them to confirm.");
-  };
-
-  // The player who *didn't* report the score confirms it — this is enforced
-  // both here (only offered to the other side in the UI) and should be
-  // enforced again in RLS (result_reported_by <> auth.uid()) so a reporter
-  // can't just confirm their own number.
-  const confirmChallengeResult = async (challenge) => {
-    const { error } = await supabase.from("challenges")
-      .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
-      .eq("id", challenge.id);
-    if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
-    await loadChallenges();
-    showToast("Result confirmed.");
-  };
-
-  // Same signed-URL pattern as downloadResultProof, but for a challenge/open
-  // challenge row's result_photo_path rather than a league submission.
-  const viewChallengeResultProof = async (challenge) => {
-    if (!challenge.result_photo_path) return;
-    const { data, error } = await supabase.storage.from("result-proofs").createSignedUrl(challenge.result_photo_path, 120);
-    if (error || !data) { showToast("Couldn't generate a download link."); return; }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  };
-
-  // Rejects a reported score and clears it back to no-result, so either side
-  // can log a fresh (hopefully accurate) one.
-  const disputeChallengeResult = async (challenge) => {
-    const { error } = await supabase.from("challenges")
-      .update({ challenger_score: null, opponent_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
-      .eq("id", challenge.id);
-    if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
-    await loadChallenges();
-    showToast("Result disputed — ask them to re-log it.");
-  };
-
-  // The "random challenge" pool: broadcasts open to every other member, plus
-  // whatever the signed-in member has posted or grabbed themselves (so their
-  // own history sticks around even after it resolves).
-  const loadOpenChallenges = useCallback(async () => {
-    if (!session) return;
-    const { data, error } = await supabase.from("open_challenges")
-      .select("*")
-      .or(`status.eq.open,creator_id.eq.${session.user.id},accepted_by.eq.${session.user.id}`)
-      .order("created_at", { ascending: false })
-      .limit(50);
-    if (error) { showToast("Couldn't load random challenges."); setOpenChallenges([]); return; }
-    setOpenChallenges(data || []);
-  }, [session, showToast]);
-
-  // Community feed at the bottom of the Challenges screen: the last 100
-  // logged results from every member on the platform — both confirmed and
-  // still-awaiting-confirmation, direct challenges and random challenges
-  // combined. Reads from the public_challenge_results view (see README) so
-  // it isn't limited to the signed-in member's own rows the way
-  // loadChallenges/loadOpenChallenges are. Logged to the console (not a
-  // toast — this feed is a nice-to-have, not worth interrupting anyone) so
-  // a missing/misconfigured view is easy to spot while debugging instead of
-  // just silently showing an empty feed.
-  const loadRecentResults = useCallback(async () => {
-    if (!session) return;
-    const { data, error } = await supabase.from("public_challenge_results")
-      .select("*")
-      .order("result_confirmed_at", { ascending: false })
-      .limit(100);
-    if (error) { console.error("Couldn't load community results:", error.message); setRecentResults([]); return; }
-    setRecentResults(data || []);
-  }, [session]);
-
-  // Comment wall shown under Challenges — a single platform-wide board (not
-  // tied to any one league or challenge) for banter, callouts, and general
-  // chat. Backed by its own tables so it's independent of the per-league
-  // comments system: open to any signed-in member, no join/membership
-  // concept applies here the way it does inside a league.
-  const loadBoardComments = useCallback(async () => {
-    if (!session) return;
-    const { data, error } = await supabase.from("challenge_board_comments")
-      .select("*, challenge_board_comment_likes(*)")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (error) { console.error("Couldn't load the challenge board:", error.message); setBoardComments([]); return; }
-    setBoardComments(data || []);
-  }, [session]);
-
-  const postBoardComment = async (body, parentComment = null) => {
-    const trimmed = (body || "").trim();
-    if (!trimmed) return false;
-    const username = profile?.efootball_username || session.user.email;
-    const { error } = await supabase.from("challenge_board_comments").insert({
-      user_id: session.user.id, username, body: trimmed,
-      parent_comment_id: parentComment?.id || null,
-    });
-    if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
-    await loadBoardComments();
-    return true;
-  };
-
-  // A comment with replies underneath it warns about taking those replies
-  // down with it — replies nest to unlimited depth, so this counts every
-  // descendant, not just direct children.
-  const deleteBoardComment = (comment) => {
-    const all = boardComments || [];
-    const countDescendants = (id) => {
-      const direct = all.filter((cm) => cm.parent_comment_id === id);
-      return direct.reduce((sum, d) => sum + 1 + countDescendants(d.id), 0);
-    };
-    const replyCount = countDescendants(comment.id);
-    const message = comment.parent_comment_id
-      ? "Delete this reply? This can't be undone."
-      : replyCount > 0
-        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
-        : "Delete this comment? This can't be undone.";
-    requestConfirm([message], async () => {
-      const { error } = await supabase.from("challenge_board_comments").delete().eq("id", comment.id);
-      if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
-      await loadBoardComments();
-      showToast(comment.parent_comment_id ? "Reply deleted." : "Comment deleted.");
-    });
-  };
-
-  const toggleBoardCommentReaction = async (comment, reaction) => {
-    const mine = (comment.challenge_board_comment_likes || []).find((l) => l.user_id === session.user.id);
-    if (reaction === null) {
-      if (!mine) return true;
-      const { error } = await supabase.from("challenge_board_comment_likes").delete().eq("id", mine.id);
-      if (error) { showToast(`Couldn't remove reaction: ${error.message}`); return false; }
-    } else if (mine) {
-      const { error } = await supabase.from("challenge_board_comment_likes").update({ reaction }).eq("id", mine.id);
-      if (error) { showToast(`Couldn't update reaction: ${error.message}`); return false; }
-    } else {
-      const { error } = await supabase.from("challenge_board_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction });
-      if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
-    }
-    await loadBoardComments();
-    return true;
-  };
-
-  // Fires one challenge open to every other member. Anyone can grab it —
-  // whoever does first wins it and it's gone for the rest.
-  const sendRandomChallenge = async () => {
-    const { error } = await supabase.from("open_challenges").insert({
-      creator_id: session.user.id,
-      creator_username: profile.efootball_username,
-      creator_phone: profile.phone,
-    });
-    if (error) { showToast(`Couldn't send random challenge: ${error.message}`); return; }
-    await loadOpenChallenges();
-    showToast("Random challenge sent to everyone.");
-  };
-
-  // Accepts an open broadcast. The update only matches a row that's still
-  // 'open', so if two people tap Accept at the same instant, Postgres's
-  // row lock lets exactly one of these UPDATEs through — the loser gets 0
-  // rows back and finds out someone else already grabbed it.
-  const acceptOpenChallenge = async (challenge) => {
-    const { data, error } = await supabase.from("open_challenges")
-      .update({ status: "accepted", accepted_by: session.user.id, accepted_by_username: profile.efootball_username, accepted_by_phone: profile.phone, accepted_at: new Date().toISOString() })
-      .eq("id", challenge.id).eq("status", "open")
-      .select();
-    if (error) { showToast(`Couldn't accept challenge: ${error.message}`); return; }
-    if (!data || data.length === 0) { showToast("Too slow — someone else already accepted that one."); await loadOpenChallenges(); return; }
-    await loadOpenChallenges();
-    showToast(`Challenge accepted — say hi on WhatsApp.`);
-  };
-
-  // Withdraws your own still-open broadcast before anyone's grabbed it.
-  const cancelOpenChallenge = async (challenge) => {
-    const { error } = await supabase.from("open_challenges").update({ status: "cancelled" }).eq("id", challenge.id).eq("status", "open");
-    if (error) { showToast(`Couldn't cancel: ${error.message}`); return; }
-    await loadOpenChallenges();
-  };
-
-  // Dismisses a resolved (accepted/cancelled) broadcast off your own list.
-  const removeOpenChallenge = async (challenge) => {
-    const { error } = await supabase.from("open_challenges").delete().eq("id", challenge.id);
-    if (error) { showToast(`Couldn't remove: ${error.message}`); return; }
-    setOpenChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
-  };
-
-  // Same report → confirm/dispute flow as reportChallengeResult, on the
-  // open_challenges table instead — scores are stored from the creator's
-  // perspective (creator_score / accepted_by_score) regardless of who logs it.
-  const reportOpenChallengeResult = async (challenge, myScore, theirScore, file) => {
-    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${session.user.id}/open-challenge-${challenge.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
-    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
-
-    const iAmCreator = challenge.creator_id === session.user.id;
-    const update = {
-      creator_score: iAmCreator ? myScore : theirScore,
-      accepted_by_score: iAmCreator ? theirScore : myScore,
-      result_status: "pending",
-      result_reported_by: session.user.id,
-      result_reported_at: new Date().toISOString(),
-      result_photo_path: path,
-    };
-    const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
-    if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
-    await loadOpenChallenges();
-    showToast("Result logged — waiting for them to confirm.");
-  };
-
-  const confirmOpenChallengeResult = async (challenge) => {
-    const { error } = await supabase.from("open_challenges")
-      .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
-      .eq("id", challenge.id);
-    if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
-    await loadOpenChallenges();
-    showToast("Result confirmed.");
-  };
-
-  const disputeOpenChallengeResult = async (challenge) => {
-    const { error } = await supabase.from("open_challenges")
-      .update({ creator_score: null, accepted_by_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
-      .eq("id", challenge.id);
-    if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
-    await loadOpenChallenges();
-    showToast("Result disputed — ask them to re-log it.");
+  // Admin-only — marks an account approved via a security-definer function
+  // (a normal client update to another user's profiles row would be blocked
+  // by RLS, same reasoning as admin_delete_account above).
+  const approveAccount = async (account) => {
+    const { error } = await supabase.rpc("admin_set_account_approved", { target_user_id: account.user_id, is_approved: true });
+    if (error) { showToast(`Couldn't approve account: ${error.message}`); return; }
+    setAccounts((prev) => (prev || []).map((a) => (a.user_id === account.user_id ? { ...a, approved: true } : a)));
   };
 
   useEffect(() => {
@@ -1294,34 +813,7 @@ export default function App() {
     supabase.from("admins").select("user_id").eq("user_id", session.user.id).maybeSingle()
       .then(({ data }) => setIsAdmin(!!data));
     loadLeagues();
-    loadChallenges();
-    loadOpenChallenges();
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges]);
-
-  // While the Challenges screen is open, poll the random-challenge pool every
-  // few seconds — it's a race to accept, so members want to see it move
-  // without having to manually refresh.
-  useEffect(() => {
-    if (view !== "challenges") return;
-    const id = setInterval(loadOpenChallenges, 4000);
-    return () => clearInterval(id);
-  }, [view, loadOpenChallenges]);
-
-  // Same idea for the community results feed, on a slower clock — new
-  // confirmed results trickle in rather than needing a race-to-accept refresh.
-  useEffect(() => {
-    if (view !== "challenges") return;
-    loadRecentResults();
-    const id = setInterval(loadRecentResults, 20000);
-    return () => clearInterval(id);
-  }, [view, loadRecentResults]);
-
-  useEffect(() => {
-    if (view !== "challenges") return;
-    loadBoardComments();
-    const id = setInterval(loadBoardComments, 15000);
-    return () => clearInterval(id);
-  }, [view, loadBoardComments]);
+  }, [session, profile, loadLeagues]);
 
   // Handle a shared deep link like ?league=<id> once leagues have loaded.
   useEffect(() => {
@@ -1337,7 +829,7 @@ export default function App() {
     setHandledDeepLink(true);
   }, [leagues, handledDeepLink, showToast]);
 
-  const completeProfile = async (phone, username, photoFile) => {
+  const completeProfile = async (phone, username) => {
     const { data, error } = await supabase.from("profiles")
       .insert({ user_id: session.user.id, phone, efootball_username: username })
       .select().single();
@@ -1350,24 +842,6 @@ export default function App() {
       return;
     }
     setProfile(data);
-    if (photoFile) await updateProfilePhoto(photoFile);
-  };
-
-  // Uploads (or replaces) the signed-in member's own profile photo to the public
-  // "avatars" bucket and saves the resulting URL onto their profiles row. Same
-  // upload-then-link pattern as league/comment photos elsewhere in the app.
-  const updateProfilePhoto = async (file) => {
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${session.user.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
-    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
-    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
-    const { data, error } = await supabase.from("profiles")
-      .update({ avatar_url: pub.publicUrl }).eq("user_id", session.user.id)
-      .select().single();
-    if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
-    setProfile(data);
-    showToast("Profile photo updated.");
   };
 
   // Lets a signed-in member fix their own phone/username later — the only way to
@@ -1392,9 +866,6 @@ export default function App() {
   };
 
   const activeLeague = useMemo(() => (leagues || []).find((l) => l.id === activeLeagueId) || null, [leagues, activeLeagueId]);
-  const incomingPendingCount = useMemo(() =>
-    (challenges || []).filter((ch) => session && ch.opponent_id === session.user.id && ch.status === "pending").length,
-    [challenges, session]);
 
   const myMembership = (league) => (session ? (league.members || []).find((m) => m.user_id === session.user.id) : null);
   const isMemberOf = (league) => !!myMembership(league);
@@ -1727,7 +1198,7 @@ export default function App() {
   const recordResult = async (league, fixture, homeScore, awayScore, file = null) => {
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return; }
     const { error } = await supabase.from("fixtures")
-      .update({ played: true, home_score: homeScore, away_score: awayScore, played_at: new Date().toISOString() }).eq("id", fixture.id);
+      .update({ played: true, home_score: homeScore, away_score: awayScore }).eq("id", fixture.id);
     if (error) { showToast("Couldn't save result."); return; }
 
     const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
@@ -1752,7 +1223,7 @@ export default function App() {
     }
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
-    await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
+    await postComment(league, `${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
     await loadLeagues();
     showToast(`Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
   };
@@ -1817,7 +1288,7 @@ export default function App() {
       if (data?.signedUrl) {
         await postComment(
           league,
-          `Photo proof for ${submission.submitted_by_username}'s approved result — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+          `Photo proof for ${submission.submitted_by_username}'s approved result — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
           null, null, data.signedUrl, true,
         );
       }
@@ -1850,7 +1321,7 @@ export default function App() {
       }
       await postComment(
         league,
-        `${submission.submitted_by_username}'s result was rejected — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+        `${submission.submitted_by_username}'s result was rejected — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
         null, null, photoUrl, true,
       );
 
@@ -2140,7 +1611,7 @@ export default function App() {
   if (session === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: THEMES.dark.bg }}><Loader c={THEMES.dark} /></div>;
   }
-  if (!session) return <LoginScreen c={c} theme={theme} toggleTheme={toggleTheme} onSignIn={(stay) => signInWithGoogle(stay)} />;
+  if (!session) return <LoginScreen c={c} theme={theme} toggleTheme={toggleTheme} onSignIn={signInWithGoogle} />;
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: c.bg }}><Loader c={c} /></div>;
   }
@@ -2149,27 +1620,11 @@ export default function App() {
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       <Header view={view} setView={setView} activeLeague={activeLeague} theme={theme} toggleTheme={toggleTheme} c={c} onSignOut={signOut} userEmail={session.user.email}
-        avatarUrl={profile?.avatar_url}
         onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
-        onOpenChallenges={() => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); }}
-        challengeBadge={incomingPendingCount}
         onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
-          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onBack={() => setView("home")} c={c} />
-        ) : view === "challenges" ? (
-          <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
-            boardComments={boardComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
-            onPostBoardComment={postBoardComment} onDeleteBoardComment={deleteBoardComment} onToggleBoardCommentReaction={toggleBoardCommentReaction}
-            onSendChallenge={sendChallenge} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)}
-            onRemove={removeChallenge}
-            onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
-            onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
-            onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
-            onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
-            onViewResultProof={viewChallengeResultProof}
-            onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
-            onBack={() => setView("home")} c={c} />
+          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={() => setView("home")} c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (
@@ -2209,27 +1664,9 @@ export default function App() {
         <SubmitResultModal league={resultModal.league} fixture={resultModal.fixture} homeTeam={resultModal.homeTeam} awayTeam={resultModal.awayTeam} existing={resultModal.existing}
           onCancel={() => setResultModal(null)} onSubmit={handleResultModalSubmit} c={c} />
       )}
-      {challengeResultModal && (() => {
-        const { kind, challenge: ch } = challengeResultModal;
-        const iAmFirst = kind === "open" ? ch.creator_id === session.user.id : ch.challenger_id === session.user.id;
-        const myUsername = kind === "open"
-          ? (iAmFirst ? ch.creator_username : ch.accepted_by_username)
-          : (iAmFirst ? ch.challenger_username : ch.opponent_username);
-        const opponentUsername = kind === "open"
-          ? (iAmFirst ? ch.accepted_by_username : ch.creator_username)
-          : (iAmFirst ? ch.opponent_username : ch.challenger_username);
-        const submit = kind === "open" ? reportOpenChallengeResult : reportChallengeResult;
-        return (
-          <LogChallengeResultModal challenge={ch} myUsername={myUsername} opponentUsername={opponentUsername}
-            onCancel={() => setChallengeResultModal(null)}
-            onSubmit={async (mine, theirs, file) => { await submit(ch, mine, theirs, file); setChallengeResultModal(null); }}
-            c={c} />
-        );
-      })()}
       {editProfileOpen && (
         <EditProfileModal profile={profile} onCancel={() => setEditProfileOpen(false)}
-          onSubmit={async (phone, username) => { const ok = await updateProfile(phone, username); if (ok) setEditProfileOpen(false); }}
-          onUpdatePhoto={updateProfilePhoto} c={c} />
+          onSubmit={async (phone, username) => { const ok = await updateProfile(phone, username); if (ok) setEditProfileOpen(false); }} c={c} />
       )}
       {suggestionOpen && (
         <SuggestionModal onCancel={() => setSuggestionOpen(false)}
@@ -2246,7 +1683,6 @@ export default function App() {
 }
 
 function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
-  const [staySignedIn, setStaySignedIn] = useState(true);
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-10" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       <style>{`
@@ -2281,21 +1717,9 @@ function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
           Run your table.<br />Own your league.
         </h1>
         <p className="font-body text-center max-w-xs mb-8" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself.</p>
-
-        <label className="flex items-center gap-2 mb-5 cursor-pointer select-none">
-          <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
-            <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
-            {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
-          </span>
-          <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
-        </label>
-
-        <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+        <button onClick={onSignIn} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
           <GoogleIcon /> Continue with Google
         </button>
-        {!staySignedIn && (
-          <p className="font-mono text-[10px] text-center max-w-xs mt-3" style={{ color: c.textFaint }}>You'll be signed out automatically once you close this tab or browser.</p>
-        )}
       </div>
       <PublicLeaguePreview c={c} />
     </div>
@@ -2383,25 +1807,14 @@ function GoogleIcon() {
 function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const [phone, setPhone] = useState("");
   const [username, setUsername] = useState("");
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const fileInputRef = useRef(null);
   const usernameTrimmed = username.trim();
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
   const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord;
 
-  const handlePhoto = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-  };
-
   const submit = async () => {
     setSubmitting(true);
-    await onSubmit(phone.trim(), usernameTrimmed, photoFile);
+    await onSubmit(phone.trim(), usernameTrimmed);
     setSubmitting(false);
   };
 
@@ -2416,17 +1829,6 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
         Confirm your phone number and eFootball username before you can access leagues. Other players use these to reach you for matches.
       </p>
       <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-5">
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()}
-            className="relative w-20 h-20 rounded-full overflow-hidden flex items-center justify-center mb-2"
-            style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            {photoPreview ? <img src={photoPreview} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
-          </button>
-          <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>
-            {photoPreview ? "Change photo" : "Add profile photo (optional)"}
-          </span>
-        </div>
         <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Ndosi_123"
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
@@ -2452,12 +1854,10 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
 // self-service fix for "this phone number is already linked to another account"
 // (phone numbers are unique platform-wide), but also covers the ordinary case of
 // a changed number or in-game name.
-function EditProfileModal({ profile, onCancel, onSubmit, onUpdatePhoto, c }) {
+function EditProfileModal({ profile, onCancel, onSubmit, c }) {
   const [phone, setPhone] = useState(profile?.phone || "");
   const [username, setUsername] = useState(profile?.efootball_username || "");
   const [submitting, setSubmitting] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const fileInputRef = useRef(null);
   const usernameTrimmed = username.trim();
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
   const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord;
@@ -2468,35 +1868,12 @@ function EditProfileModal({ profile, onCancel, onSubmit, onUpdatePhoto, c }) {
     setSubmitting(false);
   };
 
-  // Photo changes save immediately on selection (same pattern as league
-  // photos) rather than waiting for the "Save changes" button below, which
-  // only covers phone/username.
-  const handlePhoto = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploadingPhoto(true);
-    await onUpdatePhoto(file);
-    setUploadingPhoto(false);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.6)" }}>
       <div className="w-full max-w-sm rounded-xl p-6" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-extrabold uppercase tracking-tight">Edit your details</h2>
           <button onClick={onCancel} className="p-1" style={{ color: c.textFaint }}><X size={18} /></button>
-        </div>
-        <div className="flex flex-col items-center mb-5">
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}
-            className="relative w-20 h-20 rounded-full overflow-hidden flex items-center justify-center mb-2"
-            style={{ background: c.surface, border: `1px solid ${c.border}`, opacity: uploadingPhoto ? 0.6 : 1 }}>
-            {profile?.avatar_url ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
-          </button>
-          <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>
-            {uploadingPhoto ? "Uploading…" : profile?.avatar_url ? "Change photo" : "Add profile photo"}
-          </span>
         </div>
         <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Ndosi_123"
@@ -2529,10 +1906,12 @@ function csvEscape(val) {
 // keeping, and a visible flag for any account still carrying a leftover
 // "(DUPLICATE-n)" marker from the phone-uniqueness cleanup so it's easy to see
 // who still needs to update their number.
-function AccountsPanel({ accounts, leagues, session, onDelete, onBack, c }) {
+function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack, c }) {
   const [query, setQuery] = useState("");
 
   if (accounts === null) return <div className="pt-8"><Loader c={c} /></div>;
+
+  const sorted = [...accounts].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
   const leagueCountsFor = (userId) => {
     const list = leagues || [];
@@ -2543,12 +1922,13 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onBack, c }) {
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? accounts.filter((a) =>
+    ? sorted.filter((a) =>
         (a.efootball_username || "").toLowerCase().includes(q) ||
         (a.phone || "").toLowerCase().includes(q) ||
         (a.email || "").toLowerCase().includes(q))
-    : accounts;
+    : sorted;
   const flaggedCount = accounts.filter((a) => (a.phone || "").includes("(DUPLICATE-")).length;
+  const pendingCount = accounts.filter((a) => !a.approved).length;
 
   const exportCsv = () => {
     const rows = [["Username", "Phone", "Google account", "Joined"], ...filtered.map((a) => [a.efootball_username, a.phone, a.email, a.created_at])];
@@ -2577,6 +1957,7 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onBack, c }) {
       </div>
       <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
         {accounts.length} account{accounts.length === 1 ? "" : "s"} on the platform
+        {pendingCount > 0 && <span style={{ color: "#B8860B" }}> · {pendingCount} pending approval</span>}
         {flaggedCount > 0 && <span style={{ color: c.red }}> · {flaggedCount} still need{flaggedCount === 1 ? "s" : ""} a phone number fixed</span>}
       </div>
 
@@ -2595,7 +1976,7 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onBack, c }) {
           {filtered.map((a) => (
             <AccountRow key={a.user_id} account={a} leagueCounts={leagueCountsFor(a.user_id)}
               isSelf={session && a.user_id === session.user.id}
-              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} c={c} />
+              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} onApprove={() => onApprove(a)} c={c} />
           ))}
         </div>
       )}
@@ -2620,109 +2001,20 @@ function rankLeaderboard(rows, metric) {
   return sorted.map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// Small two-up card row highlighting the top scorer and the player/club
-// with the best defensive record (fewest goals conceded) out of whatever
-// rows were handed in — reused by both the platform-wide Leaderboard and
-// each league's own Table tab, just scoped to a different set of rows.
-function GoalExtremesBar({ top, least, c }) {
-  if (!top) return null;
-  return (
-    <div className={`grid ${least ? "grid-cols-2" : "grid-cols-1"} gap-2 mb-4`}>
-      <div className="rounded-lg px-3 py-2.5 flex items-center gap-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}><Target size={13} /></div>
-        <div className="min-w-0">
-          <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Top scorer</div>
-          <div className="font-body text-xs font-semibold truncate" title={top.name}>{top.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>· {top.gf}⚽</span></div>
-        </div>
-      </div>
-      {least && (
-        <div className="rounded-lg px-3 py-2.5 flex items-center gap-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
-          <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}><Shield size={13} /></div>
-          <div className="min-w-0">
-            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Defensive team</div>
-            <div className="font-body text-xs font-semibold truncate" title={least.name}>{least.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>· {least.ga} conceded</span></div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Dropdown for switching the Leaderboard between "this season" (the current
-// 3-month window, counted from the very first match ever played — the
-// default), any past season, and an all-time view. Follows the same
-// open/outside-click pattern as LeagueMenu.
-function SeasonPicker({ value, seasons, anchor, cur, onChange, c }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleOutside = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [open]);
-
-  const label = value === "all" ? "All-time" : value === seasonKey(cur) ? `This season · ${seasonLabel(cur, anchor)}` : seasonLabel(seasons.find((s) => seasonKey(s) === value) ?? cur, anchor);
-
-  const choose = (v) => { setOpen(false); onChange(v); };
-
-  return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-body text-xs font-semibold" style={{ background: c.surface, color: c.text }}>
-        <History size={13} style={{ color: c.textFaint }} /> {label} <ChevronDown size={13} style={{ color: c.textFaint }} />
-      </button>
-      {open && (
-        <div className="absolute left-0 mt-2 w-64 max-h-72 overflow-y-auto rounded-xl overflow-x-hidden z-20 shadow-lg" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-          <button onClick={() => choose(seasonKey(cur))} className="w-full flex items-center justify-between gap-2 px-4 py-3 font-body text-sm text-left"
-            style={{ color: value === seasonKey(cur) ? c.accent : c.text }}>
-            This season · {seasonLabel(cur, anchor)} {value === seasonKey(cur) && <Check size={14} />}
-          </button>
-          {seasons.filter((s) => seasonKey(s) !== seasonKey(cur)).map((s) => (
-            <button key={seasonKey(s)} onClick={() => choose(seasonKey(s))} className="w-full flex items-center justify-between gap-2 px-4 py-3 font-body text-sm text-left"
-              style={{ color: value === seasonKey(s) ? c.accent : c.text, borderTop: `1px solid ${c.border}` }}>
-              {seasonLabel(s, anchor)} {value === seasonKey(s) && <Check size={14} />}
-            </button>
-          ))}
-          <button onClick={() => choose("all")} className="w-full flex items-center justify-between gap-2 px-4 py-3 font-body text-sm text-left"
-            style={{ color: value === "all" ? c.accent : c.text, borderTop: `1px solid ${c.border}` }}>
-            All-time {value === "all" && <Check size={14} />}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Platform-wide leaderboard — every person's record across every match
-// they've played, in any league. Resets automatically every 3 months (the
-// board defaults to the current calendar quarter); past quarters and an
-// all-time view are one tap away via the season picker, since nothing is
-// actually deleted when a season rolls over. Top 10 by default in a
-// scrollable panel; typing a username searches the FULL ranked list (not
-// just the top 10) so someone can find themselves — or anyone else —
-// wherever they actually sit.
-function Leaderboard({ leagues, session, onBack, embedded, c }) {
+// they've played, in any league. Top 10 by default in a scrollable panel;
+// typing a username searches the FULL ranked list (not just the top 10) so
+// someone can find themselves — or anyone else — wherever they actually sit.
+function Leaderboard({ leagues, session, onBack, c }) {
   const [metric, setMetric] = useState("wins");
   const [query, setQuery] = useState("");
-  const anchor = useMemo(() => seasonAnchor(leagues), [leagues]);
-  const cur = currentSeason(anchor);
-  const [season, setSeason] = useState(seasonKey(cur));
 
-  const seasons = useMemo(() => listSeasons(leagues), [leagues]);
-  const bounds = (season === "all" || !anchor) ? null : seasonBounds(season === seasonKey(cur) ? cur : (seasons.find((s) => seasonKey(s) === season) ?? cur), anchor);
-  const scopedRows = useMemo(() => computeGlobalLeaderboard(leagues, bounds), [leagues, season]);
-  const ranked = useMemo(() => rankLeaderboard(scopedRows, metric), [scopedRows, metric]);
-  const { top: topScorer, least: leastScorer } = useMemo(() => goalExtremes(scopedRows), [scopedRows]);
-  const pastMatches = useMemo(() => computeRecentMatches(leagues, bounds), [leagues, season]);
-
+  const ranked = useMemo(() => rankLeaderboard(computeGlobalLeaderboard(leagues), metric), [leagues, metric]);
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
   const results = searching ? ranked.filter((r) => (r.name || "").toLowerCase().includes(q)).slice(0, 20) : ranked.slice(0, 10);
   const myRow = session ? ranked.find((r) => r.userId === session.user.id) : null;
   const myRowVisible = myRow && results.some((r) => r.userId === myRow.userId);
-  const viewingCurrent = season === seasonKey(cur);
-  const daysLeft = anchor ? daysUntilSeasonReset(anchor) : null;
 
   const statLine = (r) => {
     if (metric === "winrate") return `${Math.round(r.winRate * 100)}% win rate · ${r.w}W ${r.d}D ${r.l}L`;
@@ -2744,24 +2036,16 @@ function Leaderboard({ leagues, session, onBack, embedded, c }) {
   );
 
   return (
-    <div className={embedded ? "" : "pt-8"}>
-      {!embedded && (
-        <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
-      )}
+    <div className="pt-8">
+      <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
 
       <div className="flex items-center gap-2 mb-1">
         <Trophy size={20} style={{ color: c.accent }} />
         <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard</h1>
       </div>
-      <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
-        {season === "all" ? "Ranked by results across every league, all-time" : "Ranked by results across every league this season"}
-        {" — "}{ranked.length} player{ranked.length === 1 ? "" : "s"} with at least one match played
-        {viewingCurrent && daysLeft != null && <> · resets in {daysLeft} day{daysLeft === 1 ? "" : "s"}</>}
+      <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
+        Ranked by results across every league — {ranked.length} player{ranked.length === 1 ? "" : "s"} with at least one match played
       </div>
-
-      {anchor && <div className="mb-4"><SeasonPicker value={season} seasons={seasons} anchor={anchor} cur={cur} onChange={setSeason} c={c} /></div>}
-
-      <GoalExtremesBar top={topScorer} least={leastScorer} c={c} />
 
       <div className="flex gap-1 mb-4 rounded-full p-1 w-fit" style={{ background: c.surface }}>
         {LEADERBOARD_METRICS.map((opt) => (
@@ -2783,7 +2067,7 @@ function Leaderboard({ leagues, session, onBack, embedded, c }) {
 
       {results.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          {ranked.length === 0 ? (season === "all" ? "No matches played yet — the board fills in once results start coming in." : "No matches played this season yet.") : `No one matching "${query}".`}
+          {ranked.length === 0 ? "No matches played yet — the board fills in once results start coming in." : `No one matching "${query}".`}
         </div>
       ) : (
         <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
@@ -2797,42 +2081,19 @@ function Leaderboard({ leagues, session, onBack, embedded, c }) {
           {row(myRow)}
         </div>
       )}
-
-      <div className="mt-8">
-        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>
-          Past matches {season === "all" ? "" : "this season"} <span style={{ color: c.textFaint }}>({pastMatches.length})</span>
-        </div>
-        {pastMatches.length === 0 ? (
-          <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-            {season === "all" ? "No matches played yet." : "No matches played this season yet."}
-          </div>
-        ) : (
-          <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
-            {pastMatches.slice(0, 40).map((m) => (
-              <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
-                <div className="min-w-0 flex-1">
-                  <div className="font-body text-sm truncate">{m.homeName} <span style={{ color: c.textFaint }}>vs</span> {m.awayName}</div>
-                  <div className="font-mono text-[10px] truncate" style={{ color: c.textFaint }}>{m.leagueName} · Matchday {m.round} · {fmtDate(m.playedAt)}</div>
-                </div>
-                <div className="font-mono text-sm font-semibold shrink-0">{m.homeScore} – {m.awayScore}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-function AccountRow({ account, leagueCounts, isSelf, onDelete, c }) {
-  const [copied, setCopied] = useState(false);
+function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
+  const [copiedField, setCopiedField] = useState(null); // "phone" | "username" | null
   const isFlagged = (account.phone || "").includes("(DUPLICATE-");
   const digitsOnly = (account.phone || "").replace(/\D/g, "");
 
-  const copyPhone = () => {
-    navigator.clipboard?.writeText(account.phone || "");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const copy = (field, value) => {
+    navigator.clipboard?.writeText(value || "");
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
   };
 
   return (
@@ -2841,7 +2102,14 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, c }) {
         {(account.efootball_username || "?")[0]?.toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="font-body text-sm truncate">{account.efootball_username || "—"}</div>
+        <div className="font-body text-sm truncate flex items-center gap-1.5">
+          <span className="truncate">{account.efootball_username || "—"}</span>
+          {account.efootball_username && (
+            <button onClick={() => copy("username", account.efootball_username)} title="Copy username" className="shrink-0" style={{ color: copiedField === "username" ? c.greenText : c.textFaint }}>
+              <Copy size={11} />
+            </button>
+          )}
+        </div>
         <div className="font-mono text-xs flex items-center gap-1" style={{ color: isFlagged ? c.red : c.textFaint }}>
           {isFlagged && <AlertTriangle size={11} />} {account.phone || "No number"}
         </div>
@@ -2854,7 +2122,16 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, c }) {
           </div>
         )}
       </div>
-      <button onClick={copyPhone} title="Copy phone number" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: copied ? c.greenText : c.textFaint }}>
+      {account.approved ? (
+        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded shrink-0 flex items-center gap-1" style={{ background: c.greenSoft, color: c.greenText }}>
+          <CheckCircle2 size={11} /> Approved
+        </span>
+      ) : (
+        <button onClick={onApprove} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded shrink-0" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
+          Pending approval
+        </button>
+      )}
+      <button onClick={() => copy("phone", account.phone)} title="Copy phone number" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: copiedField === "phone" ? c.greenText : c.textFaint }}>
         <Copy size={13} />
       </button>
       {!isFlagged && digitsOnly && (
@@ -2872,799 +2149,7 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, c }) {
   );
 }
 
-// Small round avatar used on the Challenges screen — a photo if the member
-// has one, otherwise the same colored-initial fallback used for comments.
-function MemberAvatar({ url, username, size = 32, c }) {
-  if (url) {
-    return <img src={url} alt="" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
-  }
-  return (
-    <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
-      style={{ width: size, height: size, background: avatarColor(username || "?"), color: "#fff", fontSize: size * 0.4 }}>
-      {(username || "?")[0]?.toUpperCase()}
-    </div>
-  );
-}
-
-// Lets any member challenge any other member to a friendly match, and manage
-// the challenges they've sent or received. A challenge starts as "pending" —
-// visible to both sides, actionable only by whoever received it. Once they
-// accept, both people's WhatsApp icon becomes visible to the other; nobody's
-// number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
-  const [query, setQuery] = useState("");
-  const [sendingTo, setSendingTo] = useState(null);
-  const [sendingRandom, setSendingRandom] = useState(false);
-  const [resultsQuery, setResultsQuery] = useState("");
-
-  if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
-
-  const myId = session.user.id;
-  const activeUserIds = new Set(
-    challenges.filter((ch) => ch.status === "pending" || ch.status === "accepted")
-      .map((ch) => (ch.challenger_id === myId ? ch.opponent_id : ch.challenger_id))
-  );
-
-  const q = query.trim().toLowerCase();
-  const results = q ? members.filter((m) => (m.username || "").toLowerCase().includes(q)) : [];
-
-  const send = async (member) => {
-    setSendingTo(member.user_id);
-    await onSendChallenge(member);
-    setSendingTo(null);
-    setQuery("");
-  };
-
-  const sorted = [...challenges].sort((a, b) => {
-    const rank = (ch) => (ch.status === "pending" && ch.opponent_id === myId ? 0 : ch.status === "accepted" ? 1 : ch.status === "pending" ? 2 : 3);
-    return rank(a) - rank(b) || new Date(b.created_at) - new Date(a.created_at);
-  });
-
-  // My own broadcast still up for grabs, if I have one — only one at a time.
-  const myOpenBroadcast = (openChallenges || []).find((ch) => ch.creator_id === myId && ch.status === "open");
-  // Everyone else's open broadcasts, oldest-first exception aside — newest first, ready to grab.
-  const grabbable = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== myId);
-  // My own resolved broadcasts (sent or grabbed) worth keeping visible briefly.
-  const myResolvedOpen = (openChallenges || [])
-    .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-  const fireRandom = async () => {
-    setSendingRandom(true);
-    await onSendRandom();
-    setSendingRandom(false);
-  };
-
-  // Community results feed: last 100 confirmed results platform-wide. Filter
-  // client-side by username, and flag which rows involve the signed-in
-  // member so their own results stand out scrolling past everyone else's.
-  const rq = resultsQuery.trim().toLowerCase();
-  const filteredResults = (recentResults || []).filter((r) => {
-    if (!rq) return true;
-    return (r.player_one || "").toLowerCase().includes(rq) || (r.player_two || "").toLowerCase().includes(rq);
-  });
-  const resultsToday = (recentResults || []).filter((r) => {
-    const d = new Date(r.result_confirmed_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
-
-  return (
-    <div className="pt-6">
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={16} /></button>
-        <h1 className="text-2xl font-extrabold uppercase tracking-tight">Challenges</h1>
-      </div>
-
-      <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Random challenge</div>
-        <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-          Fire one challenge open to every other player — whoever accepts it first gets it, then it's gone for everyone else.
-        </div>
-        {myOpenBroadcast ? (
-          <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: c.accent, color: c.accentText }}><Shuffle size={14} /></div>
-            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Waiting for someone to accept your open challenge…</div>
-            <button onClick={() => onCancelOpen(myOpenBroadcast)} title="Cancel" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        ) : (
-          <button onClick={fireRandom} disabled={sendingRandom}
-            className="w-full flex items-center justify-center gap-2 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-            style={{ background: c.accent, color: c.accentText, opacity: sendingRandom ? 0.6 : 1 }}>
-            <Shuffle size={15} /> {sendingRandom ? "Sending…" : "Send random challenge to everyone"}
-          </button>
-        )}
-      </div>
-
-      {grabbable.length > 0 && (
-        <>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Open challenges — grab one</div>
-          <div className="flex flex-col gap-2 mb-6">
-            {grabbable.map((ch) => <OpenChallengeRow key={ch.id} challenge={ch} onAccept={onAcceptOpen} c={c} />)}
-          </div>
-        </>
-      )}
-
-      {myResolvedOpen.length > 0 && (
-        <>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your random challenges</div>
-          <div className="flex flex-col gap-2 mb-6">
-            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} onRemove={onRemoveOpen}
-              onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} onViewResultProof={onViewResultProof} c={c} />)}
-          </div>
-        </>
-      )}
-
-      <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Challenge someone</div>
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by eFootball username"
-            className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        </div>
-        {q && (
-          <div className="mt-2 max-h-56 overflow-y-auto flex flex-col gap-1.5">
-            {results.length === 0 && <div className="font-body text-xs py-2" style={{ color: c.textFaint }}>No members match "{query}".</div>}
-            {results.map((m) => {
-              const already = activeUserIds.has(m.user_id);
-              return (
-                <div key={m.user_id} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2" style={{ background: c.surfaceHover }}>
-                  <MemberAvatar url={m.avatar_url} username={m.username} size={30} c={c} />
-                  <div className="flex-1 min-w-0 font-body text-sm truncate">{m.username}</div>
-                  <button onClick={() => send(m)} disabled={already || sendingTo === m.user_id}
-                    className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
-                    style={already ? { background: c.surface, color: c.textFaint } : { background: c.accent, color: c.accentText, opacity: sendingTo === m.user_id ? 0.6 : 1 }}>
-                    {already ? "Already active" : sendingTo === m.user_id ? "Sending…" : "Challenge"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your challenges</div>
-      {sorted.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No challenges yet — search above for someone to challenge.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
-            onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof} c={c} />)}
-        </div>
-      )}
-
-      <div className="mt-8 flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-          <History size={12} /> Community results
-        </div>
-        {recentResults && recentResults.length > 0 && (
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-            {resultsToday > 0 ? `${resultsToday} today` : `${recentResults.length} shown`}
-          </div>
-        )}
-      </div>
-      <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-        The last 100 logged results across Matchday — direct and random challenges, everyone included.
-      </div>
-
-      {recentResults === null ? (
-        <Loader c={c} />
-      ) : recentResults.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No results logged yet — once someone logs a challenge score, it'll show up here for everyone.
-        </div>
-      ) : (
-        <>
-          <div className="relative mb-2.5">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-            <input value={resultsQuery} onChange={(e) => setResultsQuery(e.target.value)} placeholder="Filter by username"
-              className="w-full border rounded-lg pl-8 pr-3 py-1.5 font-body text-xs outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-          </div>
-          {filteredResults.length === 0 ? (
-            <div className="font-body text-xs py-2 text-center" style={{ color: c.textFaint }}>No results match "{resultsQuery}".</div>
-          ) : (
-            <div className="flex flex-col gap-1.5 max-h-[28rem] overflow-y-auto pr-0.5">
-              {filteredResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
-            </div>
-          )}
-        </>
-      )}
-
-      <ChallengeBoard session={session} comments={boardComments} isAdmin={isAdmin} myUsername={myUsername}
-        onPost={onPostBoardComment} onDelete={onDeleteBoardComment} onToggleReaction={onToggleBoardCommentReaction} c={c} />
-    </div>
-  );
-}
-
-// One row in the platform-wide "Community results" feed at the bottom of the
-// Challenges screen — every confirmed result from every member, not just the
-// signed-in member's own. Winner's name is bolded, loser's dimmed, draws
-// stay neutral; rows the signed-in member played in get a subtle highlight
-// so their own results are easy to spot scrolling past everyone else's.
-function CommunityResultRow({ result: r, myId, c }) {
-  const p1Wins = r.score_one > r.score_two;
-  const p2Wins = r.score_two > r.score_one;
-  const involvesMe = myId && (r.player_one_id === myId || r.player_two_id === myId);
-  const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
-
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}`, opacity: r.confirmed ? 1 : 0.75 }}>
-      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
-        {r.kind === "open" ? <Shuffle size={12} /> : <Trophy size={12} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm flex items-center gap-1.5 min-w-0">
-          <span className="truncate" style={nameStyle(p1Wins)}>{r.player_one}</span>
-          <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}–{r.score_two}</span>
-          <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
-        </div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const BOARD_PAGE_SIZE = 8;
-const BOARD_MAX_INDENT_DEPTH = 4;
-
-// A single platform-wide comment wall at the very bottom of the Challenges
-// screen — banter, callouts, "who's on tonight" — open to any signed-in
-// member regardless of which challenges they're personally involved in.
-// Threads nest to unlimited depth, same as the per-league comments system —
-// a reply can be replied to, and so on, with no cap on how many levels deep
-// a conversation under one root comment can go. Indentation stops growing
-// past a few levels purely for legibility on a phone; that's cosmetic only.
-function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c }) {
-  const [text, setText] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
-  const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
-  const textareaRef = useRef(null);
-  const source = comments || [];
-
-  useEffect(() => {
-    if (pending.length === 0) return;
-    setPending((prev) => prev.filter((p) => !source.some((real) =>
-      real.user_id === p.user_id && real.body === p.body && real.parent_comment_id === p.parent_comment_id
-      && Math.abs(new Date(real.created_at) - new Date(p.created_at)) < 15000
-    )));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
-
-  // Build the full reply tree (unlimited depth) from the flat list, same
-  // approach as the per-league comment thread: every comment becomes a node
-  // with a children array, parented by walking parent_comment_id.
-  const { roots, totalCount } = useMemo(() => {
-    const all = [...source, ...pending];
-    const byId = new Map(all.map((cm) => [cm.id, { ...cm, children: [] }]));
-    const topLevel = [];
-    for (const node of byId.values()) {
-      if (node.parent_comment_id && byId.has(node.parent_comment_id)) {
-        byId.get(node.parent_comment_id).children.push(node);
-      } else if (!node.parent_comment_id) {
-        topLevel.push(node);
-      }
-      // A reply whose parent isn't in byId (parent already deleted) falls
-      // back to top-level rather than vanishing.
-    }
-    const sortChildren = (node) => {
-      node.children.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      node.children.forEach(sortChildren);
-      return node;
-    };
-    topLevel.forEach(sortChildren);
-    const sortedRoots = [...topLevel].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return { roots: sortedRoots, totalCount: all.length };
-  }, [source, pending]);
-
-  const visibleRoots = roots.slice(0, visibleCount);
-  const hiddenCount = roots.length - visibleRoots.length;
-
-  const submit = async (parentComment = null, body = text) => {
-    const trimmed = body.trim();
-    if (!trimmed || posting) return false;
-    setPosting(true);
-    const tempId = `temp-${Date.now()}`;
-    const optimistic = {
-      id: tempId, user_id: session.user.id, username: myUsername,
-      body: trimmed, created_at: new Date().toISOString(),
-      parent_comment_id: parentComment?.id || null,
-      challenge_board_comment_likes: [], pending: true,
-    };
-    setPending((prev) => [...prev, optimistic]);
-    if (!parentComment) {
-      setText("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-    }
-    const ok = await onPost(trimmed, parentComment);
-    setPosting(false);
-    if (!ok) { setPending((prev) => prev.filter((p) => p.id !== tempId)); if (!parentComment) setText(trimmed); }
-    return ok;
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-  };
-
-  return (
-    <div className="mt-8 pt-6 border-t" style={{ borderColor: c.border }}>
-      <style>{`
-        @keyframes boardPopIn { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 1; transform: translateY(0); } }
-        .board-pop-in { animation: boardPopIn 0.22s ease-out; }
-        @keyframes boardReactPop { 0% { transform: scale(1); } 35% { transform: scale(1.4); } 100% { transform: scale(1); } }
-        .board-react-pop { animation: boardReactPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); display: inline-block; }
-        @keyframes boardPickerIn { 0% { opacity: 0; transform: scale(0.85) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
-        .board-reaction-picker { animation: boardPickerIn 0.12s ease-out; }
-        .board-textarea:focus { border-color: ${c.accent} !important; }
-        .board-reaction-emoji-btn:hover { transform: scale(1.3); }
-        @media (prefers-reduced-motion: reduce) {
-          .board-pop-in, .board-react-pop, .board-reaction-picker { animation: none; }
-          .board-reaction-emoji-btn:hover { transform: none; }
-        }
-      `}</style>
-
-      <div className="flex items-center gap-2 mb-3 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-        <MessageCircle size={13} /> Challenge board {totalCount > 0 && `(${totalCount})`}
-      </div>
-
-      {comments === null ? (
-        <Loader c={c} />
-      ) : (
-        <>
-          {roots.length === 0 ? (
-            <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-              <MessageCircle size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
-              <div className="font-body text-sm">No comments yet — say something to get things going.</div>
-            </div>
-          ) : (
-            <div className="space-y-2.5 mb-3">
-              {visibleRoots.map((cm) => (
-                <BoardCommentNode key={cm.id} comment={cm} session={session} isAdmin={isAdmin}
-                  onPost={submit} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={0} />
-              ))}
-            </div>
-          )}
-
-          {hiddenCount > 0 && (
-            <button onClick={() => setVisibleCount((v) => v + BOARD_PAGE_SIZE)}
-              className="mb-4 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors"
-              style={{ background: c.surface, color: c.textDim }}>
-              Show {Math.min(hiddenCount, BOARD_PAGE_SIZE)} more comment{Math.min(hiddenCount, BOARD_PAGE_SIZE) === 1 ? "" : "s"}
-            </button>
-          )}
-
-          <div className="flex items-end gap-2">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
-              style={{ background: avatarColor(myUsername || "?"), color: "#fff" }}>
-              {(myUsername || "?")[0]?.toUpperCase()}
-            </div>
-            <textarea ref={textareaRef} value={text}
-              onChange={(e) => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
-              onKeyDown={onKeyDown}
-              placeholder="Say something…" rows={1} maxLength={1000}
-              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={() => submit()} disabled={!text.trim() || posting}
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Send size={15} />
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// A single comment on the challenge board, its reaction/reply row, and —
-// recursively — every reply underneath it, no matter how deep. Each node
-// owns its own "reply box open?" / "replies expanded?" state independently
-// of its siblings and ancestors, exactly like the per-league CommentNode.
-function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onToggleReaction, c, depth }) {
-  const isOwn = session && cm.user_id === session.user.id;
-  const realReactions = cm.challenge_board_comment_likes || [];
-  const children = cm.children || [];
-  const indent = Math.min(depth + 1, BOARD_MAX_INDENT_DEPTH) * 36;
-
-  const [pendingReaction, setPendingReaction] = useState(undefined);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [popKey, setPopKey] = useState(0);
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [repliesShown, setRepliesShown] = useState(false);
-  const [replyText, setReplyText] = useState("");
-  const [replying, setReplying] = useState(false);
-  const pickerRef = useRef(null);
-  const replyRef = useRef(null);
-
-  // A reply that's still in flight should already be visible under this
-  // thread, so expand it the moment the optimistic reply is queued rather
-  // than waiting for the round trip to finish.
-  useEffect(() => {
-    if (children.some((r) => r.pending)) setRepliesShown(true);
-  }, [children]);
-
-  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
-  useEffect(() => {
-    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
-  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const reactions = useMemo(() => {
-    if (pendingReaction === undefined) return realReactions;
-    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
-    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
-  }, [realReactions, pendingReaction, session]);
-
-  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
-  const summary = useMemo(() => {
-    const counts = new Map();
-    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [reactions]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
-  }, [pickerOpen]);
-
-  const react = async (emoji) => {
-    if (!session || cm.pending) return;
-    setPickerOpen(false);
-    setPendingReaction(emoji);
-    setPopKey((k) => k + 1);
-    const ok = await onToggleReaction(cm, emoji);
-    if (!ok) setPendingReaction(undefined);
-  };
-
-  const handleMainClick = async () => {
-    if (!session || cm.pending) return;
-    if (myReaction) {
-      setPendingReaction(null);
-      const ok = await onToggleReaction(cm, null);
-      if (!ok) setPendingReaction(undefined);
-    } else {
-      setPickerOpen((v) => !v);
-    }
-  };
-
-  const canReply = !!session && !cm.pending;
-
-  const submitReply = async () => {
-    const trimmed = replyText.trim();
-    if (!trimmed || replying) return;
-    setReplying(true);
-    setReplyText("");
-    setReplyOpen(false);
-    const ok = await onPost(cm, trimmed);
-    setReplying(false);
-    if (!ok) setReplyText(trimmed);
-  };
-
-  const onReplyKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(); }
-    if (e.key === "Escape") { setReplyOpen(false); setReplyText(""); }
-  };
-
-  return (
-    <div className={cm.pending ? "opacity-60" : "board-pop-in"}>
-      <div className="flex items-start gap-2.5 group" style={{ marginLeft: indent }}>
-        <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
-          style={{ background: avatarColor(cm.username), color: "#fff", width: 28, height: 28, fontSize: 12 }}>
-          {cm.username?.[0]?.toUpperCase() || "?"}
-        </div>
-        <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: c.surface }}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
-                {cm.pending ? "sending…" : timeAgo(cm.created_at)}
-              </span>
-              {!cm.pending && (isOwn || isAdmin) && (
-                <button onClick={() => onDelete(cm)} title="Delete"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
-                  <Trash2 size={11} />
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
-          {!cm.pending && (
-            <div className="flex items-center gap-3 mt-1.5">
-              <div className="relative" ref={pickerRef}>
-                <button onClick={handleMainClick} disabled={!session}
-                  className="flex items-center gap-1 font-mono text-[10px] transition-colors"
-                  style={{ color: myReaction ? c.accent : c.textFaint }}>
-                  <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
-                    {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
-                  </span>
-                  {reactions.length > 0 && (
-                    <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-                  )}
-                </button>
-
-                {pickerOpen && (
-                  <div className="board-reaction-picker absolute top-full left-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-                    style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-                    {REACTIONS.map((r) => (
-                      <button key={r.key} onClick={() => react(r.key)} title={r.key}
-                        className="board-reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-                        {r.emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {canReply && (
-                <button onClick={() => setReplyOpen((v) => !v)}
-                  className="font-mono text-[10px] uppercase tracking-wider transition-colors"
-                  style={{ color: c.textFaint }}>
-                  Reply
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {children.length > 0 && (
-        <button onClick={() => setRepliesShown((v) => !v)}
-          className="mt-1 font-mono text-[10px] uppercase tracking-wider flex items-center gap-1"
-          style={{ color: c.textFaint, marginLeft: indent + 38 }}>
-          <CornerDownRight size={11} />
-          {repliesShown ? "Hide" : "Show"} {children.length} repl{children.length === 1 ? "y" : "ies"}
-        </button>
-      )}
-
-      {repliesShown && (
-        <div className="mt-2 space-y-2">
-          {children.map((r) => (
-            <BoardCommentNode key={r.id} comment={r} session={session} isAdmin={isAdmin}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
-          ))}
-        </div>
-      )}
-
-      {replyOpen && (
-        <div className="mt-2" style={{ marginLeft: indent + 38 }}>
-          <div className="flex items-center gap-1.5 mb-1.5 font-mono text-[10px]" style={{ color: c.textFaint }}>
-            <CornerDownRight size={11} />
-            Replying to {cm.username}
-            <button onClick={() => { setReplyOpen(false); setReplyText(""); }} className="ml-0.5" style={{ color: c.textFaint }}>
-              <X size={11} />
-            </button>
-          </div>
-          <div className="flex items-end gap-2">
-            <textarea ref={replyRef} value={replyText}
-              onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
-              onKeyDown={onReplyKeyDown}
-              placeholder={`Reply to ${cm.username}…`} rows={1} maxLength={1000} autoFocus
-              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={submitReply} disabled={!replyText.trim() || replying}
-              className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={replyText.trim() && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Send size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One grabbable row in the open-challenge pool — anyone but the creator can
-// accept it. The accept button locally disables itself the instant it's
-// tapped so a slow network round-trip can't look like nothing happened,
-// and the row simply vanishes (via the next reload) once it's taken.
-function OpenChallengeRow({ challenge: ch, onAccept, c }) {
-  const [accepting, setAccepting] = useState(false);
-  const accept = async () => {
-    setAccepting(true);
-    await onAccept(ch);
-    setAccepting(false);
-  };
-  return (
-    <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <MemberAvatar url={null} username={ch.creator_username} size={34} c={c} />
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{ch.creator_username}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Open to anyone — first to accept wins it</div>
-      </div>
-      <button onClick={accept} disabled={accepting}
-        className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
-        style={{ background: c.accent, color: c.accentText, opacity: accepting ? 0.6 : 1 }}>
-        {accepting ? "Accepting…" : "Accept"}
-      </button>
-    </div>
-  );
-}
-
-// A resolved (accepted/cancelled) broadcast, shown to whichever side is
-// looking at it — the creator or whoever grabbed it.
-function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, c }) {
-  const [resolving, setResolving] = useState(false);
-  const iAmCreator = ch.creator_id === myId;
-  const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
-  const counterpartPhone = iAmCreator ? ch.accepted_by_phone : ch.creator_phone;
-
-  // Scores are stored from the creator's perspective — flip for display when
-  // the signed-in member is the one who accepted it.
-  const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
-  const theirScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
-  const iReported = ch.result_reported_by === myId;
-
-  const resolve = async (fn) => {
-    setResolving(true);
-    await fn(ch);
-    setResolving(false);
-  };
-
-  return (
-    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex items-center gap-3">
-        <MemberAvatar url={null} username={counterpartUsername || ch.creator_username} size={34} c={c} />
-        <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
-          {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
-          )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-          {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
-        </div>
-        {ch.status === "accepted" && !ch.result_status && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
-            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        )}
-        {ch.status === "cancelled" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-      </div>
-      {ch.status === "accepted" && !ch.result_status && (
-        <button onClick={() => onOpenLogResult(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-          style={{ background: c.accent, color: c.accentText }}>
-          <Trophy size={14} /> Log result
-        </button>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && (
-        <button onClick={() => onViewResultProof(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
-          style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          <Camera size={13} /> View photo proof
-        </button>
-      )}
-    </div>
-  );
-}
-
-function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, c }) {
-  const [responding, setResponding] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const iAmChallenger = ch.challenger_id === myId;
-  const counterpartUsername = iAmChallenger ? ch.opponent_username : ch.challenger_username;
-  const counterpartPhone = iAmChallenger ? ch.opponent_phone : ch.challenger_phone;
-
-  // Scores are stored from the challenger's perspective — flip them for
-  // display when the signed-in member is the opponent, so "my score" always
-  // reads on the left regardless of who challenged whom.
-  const myScore = iAmChallenger ? ch.challenger_score : ch.opponent_score;
-  const theirScore = iAmChallenger ? ch.opponent_score : ch.challenger_score;
-  const iReported = ch.result_reported_by === myId;
-
-  const respond = async (accept) => {
-    setResponding(true);
-    await (accept ? onAccept(ch) : onDecline(ch));
-    setResponding(false);
-  };
-
-  const resolve = async (fn) => {
-    setResolving(true);
-    await fn(ch);
-    setResolving(false);
-  };
-
-  return (
-    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex items-center gap-3">
-        <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
-        <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate">{counterpartUsername}</div>
-          {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
-          {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
-          {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
-          )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-          {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
-        </div>
-        {ch.status === "pending" && !iAmChallenger && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => respond(true)} disabled={responding} title="Accept" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => respond(false)} disabled={responding} title="Decline" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "pending" && iAmChallenger && (
-          <button onClick={() => onRemove(ch)} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-        )}
-        {ch.status === "accepted" && !ch.result_status && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
-            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        )}
-        {ch.status === "declined" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-      </div>
-      {ch.status === "accepted" && !ch.result_status && (
-        <button onClick={() => onOpenLogResult(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-          style={{ background: c.accent, color: c.accentText }}>
-          <Trophy size={14} /> Log result
-        </button>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && (
-        <button onClick={() => onViewResultProof(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
-          style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          <Camera size={13} /> View photo proof
-        </button>
-      )}
-    </div>
-  );
-}
-
-function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard }) {
+function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, onEditProfile, isAdmin, onOpenAccounts, onOpenSuggestion, onOpenLeaderboard }) {
   return (
     <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
       <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -3682,21 +2167,13 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
             <MessageCircle size={13} /> <span className="hidden sm:inline">Suggest</span>
           </button>
           <button onClick={onOpenLeaderboard} title="Leaderboard" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "leaderboard" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Trophy size={14} /></button>
-          <button onClick={onOpenChallenges} title="Challenges" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={view === "challenges" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
-            <Target size={14} />
-            {challengeBadge > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center font-mono text-[8px] font-bold" style={{ background: c.red, color: "#fff" }}>{challengeBadge}</span>
-            )}
-          </button>
           {isAdmin && (
             <button onClick={onOpenAccounts} title="All accounts" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "accounts" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Shield size={14} /></button>
           )}
           <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
             {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
           </button>
-          <button onClick={onEditProfile} title="Edit profile" className="w-8 h-8 flex items-center justify-center rounded-full overflow-hidden" style={{ background: c.surface, color: c.textDim }}>
-            {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <Settings2 size={14} />}
-          </button>
+          <button onClick={onEditProfile} title="Edit phone / username" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><Settings2 size={14} /></button>
           <button onClick={onSignOut} title={userEmail} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><LogOut size={14} /></button>
         </div>
       </div>
@@ -3777,27 +2254,24 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </section>
       )}
 
-      <LeagueSection title="Fun leagues" icon="🎮" leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
-        entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
-        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
-
       {cashLeagues.length > 0 && (
         <LeagueSection title="Cash leagues" icon="💰" leagues={sortLeagues(cashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
 
-      <section className="mt-10 pt-8" style={{ borderTop: `1px solid ${c.border}` }}>
-        <Leaderboard leagues={leagues} session={session} embedded c={c} />
-      </section>
+      {funLeagues.length > 0 && (
+        <LeagueSection title="Fun leagues" icon="🎮" leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+          entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+          session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
+      )}
     </div>
   );
 }
 
-function LeagueSection({ title, icon, leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
+function LeagueSection({ title, icon, leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
   const pendingReviewCount = leagues.filter(canManageLeague).reduce((sum, l) =>
     sum + (l.members || []).filter((m) => m.payment_status === "pending").length, 0);
-  if (leagues.length === 0 && !onCreate) return null;
   return (
     <section className="mt-8 first:mt-0">
       <div className="flex items-center justify-between mb-3">
@@ -3816,12 +2290,6 @@ function LeagueSection({ title, icon, leagues, isAdmin, isMemberOf, entryClosed,
             myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
-        {onCreate && (
-          <button onClick={onCreate} className="w-full flex items-center justify-center gap-2 border border-dashed rounded-xl px-4 py-4 font-body text-sm font-semibold"
-            style={{ borderColor: c.borderStrong, color: c.textDim }}>
-            <Plus size={16} strokeWidth={2.5} /> Create your own league
-          </button>
-        )}
       </div>
     </section>
   );
@@ -4094,24 +2562,12 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
 const STANDINGS_ROW_HEIGHT = 42;
 const STANDINGS_VISIBLE_ROWS = 5;
 
-// Standings rows are per-club (gf, ga, p, ...); this maps a club back to
-// the member managing it so the top-scorer/defensive-team cards can show a
-// username rather than a club name, and only considers clubs that have
-// actually played (a club sitting at 0 goals conceded because it hasn't
-// played yet shouldn't win "defensive team").
-function leagueGoalExtremes(standings, league) {
-  const played = standings.filter((r) => r.p > 0);
-  const named = played.map((r) => ({ ...r, name: (league.members || []).find((m) => m.team_id === r.id)?.display_name || r.name }));
-  return goalExtremes(named);
-}
-
 function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, c }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const ranked = standings.map((r, i) => ({ ...r, rank: i + 1 }));
   const filtered = q ? ranked.filter((r) => r.name.toLowerCase().includes(q)) : ranked;
   const scrolls = filtered.length > STANDINGS_VISIBLE_ROWS;
-  const { top: leagueTopScorer, least: leagueLeastScorer } = useMemo(() => leagueGoalExtremes(standings, league), [standings, league]);
 
   // In an active (non-final) survivor stage, work out exactly which clubs
   // are currently sitting in the cut zone for this stage.
@@ -4144,8 +2600,6 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
           Bottom {league.survivor_elimination_percent}% ({atRiskCount} club{atRiskCount === 1 ? "" : "s"}) eliminated when this stage ends
         </div>
       )}
-
-      <GoalExtremesBar top={leagueTopScorer} least={leagueLeastScorer} c={c} />
 
       <div className="relative mb-3">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a club..."
@@ -4536,7 +2990,7 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
-                  <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` · Matchday ${fixture.round}` : ""} · {timeAgo(s.created_at)}</div>
+                  <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username} · {timeAgo(s.created_at)}</div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
