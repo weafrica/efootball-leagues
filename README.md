@@ -39,9 +39,13 @@ select id from auth.users where email = 'your-email@gmail.com';
 
 ### 5. Turn on the Ladder
 A permanent, never-resetting ranking sits in front of the home page and on the sign-in screen — everyone fights for #1, and you can only challenge one of the 3 names directly above you. Beat them and you take their spot.
+
+Deadlines keep things moving: 7 days to accept a ladder challenge or it's an automatic walkover win for the challenger, and 7 days after accepting to log a result or both players drop one spot. (If one side reports a score and the other just won't confirm it, it auto-confirms after 2 days too, so stalling doesn't work as a dodge.)
+
 1. Go to Supabase → SQL Editor
 2. Paste in the contents of `supabase/ladder-migration.sql` (in this repo) and run it — safe to run more than once
-3. That's it — new members are added to the bottom of the ladder automatically when they set up their profile, and existing members get slotted in by join date
+3. Then paste in `supabase/ladder-deadlines-migration.sql` and run that too
+4. That's it — new members are added to the bottom of the ladder automatically when they set up their profile, existing members get slotted in by join date, and deadlines are enforced automatically from here on
 
 ### 6. (Optional) Custom domain
 In Vercel: Project → Settings → Domains → add your own domain and follow the DNS instructions shown.
