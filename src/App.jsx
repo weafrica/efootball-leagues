@@ -867,7 +867,7 @@ export default function App() {
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
   const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
-  const [challengeResultModal, setChallengeResultModal] = useState(null); // { challenge } — logging a score for an accepted challenge
+  const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } — logging a score for an accepted challenge
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
@@ -1125,6 +1125,42 @@ export default function App() {
     const { error } = await supabase.from("open_challenges").delete().eq("id", challenge.id);
     if (error) { showToast(`Couldn't remove: ${error.message}`); return; }
     setOpenChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
+  };
+
+  // Same report → confirm/dispute flow as reportChallengeResult, on the
+  // open_challenges table instead — scores are stored from the creator's
+  // perspective (creator_score / accepted_by_score) regardless of who logs it.
+  const reportOpenChallengeResult = async (challenge, myScore, theirScore) => {
+    const iAmCreator = challenge.creator_id === session.user.id;
+    const update = {
+      creator_score: iAmCreator ? myScore : theirScore,
+      accepted_by_score: iAmCreator ? theirScore : myScore,
+      result_status: "pending",
+      result_reported_by: session.user.id,
+      result_reported_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
+    if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
+    await loadOpenChallenges();
+    showToast("Result logged — waiting for them to confirm.");
+  };
+
+  const confirmOpenChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("open_challenges")
+      .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
+    await loadOpenChallenges();
+    showToast("Result confirmed.");
+  };
+
+  const disputeOpenChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("open_challenges")
+      .update({ creator_score: null, accepted_by_score: null, result_status: null, result_reported_by: null, result_reported_at: null })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
+    await loadOpenChallenges();
+    showToast("Result disputed — ask them to re-log it.");
   };
 
   useEffect(() => {
@@ -1990,8 +2026,10 @@ export default function App() {
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges}
             onSendChallenge={sendChallenge} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)}
             onRemove={removeChallenge}
-            onOpenLogResult={(ch) => setChallengeResultModal({ challenge: ch })}
+            onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
             onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
+            onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
+            onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={() => setView("home")} c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
@@ -2034,14 +2072,19 @@ export default function App() {
           onCancel={() => setResultModal(null)} onSubmit={handleResultModalSubmit} c={c} />
       )}
       {challengeResultModal && (() => {
-        const ch = challengeResultModal.challenge;
-        const iAmChallenger = ch.challenger_id === session.user.id;
-        const myUsername = iAmChallenger ? ch.challenger_username : ch.opponent_username;
-        const opponentUsername = iAmChallenger ? ch.opponent_username : ch.challenger_username;
+        const { kind, challenge: ch } = challengeResultModal;
+        const iAmFirst = kind === "open" ? ch.creator_id === session.user.id : ch.challenger_id === session.user.id;
+        const myUsername = kind === "open"
+          ? (iAmFirst ? ch.creator_username : ch.accepted_by_username)
+          : (iAmFirst ? ch.challenger_username : ch.opponent_username);
+        const opponentUsername = kind === "open"
+          ? (iAmFirst ? ch.accepted_by_username : ch.creator_username)
+          : (iAmFirst ? ch.opponent_username : ch.challenger_username);
+        const submit = kind === "open" ? reportOpenChallengeResult : reportChallengeResult;
         return (
           <LogChallengeResultModal challenge={ch} myUsername={myUsername} opponentUsername={opponentUsername}
             onCancel={() => setChallengeResultModal(null)}
-            onSubmit={async (mine, theirs) => { await reportChallengeResult(ch, mine, theirs); setChallengeResultModal(null); }}
+            onSubmit={async (mine, theirs) => { await submit(ch, mine, theirs); setChallengeResultModal(null); }}
             c={c} />
         );
       })()}
@@ -2710,7 +2753,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -2793,7 +2836,8 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
         <>
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your random challenges</div>
           <div className="flex flex-col gap-2 mb-6">
-            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} onRemove={onRemoveOpen} c={c} />)}
+            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} onRemove={onRemoveOpen}
+              onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} c={c} />)}
           </div>
         </>
       )}
@@ -2870,26 +2914,72 @@ function OpenChallengeRow({ challenge: ch, onAccept, c }) {
 
 // A resolved (accepted/cancelled) broadcast, shown to whichever side is
 // looking at it — the creator or whoever grabbed it.
-function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, c }) {
+function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, c }) {
+  const [resolving, setResolving] = useState(false);
   const iAmCreator = ch.creator_id === myId;
   const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
   const counterpartPhone = iAmCreator ? ch.accepted_by_phone : ch.creator_phone;
+
+  // Scores are stored from the creator's perspective — flip for display when
+  // the signed-in member is the one who accepted it.
+  const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
+  const theirScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
+  const iReported = ch.result_reported_by === myId;
+
+  const resolve = async (fn) => {
+    setResolving(true);
+    await fn(ch);
+    setResolving(false);
+  };
+
   return (
-    <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <MemberAvatar url={null} username={counterpartUsername || ch.creator_username} size={34} c={c} />
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
-        {ch.status === "accepted" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-        {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
-      </div>
-      {ch.status === "accepted" && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="flex items-center gap-3">
+        <MemberAvatar url={null} username={counterpartUsername || ch.creator_username} size={34} c={c} />
+        <div className="flex-1 min-w-0">
+          <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
+          {ch.status === "accepted" && ch.result_status === "confirmed" && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
+          )}
+          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
+          {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
         </div>
-      )}
-      {ch.status === "cancelled" && (
-        <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        {ch.status === "accepted" && !ch.result_status && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
+            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+          </div>
+        )}
+        {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
+          </div>
+        )}
+        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+          </div>
+        )}
+        {ch.status === "accepted" && ch.result_status === "confirmed" && (
+          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+        )}
+        {ch.status === "cancelled" && (
+          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        )}
+      </div>
+      {ch.status === "accepted" && !ch.result_status && (
+        <button onClick={() => onOpenLogResult(ch)}
+          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
+          style={{ background: c.accent, color: c.accentText }}>
+          <Trophy size={14} /> Log result
+        </button>
       )}
     </div>
   );
