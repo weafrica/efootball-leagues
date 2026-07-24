@@ -1110,17 +1110,21 @@ export default function App() {
   }, [session, showToast]);
 
   // Community feed at the bottom of the Challenges screen: the last 100
-  // confirmed results from every member on the platform, direct challenges
-  // and random challenges combined. Reads from the public_challenge_results
-  // view (see README) so it isn't limited to the signed-in member's own
-  // rows the way loadChallenges/loadOpenChallenges are.
+  // logged results from every member on the platform — both confirmed and
+  // still-awaiting-confirmation, direct challenges and random challenges
+  // combined. Reads from the public_challenge_results view (see README) so
+  // it isn't limited to the signed-in member's own rows the way
+  // loadChallenges/loadOpenChallenges are. Logged to the console (not a
+  // toast — this feed is a nice-to-have, not worth interrupting anyone) so
+  // a missing/misconfigured view is easy to spot while debugging instead of
+  // just silently showing an empty feed.
   const loadRecentResults = useCallback(async () => {
     if (!session) return;
     const { data, error } = await supabase.from("public_challenge_results")
       .select("*")
       .order("result_confirmed_at", { ascending: false })
       .limit(100);
-    if (error) { setRecentResults([]); return; }
+    if (error) { console.error("Couldn't load community results:", error.message); setRecentResults([]); return; }
     setRecentResults(data || []);
   }, [session]);
 
@@ -2964,14 +2968,14 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
         )}
       </div>
       <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-        The last 100 confirmed results across Matchday — direct and random challenges, everyone included.
+        The last 100 logged results across Matchday — direct and random challenges, everyone included.
       </div>
 
       {recentResults === null ? (
         <Loader c={c} />
       ) : recentResults.length === 0 ? (
         <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No confirmed results yet — once challenge results get confirmed, they'll show up here for everyone.
+          No results logged yet — once someone logs a challenge score, it'll show up here for everyone.
         </div>
       ) : (
         <>
@@ -3005,7 +3009,7 @@ function CommunityResultRow({ result: r, myId, c }) {
   const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
 
   return (
-    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}` }}>
+    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}`, opacity: r.confirmed ? 1 : 0.75 }}>
       <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
         {r.kind === "open" ? <Shuffle size={12} /> : <Trophy size={12} />}
       </div>
@@ -3016,7 +3020,7 @@ function CommunityResultRow({ result: r, myId, c }) {
           <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
         </div>
         <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}
+          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
         </div>
       </div>
     </div>
