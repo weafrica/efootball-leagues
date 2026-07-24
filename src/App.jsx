@@ -2922,58 +2922,64 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
   };
 
   return (
-    <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{counterpartUsername}</div>
-        {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
-        {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
-        {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="flex items-center gap-3">
+        <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
+        <div className="flex-1 min-w-0">
+          <div className="font-body text-sm font-semibold truncate">{counterpartUsername}</div>
+          {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
+          {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
+          {ch.status === "accepted" && ch.result_status === "confirmed" && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
+          )}
+          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
+          {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
+        </div>
+        {ch.status === "pending" && !iAmChallenger && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={() => respond(true)} disabled={responding} title="Accept" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+            <button onClick={() => respond(false)} disabled={responding} title="Decline" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+          </div>
+        )}
+        {ch.status === "pending" && iAmChallenger && (
+          <button onClick={() => onRemove(ch)} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+        )}
+        {ch.status === "accepted" && !ch.result_status && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
+            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+          </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-          <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
+          </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+          </div>
         )}
-        {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-        {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
+        {ch.status === "accepted" && ch.result_status === "confirmed" && (
+          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+        )}
+        {ch.status === "declined" && (
+          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        )}
       </div>
-      {ch.status === "pending" && !iAmChallenger && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={() => respond(true)} disabled={responding} title="Accept" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-          <button onClick={() => respond(false)} disabled={responding} title="Decline" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-        </div>
-      )}
-      {ch.status === "pending" && iAmChallenger && (
-        <button onClick={() => onRemove(ch)} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-      )}
       {ch.status === "accepted" && !ch.result_status && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={() => onOpenLogResult(ch)} title="Log result" className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.accent, color: c.accentText }}>
-            <Trophy size={12} /> Log result
-          </button>
-          <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        </div>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
-        </div>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-          <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-        </div>
-      )}
-      {ch.status === "accepted" && ch.result_status === "confirmed" && (
-        <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-      )}
-      {ch.status === "declined" && (
-        <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
+        <button onClick={() => onOpenLogResult(ch)}
+          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
+          style={{ background: c.accent, color: c.accentText }}>
+          <Trophy size={14} /> Log result
+        </button>
       )}
     </div>
   );
