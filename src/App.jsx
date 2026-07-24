@@ -5,6 +5,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
+  TrendingUp, Swords,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -883,6 +884,8 @@ export default function App() {
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
   const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
   const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
+  const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets
+  const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const c = THEMES[theme];
 
@@ -1005,22 +1008,48 @@ export default function App() {
     setChallenges(data || []);
   }, [session, showToast]);
 
+  // The permanent ladder — every member, ordered by rank_position. Never
+  // resets (that's the whole point), unlike seasons/leagues elsewhere in the
+  // app. RLS only allows reading this while signed in; the login screen
+  // shows its own top-5 public view instead (see PublicLadderPreview).
+  const loadLadder = useCallback(async () => {
+    const { data, error } = await supabase.from("ladder_ranks").select("*").order("rank_position", { ascending: true });
+    if (error) { console.error("Couldn't load the ladder:", error.message); setLadder([]); return; }
+    setLadder(data || []);
+  }, []);
+
+  // The only people the signed-in member is allowed to send a ladder
+  // challenge to: the (up to) 3 names directly above them. Ordered closest
+  // rank first, since that's the one worth trying first.
+  const ladderTargets = useMemo(() => {
+    if (!ladder || !session) return [];
+    const mine = ladder.find((r) => r.user_id === session.user.id);
+    if (!mine) return [];
+    return ladder
+      .filter((r) => r.rank_position < mine.rank_position && r.rank_position >= mine.rank_position - 3)
+      .sort((a, b) => b.rank_position - a.rank_position);
+  }, [ladder, session]);
+  const myLadderRank = useMemo(() => (ladder && session ? ladder.find((r) => r.user_id === session.user.id) : null), [ladder, session]);
+
   // Sends a challenge to another member. Snapshots the challenger's own
   // username/phone onto the row right away (same pattern used everywhere
   // else in the app — a team's display_name/phone are snapshotted at join
   // time too) — the opponent's phone stays off the row entirely until they
   // accept, so nobody's number is exposed before they've agreed to it.
-  const sendChallenge = async (opponent) => {
+  // `isLadder` tags it so that, if it's ever confirmed as a win, the
+  // ladder-promotion trigger in Supabase actually moves the two of them.
+  const sendChallenge = async (opponent, isLadder = false) => {
     const { error } = await supabase.from("challenges").insert({
       challenger_id: session.user.id,
       challenger_username: profile.efootball_username,
       challenger_phone: profile.phone,
       opponent_id: opponent.user_id,
       opponent_username: opponent.username,
+      is_ladder: isLadder,
     });
     if (error) { showToast(`Couldn't send challenge: ${error.message}`); return; }
     await loadChallenges();
-    showToast(`Challenge sent to ${opponent.username}.`);
+    showToast(isLadder ? `Ladder challenge sent to ${opponent.username} — win it and their spot is yours.` : `Challenge sent to ${opponent.username}.`);
   };
 
   // Accepting fills in the opponent's own phone right at the moment they agree
@@ -1082,7 +1111,8 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
     await loadChallenges();
-    showToast("Result confirmed.");
+    if (challenge.is_ladder) await loadLadder();
+    showToast(challenge.is_ladder ? "Result confirmed — the ladder just updated." : "Result confirmed.");
   };
 
   // Same signed-URL pattern as downloadResultProof, but for a challenge/open
@@ -1305,7 +1335,17 @@ export default function App() {
     loadLeagues();
     loadChallenges();
     loadOpenChallenges();
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges]);
+    loadLadder();
+  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder]);
+
+  // The ladder never resets, but ranks can move any time someone else's
+  // challenge gets confirmed — so refresh it quietly while Home is open,
+  // the same way the random-challenge pool refreshes itself.
+  useEffect(() => {
+    if (view !== "home" || !profile) return;
+    const id = setInterval(loadLadder, 8000);
+    return () => clearInterval(id);
+  }, [view, profile, loadLadder]);
 
   // While the Challenges screen — or Home, where the random-challenge
   // notification banner lives — is open, poll the random-challenge pool
@@ -2188,6 +2228,7 @@ export default function App() {
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} myPaymentStatus={myPaymentStatus}
                 canManageLeague={canManageLeague} session={session} onToggleLeagueReaction={toggleLeagueReaction}
                 openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
+                ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={() => setLadderChallengeOpen(true)}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
                 onCreate={() => setView("create")} onJoin={startJoin} c={c} />
             )}
@@ -2248,6 +2289,11 @@ export default function App() {
         <SuggestionModal onCancel={() => setSuggestionOpen(false)}
           onSubmit={async (text) => { const ok = await postSuggestion(text); if (ok) setSuggestionOpen(false); }} c={c} />
       )}
+      {ladderChallengeOpen && (
+        <LadderChallengeSheet myRank={myLadderRank} targets={ladderTargets}
+          onChallenge={async (target) => { await sendChallenge(target, true); setLadderChallengeOpen(false); }}
+          onCancel={() => setLadderChallengeOpen(false)} c={c} />
+      )}
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full font-body text-sm font-medium shadow-lg z-50 max-w-[90vw] text-center" style={{ background: c.toastBg, color: c.toastText }}>
@@ -2293,9 +2339,11 @@ function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
         <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight text-center leading-[0.95] mb-3">
           Run your table.<br />Own your league.
         </h1>
-        <p className="font-body text-center max-w-xs mb-8" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself.</p>
+        <p className="font-body text-center max-w-xs mb-6" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself.</p>
 
-        <label className="flex items-center gap-2 mb-5 cursor-pointer select-none">
+        <PublicLadderPreview c={c} />
+
+        <label className="flex items-center gap-2 mb-5 mt-2 cursor-pointer select-none">
           <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
             <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
             {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
@@ -2311,6 +2359,42 @@ function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
         )}
       </div>
       <PublicLeaguePreview c={c} />
+    </div>
+  );
+}
+
+// The ladder's top 5, for people who haven't signed in yet — reads from the
+// public_ladder_top view (granted to anon in Supabase). Deliberately styled
+// as a plain scrollable line, not a card, so it sits naturally under the
+// headline rather than looking like a separate widget.
+function PublicLadderPreview({ c }) {
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from("public_ladder_top").select("*").order("rank_position", { ascending: true })
+      .then(({ data }) => { if (!cancelled) setRows(data || []); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <div className="w-full max-w-md mb-2">
+      <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-center mb-2 flex items-center justify-center gap-1.5" style={{ color: c.textFaint }}>
+        <TrendingUp size={11} /> The Ladder — everyone's fighting for #1
+      </div>
+      <div className="no-scrollbar flex items-center justify-center gap-4 overflow-x-auto px-2">
+        {rows.map((row, i) => (
+          <div key={row.username + i} className="flex items-center gap-1.5 shrink-0"
+            style={{ borderRight: i < rows.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < rows.length - 1 ? 16 : 0 }}>
+            {i === 0 ? <Crown size={14} style={{ color: c.accent }} /> : (
+              <span className="font-mono text-[11px] font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
+            )}
+            <span className="font-body font-semibold text-xs truncate max-w-[90px]">{row.username}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3773,7 +3857,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadderChallenge, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
 
@@ -3797,6 +3881,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={onOpenLadderChallenge} c={c} />
+
       {grabbableChallenges.length > 0 && (
         <button onClick={onOpenChallenges} className="animate-flicker w-full flex items-center gap-2.5 mt-4 px-4 py-2.5 rounded-full font-body text-xs font-semibold text-left"
           style={{ background: c.accent, color: c.accentText }}>
@@ -3843,6 +3929,86 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
       <section className="mt-10 pt-8" style={{ borderTop: `1px solid ${c.border}` }}>
         <Leaderboard leagues={leagues} session={session} embedded c={c} />
       </section>
+    </div>
+  );
+}
+
+// The permanent ladder, sitting in front of everything else on Home — a
+// horizontally-scrolling strip, not a boxed-off card, so it reads as part of
+// the page rather than a widget bolted onto it. Shows the top 5 by
+// rank_position (which never resets) plus, if the viewer has a spot on it
+// themselves, a quiet "you're #N" line that opens the challenge picker.
+function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
+  if (!ladder || ladder.length === 0) return null;
+  const top5 = ladder.slice(0, 5);
+  return (
+    <section className="pt-5">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
+          <TrendingUp size={12} /> The Ladder
+        </div>
+        {myLadderRank && (
+          <button onClick={onOpenLadderChallenge} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+            You're #{myLadderRank.rank_position} <ChevronRight size={12} />
+          </button>
+        )}
+      </div>
+      <div className="no-scrollbar flex items-stretch gap-4 overflow-x-auto -mx-4 px-4 pb-1">
+        {top5.map((row, i) => (
+          <div key={row.user_id} className="flex items-center gap-2 shrink-0"
+            style={{ borderRight: i < top5.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < top5.length - 1 ? 16 : 0 }}>
+            {i === 0 ? <Crown size={16} style={{ color: c.accent }} /> : (
+              <span className="font-mono text-xs font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
+            )}
+            <div className="flex flex-col leading-tight">
+              <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</span>
+            </div>
+          </div>
+        ))}
+        {myLadderRank && myLadderRank.rank_position > 5 && (
+          <button onClick={onOpenLadderChallenge} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px]" style={{ color: c.textFaint, paddingLeft: 2 }}>
+            <Swords size={13} /> Climb it
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// The picker for who a member is allowed to send a ladder challenge to —
+// always just the (up to) 3 names directly above them, closest first.
+function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onCancel}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="font-extrabold uppercase tracking-tight text-lg flex items-center gap-2"><Swords size={18} /> Climb the ladder</div>
+          <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
+        </div>
+        <p className="font-body text-xs mb-4" style={{ color: c.textDim }}>
+          {myRank ? `You're #${myRank.rank_position}. Beat one of these and their spot is yours.` : "You'll get a ladder spot once your profile is set up."}
+        </p>
+        {targets.length === 0 ? (
+          <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>
+            {myRank && myRank.rank_position === 1 ? "You're #1 — nobody left to challenge." : "No one directly above you yet."}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {targets.map((t) => (
+              <div key={t.user_id} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: c.surface }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-xs font-semibold shrink-0" style={{ color: c.textFaint }}>#{t.rank_position}</span>
+                  <span className="font-body font-semibold text-sm truncate">{t.username}</span>
+                </div>
+                <button onClick={() => onChallenge(t)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+                  Challenge
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
