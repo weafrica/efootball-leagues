@@ -235,6 +235,23 @@ function isExpired(fixture) {
   return !fixture.played && !!fixture.due_at && new Date(fixture.due_at) < new Date();
 }
 
+// A submitted result gives the opponent 24 hours to confirm or dispute it
+// (see respondToResultSubmission) before it escalates to the admin override
+// queue. These three helpers are the single source of truth for that window
+// so the opponent panel's countdown and the admin panel's visibility can't
+// drift out of sync.
+const RESULT_CONFIRM_WINDOW_HOURS = 24;
+function resultConfirmDeadline(submission) {
+  return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_HOURS * 60 * 60 * 1000);
+}
+function resultConfirmExpired(submission) {
+  return Date.now() >= resultConfirmDeadline(submission).getTime();
+}
+function resultConfirmHoursLeft(submission) {
+  const ms = resultConfirmDeadline(submission).getTime() - Date.now();
+  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
+}
+
 // Expired, unplayed fixtures count as a loss for both sides once past their deadline.
 function computeStandings(teams, fixtures) {
   const table = {};
@@ -3978,7 +3995,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // rest stay newest-first.
   const attentionScore = (l) => {
     const pendingCount = l.league_type === "cash" ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0;
-    const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending").length;
+    const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultConfirmExpired(s)).length;
     const myStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
     let score = 0;
     if (canManageLeague(l) && (pendingCount > 0 || pendingResultsCount > 0)) score += 2;
@@ -4162,7 +4179,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
   const approvedMembers = isCash ? (l.members || []).filter((m) => m.payment_status === "approved") : [];
   const pool = approvedMembers.reduce((sum, m) => sum + (m.entry_fee || 0), 0);
   const pendingCount = isCash ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0;
-  const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending").length;
+  const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultConfirmExpired(s)).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
   const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
   const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
@@ -4846,7 +4863,7 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
 // server-side); rejecting just leaves the fixture open for a resubmission.
 function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
   title = `${submissions.length} result${submissions.length === 1 ? "" : "s"} awaiting your review`,
-  approveLabel = "Approve", rejectLabel = "Reject" }) {
+  approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false }) {
   return (
     <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
@@ -4866,6 +4883,13 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                 <div className="flex-1 min-w-0">
                   <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
                   <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` · Matchday ${fixture.round}` : ""} · {timeAgo(s.created_at)}</div>
+                  {showDeadline && (
+                    <div className="font-mono text-[11px] mt-0.5" style={{ color: resultConfirmHoursLeft(s) <= 3 ? c.red : "#B8860B" }}>
+                      {resultConfirmHoursLeft(s) > 0
+                        ? `${resultConfirmHoursLeft(s)}h left to respond — after that it goes to the admin`
+                        : "Confirmation window passed — this has been sent to the admin"}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
@@ -5054,6 +5078,12 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
   const myPendingResults = session
     ? pendingResults.filter((s) => s.submitted_by !== session.user.id && findSubmissionOpponentId(league, s) === session.user.id)
     : [];
+  // The opponent has 24 hours to confirm or dispute a submission themselves
+  // (see resultConfirmDeadline). Only once that window has passed without a
+  // response does it escalate into the admin's override queue — before that,
+  // it's still the opponent's to act on, so admins see it as a heads-up only.
+  const escalatedResults = pendingResults.filter((s) => resultConfirmExpired(s));
+  const awaitingOpponentResults = pendingResults.filter((s) => !resultConfirmExpired(s));
   const isKnockout = league.format === "knockout";
   const isSurvivor = league.format === "survivor";
   const isGroupsKnockout = league.format === "groups_knockout";
@@ -5221,15 +5251,23 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {myPendingResults.length > 0 && (
         <PendingResultsPanel league={league} submissions={myPendingResults}
           title={`${myPendingResults.length} result${myPendingResults.length === 1 ? "" : "s"} awaiting your confirmation`}
-          approveLabel="Confirm" rejectLabel="Dispute"
+          approveLabel="Confirm" rejectLabel="Dispute" showDeadline
           onDownloadProof={onDownloadResultProof}
           onApprove={(l, s) => onRespondToResultSubmission(l, s, true)}
           onReject={(l, s) => onRespondToResultSubmission(l, s, false)} c={c} />
       )}
 
-      {canManage && pendingResults.length > 0 && (
-        <PendingResultsPanel league={league} submissions={pendingResults}
-          title={`${pendingResults.length} result${pendingResults.length === 1 ? "" : "s"} awaiting review (admin override)`}
+      {canManage && awaitingOpponentResults.length > 0 && (
+        <div className="rounded-xl p-4 border mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
+          <Clock size={13} className="shrink-0" />
+          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's 24h confirmation window
+          {" — "}lands here for your review only if they don't respond in time.
+        </div>
+      )}
+
+      {canManage && escalatedResults.length > 0 && (
+        <PendingResultsPanel league={league} submissions={escalatedResults}
+          title={`${escalatedResults.length} result${escalatedResults.length === 1 ? "" : "s"} needing review — opponent didn't respond within 24h`}
           onDownloadProof={onDownloadResultProof} onApprove={onApproveResult} onReject={onRejectResult} c={c} />
       )}
 
