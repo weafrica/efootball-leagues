@@ -1144,24 +1144,39 @@ export default function App() {
     setBoardComments(data || []);
   }, [session]);
 
-  const postBoardComment = async (body) => {
+  const postBoardComment = async (body, parentComment = null) => {
     const trimmed = (body || "").trim();
     if (!trimmed) return false;
     const username = profile?.efootball_username || session.user.email;
     const { error } = await supabase.from("challenge_board_comments").insert({
       user_id: session.user.id, username, body: trimmed,
+      parent_comment_id: parentComment?.id || null,
     });
-    if (error) { showToast(`Couldn't post comment: ${error.message}`); return false; }
+    if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await loadBoardComments();
     return true;
   };
 
+  // A comment with replies underneath it warns about taking those replies
+  // down with it — replies nest to unlimited depth, so this counts every
+  // descendant, not just direct children.
   const deleteBoardComment = (comment) => {
-    requestConfirm(["Delete this comment? This can't be undone."], async () => {
+    const all = boardComments || [];
+    const countDescendants = (id) => {
+      const direct = all.filter((cm) => cm.parent_comment_id === id);
+      return direct.reduce((sum, d) => sum + 1 + countDescendants(d.id), 0);
+    };
+    const replyCount = countDescendants(comment.id);
+    const message = comment.parent_comment_id
+      ? "Delete this reply? This can't be undone."
+      : replyCount > 0
+        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
+        : "Delete this comment? This can't be undone.";
+    requestConfirm([message], async () => {
       const { error } = await supabase.from("challenge_board_comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
       await loadBoardComments();
-      showToast("Comment deleted.");
+      showToast(comment.parent_comment_id ? "Reply deleted." : "Comment deleted.");
     });
   };
 
@@ -3094,51 +3109,81 @@ function CommunityResultRow({ result: r, myId, c }) {
 }
 
 const BOARD_PAGE_SIZE = 8;
+const BOARD_MAX_INDENT_DEPTH = 4;
 
 // A single platform-wide comment wall at the very bottom of the Challenges
 // screen — banter, callouts, "who's on tonight" — open to any signed-in
 // member regardless of which challenges they're personally involved in.
-// Deliberately flat (no reply threads) and text-only: this is a chat wall,
-// not the per-league discussion system, so it stays simple on purpose.
+// Threads nest to unlimited depth, same as the per-league comments system —
+// a reply can be replied to, and so on, with no cap on how many levels deep
+// a conversation under one root comment can go. Indentation stops growing
+// past a few levels purely for legibility on a phone; that's cosmetic only.
 function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
-  const [pending, setPending] = useState([]); // optimistic comments, cleared once the real row lands
+  const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
   const textareaRef = useRef(null);
   const source = comments || [];
 
   useEffect(() => {
     if (pending.length === 0) return;
     setPending((prev) => prev.filter((p) => !source.some((real) =>
-      real.user_id === p.user_id && real.body === p.body
+      real.user_id === p.user_id && real.body === p.body && real.parent_comment_id === p.parent_comment_id
       && Math.abs(new Date(real.created_at) - new Date(p.created_at)) < 15000
     )));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
 
-  const all = useMemo(() =>
-    [...source, ...pending].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
-    [source, pending]);
-  const visible = all.slice(0, visibleCount);
-  const hiddenCount = all.length - visible.length;
+  // Build the full reply tree (unlimited depth) from the flat list, same
+  // approach as the per-league comment thread: every comment becomes a node
+  // with a children array, parented by walking parent_comment_id.
+  const { roots, totalCount } = useMemo(() => {
+    const all = [...source, ...pending];
+    const byId = new Map(all.map((cm) => [cm.id, { ...cm, children: [] }]));
+    const topLevel = [];
+    for (const node of byId.values()) {
+      if (node.parent_comment_id && byId.has(node.parent_comment_id)) {
+        byId.get(node.parent_comment_id).children.push(node);
+      } else if (!node.parent_comment_id) {
+        topLevel.push(node);
+      }
+      // A reply whose parent isn't in byId (parent already deleted) falls
+      // back to top-level rather than vanishing.
+    }
+    const sortChildren = (node) => {
+      node.children.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      node.children.forEach(sortChildren);
+      return node;
+    };
+    topLevel.forEach(sortChildren);
+    const sortedRoots = [...topLevel].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return { roots: sortedRoots, totalCount: all.length };
+  }, [source, pending]);
 
-  const submit = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || posting) return;
+  const visibleRoots = roots.slice(0, visibleCount);
+  const hiddenCount = roots.length - visibleRoots.length;
+
+  const submit = async (parentComment = null, body = text) => {
+    const trimmed = body.trim();
+    if (!trimmed || posting) return false;
     setPosting(true);
     const tempId = `temp-${Date.now()}`;
     const optimistic = {
       id: tempId, user_id: session.user.id, username: myUsername,
       body: trimmed, created_at: new Date().toISOString(),
+      parent_comment_id: parentComment?.id || null,
       challenge_board_comment_likes: [], pending: true,
     };
     setPending((prev) => [...prev, optimistic]);
-    setText("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    const ok = await onPost(trimmed);
+    if (!parentComment) {
+      setText("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+    }
+    const ok = await onPost(trimmed, parentComment);
     setPosting(false);
-    if (!ok) { setPending((prev) => prev.filter((p) => p.id !== tempId)); setText(trimmed); }
+    if (!ok) { setPending((prev) => prev.filter((p) => p.id !== tempId)); if (!parentComment) setText(trimmed); }
+    return ok;
   };
 
   const onKeyDown = (e) => {
@@ -3163,23 +3208,23 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
       `}</style>
 
       <div className="flex items-center gap-2 mb-3 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-        <MessageCircle size={13} /> Challenge board {all.length > 0 && `(${all.length})`}
+        <MessageCircle size={13} /> Challenge board {totalCount > 0 && `(${totalCount})`}
       </div>
 
       {comments === null ? (
         <Loader c={c} />
       ) : (
         <>
-          {all.length === 0 ? (
+          {roots.length === 0 ? (
             <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
               <MessageCircle size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
               <div className="font-body text-sm">No comments yet — say something to get things going.</div>
             </div>
           ) : (
             <div className="space-y-2.5 mb-3">
-              {visible.map((cm) => (
-                <BoardCommentRow key={cm.id} comment={cm} session={session} isAdmin={isAdmin}
-                  onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} />
+              {visibleRoots.map((cm) => (
+                <BoardCommentNode key={cm.id} comment={cm} session={session} isAdmin={isAdmin}
+                  onPost={submit} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={0} />
               ))}
             </div>
           )}
@@ -3203,7 +3248,7 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
               placeholder="Say something…" rows={1} maxLength={1000}
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={submit} disabled={!text.trim() || posting}
+            <button onClick={() => submit()} disabled={!text.trim() || posting}
               className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
               style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={15} />
@@ -3215,18 +3260,32 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
   );
 }
 
-// A single row on the challenge board: avatar, username, timestamp, delete
-// (own comments, or any comment if you're an admin), body text, and an
-// emoji reaction picker — same reaction set and interaction pattern as the
-// per-league comments, just backed by challenge_board_comment_likes instead.
-function BoardCommentRow({ comment: cm, session, isAdmin, onDelete, onToggleReaction, c }) {
+// A single comment on the challenge board, its reaction/reply row, and —
+// recursively — every reply underneath it, no matter how deep. Each node
+// owns its own "reply box open?" / "replies expanded?" state independently
+// of its siblings and ancestors, exactly like the per-league CommentNode.
+function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onToggleReaction, c, depth }) {
   const isOwn = session && cm.user_id === session.user.id;
   const realReactions = cm.challenge_board_comment_likes || [];
+  const children = cm.children || [];
+  const indent = Math.min(depth + 1, BOARD_MAX_INDENT_DEPTH) * 36;
 
   const [pendingReaction, setPendingReaction] = useState(undefined);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [popKey, setPopKey] = useState(0);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [repliesShown, setRepliesShown] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replying, setReplying] = useState(false);
   const pickerRef = useRef(null);
+  const replyRef = useRef(null);
+
+  // A reply that's still in flight should already be visible under this
+  // thread, so expand it the moment the optimistic reply is queued rather
+  // than waiting for the round trip to finish.
+  useEffect(() => {
+    if (children.some((r) => r.pending)) setRepliesShown(true);
+  }, [children]);
 
   const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
   useEffect(() => {
@@ -3275,9 +3334,27 @@ function BoardCommentRow({ comment: cm, session, isAdmin, onDelete, onToggleReac
     }
   };
 
+  const canReply = !!session && !cm.pending;
+
+  const submitReply = async () => {
+    const trimmed = replyText.trim();
+    if (!trimmed || replying) return;
+    setReplying(true);
+    setReplyText("");
+    setReplyOpen(false);
+    const ok = await onPost(cm, trimmed);
+    setReplying(false);
+    if (!ok) setReplyText(trimmed);
+  };
+
+  const onReplyKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(); }
+    if (e.key === "Escape") { setReplyOpen(false); setReplyText(""); }
+  };
+
   return (
     <div className={cm.pending ? "opacity-60" : "board-pop-in"}>
-      <div className="flex items-start gap-2.5 group">
+      <div className="flex items-start gap-2.5 group" style={{ marginLeft: indent }}>
         <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
           style={{ background: avatarColor(cm.username), color: "#fff", width: 28, height: 28, fontSize: 12 }}>
           {cm.username?.[0]?.toUpperCase() || "?"}
@@ -3299,33 +3376,86 @@ function BoardCommentRow({ comment: cm, session, isAdmin, onDelete, onToggleReac
           </div>
           <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
           {!cm.pending && (
-            <div className="relative mt-1.5" ref={pickerRef}>
-              <button onClick={handleMainClick} disabled={!session}
-                className="flex items-center gap-1 font-mono text-[10px] transition-colors"
-                style={{ color: myReaction ? c.accent : c.textFaint }}>
-                <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
-                  {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
-                </span>
-                {reactions.length > 0 && (
-                  <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-                )}
-              </button>
+            <div className="flex items-center gap-3 mt-1.5">
+              <div className="relative" ref={pickerRef}>
+                <button onClick={handleMainClick} disabled={!session}
+                  className="flex items-center gap-1 font-mono text-[10px] transition-colors"
+                  style={{ color: myReaction ? c.accent : c.textFaint }}>
+                  <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
+                    {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
+                  </span>
+                  {reactions.length > 0 && (
+                    <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
+                  )}
+                </button>
 
-              {pickerOpen && (
-                <div className="board-reaction-picker absolute top-full left-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-                  style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-                  {REACTIONS.map((r) => (
-                    <button key={r.key} onClick={() => react(r.key)} title={r.key}
-                      className="board-reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-                      {r.emoji}
-                    </button>
-                  ))}
-                </div>
+                {pickerOpen && (
+                  <div className="board-reaction-picker absolute top-full left-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
+                    style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
+                    {REACTIONS.map((r) => (
+                      <button key={r.key} onClick={() => react(r.key)} title={r.key}
+                        className="board-reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
+                        {r.emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canReply && (
+                <button onClick={() => setReplyOpen((v) => !v)}
+                  className="font-mono text-[10px] uppercase tracking-wider transition-colors"
+                  style={{ color: c.textFaint }}>
+                  Reply
+                </button>
               )}
             </div>
           )}
         </div>
       </div>
+
+      {children.length > 0 && (
+        <button onClick={() => setRepliesShown((v) => !v)}
+          className="mt-1 font-mono text-[10px] uppercase tracking-wider flex items-center gap-1"
+          style={{ color: c.textFaint, marginLeft: indent + 38 }}>
+          <CornerDownRight size={11} />
+          {repliesShown ? "Hide" : "Show"} {children.length} repl{children.length === 1 ? "y" : "ies"}
+        </button>
+      )}
+
+      {repliesShown && (
+        <div className="mt-2 space-y-2">
+          {children.map((r) => (
+            <BoardCommentNode key={r.id} comment={r} session={session} isAdmin={isAdmin}
+              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+
+      {replyOpen && (
+        <div className="mt-2" style={{ marginLeft: indent + 38 }}>
+          <div className="flex items-center gap-1.5 mb-1.5 font-mono text-[10px]" style={{ color: c.textFaint }}>
+            <CornerDownRight size={11} />
+            Replying to {cm.username}
+            <button onClick={() => { setReplyOpen(false); setReplyText(""); }} className="ml-0.5" style={{ color: c.textFaint }}>
+              <X size={11} />
+            </button>
+          </div>
+          <div className="flex items-end gap-2">
+            <textarea ref={replyRef} value={replyText}
+              onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
+              onKeyDown={onReplyKeyDown}
+              placeholder={`Reply to ${cm.username}…`} rows={1} maxLength={1000} autoFocus
+              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
+              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+            <button onClick={submitReply} disabled={!replyText.trim() || replying}
+              className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
+              style={replyText.trim() && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              <Send size={13} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
