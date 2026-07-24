@@ -807,12 +807,13 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
 function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCancel, onSubmit, c }) {
   const [mine, setMine] = useState(0);
   const [theirs, setTheirs] = useState(0);
+  const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (saving) return;
+    if (!file || saving) return;
     setSaving(true);
-    await onSubmit(mine, theirs);
+    await onSubmit(mine, theirs, file);
     setSaving(false);
   };
 
@@ -842,12 +843,18 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
           </div>
         </div>
 
+        <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Photo proof (required)</label>
+        <label className="flex items-center gap-2 border border-dashed rounded-lg px-4 py-3 mb-1 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
+          <Camera size={15} style={{ color: c.textFaint }} />
+          {file ? file.name : "Upload a screenshot of the final scoreboard"}
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
         <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
-          {opponentUsername} will need to confirm this score before it counts.
+          {opponentUsername} will see this photo and needs to confirm the score before it counts.
         </div>
 
-        <button disabled={saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
-          style={!saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
+        <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
+          style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
           {saving ? "Logging…" : "Log result"}
         </button>
       </div>
@@ -1032,7 +1039,13 @@ export default function App() {
   // Scores are stored from the challenger's perspective (challenger_score /
   // opponent_score) regardless of who reports them, so the row has one
   // unambiguous scoreline no matter which side typed it in.
-  const reportChallengeResult = async (challenge, myScore, theirScore) => {
+  const reportChallengeResult = async (challenge, myScore, theirScore, file) => {
+    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${session.user.id}/challenge-${challenge.id}-${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+
     const iAmChallenger = challenge.challenger_id === session.user.id;
     const update = {
       challenger_score: iAmChallenger ? myScore : theirScore,
@@ -1040,6 +1053,7 @@ export default function App() {
       result_status: "pending",
       result_reported_by: session.user.id,
       result_reported_at: new Date().toISOString(),
+      result_photo_path: path,
     };
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
@@ -1060,11 +1074,20 @@ export default function App() {
     showToast("Result confirmed.");
   };
 
+  // Same signed-URL pattern as downloadResultProof, but for a challenge/open
+  // challenge row's result_photo_path rather than a league submission.
+  const viewChallengeResultProof = async (challenge) => {
+    if (!challenge.result_photo_path) return;
+    const { data, error } = await supabase.storage.from("result-proofs").createSignedUrl(challenge.result_photo_path, 120);
+    if (error || !data) { showToast("Couldn't generate a download link."); return; }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
   // Rejects a reported score and clears it back to no-result, so either side
   // can log a fresh (hopefully accurate) one.
   const disputeChallengeResult = async (challenge) => {
     const { error } = await supabase.from("challenges")
-      .update({ challenger_score: null, opponent_score: null, result_status: null, result_reported_by: null, result_reported_at: null })
+      .update({ challenger_score: null, opponent_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadChallenges();
@@ -1130,7 +1153,13 @@ export default function App() {
   // Same report → confirm/dispute flow as reportChallengeResult, on the
   // open_challenges table instead — scores are stored from the creator's
   // perspective (creator_score / accepted_by_score) regardless of who logs it.
-  const reportOpenChallengeResult = async (challenge, myScore, theirScore) => {
+  const reportOpenChallengeResult = async (challenge, myScore, theirScore, file) => {
+    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${session.user.id}/open-challenge-${challenge.id}-${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+
     const iAmCreator = challenge.creator_id === session.user.id;
     const update = {
       creator_score: iAmCreator ? myScore : theirScore,
@@ -1138,6 +1167,7 @@ export default function App() {
       result_status: "pending",
       result_reported_by: session.user.id,
       result_reported_at: new Date().toISOString(),
+      result_photo_path: path,
     };
     const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
@@ -1156,7 +1186,7 @@ export default function App() {
 
   const disputeOpenChallengeResult = async (challenge) => {
     const { error } = await supabase.from("open_challenges")
-      .update({ creator_score: null, accepted_by_score: null, result_status: null, result_reported_by: null, result_reported_at: null })
+      .update({ creator_score: null, accepted_by_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadOpenChallenges();
@@ -2030,6 +2060,7 @@ export default function App() {
             onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
             onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
             onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
+            onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={() => setView("home")} c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
@@ -2084,7 +2115,7 @@ export default function App() {
         return (
           <LogChallengeResultModal challenge={ch} myUsername={myUsername} opponentUsername={opponentUsername}
             onCancel={() => setChallengeResultModal(null)}
-            onSubmit={async (mine, theirs) => { await submit(ch, mine, theirs); setChallengeResultModal(null); }}
+            onSubmit={async (mine, theirs, file) => { await submit(ch, mine, theirs, file); setChallengeResultModal(null); }}
             c={c} />
         );
       })()}
@@ -2753,7 +2784,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -2837,7 +2868,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your random challenges</div>
           <div className="flex flex-col gap-2 mb-6">
             {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} onRemove={onRemoveOpen}
-              onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} c={c} />)}
+              onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} onViewResultProof={onViewResultProof} c={c} />)}
           </div>
         </>
       )}
@@ -2878,7 +2909,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, onSend
       ) : (
         <div className="flex flex-col gap-2">
           {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
-            onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} c={c} />)}
+            onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof} c={c} />)}
         </div>
       )}
     </div>
@@ -2914,7 +2945,7 @@ function OpenChallengeRow({ challenge: ch, onAccept, c }) {
 
 // A resolved (accepted/cancelled) broadcast, shown to whichever side is
 // looking at it — the creator or whoever grabbed it.
-function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, c }) {
+function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, c }) {
   const [resolving, setResolving] = useState(false);
   const iAmCreator = ch.creator_id === myId;
   const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
@@ -2981,11 +3012,18 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResu
           <Trophy size={14} /> Log result
         </button>
       )}
+      {ch.status === "accepted" && ch.result_status === "pending" && (
+        <button onClick={() => onViewResultProof(ch)}
+          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
+          style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          <Camera size={13} /> View photo proof
+        </button>
+      )}
     </div>
   );
 }
 
-function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, c }) {
+function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, c }) {
   const [responding, setResponding] = useState(false);
   const [resolving, setResolving] = useState(false);
   const iAmChallenger = ch.challenger_id === myId;
@@ -3069,6 +3107,13 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
           className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
           style={{ background: c.accent, color: c.accentText }}>
           <Trophy size={14} /> Log result
+        </button>
+      )}
+      {ch.status === "accepted" && ch.result_status === "pending" && (
+        <button onClick={() => onViewResultProof(ch)}
+          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
+          style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          <Camera size={13} /> View photo proof
         </button>
       )}
     </div>
