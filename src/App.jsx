@@ -987,6 +987,137 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
   );
 }
 
+// ---------------------------------------------------------------------------
+// In-app rules reference. Mirrors the community's RULES.md so players can
+// check how leagues, the ladder, or challenges actually work without leaving
+// the screen they're on. Split into three focused modals (rather than one
+// long wall of text) so each "Rules" button surfaces only what's relevant to
+// where the player already is.
+const RULES_CONTENT = {
+  league: {
+    icon: Trophy,
+    title: "League Rules",
+    sections: [
+      { heading: "The basics", items: [
+        "Fun leagues are free to join. Cash leagues are admin-created only, with a real entry fee.",
+        "Your eFootball username has to match a club name to actually play — no match and you're just spectating.",
+        "One active fun league at a time — your club there needs to be eliminated (or the league finished) before you can join another.",
+        "Once a league starts, no new clubs can register — late joiners can only step into an already-listed, unclaimed club.",
+      ]},
+      { heading: "Formats", items: [
+        "Single / Double Round Robin — everyone plays everyone once, or home-and-away.",
+        "Knockout — single elimination, single- or double-legged ties.",
+        "Survivor — play a set number of matches, the bottom % get cut, repeat until a target number remain, then a round-robin decider.",
+        "Groups + Knockout — a group-stage round robin first, then the top clubs from each group go into a knockout bracket.",
+      ]},
+      { heading: "Arranging your fixture", items: [
+        "Text your opponent once to propose a date & time, as soon as your fixture is published.",
+        "No reply? You may call them once, on a different day, as a backup.",
+        "Everything must be finalized before the fixture deadline.",
+        "No response at all before the deadline = an automatic loss for whoever went silent.",
+        "Agreed a time but they didn't show? Automatic forfeit.",
+      ]},
+      { heading: "On-pitch rules", items: [
+        "15-minute halves (30 min total), up to 6 subs, no extra time or penalties — decided at 90 minutes.",
+        "Bad connection during the match? That player takes the loss.",
+        "Both players can agree to play ahead of schedule.",
+        "Your screenshot is your proof — no screenshot, no result.",
+        "3 different players report you for foul play and you're eliminated from the league.",
+      ]},
+      { heading: "Fixtures & deadlines", items: [
+        "Each round is due 2 days after the previous one.",
+        "Miss the deadline unplayed and it's a loss for both sides — both concede 4 goals, no points either way.",
+      ]},
+      { heading: "Standings", items: [
+        "Sorted by points, then goal difference, then goals scored, then name.",
+        "Knockout rounds are ranked by how far you got, not points — same-round ties are broken by aggregate goal difference in your exit round.",
+        "Level on aggregate after two legs? It needs a manual edit to break it — there's no away-goals rule.",
+      ]},
+      { heading: "Cash leagues", items: [
+        "Entry fee is R10–R200, your choice, paid and approved before you're confirmed.",
+        "Payment rejected? Resubmit proof without losing your club.",
+        "The organizer takes a flat 5% off the top; the rest splits gold/silver/bronze (55/25/15) in table-based leagues, or champion/runner-up (75/20) in knockout-based ones.",
+        "The more you put in, the bigger your slice of your place's prize.",
+      ]},
+    ],
+  },
+  ladder: {
+    icon: Swords,
+    title: "Ladder Rules",
+    sections: [
+      { heading: "How it works", items: [
+        "One permanent ranking, shared by everyone — it never resets.",
+        "You can only challenge one of the 3 names directly above you.",
+        "7 days to accept, or it's an automatic walkover win for the challenger.",
+        "7 days after accepting to log a result, or you both drop a spot.",
+        "Reported a score and they're ignoring it? It auto-confirms after 2 days — stalling doesn't work.",
+        "Win the challenge and you take their spot.",
+        "A photo of the final scoreboard is required, same as everywhere else.",
+      ]},
+    ],
+  },
+  challenge: {
+    icon: Target,
+    title: "Challenge Rules",
+    sections: [
+      { heading: "Direct & random challenges", items: [
+        "Direct — challenge one specific player, any time.",
+        "Random — broadcast open to everyone; first to accept gets the match, everyone else misses out.",
+      ]},
+      { heading: "Reporting results", items: [
+        "A screenshot of the final scoreboard is required, always.",
+        "Whoever didn't report the score has to confirm it before it counts — you can't confirm your own.",
+        "Dispute it and the score clears completely — ask them to re-log it.",
+      ]},
+    ],
+  },
+};
+
+function RulesModal({ type, onClose, c }) {
+  const data = RULES_CONTENT[type];
+  if (!data) return null;
+  const Icon = data.icon;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icon size={18} style={{ color: c.accent }} />
+            <h2 className="text-xl font-extrabold uppercase tracking-tight">{data.title}</h2>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+        </div>
+        <div className="space-y-5">
+          {data.sections.map((s) => (
+            <div key={s.heading}>
+              <div className="font-mono text-[11px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>{s.heading}</div>
+              <ul className="space-y-1.5">
+                {s.items.map((it, i) => (
+                  <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
+                    <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
+                    <span>{it}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Small pill button that opens a RulesModal — dropped in wherever a player
+// might want a quick reminder of how something works without leaving the
+// screen: on a league page, next to the ladder, and in the challenges hub.
+function RulesButton({ label, onClick, c }) {
+  return (
+    <button onClick={onClick} className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}>
+      <Info size={11} /> {label}
+    </button>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [profile, setProfile] = useState(undefined);
@@ -3184,6 +3315,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
   const [resultsQuery, setResultsQuery] = useState("");
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
 
@@ -3241,8 +3373,10 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
     <div className="pt-6">
       <div className="flex items-center gap-3 mb-6">
         <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={16} /></button>
-        <h1 className="text-2xl font-extrabold uppercase tracking-tight">Challenges</h1>
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight flex-1">Challenges</h1>
+        <RulesButton label="Challenge Rules" onClick={() => setRulesOpen(true)} c={c} />
       </div>
+      {rulesOpen && <RulesModal type="challenge" onClose={() => setRulesOpen(false)} c={c} />}
 
       <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
         <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Random challenge</div>
@@ -4140,6 +4274,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 // rank_position (which never resets) plus, if the viewer has a spot on it
 // themselves, a quiet "you're #N" line that opens the challenge picker.
 function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
   return (
@@ -4148,12 +4283,16 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
         <div className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
           <TrendingUp size={12} /> The Ladder
         </div>
-        {myLadderRank && (
-          <button onClick={onOpenLadderChallenge} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
-            You're #{myLadderRank.rank_position} <ChevronRight size={12} />
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+          {myLadderRank && (
+            <button onClick={onOpenLadderChallenge} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+              You're #{myLadderRank.rank_position} <ChevronRight size={12} />
+            </button>
+          )}
+        </div>
       </div>
+      {rulesOpen && <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />}
       <div className="no-scrollbar flex items-stretch gap-4 overflow-x-auto -mx-4 px-4 pb-1">
         {top5.map((row, i) => (
           <div key={row.user_id} className="flex items-center gap-2 shrink-0"
@@ -5154,6 +5293,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
 function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const isCreator = session && league.created_by === session.user.id;
   const canManage = isCreator || isAdmin;
   // Results (auto-posted scorelines/photo-proof rows) live under the Table
@@ -5225,6 +5365,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       <div className="flex items-center justify-between mb-5">
         <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
         <div className="flex items-center gap-2">
+          <RulesButton label="League Rules" onClick={() => setRulesOpen(true)} c={c} />
           {canManage && (
             <LeagueMenu league={league} onShare={onShare} onDelete={onDelete} c={c} />
           )}
@@ -5233,6 +5374,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           )}
         </div>
       </div>
+
+      {rulesOpen && <RulesModal type="league" onClose={() => setRulesOpen(false)} c={c} />}
 
       <LeaguePhotoBanner league={league} canManage={canManage} onUpdatePhoto={onUpdatePhoto} c={c} />
 
