@@ -1251,14 +1251,14 @@ function RulesModal({ type, onClose, c }) {
                 const isActiveSection = speakingKey === rKey;
                 return (
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
-                    <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2">
                       <button
                         onClick={() => setPinnedKey(rKey)}
-                        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded px-1 -mx-1"
+                        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded px-1 -mx-1 min-w-0"
                         style={{ color: c.accent, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
                       >
-                        <RIcon size={11} />
-                        <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
+                        <RIcon size={11} className="shrink-0" />
+                        <span className="underline decoration-dotted underline-offset-2 truncate">{r.catTitle} — {r.heading}</span>
                       </button>
                       <button
                         onClick={() => speak(rKey, `${r.catTitle} — ${r.heading}`, r.items)}
@@ -1298,7 +1298,7 @@ function RulesModal({ type, onClose, c }) {
               const isActiveSection = speakingKey === sKey;
               return (
                 <div key={s.heading}>
-                  <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <div
                       className="font-mono text-[11px] uppercase tracking-[0.2em] rounded px-1 -mx-1"
                       style={{ color: c.textFaint, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
