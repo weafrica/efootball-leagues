@@ -2049,6 +2049,7 @@ export default function App() {
   const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
   const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
   const [ladderComments, setLadderComments] = useState(null); // comment wall shown on the full Ladder page
+  const [ladderResults, setLadderResults] = useState(null); // last 100 confirmed ladder-challenge results, for the full Ladder page
   const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
@@ -2427,6 +2428,20 @@ export default function App() {
     if (error) { console.error("Couldn't load the ladder comments:", error.message); setLadderComments([]); return; }
     setLadderComments(data || []);
   }, [session]);
+
+  // Last 100 confirmed ladder-challenge results, platform-wide — reads from
+  // the ladder_match_results view (see README) so it isn't limited by the
+  // per-user RLS on the raw challenges table.
+  const loadLadderResults = useCallback(async () => {
+    if (!session) return;
+    const { data, error } = await supabase.from("ladder_match_results")
+      .select("*")
+      .order("result_confirmed_at", { ascending: false })
+      .limit(100);
+    if (error) { console.error("Couldn't load ladder results:", error.message); setLadderResults([]); return; }
+    setLadderResults(data || []);
+  }, [session]);
+
 
   const postLadderComment = async (body, parentComment = null, voiceClip = null) => {
     const trimmed = (body || "").trim();
@@ -3510,7 +3525,7 @@ export default function App() {
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
 
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); };
-  const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); };
+  const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
 
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -3572,6 +3587,7 @@ export default function App() {
                 onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")}
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
+                recentMatches={ladderResults}
                 c={c} />
             )}
           </>
@@ -5609,7 +5625,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, c }) {
+function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [query, setQuery] = useState("");
   const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
@@ -5618,7 +5634,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
 
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
-  const results = searching ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : [];
+  const searchResults = searching ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : [];
   const top10 = ladder.slice(0, 10);
   const rest = ladder.slice(10);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
@@ -5691,19 +5707,50 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           No one's on the ladder yet.
         </div>
       ) : searching ? (
-        results.length === 0 ? (
+        searchResults.length === 0 ? (
           <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
             No one matching "{query}".
           </div>
         ) : (
           <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
-            {results.map(row)}
+            {searchResults.map(row)}
           </div>
         )
       ) : (
         <>
-          <div className="space-y-1.5">
-            {top10.map(row)}
+          <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Top 10</div>
+          <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
+            {top10.map((r) => {
+              const isMe = session && r.user_id === session.user.id;
+              const canChallenge = targetIds.has(r.user_id);
+              const rankIdx = r.rank_position - 1;
+              return (
+                <div key={r.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+                  style={{
+                    background: rankIdx === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
+                    border: `1px solid ${isMe ? c.accent : rankIdx === 0 ? c.accent + "55" : c.border}`,
+                  }}>
+                  {rankIdx < 3 ? (
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
+                      {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
+                    </span>
+                  ) : (
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                      {r.rank_position}
+                    </span>
+                  )}
+                  <div className="flex flex-col leading-tight">
+                    <span className="font-body font-semibold text-sm truncate max-w-[110px]">{r.username}{isMe ? " (you)" : ""}</span>
+                    <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{r.wins}W–{r.losses}L</span>
+                  </div>
+                  {canChallenge && (
+                    <button onClick={onOpenChallenge} className="ml-1 font-body text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+                      Challenge
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {rest.length > 0 && (
             <div className="mt-4">
@@ -5717,6 +5764,39 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           )}
         </>
       )}
+
+      <div className="mt-8">
+        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>
+          Recent matches <span style={{ color: c.textFaint }}>({(recentMatches || []).length})</span>
+        </div>
+        {recentMatches === null ? (
+          <Loader c={c} />
+        ) : (recentMatches || []).length === 0 ? (
+          <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+            No ladder matches played yet.
+          </div>
+        ) : (
+          <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+            {recentMatches.map((m) => {
+              const challengerWins = m.challenger_score > m.opponent_score;
+              const opponentWins = m.opponent_score > m.challenger_score;
+              return (
+                <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-body text-sm truncate flex items-center gap-1.5">
+                      <span style={{ fontWeight: challengerWins ? 700 : 500, color: challengerWins ? c.text : c.textFaint }}>{m.challenger_username}</span>
+                      <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>vs</span>
+                      <span style={{ fontWeight: opponentWins ? 700 : 500, color: opponentWins ? c.text : c.textFaint }}>{m.opponent_username}</span>
+                    </div>
+                    <div className="font-mono text-[10px] truncate" style={{ color: c.textFaint }}>{timeAgo(m.result_confirmed_at)}</div>
+                  </div>
+                  <div className="font-mono text-sm font-semibold shrink-0">{m.challenger_score} – {m.opponent_score}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <ChallengeBoard session={session} comments={comments} isAdmin={isAdmin} myUsername={myUsername}
         onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleCommentReaction}
