@@ -5,7 +5,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2, Pause, Play, Square,
+  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -1217,6 +1217,23 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 }
 const isMobileDeviceGlobal = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
+// Only one audio source — a "read aloud" utterance or a voice-note clip —
+// should ever be playing at once across the whole app. Whoever wants to
+// start playing calls take() with its own stop function; if something else
+// was already playing, this stops it first. release() only clears the slot
+// if it's still the caller's own stop function (so a stale release from an
+// already-superseded player can't clobber whatever's playing now).
+const audioArbiter = {
+  current: null,
+  take(stop) {
+    if (this.current && this.current !== stop) this.current();
+    this.current = stop;
+  },
+  release(stop) {
+    if (this.current === stop) this.current = null;
+  },
+};
+
 const commentSpeech = {
   speakingId: null,
   utterance: null,
@@ -1229,15 +1246,20 @@ const commentSpeech = {
     this.clearWatchdog();
     this.speakingId = null;
     this.utterance = null;
+    audioArbiter.release(this.arbiterStop);
     this.notify();
   },
   // Tapping the speaker on whatever's already playing stops it; tapping a
-  // different comment cancels the first and starts the new one.
+  // different comment cancels the first and starts the new one. Also yields
+  // the shared audioArbiter slot, so starting a voice-note playback elsewhere
+  // stops this the same way a second read-aloud tap would.
   speak(id, text) {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     this.clearWatchdog();
-    if (this.speakingId === id) { this.speakingId = null; this.utterance = null; this.notify(); return; }
+    if (this.speakingId === id) { this.speakingId = null; this.utterance = null; audioArbiter.release(this.arbiterStop); this.notify(); return; }
+    if (!this.arbiterStop) this.arbiterStop = () => this.stop();
+    audioArbiter.take(this.arbiterStop);
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickBestVoice(commentVoicesCache);
     if (voice) utter.voice = voice;
@@ -1267,6 +1289,163 @@ function useCommentSpeakingId() {
   const [id, setId] = useState(commentSpeech.speakingId);
   useEffect(() => commentSpeech.subscribe(setId), []);
   return id;
+}
+
+const fmtDuration = (s) => {
+  const total = Math.max(0, Math.round(s || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+
+// Records a short voice note from the mic. Every composer (top-level and
+// replies, on both the league comments and the challenge board) gets its
+// own instance of this, same as they each get their own text/photo state —
+// nothing here is shared across composers, unlike commentSpeech/audioArbiter
+// above which coordinate *playback* across the whole app.
+function useVoiceRecorder() {
+  const [state, setState] = useState("idle"); // idle | recording | recorded | denied
+  const [seconds, setSeconds] = useState(0);
+  const [clip, setClip] = useState(null); // { blob, duration }
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const streamRef = useRef(null);
+  const secondsRef = useRef(0);
+
+  const cleanupStream = () => {
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+  };
+
+  const start = async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setState("denied");
+      return false;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = ["audio/webm", "audio/mp4", "audio/ogg"].find((t) => MediaRecorder.isTypeSupported?.(t));
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setClip({ blob, duration: secondsRef.current });
+        setState("recorded");
+        cleanupStream();
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setSeconds(0);
+      secondsRef.current = 0;
+      setState("recording");
+      timerRef.current = setInterval(() => { secondsRef.current += 1; setSeconds(secondsRef.current); }, 1000);
+      return true;
+    } catch {
+      setState("denied");
+      return false;
+    }
+  };
+
+  const stop = () => {
+    clearInterval(timerRef.current);
+    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
+  };
+
+  const discard = () => {
+    clearInterval(timerRef.current);
+    cleanupStream();
+    setClip(null);
+    setSeconds(0);
+    setState("idle");
+  };
+
+  // Puts a previously-recorded clip back into the "recorded" preview state —
+  // used to undo an optimistic discard() when the post it was attached to
+  // fails to send, mirroring how failed text/photo get restored to the box.
+  const restore = (savedClip) => {
+    if (!savedClip) return;
+    setClip(savedClip);
+    setSeconds(savedClip.duration || 0);
+    setState("recorded");
+  };
+
+  useEffect(() => () => { clearInterval(timerRef.current); cleanupStream(); }, []);
+
+  return { state, seconds, clip, start, stop, discard, restore };
+}
+
+// Mic button for a comment composer: idle → tap to start recording → tap
+// again to stop. While recording it swaps to a small pulsing timer, mirroring
+// how the Camera attach button sits next to the textarea everywhere else.
+function VoiceRecorderButton({ recorder, c, size = 40, iconSize = 15 }) {
+  const handleClick = () => {
+    if (recorder.state === "recording") recorder.stop();
+    else if (recorder.state === "idle" || recorder.state === "denied") recorder.start();
+  };
+  if (recorder.state === "recording") {
+    return (
+      <button onClick={handleClick} title="Stop recording" type="button"
+        className="shrink-0 flex items-center justify-center gap-1.5 rounded-full px-3 font-mono text-[10px] transition-colors"
+        style={{ height: size, background: c.red, color: "#fff" }}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#fff", animation: "voiceRecPulse 1s ease-in-out infinite" }} />
+        {fmtDuration(recorder.seconds)}
+      </button>
+    );
+  }
+  return (
+    <button onClick={handleClick} title="Record a voice note" type="button"
+      className="shrink-0 flex items-center justify-center rounded-full transition-colors"
+      style={{ width: size, height: size, background: c.surfaceHover, color: c.textFaint }}>
+      <Mic size={iconSize} />
+    </button>
+  );
+}
+
+// Compact play/pause + progress pill used both for a just-recorded preview
+// clip (object URL, still local) and for a posted comment's voice note
+// (public storage URL). Registers with audioArbiter so playing one stops
+// any read-aloud comment, or another voice note, that was already going.
+function VoiceNotePlayer({ url, duration, c, compact = false }) {
+  const audioRef = useRef(null);
+  const stopRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [dur, setDur] = useState(duration || 0);
+
+  useEffect(() => {
+    return () => { audioRef.current?.pause(); audioArbiter.release(stopRef.current); };
+  }, []);
+
+  const pause = () => { audioRef.current?.pause(); setPlaying(false); };
+
+  const toggle = () => {
+    if (!audioRef.current) {
+      const audio = new Audio(url);
+      audio.onended = () => { setPlaying(false); setProgress(0); audioArbiter.release(stopRef.current); };
+      audio.onloadedmetadata = () => { if (isFinite(audio.duration) && audio.duration > 0) setDur(audio.duration); };
+      audio.ontimeupdate = () => { if (audio.duration) setProgress(audio.currentTime / audio.duration); };
+      audioRef.current = audio;
+      stopRef.current = () => pause();
+    }
+    if (playing) { pause(); audioArbiter.release(stopRef.current); }
+    else { audioArbiter.take(stopRef.current); audioRef.current.play(); setPlaying(true); }
+  };
+
+  return (
+    <button onClick={toggle} type="button"
+      className="flex items-center gap-2 rounded-full transition-colors"
+      style={{ padding: compact ? "5px 10px" : "7px 12px", background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+      <span className="rounded-full flex items-center justify-center shrink-0" style={{ width: compact ? 20 : 24, height: compact ? 20 : 24, background: c.accent, color: c.accentText }}>
+        {playing ? <Pause size={compact ? 9 : 11} /> : <Play size={compact ? 9 : 11} style={{ marginLeft: 1 }} />}
+      </span>
+      <div className="rounded-full overflow-hidden" style={{ width: compact ? 64 : 90, height: 3, background: c.border }}>
+        <div className="h-full" style={{ width: `${Math.min(1, progress) * 100}%`, background: c.accent }} />
+      </div>
+      <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
+        {fmtDuration(playing ? progress * dur : dur)}
+      </span>
+    </button>
+  );
 }
 
 function RulesModal({ type, onClose, c }) {
@@ -2140,13 +2319,25 @@ export default function App() {
     setBoardComments(data || []);
   }, [session]);
 
-  const postBoardComment = async (body, parentComment = null) => {
+  const postBoardComment = async (body, parentComment = null, voiceClip = null) => {
     const trimmed = (body || "").trim();
-    if (!trimmed) return false;
+    if (!trimmed && !voiceClip) return false;
     const username = profile?.efootball_username || session.user.email;
+    let voice_url = null;
+    let voice_duration = null;
+    if (voiceClip) {
+      const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
+      voice_url = pub.publicUrl;
+      voice_duration = voiceClip.duration || null;
+    }
     const { error } = await supabase.from("challenge_board_comments").insert({
       user_id: session.user.id, username, body: trimmed,
-      parent_comment_id: parentComment?.id || null,
+      parent_comment_id: parentComment?.id || null, voice_url, voice_duration,
     });
     if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await loadBoardComments();
@@ -3068,9 +3259,11 @@ export default function App() {
   // photoUrl lets a caller pass an already-resolved URL instead (used when
   // rejecting a result: it reuses the submission's existing photo rather than
   // re-uploading it).
-  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false) => {
+  // voiceClip is { blob, duration } from useVoiceRecorder — optional, same
+  // as the photo, and stands alone fine (a voice-only comment with no text).
+  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null) => {
     const trimmed = (body || "").trim();
-    if (!trimmed) return;
+    if (!trimmed && !file && !photoUrl && !voiceClip) return;
     const username = profile?.efootball_username || session.user.email;
     let photo_url = photoUrl || null;
     if (!photo_url && file) {
@@ -3081,9 +3274,22 @@ export default function App() {
       const { data: pub } = supabase.storage.from("comment-photos").getPublicUrl(path);
       photo_url = pub.publicUrl;
     }
+    let voice_url = null;
+    let voice_duration = null;
+    if (voiceClip) {
+      const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
+      voice_url = pub.publicUrl;
+      voice_duration = voiceClip.duration || null;
+    }
     const { error } = await supabase.from("comments").insert({
       league_id: league.id, user_id: session.user.id, username, body: trimmed,
       parent_comment_id: parentComment?.id || null, photo_url, is_result: isResult,
+      voice_url, voice_duration,
     });
     if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await loadLeagues();
@@ -4245,6 +4451,7 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
   const [posting, setPosting] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
   const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
+  const voiceRecorder = useVoiceRecorder();
   const textareaRef = useRef(null);
   const source = comments || [];
 
@@ -4286,30 +4493,35 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
   const visibleRoots = roots.slice(0, visibleCount);
   const hiddenCount = roots.length - visibleRoots.length;
 
-  const submit = async (parentComment = null, body = text) => {
+  const submit = async (parentComment = null, body = text, voiceClip = null) => {
     const trimmed = body.trim();
-    if (!trimmed || posting) return false;
+    if ((!trimmed && !voiceClip) || posting) return false;
     setPosting(true);
     const tempId = `temp-${Date.now()}`;
     const optimistic = {
       id: tempId, user_id: session.user.id, username: myUsername,
       body: trimmed, created_at: new Date().toISOString(),
       parent_comment_id: parentComment?.id || null,
+      voice_url: voiceClip ? URL.createObjectURL(voiceClip.blob) : null, voice_duration: voiceClip?.duration || null,
       challenge_board_comment_likes: [], pending: true,
     };
     setPending((prev) => [...prev, optimistic]);
     if (!parentComment) {
       setText("");
+      voiceRecorder.discard();
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     }
-    const ok = await onPost(trimmed, parentComment);
+    const ok = await onPost(trimmed, parentComment, voiceClip);
     setPosting(false);
-    if (!ok) { setPending((prev) => prev.filter((p) => p.id !== tempId)); if (!parentComment) setText(trimmed); }
+    if (!ok) {
+      setPending((prev) => prev.filter((p) => p.id !== tempId));
+      if (!parentComment) { setText(trimmed); voiceRecorder.restore(voiceClip); }
+    }
     return ok;
   };
 
   const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(null, text, voiceRecorder.state === "recorded" ? voiceRecorder.clip : null); }
   };
 
   return (
@@ -4359,6 +4571,20 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
             </button>
           )}
 
+          {voiceRecorder.state === "recorded" && voiceRecorder.clip && (
+            <div className="flex items-center gap-2 mb-2 ml-10">
+              <VoiceNotePlayer url={URL.createObjectURL(voiceRecorder.clip.blob)} duration={voiceRecorder.clip.duration} c={c} compact />
+              <button onClick={voiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
+                style={{ background: c.surface, color: c.textFaint }}>
+                Remove
+              </button>
+            </div>
+          )}
+          {voiceRecorder.state === "denied" && (
+            <div className="font-mono text-[10px] mb-2 ml-10" style={{ color: c.red }}>
+              Couldn't access your microphone — check your browser's permissions.
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
               style={{ background: avatarColor(myUsername || "?"), color: "#fff" }}>
@@ -4370,9 +4596,11 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
               placeholder="Say something…" rows={1} maxLength={1000}
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={() => submit()} disabled={!text.trim() || posting}
+            {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
+            <button onClick={() => submit(null, text, voiceRecorder.state === "recorded" ? voiceRecorder.clip : null)}
+              disabled={(!text.trim() && voiceRecorder.state !== "recorded") || posting}
               className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              style={(text.trim() || voiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={15} />
             </button>
           </div>
@@ -4401,6 +4629,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
   const [repliesShown, setRepliesShown] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [replying, setReplying] = useState(false);
+  const replyVoiceRecorder = useVoiceRecorder();
   const pickerRef = useRef(null);
   const replyRef = useRef(null);
 
@@ -4462,13 +4691,15 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
 
   const submitReply = async () => {
     const trimmed = replyText.trim();
-    if (!trimmed || replying) return;
+    const voiceClip = replyVoiceRecorder.state === "recorded" ? replyVoiceRecorder.clip : null;
+    if ((!trimmed && !voiceClip) || replying) return;
     setReplying(true);
     setReplyText("");
+    replyVoiceRecorder.discard();
     setReplyOpen(false);
-    const ok = await onPost(cm, trimmed);
+    const ok = await onPost(cm, trimmed, voiceClip);
     setReplying(false);
-    if (!ok) setReplyText(trimmed);
+    if (!ok) { setReplyText(trimmed); replyVoiceRecorder.restore(voiceClip); }
   };
 
   const onReplyKeyDown = (e) => {
@@ -4490,7 +4721,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
               <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
                 {cm.pending ? "sending…" : timeAgo(cm.created_at)}
               </span>
-              {!cm.pending && (
+              {!cm.pending && cm.body && (
                 <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
                   className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
                   <Volume2 size={11} />
@@ -4504,7 +4735,8 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
               )}
             </div>
           </div>
-          <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
+          {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
+          {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}
           {!cm.pending && (
             <div className="flex items-center gap-3 mt-1.5">
               <div className="relative" ref={pickerRef}>
@@ -4571,6 +4803,20 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
               <X size={11} />
             </button>
           </div>
+          {replyVoiceRecorder.state === "recorded" && replyVoiceRecorder.clip && (
+            <div className="flex items-center gap-2 mb-1.5">
+              <VoiceNotePlayer url={URL.createObjectURL(replyVoiceRecorder.clip.blob)} duration={replyVoiceRecorder.clip.duration} c={c} compact />
+              <button onClick={replyVoiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
+                style={{ background: c.surface, color: c.textFaint }}>
+                Remove
+              </button>
+            </div>
+          )}
+          {replyVoiceRecorder.state === "denied" && (
+            <div className="font-mono text-[10px] mb-1.5" style={{ color: c.red }}>
+              Couldn't access your microphone — check your browser's permissions.
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <textarea ref={replyRef} value={replyText}
               onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
@@ -4578,9 +4824,10 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
               placeholder={`Reply to ${cm.username}…`} rows={1} maxLength={1000} autoFocus
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={submitReply} disabled={!replyText.trim() || replying}
+            {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
+            <button onClick={submitReply} disabled={(!replyText.trim() && replyVoiceRecorder.state !== "recorded") || replying}
               className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={replyText.trim() && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              style={(replyText.trim() || replyVoiceRecorder.state === "recorded") && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={13} />
             </button>
           </div>
@@ -6475,6 +6722,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
   const [visibleCount, setVisibleCount] = useState(COMMENT_PAGE_SIZE);
   const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
   const [photo, setPhoto] = useState(null); // optional photo attached to the comment being composed
+  const voiceRecorder = useVoiceRecorder(); // optional voice note attached to the comment being composed
   const textareaRef = useRef(null);
   const photoInputRef = useRef(null);
   const sourceComments = comments || league.comments || [];
@@ -6525,7 +6773,8 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
 
   const submit = async () => {
     const trimmed = text.trim();
-    if (!trimmed || posting) return;
+    const voiceClip = voiceRecorder.state === "recorded" ? voiceRecorder.clip : null;
+    if ((!trimmed && !photo && !voiceClip) || posting) return;
     setPosting(true);
     const tempId = `temp-${Date.now()}`;
     const photoFile = photo;
@@ -6534,18 +6783,21 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
       username: myUsername || session.user.email,
       body: trimmed, created_at: new Date().toISOString(), parent_comment_id: null,
       photo_url: photoFile ? URL.createObjectURL(photoFile) : null,
+      voice_url: voiceClip ? URL.createObjectURL(voiceClip.blob) : null, voice_duration: voiceClip?.duration || null,
       comment_likes: [], pending: true,
     };
     setPending((prev) => [...prev, optimistic]);
     setText("");
     setPhoto(null);
+    voiceRecorder.discard();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-    const ok = await onPost(league, trimmed, null, photoFile);
+    const ok = await onPost(league, trimmed, null, photoFile, null, false, voiceClip);
     setPosting(false);
     if (!ok) {
       setPending((prev) => prev.filter((p) => p.id !== tempId));
       setText(trimmed);
       setPhoto(photoFile);
+      voiceRecorder.restore(voiceClip);
     }
   };
 
@@ -6620,6 +6872,20 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
               </button>
             </div>
           )}
+          {voiceRecorder.state === "recorded" && voiceRecorder.clip && (
+            <div className="flex items-center gap-2 mb-2 ml-10">
+              <VoiceNotePlayer url={URL.createObjectURL(voiceRecorder.clip.blob)} duration={voiceRecorder.clip.duration} c={c} compact />
+              <button onClick={voiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
+                style={{ background: c.surface, color: c.textFaint }}>
+                Remove
+              </button>
+            </div>
+          )}
+          {voiceRecorder.state === "denied" && (
+            <div className="font-mono text-[10px] mb-2 ml-10" style={{ color: c.red }}>
+              Couldn't access your microphone — check your browser's permissions.
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
               style={{ background: avatarColor(myUsername || session?.user?.email || "?"), color: "#fff" }}>
@@ -6638,10 +6904,11 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
               style={photo ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Camera size={15} />
             </button>
+            {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
             <div className="flex flex-col items-end gap-1 shrink-0">
-              <button onClick={submit} disabled={!text.trim() || posting}
+              <button onClick={submit} disabled={(!text.trim() && !photo && voiceRecorder.state !== "recorded") || posting}
                 className="w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
-                style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+                style={(text.trim() || photo || voiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
                 <Send size={15} />
               </button>
               {text.length > 800 && (
@@ -6669,6 +6936,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
   const [replyText, setReplyText] = useState("");
   const [posting, setPosting] = useState(false);
   const [replyPhoto, setReplyPhoto] = useState(null);
+  const replyVoiceRecorder = useVoiceRecorder();
   const replyRef = useRef(null);
   const replyPhotoInputRef = useRef(null);
   const children = comment.children || [];
@@ -6683,15 +6951,17 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
 
   const submitReply = async () => {
     const trimmed = replyText.trim();
-    if (!trimmed || posting) return;
+    const voiceClip = replyVoiceRecorder.state === "recorded" ? replyVoiceRecorder.clip : null;
+    if ((!trimmed && !replyPhoto && !voiceClip) || posting) return;
     setPosting(true);
     const photoFile = replyPhoto;
     setReplyText("");
     setReplyPhoto(null);
+    replyVoiceRecorder.discard();
     setReplyOpen(false);
-    const ok = await onPost(league, trimmed, comment, photoFile);
+    const ok = await onPost(league, trimmed, comment, photoFile, null, false, voiceClip);
     setPosting(false);
-    if (!ok) { setReplyText(trimmed); setReplyPhoto(photoFile); }
+    if (!ok) { setReplyText(trimmed); setReplyPhoto(photoFile); replyVoiceRecorder.restore(voiceClip); }
   };
 
   const onKeyDown = (e) => {
@@ -6745,6 +7015,20 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
               </button>
             </div>
           )}
+          {replyVoiceRecorder.state === "recorded" && replyVoiceRecorder.clip && (
+            <div className="flex items-center gap-2 mb-1.5">
+              <VoiceNotePlayer url={URL.createObjectURL(replyVoiceRecorder.clip.blob)} duration={replyVoiceRecorder.clip.duration} c={c} compact />
+              <button onClick={replyVoiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
+                style={{ background: c.surface, color: c.textFaint }}>
+                Remove
+              </button>
+            </div>
+          )}
+          {replyVoiceRecorder.state === "denied" && (
+            <div className="font-mono text-[10px] mb-1.5" style={{ color: c.red }}>
+              Couldn't access your microphone — check your browser's permissions.
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <textarea ref={replyRef} value={replyText}
               onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
@@ -6759,9 +7043,10 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
               style={replyPhoto ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Camera size={13} />
             </button>
-            <button onClick={submitReply} disabled={!replyText.trim() || posting}
+            {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
+            <button onClick={submitReply} disabled={(!replyText.trim() && !replyPhoto && replyVoiceRecorder.state !== "recorded") || posting}
               className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={replyText.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              style={(replyText.trim() || replyPhoto || replyVoiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={13} />
             </button>
           </div>
@@ -6861,7 +7146,7 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
             <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
               {cm.pending ? "sending…" : timeAgo(cm.created_at)}
             </span>
-            {!cm.pending && (
+            {!cm.pending && cm.body && (
               <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
                 className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
                 <Volume2 size={11} />
@@ -6875,12 +7160,13 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
             )}
           </div>
         </div>
-        <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
+        {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
         {cm.photo_url && (
           <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
             <img src={cm.photo_url} alt="" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
           </button>
         )}
+        {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}
         {!cm.pending && (
           <div className="flex items-center gap-3 mt-1.5">
             <div className="relative" ref={pickerRef}>
