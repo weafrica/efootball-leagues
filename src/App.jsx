@@ -1190,6 +1190,85 @@ function suggestForQuery(q) {
   return null;
 }
 
+// Comments render in many independent components scattered across the
+// challenge board and league pages, but the browser can only speak one
+// utterance at a time — so "which comment is currently being read aloud"
+// lives here, outside React, as a tiny subscribe/notify singleton. Every
+// comment row's speaker button reads from this same source via
+// useCommentSpeakingId(), so starting a new one automatically resets the
+// icon on whichever row was playing before.
+let commentVoicesCache = [];
+function refreshCommentVoices() {
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    commentVoicesCache = window.speechSynthesis.getVoices();
+  }
+}
+if (typeof window !== "undefined" && window.speechSynthesis) {
+  refreshCommentVoices();
+  // addEventListener (rather than the onvoiceschanged property) so this
+  // doesn't clobber — or get clobbered by — RulesModal's own voice loading.
+  window.speechSynthesis.addEventListener("voiceschanged", refreshCommentVoices);
+  let commentVoicePollAttempts = 0;
+  const commentVoicePoll = setInterval(() => {
+    commentVoicePollAttempts += 1;
+    refreshCommentVoices();
+    if (commentVoicesCache.length || commentVoicePollAttempts > 10) clearInterval(commentVoicePoll);
+  }, 300);
+}
+const isMobileDeviceGlobal = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+const commentSpeech = {
+  speakingId: null,
+  utterance: null,
+  watchdog: null,
+  listeners: new Set(),
+  notify() { this.listeners.forEach((fn) => fn(this.speakingId)); },
+  clearWatchdog() { if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; } },
+  stop() {
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    this.clearWatchdog();
+    this.speakingId = null;
+    this.utterance = null;
+    this.notify();
+  },
+  // Tapping the speaker on whatever's already playing stops it; tapping a
+  // different comment cancels the first and starts the new one.
+  speak(id, text) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    this.clearWatchdog();
+    if (this.speakingId === id) { this.speakingId = null; this.utterance = null; this.notify(); return; }
+    const utter = new SpeechSynthesisUtterance(text);
+    const voice = pickBestVoice(commentVoicesCache);
+    if (voice) utter.voice = voice;
+    utter.lang = voice?.lang || "en-US";
+    utter.onend = () => { this.speakingId = null; this.utterance = null; this.clearWatchdog(); this.notify(); };
+    utter.onerror = () => { this.speakingId = null; this.utterance = null; this.clearWatchdog(); this.notify(); };
+    this.utterance = utter;
+    this.speakingId = id;
+    this.notify();
+    window.speechSynthesis.speak(utter);
+    // Same desktop Chrome/Edge "goes silent after ~15s" bug worked around
+    // in RulesModal — harmless no-op on browsers that don't have it.
+    if (!isMobileDeviceGlobal) {
+      this.watchdog = setInterval(() => {
+        if (!window.speechSynthesis.speaking) { this.clearWatchdog(); return; }
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }, 5000);
+    }
+  },
+  subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+};
+
+// Returns the id of whichever comment is currently being read aloud (or
+// null), staying in sync across every comment row via commentSpeech above.
+function useCommentSpeakingId() {
+  const [id, setId] = useState(commentSpeech.speakingId);
+  useEffect(() => commentSpeech.subscribe(setId), []);
+  return id;
+}
+
 function RulesModal({ type, onClose, c }) {
   const data = RULES_CONTENT[type];
   const [query, setQuery] = useState("");
@@ -4312,6 +4391,8 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
   const realReactions = cm.challenge_board_comment_likes || [];
   const children = cm.children || [];
   const indent = Math.min(depth + 1, BOARD_MAX_INDENT_DEPTH) * 36;
+  const speakingId = useCommentSpeakingId();
+  const isSpeaking = speakingId === cm.id;
 
   const [pendingReaction, setPendingReaction] = useState(undefined);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -4402,13 +4483,19 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
           style={{ background: avatarColor(cm.username), color: "#fff", width: 28, height: 28, fontSize: 12 }}>
           {cm.username?.[0]?.toUpperCase() || "?"}
         </div>
-        <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: c.surface }}>
+        <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: isSpeaking ? c.surfaceHover : c.surface }}>
           <div className="flex items-center justify-between gap-2">
             <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
             <div className="flex items-center gap-2 shrink-0">
               <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
                 {cm.pending ? "sending…" : timeAgo(cm.created_at)}
               </span>
+              {!cm.pending && (
+                <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
+                  className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
+                  <Volume2 size={11} />
+                </button>
+              )}
               {!cm.pending && (isOwn || isAdmin) && (
                 <button onClick={() => onDelete(cm)} title="Delete"
                   className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
@@ -6696,6 +6783,8 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
   const isOwn = session && cm.user_id === session.user.id;
   const isManager = cm.user_id === league.created_by;
   const realReactions = cm.comment_likes || [];
+  const speakingId = useCommentSpeakingId();
+  const isSpeaking = speakingId === cm.id;
 
   const [pendingReaction, setPendingReaction] = useState(undefined); // undefined = no optimistic override
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -6757,7 +6846,7 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
         style={{ background: avatarColor(cm.username), color: "#fff", width: isReply ? 22 : 28, height: isReply ? 22 : 28, fontSize: isReply ? 10 : 12 }}>
         {cm.username?.[0]?.toUpperCase() || "?"}
       </div>
-      <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: c.surface }}>
+      <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: isSpeaking ? c.surfaceHover : c.surface }}>
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 min-w-0">
             <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
@@ -6772,6 +6861,12 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
             <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
               {cm.pending ? "sending…" : timeAgo(cm.created_at)}
             </span>
+            {!cm.pending && (
+              <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
+                className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
+                <Volume2 size={11} />
+              </button>
+            )}
             {!cm.pending && (isOwn || canComment) && (
               <button onClick={() => onDelete(cm, league)} title="Delete"
                 className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
