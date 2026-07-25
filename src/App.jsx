@@ -1193,19 +1193,47 @@ function RulesModal({ type, onClose, c }) {
 
   // The list of voices a browser exposes often isn't ready on first render
   // — it loads asynchronously — so we listen for the change event too and
-  // pick the best natural-sounding one once it's available.
+  // pick the best natural-sounding one once it's available. Some older
+  // desktop browsers (notably Chrome/Edge on Windows) never fire
+  // onvoiceschanged at all, so we also poll for a bit as a fallback.
   const [voices, setVoices] = useState([]);
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const loadVoices = () => setVoices(window.speechSynthesis.getVoices());
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
+    let attempts = 0;
+    const poll = setInterval(() => {
+      attempts += 1;
+      loadVoices();
+      if (window.speechSynthesis.getVoices().length || attempts > 10) clearInterval(poll);
+    }, 300);
+    // Desktop Chrome/Edge on Windows has a long-standing bug where the very
+    // first speak() call after a page load is silently swallowed. Sending a
+    // no-op cancel() early "wakes up" the engine so the first real read
+    // isn't the one that gets lost.
+    window.speechSynthesis.cancel();
+    return () => { window.speechSynthesis.onvoiceschanged = null; clearInterval(poll); };
   }, []);
+
+  // Desktop Chrome/Edge also has a documented bug where the utterance
+  // object can be garbage-collected mid-speech if nothing keeps a
+  // reference to it, which silently kills playback partway through (or
+  // right away) — this mostly shows up on desktop, not phones. Keeping it
+  // in a ref keeps it alive for the duration of the read.
+  const utteranceRef = useRef(null);
+  // Same family of bug: the speech engine can go silent after ~15s of
+  // continuous speaking. Nudging pause()/resume() periodically keeps it
+  // going; harmless no-op on browsers that don't have the bug.
+  const resumeWatchdogRef = useRef(null);
+  const clearResumeWatchdog = () => {
+    if (resumeWatchdogRef.current) { clearInterval(resumeWatchdogRef.current); resumeWatchdogRef.current = null; }
+  };
 
   const speak = (key, heading, items) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
+    clearResumeWatchdog();
     if (speakingKey === key) { setSpeakingKey(null); setSpeakingLine(null); return; }
 
     // Build the full text to read, remembering the character range each
@@ -1229,15 +1257,24 @@ function RulesModal({ type, onClose, c }) {
       const seg = segments.find((s) => e.charIndex >= s.start && e.charIndex < s.end);
       if (seg) setSpeakingLine(seg.lineIndex);
     };
-    utter.onend = () => { setSpeakingKey(null); setSpeakingLine(null); };
-    utter.onerror = () => { setSpeakingKey(null); setSpeakingLine(null); };
+    utter.onend = () => { setSpeakingKey(null); setSpeakingLine(null); clearResumeWatchdog(); utteranceRef.current = null; };
+    utter.onerror = () => { setSpeakingKey(null); setSpeakingLine(null); clearResumeWatchdog(); utteranceRef.current = null; };
+    utteranceRef.current = utter;
     setSpeakingKey(key);
     setSpeakingLine(-1);
     window.speechSynthesis.speak(utter);
+    resumeWatchdogRef.current = setInterval(() => {
+      if (!window.speechSynthesis.speaking) { clearResumeWatchdog(); return; }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 5000);
   };
   // Stop any in-progress reading if the player closes the modal mid-sentence.
   useEffect(() => {
-    return () => { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); };
+    return () => {
+      clearResumeWatchdog();
+      if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    };
   }, []);
 
   if (!data) return null;
