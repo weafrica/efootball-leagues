@@ -1222,9 +1222,12 @@ function RulesModal({ type, onClose, c }) {
   // right away) — this mostly shows up on desktop, not phones. Keeping it
   // in a ref keeps it alive for the duration of the read.
   const utteranceRef = useRef(null);
-  // Same family of bug: the speech engine can go silent after ~15s of
-  // continuous speaking. Nudging pause()/resume() periodically keeps it
-  // going; harmless no-op on browsers that don't have the bug.
+  // Same family of bug: on desktop, the speech engine can go silent after
+  // ~15s of continuous speaking, and nudging pause()/resume() keeps it
+  // going. Mobile browsers (iOS Safari, Android Chrome) don't have that
+  // bug, and calling pause()/resume() on them can actually kill the
+  // speech instead of resuming it — so this workaround is desktop-only.
+  const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   const resumeWatchdogRef = useRef(null);
   const clearResumeWatchdog = () => {
     if (resumeWatchdogRef.current) { clearInterval(resumeWatchdogRef.current); resumeWatchdogRef.current = null; }
@@ -1263,11 +1266,13 @@ function RulesModal({ type, onClose, c }) {
     setSpeakingKey(key);
     setSpeakingLine(-1);
     window.speechSynthesis.speak(utter);
-    resumeWatchdogRef.current = setInterval(() => {
-      if (!window.speechSynthesis.speaking) { clearResumeWatchdog(); return; }
-      window.speechSynthesis.pause();
-      window.speechSynthesis.resume();
-    }, 5000);
+    if (!isMobileDevice) {
+      resumeWatchdogRef.current = setInterval(() => {
+        if (!window.speechSynthesis.speaking) { clearResumeWatchdog(); return; }
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }, 5000);
+    }
   };
   // Stop any in-progress reading if the player closes the modal mid-sentence.
   useEffect(() => {
