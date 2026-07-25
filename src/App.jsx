@@ -730,29 +730,33 @@ function WhatsAppLink({ phone, text, label, iconOnly, c }) {
   );
 }
 
-// Same idea as WhatsAppLink but for placing a direct phone call via a tel:
-// link — opens the device's own dialer/phone app. Renders nothing without a
-// usable number, same guard pattern as WhatsAppLink so the two can sit
-// side-by-side.
-function CallLink({ phone, label, iconOnly, c }) {
-  const digits = (phone || "").replace(/\D/g, "");
-  if (!digits) return null;
-  const href = `tel:${digits}`;
+// A "call" entry point that goes through WhatsApp instead of the device's
+// own dialer. WhatsApp has no public deep link that starts a voice call
+// directly against a phone number (its Call Link feature only shares links
+// to calls a user already created inside the app) — so this opens the
+// WhatsApp chat with that number, prefilled with a message explaining why,
+// so the other person immediately knows to expect a call. From there the
+// person taps WhatsApp's own call icon. Renders nothing without a usable
+// number, same guard pattern as WhatsAppLink so the two can sit side-by-side.
+function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
+  const href = waLink(phone, text);
+  if (!href) return null;
   if (iconOnly) {
     return (
-      <a href={href} title="Call"
+      <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp"
         className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0"
-        style={{ background: c.surfaceHover, color: c.textDim }}>
+        style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
         <Phone size={13} />
       </a>
     );
   }
   return (
-    <a href={href} title="Call"
+    <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp"
       className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
-      style={{ background: c.surfaceHover, color: c.textDim }}>
+      style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
       <Phone size={11} /> {label || "Call"}
     </a>
+
   );
 }
 
@@ -3454,7 +3458,7 @@ export default function App() {
             onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
             onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
-            onBack={() => setView("home")} c={c} />
+            onBack={() => setView("home")} showToast={showToast} c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (
@@ -4242,7 +4246,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -4344,7 +4348,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
         <>
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your random challenges</div>
           <div className="flex flex-col gap-2 mb-6">
-            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} onRemove={onRemoveOpen}
+            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onRemove={onRemoveOpen}
               onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} onViewResultProof={onViewResultProof}
               onOpenChat={setChatModal} c={c} />)}
           </div>
@@ -4386,7 +4390,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
+          {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
             onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof}
             onOpenChat={setChatModal} c={c} />)}
         </div>
@@ -4434,7 +4438,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
 
       {chatModal && (
         <ChallengeChatModal challengeId={chatModal.challengeId} kind={chatModal.kind} myId={myId}
-          counterpartUsername={chatModal.counterpartUsername} onClose={() => setChatModal(null)} c={c} />
+          counterpartUsername={chatModal.counterpartUsername} onClose={() => setChatModal(null)} showToast={showToast} c={c} />
       )}
     </div>
   );
@@ -4900,7 +4904,7 @@ function OpenChallengeRow({ challenge: ch, onAccept, c }) {
 
 // A resolved (accepted/cancelled) broadcast, shown to whichever side is
 // looking at it — the creator or whoever grabbed it.
-function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
+function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
   const [resolving, setResolving] = useState(false);
   const iAmCreator = ch.creator_id === myId;
   const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
@@ -4939,16 +4943,14 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResu
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "open", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
-            <CallLink phone={counterpartPhone} iconOnly c={c} />
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "open", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
-            <CallLink phone={counterpartPhone} iconOnly c={c} />
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a random challenge match on Matchday — when are you free?`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
@@ -4982,7 +4984,7 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, onRemove, onOpenLogResu
   );
 }
 
-function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
+function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
   const [responding, setResponding] = useState(false);
   const [resolving, setResolving] = useState(false);
   const iAmChallenger = ch.challenger_id === myId;
@@ -5064,16 +5066,14 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "direct", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
-            <CallLink phone={counterpartPhone} iconOnly c={c} />
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "direct", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
-            <CallLink phone={counterpartPhone} iconOnly c={c} />
-            <WhatsAppLink phone={counterpartPhone} iconOnly text={`Hi, it's a challenge match on Matchday — when are you free?`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
@@ -5119,7 +5119,7 @@ function ChallengeRow({ challenge: ch, myId, onAccept, onDecline, onRemove, onOp
 // supabase/chat-migration.sql) plus Supabase Realtime, so new messages show
 // up live on both ends without a refresh. History loads once on open; the
 // realtime subscription only needs to carry what happens after that.
-function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onClose, c }) {
+function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onClose, showToast, c }) {
   const [messages, setMessages] = useState(null);
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -5133,7 +5133,14 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
         .eq("challenge_id", challengeId)
         .eq("challenge_kind", kind)
         .order("created_at", { ascending: true });
-      if (active) setMessages(error ? [] : (data || []));
+      if (!active) return;
+      if (error) {
+        console.error("Couldn't load chat:", error.message);
+        showToast?.(`Couldn't load chat: ${error.message}`);
+        setMessages([]);
+        return;
+      }
+      setMessages(data || []);
     })();
 
     // Live updates: postgres_changes filters can only match one column, so
@@ -5146,7 +5153,12 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
           if (payload.new.challenge_kind !== kind) return;
           setMessages((prev) => ((prev || []).some((m) => m.id === payload.new.id) ? prev : [...(prev || []), payload.new]));
         })
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("Chat realtime subscription failed:", status, err?.message);
+          showToast?.("Live chat updates aren't connecting — try reopening the chat.");
+        }
+      });
 
     return () => { active = false; supabase.removeChannel(channel); };
   }, [challengeId, kind]);
@@ -5164,7 +5176,11 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
       challenge_id: challengeId, challenge_kind: kind, sender_id: myId, body: text,
     });
     setSending(false);
-    if (error) setBody(text); // send failed — put the draft back rather than lose it
+    if (error) {
+      console.error("Couldn't send message:", error.message);
+      showToast?.(`Couldn't send: ${error.message}`);
+      setBody(text); // send failed — put the draft back rather than lose it
+    }
   };
 
   return (
