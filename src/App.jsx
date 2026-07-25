@@ -252,6 +252,25 @@ function resultConfirmHoursLeft(submission) {
   return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
 }
 
+// If the same fixture has already had this many submissions disputed by the
+// opponent, the next one skips the 24h window entirely and goes straight to
+// the admin queue — two honest mistakes is a reasonable benefit of the
+// doubt, a third attempt at the same fixture is a real disagreement that
+// needs a referee, not another round of opponent back-and-forth.
+const DISPUTE_ESCALATION_THRESHOLD = 2;
+function priorRejectedCount(league, submission) {
+  return (league.result_submissions || []).filter(
+    (s) => s.fixture_id === submission.fixture_id && s.status === "rejected"
+  ).length;
+}
+// null = not escalated yet (opponent's turn); "timeout" = the 24h window
+// passed; "dispute-cap" = this fixture's been disputed too many times already.
+function resultEscalationReason(league, submission) {
+  if (priorRejectedCount(league, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
+  if (resultConfirmExpired(submission)) return "timeout";
+  return null;
+}
+
 // Expired, unplayed fixtures count as a loss for both sides once past their deadline.
 function computeStandings(teams, fixtures) {
   const table = {};
@@ -3995,7 +4014,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // rest stay newest-first.
   const attentionScore = (l) => {
     const pendingCount = l.league_type === "cash" ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0;
-    const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultConfirmExpired(s)).length;
+    const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultEscalationReason(l, s)).length;
     const myStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
     let score = 0;
     if (canManageLeague(l) && (pendingCount > 0 || pendingResultsCount > 0)) score += 2;
@@ -4179,7 +4198,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
   const approvedMembers = isCash ? (l.members || []).filter((m) => m.payment_status === "approved") : [];
   const pool = approvedMembers.reduce((sum, m) => sum + (m.entry_fee || 0), 0);
   const pendingCount = isCash ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0;
-  const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultConfirmExpired(s)).length;
+  const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultEscalationReason(l, s)).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
   const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
   const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
@@ -4863,7 +4882,7 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
 // server-side); rejecting just leaves the fixture open for a resubmission.
 function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
   title = `${submissions.length} result${submissions.length === 1 ? "" : "s"} awaiting your review`,
-  approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false }) {
+  approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false, showEscalationReason = false }) {
   return (
     <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
@@ -4883,12 +4902,20 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                 <div className="flex-1 min-w-0">
                   <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
                   <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` · Matchday ${fixture.round}` : ""} · {timeAgo(s.created_at)}</div>
-                  {showDeadline && (
-                    <div className="font-mono text-[11px] mt-0.5" style={{ color: resultConfirmHoursLeft(s) <= 3 ? c.red : "#B8860B" }}>
-                      {resultConfirmHoursLeft(s) > 0
-                        ? `${resultConfirmHoursLeft(s)}h left to respond — after that it goes to the admin`
-                        : "Confirmation window passed — this has been sent to the admin"}
-                    </div>
+                  {showDeadline && (() => {
+                    const reason = resultEscalationReason(league, s);
+                    return (
+                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmHoursLeft(s) <= 3 ? c.red : "#B8860B") }}>
+                        {reason === "dispute-cap"
+                          ? "This fixture's been disputed too many times already — sent straight to the admin"
+                          : reason === "timeout"
+                          ? "Confirmation window passed — this has been sent to the admin"
+                          : `${resultConfirmHoursLeft(s)}h left to respond — after that it goes to the admin`}
+                      </div>
+                    );
+                  })()}
+                  {!showDeadline && showEscalationReason && resultEscalationReason(league, s) === "dispute-cap" && (
+                    <div className="font-mono text-[11px] mt-0.5" style={{ color: c.red }}>Escalated — this fixture's been disputed too many times already</div>
                   )}
                 </div>
               </div>
@@ -5079,11 +5106,14 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
     ? pendingResults.filter((s) => s.submitted_by !== session.user.id && findSubmissionOpponentId(league, s) === session.user.id)
     : [];
   // The opponent has 24 hours to confirm or dispute a submission themselves
-  // (see resultConfirmDeadline). Only once that window has passed without a
-  // response does it escalate into the admin's override queue — before that,
-  // it's still the opponent's to act on, so admins see it as a heads-up only.
-  const escalatedResults = pendingResults.filter((s) => resultConfirmExpired(s));
-  const awaitingOpponentResults = pendingResults.filter((s) => !resultConfirmExpired(s));
+  // (see resultConfirmDeadline) — unless this fixture has already burned
+  // through its dispute allowance (see resultEscalationReason), in which case
+  // it skips straight to the admin queue. Only once one of those two
+  // conditions is true does a submission escalate into the admin's override
+  // queue — before that, it's still the opponent's to act on, so admins see
+  // it as a heads-up only.
+  const escalatedResults = pendingResults.filter((s) => resultEscalationReason(league, s));
+  const awaitingOpponentResults = pendingResults.filter((s) => !resultEscalationReason(league, s));
   const isKnockout = league.format === "knockout";
   const isSurvivor = league.format === "survivor";
   const isGroupsKnockout = league.format === "groups_knockout";
@@ -5267,7 +5297,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {canManage && escalatedResults.length > 0 && (
         <PendingResultsPanel league={league} submissions={escalatedResults}
-          title={`${escalatedResults.length} result${escalatedResults.length === 1 ? "" : "s"} needing review — opponent didn't respond within 24h`}
+          title={`${escalatedResults.length} result${escalatedResults.length === 1 ? "" : "s"} needing review — opponent didn't confirm in time or disputed it repeatedly`}
+          showEscalationReason
           onDownloadProof={onDownloadResultProof} onApprove={onApproveResult} onReject={onRejectResult} c={c} />
       )}
 
