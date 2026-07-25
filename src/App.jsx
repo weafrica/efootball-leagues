@@ -2048,6 +2048,7 @@ export default function App() {
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
   const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
   const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
+  const [ladderComments, setLadderComments] = useState(null); // comment wall shown on the full Ladder page
   const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
@@ -2411,6 +2412,81 @@ export default function App() {
       if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
     }
     await loadBoardComments();
+    return true;
+  };
+
+  // The Ladder's own comment wall — same shape and behavior as the challenge
+  // board comments above, just backed by a separate `ladder_comments` table
+  // so the two threads don't mix.
+  const loadLadderComments = useCallback(async () => {
+    if (!session) return;
+    const { data, error } = await supabase.from("ladder_comments")
+      .select("*, ladder_comment_likes(*)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) { console.error("Couldn't load the ladder comments:", error.message); setLadderComments([]); return; }
+    setLadderComments(data || []);
+  }, [session]);
+
+  const postLadderComment = async (body, parentComment = null, voiceClip = null) => {
+    const trimmed = (body || "").trim();
+    if (!trimmed && !voiceClip) return false;
+    const username = profile?.efootball_username || session.user.email;
+    let voice_url = null;
+    let voice_duration = null;
+    if (voiceClip) {
+      const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
+      voice_url = pub.publicUrl;
+      voice_duration = voiceClip.duration || null;
+    }
+    const { error } = await supabase.from("ladder_comments").insert({
+      user_id: session.user.id, username, body: trimmed,
+      parent_comment_id: parentComment?.id || null, voice_url, voice_duration,
+    });
+    if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
+    await loadLadderComments();
+    return true;
+  };
+
+  const deleteLadderComment = (comment) => {
+    const all = ladderComments || [];
+    const countDescendants = (id) => {
+      const direct = all.filter((cm) => cm.parent_comment_id === id);
+      return direct.reduce((sum, d) => sum + 1 + countDescendants(d.id), 0);
+    };
+    const replyCount = countDescendants(comment.id);
+    const message = comment.parent_comment_id
+      ? "Delete this reply? This can't be undone."
+      : replyCount > 0
+        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
+        : "Delete this comment? This can't be undone.";
+    requestConfirm([message], async () => {
+      const { error } = await supabase.from("ladder_comments").delete().eq("id", comment.id);
+      if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
+      await loadLadderComments();
+      showToast(comment.parent_comment_id ? "Reply deleted." : "Comment deleted.");
+    });
+  };
+
+  const toggleLadderCommentReaction = async (comment, reaction) => {
+    const mine = (comment.ladder_comment_likes || []).find((l) => l.user_id === session.user.id);
+    if (reaction === null) {
+      if (!mine) return true;
+      const { error } = await supabase.from("ladder_comment_likes").delete().eq("id", mine.id);
+      if (error) { showToast(`Couldn't remove reaction: ${error.message}`); return false; }
+    } else if (mine) {
+      const { error } = await supabase.from("ladder_comment_likes").update({ reaction }).eq("id", mine.id);
+      if (error) { showToast(`Couldn't update reaction: ${error.message}`); return false; }
+    } else {
+      const { error } = await supabase.from("ladder_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction });
+      if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
+    }
+    await loadLadderComments();
     return true;
   };
 
@@ -3434,7 +3510,7 @@ export default function App() {
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
 
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); };
-  const openLadderScreen = () => { setView("ladder"); loadLadder(); };
+  const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); };
 
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -3493,7 +3569,10 @@ export default function App() {
             )}
             {view === "ladder" && (
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
-                onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")} c={c} />
+                onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")}
+                comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
+                onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
+                c={c} />
             )}
           </>
         )}
@@ -4489,7 +4568,7 @@ const BOARD_MAX_INDENT_DEPTH = 4;
 // a reply can be replied to, and so on, with no cap on how many levels deep
 // a conversation under one root comment can go. Indentation stops growing
 // past a few levels purely for legibility on a phone; that's cosmetic only.
-function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c }) {
+function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c, heading = "Challenge board", emptyText = "No comments yet — say something to get things going." }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
@@ -4585,7 +4664,7 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
       `}</style>
 
       <div className="flex items-center gap-2 mb-3 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-        <MessageCircle size={13} /> Challenge board {totalCount > 0 && `(${totalCount})`}
+        <MessageCircle size={13} /> {heading} {totalCount > 0 && `(${totalCount})`}
       </div>
 
       {comments === null ? (
@@ -4595,7 +4674,7 @@ function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDele
           {roots.length === 0 ? (
             <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
               <MessageCircle size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
-              <div className="font-body text-sm">No comments yet — say something to get things going.</div>
+              <div className="font-body text-sm">{emptyText}</div>
             </div>
           ) : (
             <div className="space-y-2.5 mb-3">
@@ -5530,7 +5609,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, c }) {
+function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [query, setQuery] = useState("");
   const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
@@ -5611,6 +5690,10 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           })}
         </div>
       )}
+
+      <ChallengeBoard session={session} comments={comments} isAdmin={isAdmin} myUsername={myUsername}
+        onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleCommentReaction}
+        heading="Ladder talk" emptyText="No comments yet — call someone out." c={c} />
     </div>
   );
 }
