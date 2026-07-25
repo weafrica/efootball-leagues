@@ -1075,7 +1075,10 @@ const RULES_CONTENT = {
 
 // Highlights the matched substring of `text` for the given (lowercased)
 // query. Pure display helper — doesn't touch the underlying rule text.
-function highlightMatch(text, query, c) {
+// When onClick is provided, the highlighted word itself becomes clickable
+// (used in search results so tapping the word jumps to its heading, same
+// as tapping the heading directly).
+function highlightMatch(text, query, c, onClick) {
   if (!query) return text;
   const lower = text.toLowerCase();
   const idx = lower.indexOf(query);
@@ -1083,9 +1086,19 @@ function highlightMatch(text, query, c) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark style={{ background: c.accent, color: c.bg, borderRadius: 2, padding: "0 1px" }}>
-        {text.slice(idx, idx + query.length)}
-      </mark>
+      {onClick ? (
+        <mark
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
+          className="cursor-pointer"
+          style={{ background: c.accent, color: c.bg, borderRadius: 2, padding: "0 1px" }}
+        >
+          {text.slice(idx, idx + query.length)}
+        </mark>
+      ) : (
+        <mark style={{ background: c.accent, color: c.bg, borderRadius: 2, padding: "0 1px" }}>
+          {text.slice(idx, idx + query.length)}
+        </mark>
+      )}
       {text.slice(idx + query.length)}
     </>
   );
@@ -1129,6 +1142,17 @@ function RulesModal({ type, onClose, c }) {
   // that section gets pinned to the top of the list, still with its search
   // term highlighted, so they don't lose their place scrolling to re-find it.
   const [pinnedKey, setPinnedKey] = useState(null);
+  // The scrollable results list — pinning a section moves it visually to
+  // the top of the data, but the player may still be scrolled further down,
+  // so we also scroll the list itself back to the top when that happens.
+  const listRef = useRef(null);
+  const scrollListToTop = () => {
+    if (listRef.current) listRef.current.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const pinSection = (key) => {
+    setPinnedKey(key);
+    scrollListToTop();
+  };
 
   // Search runs across every rules category (league/ladder/challenge), not
   // just the one this modal was opened from — a player typing "forfeit"
@@ -1247,7 +1271,7 @@ function RulesModal({ type, onClose, c }) {
           )}
         </div>
 
-        <div className="space-y-5 overflow-y-auto">
+        <div ref={listRef} className="space-y-5 overflow-y-auto">
           {q ? (
             searchResults.length ? (
               searchResults.map((r, ri) => {
@@ -1258,7 +1282,7 @@ function RulesModal({ type, onClose, c }) {
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
                     <div className="flex items-center gap-2 mb-2">
                       <button
-                        onClick={() => setPinnedKey(pinnedKey === rKey ? null : rKey)}
+                        onClick={() => pinSection(pinnedKey === rKey ? null : rKey)}
                         className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded px-1 -mx-1 min-w-0"
                         style={{ color: c.accent, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
                       >
@@ -1285,7 +1309,7 @@ function RulesModal({ type, onClose, c }) {
                           style={{ color: c.textDim, background: isActiveSection && speakingLine === i ? c.surface : "transparent" }}
                         >
                           <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: isActiveSection && speakingLine === i ? c.accent : c.textFaint }} />
-                          <span>{highlightMatch(it, q, c)}</span>
+                          <span>{highlightMatch(it, q, c, () => pinSection(rKey))}</span>
                         </li>
                       ))}
                     </ul>
