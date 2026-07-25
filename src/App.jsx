@@ -5,7 +5,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords,
+  TrendingUp, Swords, Volume2,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -1123,6 +1123,26 @@ function RulesModal({ type, onClose, c }) {
     return out;
   }, [q, pinnedKey]);
 
+  // Which section (if any) is currently being read aloud, keyed the same
+  // way as pinnedKey. Tapping the speaker icon on the section that's
+  // already playing stops it; tapping a different one cancels the first
+  // and starts the new one.
+  const [speakingKey, setSpeakingKey] = useState(null);
+  const speak = (key, heading, items) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    if (speakingKey === key) { setSpeakingKey(null); return; }
+    const utter = new SpeechSynthesisUtterance(`${heading}. ${items.join(". ")}`);
+    utter.onend = () => setSpeakingKey(null);
+    utter.onerror = () => setSpeakingKey(null);
+    setSpeakingKey(key);
+    window.speechSynthesis.speak(utter);
+  };
+  // Stop any in-progress reading if the player closes the modal mid-sentence.
+  useEffect(() => {
+    return () => { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); };
+  }, []);
+
   if (!data) return null;
   const Icon = data.icon;
 
@@ -1161,14 +1181,27 @@ function RulesModal({ type, onClose, c }) {
                 const RIcon = r.catIcon;
                 return (
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
-                    <button
-                      onClick={() => setPinnedKey(`${r.catKey}|${r.heading}`)}
-                      className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] mb-2"
-                      style={{ color: c.accent }}
-                    >
-                      <RIcon size={11} />
-                      <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
-                    </button>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <button
+                        onClick={() => setPinnedKey(`${r.catKey}|${r.heading}`)}
+                        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em]"
+                        style={{ color: c.accent }}
+                      >
+                        <RIcon size={11} />
+                        <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
+                      </button>
+                      <button
+                        onClick={() => speak(`${r.catKey}|${r.heading}`, `${r.catTitle} — ${r.heading}`, r.items)}
+                        className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full"
+                        style={{
+                          background: speakingKey === `${r.catKey}|${r.heading}` ? c.accent : c.surface,
+                          color: speakingKey === `${r.catKey}|${r.heading}` ? c.bg : c.textFaint,
+                        }}
+                        aria-label="Read this section aloud"
+                      >
+                        <Volume2 size={12} />
+                      </button>
+                    </div>
                     <ul className="space-y-1.5">
                       {r.items.map((it, i) => (
                         <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
@@ -1188,7 +1221,20 @@ function RulesModal({ type, onClose, c }) {
           ) : (
             data.sections.map((s) => (
               <div key={s.heading}>
-                <div className="font-mono text-[11px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>{s.heading}</div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>{s.heading}</div>
+                  <button
+                    onClick={() => speak(`${type}|${s.heading}`, s.heading, s.items)}
+                    className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full"
+                    style={{
+                      background: speakingKey === `${type}|${s.heading}` ? c.accent : c.surface,
+                      color: speakingKey === `${type}|${s.heading}` ? c.bg : c.textFaint,
+                    }}
+                    aria-label="Read this section aloud"
+                  >
+                    <Volume2 size={12} />
+                  </button>
+                </div>
                 <ul className="space-y-1.5">
                   {s.items.map((it, i) => (
                     <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
