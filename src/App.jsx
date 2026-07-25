@@ -5617,8 +5617,41 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
   if (!ladder) return <Loader c={c} />;
 
   const q = query.trim().toLowerCase();
-  const rows = q ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : ladder;
+  const searching = q.length > 0;
+  const results = searching ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : [];
+  const top10 = ladder.slice(0, 10);
+  const rest = ladder.slice(10);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+
+  const row = (row) => {
+    const isMe = session && row.user_id === session.user.id;
+    const canChallenge = targetIds.has(row.user_id);
+    const rankIdx = row.rank_position - 1;
+    return (
+      <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
+        style={{ background: isMe ? c.surfaceHover : c.surface, border: isMe ? `1px solid ${c.accent}` : "1px solid transparent" }}>
+        {rankIdx >= 0 && rankIdx < 3 ? (
+          <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
+            {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
+          </span>
+        ) : (
+          <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
+        )}
+        <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
+          {row.username?.[0]?.toUpperCase() || "?"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-body text-sm truncate">{row.username}{isMe ? " (you)" : ""}</div>
+          <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</div>
+        </div>
+        {canChallenge && (
+          <button onClick={onOpenChallenge} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+            Challenge
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="pt-8">
@@ -5653,42 +5686,36 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
       </div>
 
-      {rows.length === 0 ? (
+      {ladder.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          {ladder.length === 0 ? "No one's on the ladder yet." : `No one matching "${query}".`}
+          No one's on the ladder yet.
         </div>
+      ) : searching ? (
+        results.length === 0 ? (
+          <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+            No one matching "{query}".
+          </div>
+        ) : (
+          <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
+            {results.map(row)}
+          </div>
+        )
       ) : (
-        <div className="space-y-1.5">
-          {rows.map((row) => {
-            const isMe = session && row.user_id === session.user.id;
-            const canChallenge = targetIds.has(row.user_id);
-            const rankIdx = row.rank_position - 1;
-            return (
-              <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
-                style={{ background: isMe ? c.surfaceHover : c.surface, border: isMe ? `1px solid ${c.accent}` : "1px solid transparent" }}>
-                {rankIdx >= 0 && rankIdx < 3 ? (
-                  <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
-                    {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
-                  </span>
-                ) : (
-                  <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
-                )}
-                <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
-                  {row.username?.[0]?.toUpperCase() || "?"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-body text-sm truncate">{row.username}{isMe ? " (you)" : ""}</div>
-                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</div>
-                </div>
-                {canChallenge && (
-                  <button onClick={onOpenChallenge} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
-                    Challenge
-                  </button>
-                )}
+        <>
+          <div className="space-y-1.5">
+            {top10.map(row)}
+          </div>
+          {rest.length > 0 && (
+            <div className="mt-4">
+              <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
+                #11 and below ({rest.length})
               </div>
-            );
-          })}
-        </div>
+              <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+                {rest.map(row)}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ChallengeBoard session={session} comments={comments} isAdmin={isAdmin} myUsername={myUsername}
