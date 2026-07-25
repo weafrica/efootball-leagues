@@ -2520,7 +2520,7 @@ export default function App() {
   // challenge gets confirmed — so refresh it quietly while Home is open,
   // the same way the random-challenge pool refreshes itself.
   useEffect(() => {
-    if (view !== "home" || !profile) return;
+    if ((view !== "home" && view !== "ladder") || !profile) return;
     const id = setInterval(loadLadder, 8000);
     return () => clearInterval(id);
   }, [view, profile, loadLadder]);
@@ -3434,6 +3434,7 @@ export default function App() {
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
 
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); };
+  const openLadderScreen = () => { setView("ladder"); loadLadder(); };
 
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -3442,7 +3443,7 @@ export default function App() {
         onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
         onOpenChallenges={openChallengesScreen}
         challengeBadge={incomingPendingCount}
-        onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} />
+        onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} onOpenLadder={openLadderScreen} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={() => setView("home")} c={c} />
@@ -3465,7 +3466,7 @@ export default function App() {
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} myPaymentStatus={myPaymentStatus}
                 canManageLeague={canManageLeague} session={session} onToggleLeagueReaction={toggleLeagueReaction}
                 openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
-                ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={() => setLadderChallengeOpen(true)}
+                ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
                 onCreate={() => setView("create")} onJoin={startJoin} c={c} />
             )}
@@ -3489,6 +3490,10 @@ export default function App() {
             )}
             {view === "leaderboard" && (
               <Leaderboard leagues={leagues} session={session} onBack={() => setView("home")} c={c} />
+            )}
+            {view === "ladder" && (
+              <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
+                onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")} c={c} />
             )}
           </>
         )}
@@ -5229,7 +5234,7 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
   );
 }
 
-function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard }) {
+function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder }) {
   return (
     <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
       <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -5247,6 +5252,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
             <MessageCircle size={13} /> <span className="hidden sm:inline">Suggest</span>
           </button>
           <button onClick={onOpenLeaderboard} title="Leaderboard" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "leaderboard" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Trophy size={14} /></button>
+          <button onClick={onOpenLadder} title="Ladder" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "ladder" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><TrendingUp size={14} /></button>
           <button onClick={onOpenChallenges} title="Challenges" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={view === "challenges" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
             <Target size={14} />
             {challengeBadge > 0 && (
@@ -5305,7 +5311,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadderChallenge, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
 
@@ -5372,10 +5378,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
         <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
         <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
-        <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadderChallenge} c={c} />
+        <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
       </section>
 
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={onOpenLadderChallenge} c={c} />
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
 
       {leagues.length === 0 && (
         <section className="mt-8">
@@ -5430,7 +5436,7 @@ function MenuTile({ icon: Icon, label, badge, onClick, c }) {
 // the page rather than a widget bolted onto it. Shows the top 5 by
 // rank_position (which never resets) plus, if the viewer has a spot on it
 // themselves, a quiet "you're #N" line that opens the challenge picker.
-function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
+function LadderStrip({ ladder, myLadderRank, onOpenLadder, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
@@ -5438,13 +5444,13 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
   return (
     <section className="pt-5">
       <div className="flex items-center justify-between mb-2.5">
-        <div className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
+        <button onClick={onOpenLadder} className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
           <TrendingUp size={12} /> The Ladder
-        </div>
+        </button>
         <div className="flex items-center gap-2 shrink-0">
           <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
           {myLadderRank && (
-            <button onClick={onOpenLadderChallenge} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+            <button onClick={onOpenLadder} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
               You're #{myLadderRank.rank_position} <ChevronRight size={12} />
             </button>
           )}
@@ -5473,12 +5479,10 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
             </div>
           </div>
         ))}
-        {myLadderRank && myLadderRank.rank_position > 5 && (
-          <button onClick={onOpenLadderChallenge} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
-            style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
-            <Swords size={13} /> Climb it
-          </button>
-        )}
+        <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+          style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
+          <Swords size={13} /> {myLadderRank && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
+        </button>
       </div>
     </section>
   );
@@ -5517,6 +5521,96 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// The full permanent ladder — every member, ordered by rank_position, with
+// search-to-find and inline "Challenge" buttons on whichever (up to 3) rows
+// the viewer is actually allowed to challenge right now. LadderStrip and the
+// Ladder menu tile both land here; the pick-a-target sheet stays reachable
+// from the CTA below for people who'd rather jump straight to it.
+function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, c }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
+
+  if (!ladder) return <Loader c={c} />;
+
+  const q = query.trim().toLowerCase();
+  const rows = q ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : ladder;
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+
+  return (
+    <div className="pt-8">
+      <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> Home</button>
+
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={20} style={{ color: c.accent }} />
+          <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">The Ladder</h1>
+        </div>
+        <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+      </div>
+      {rulesOpen && <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />}
+      <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
+        One permanent ranking, shared by everyone — it never resets. {ladder.length} player{ladder.length === 1 ? "" : "s"}.
+      </div>
+
+      {myLadderRank && (
+        <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4" style={{ background: c.surfaceHover, border: `1px solid ${c.accent}55` }}>
+          <div className="font-body text-sm">
+            You're <span className="font-bold" style={{ color: c.accent }}>#{myLadderRank.rank_position}</span> · {myLadderRank.wins}W–{myLadderRank.losses}L
+          </div>
+          <button onClick={onOpenChallenge} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+            <Swords size={13} /> Climb it
+          </button>
+        </div>
+      )}
+
+      <div className="relative mb-4">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type a username to find them..."
+          className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          {ladder.length === 0 ? "No one's on the ladder yet." : `No one matching "${query}".`}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((row) => {
+            const isMe = session && row.user_id === session.user.id;
+            const canChallenge = targetIds.has(row.user_id);
+            const rankIdx = row.rank_position - 1;
+            return (
+              <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
+                style={{ background: isMe ? c.surfaceHover : c.surface, border: isMe ? `1px solid ${c.accent}` : "1px solid transparent" }}>
+                {rankIdx >= 0 && rankIdx < 3 ? (
+                  <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
+                    {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
+                  </span>
+                ) : (
+                  <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
+                )}
+                <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
+                  {row.username?.[0]?.toUpperCase() || "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-body text-sm truncate">{row.username}{isMe ? " (you)" : ""}</div>
+                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</div>
+                </div>
+                {canChallenge && (
+                  <button onClick={onOpenChallenge} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+                    Challenge
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
