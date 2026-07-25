@@ -1092,7 +1092,11 @@ function highlightMatch(text, query, c) {
 }
 
 function RulesModal({ type, onClose, c }) {
-  const data = RULES_CONTENT[type];
+  // Which category's full list is showing. Starts at whatever the caller
+  // opened this modal with, but a player can jump to a different category
+  // by tapping a heading in their search results.
+  const [activeType, setActiveType] = useState(type);
+  const data = RULES_CONTENT[activeType];
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
 
@@ -1152,10 +1156,15 @@ function RulesModal({ type, onClose, c }) {
                 const RIcon = r.catIcon;
                 return (
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
-                    <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.accent }}>
+                    <button
+                      onClick={() => { setActiveType(r.catKey); setQuery(""); }}
+                      className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] mb-2"
+                      style={{ color: c.accent }}
+                    >
                       <RIcon size={11} />
-                      <span>{r.catTitle} — {r.heading}</span>
-                    </div>
+                      <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
+                      <ChevronRight size={11} />
+                    </button>
                     <ul className="space-y-1.5">
                       {r.items.map((it, i) => (
                         <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
