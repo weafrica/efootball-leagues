@@ -1073,34 +1073,120 @@ const RULES_CONTENT = {
   },
 };
 
+// Highlights the matched substring of `text` for the given (lowercased)
+// query. Pure display helper — doesn't touch the underlying rule text.
+function highlightMatch(text, query, c) {
+  if (!query) return text;
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(query);
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark style={{ background: c.accent, color: c.bg, borderRadius: 2, padding: "0 1px" }}>
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 function RulesModal({ type, onClose, c }) {
   const data = RULES_CONTENT[type];
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  // Search runs across every rules category (league/ladder/challenge), not
+  // just the one this modal was opened from — a player typing "forfeit"
+  // should find it even if they opened this from the Ladder screen. Each
+  // hit is tagged with which category it came from so results stay legible
+  // once they're mixed together.
+  const searchResults = useMemo(() => {
+    if (!q) return null;
+    const out = [];
+    for (const key of Object.keys(RULES_CONTENT)) {
+      const cat = RULES_CONTENT[key];
+      for (const s of cat.sections) {
+        const items = s.items.filter((it) => it.toLowerCase().includes(q));
+        if (items.length) out.push({ catKey: key, catTitle: cat.title, catIcon: cat.icon, heading: s.heading, items });
+      }
+    }
+    return out;
+  }, [q]);
+
   if (!data) return null;
   const Icon = data.icon;
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-        <div className="flex items-center justify-between mb-4">
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] flex flex-col" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <div className="flex items-center gap-2">
             <Icon size={18} style={{ color: c.accent }} />
             <h2 className="text-xl font-extrabold uppercase tracking-tight">{data.title}</h2>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
-        <div className="space-y-5">
-          {data.sections.map((s) => (
-            <div key={s.heading}>
-              <div className="font-mono text-[11px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>{s.heading}</div>
-              <ul className="space-y-1.5">
-                {s.items.map((it, i) => (
-                  <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
-                    <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
-                    <span>{it}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+
+        <div className="relative mb-4 shrink-0">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search rules — e.g. forfeit, screenshot, deadline..."
+            className="w-full font-body text-sm rounded-xl pl-9 pr-8 py-2.5 outline-none"
+            style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}
+          />
+          {query && (
+            <button onClick={() => setQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-5 overflow-y-auto">
+          {q ? (
+            searchResults.length ? (
+              searchResults.map((r, ri) => {
+                const RIcon = r.catIcon;
+                return (
+                  <div key={`${r.catKey}-${r.heading}-${ri}`}>
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.accent }}>
+                      <RIcon size={11} />
+                      <span>{r.catTitle} — {r.heading}</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {r.items.map((it, i) => (
+                        <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
+                          <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
+                          <span>{highlightMatch(it, q, c)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="font-body text-sm text-center py-8" style={{ color: c.textFaint }}>
+                No rules match "{query}".
+              </div>
+            )
+          ) : (
+            data.sections.map((s) => (
+              <div key={s.heading}>
+                <div className="font-mono text-[11px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>{s.heading}</div>
+                <ul className="space-y-1.5">
+                  {s.items.map((it, i) => (
+                    <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
+                      <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
+                      <span>{it}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
