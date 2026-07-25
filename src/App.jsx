@@ -5,7 +5,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone,
+  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Zap, Flame, Gamepad2, Medal,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -5327,49 +5327,68 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   };
   const sortLeagues = (list) => [...list].sort((a, b) => attentionScore(b) - attentionScore(a) || new Date(b.created_at) - new Date(a.created_at));
 
+  const totalClubs = leagues.reduce((sum, l) => sum + l.teams.length, 0);
+  const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
+
   return (
     <div>
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={onOpenLadderChallenge} c={c} />
-
-      {grabbableChallenges.length > 0 && (
-        <button onClick={onOpenChallenges} className="animate-flicker w-full flex items-center gap-2.5 mt-4 px-4 py-2.5 rounded-full font-body text-xs font-semibold text-left"
-          style={{ background: c.accent, color: c.accentText }}>
-          <Shuffle size={14} className="shrink-0" />
-          <span className="flex-1 min-w-0 truncate">
-            {grabbableChallenges.length === 1 ? "1 random challenge" : `${grabbableChallenges.length} random challenges`} waiting — first to accept gets it!
-          </span>
-          <ChevronRight size={14} className="shrink-0" />
-        </button>
-      )}
-
-      <section className="pt-10 pb-6">
-        <div className="font-mono text-xs tracking-[0.2em] uppercase mb-2" style={{ color: c.accent }}>Season 2026</div>
-        <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight leading-[0.95]">Run your table.<br />Own your league.</h1>
-        <p className="font-body mt-3 max-w-md" style={{ color: c.textDim }}>
-          {isAdmin ? "Leagues you create here are public. " : ""}Create an eFootball league, invite people to join, log results — the table updates itself.
-        </p>
-        <div className="flex flex-wrap items-center gap-2.5 mt-5">
-          <button onClick={onCreate} className="inline-flex items-center gap-2 font-body font-semibold px-5 py-2.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-            <Plus size={16} strokeWidth={2.5} /> New league
-          </button>
-          <button onClick={onOpenChallenges} title="Send or grab a random challenge" className="inline-flex items-center gap-2 font-body font-semibold px-5 py-2.5 rounded-full border" style={{ borderColor: c.borderStrong, color: c.text }}>
-            <Shuffle size={16} strokeWidth={2.5} /> Random challenge
-          </button>
+      {/* Compact HUD banner — status strip, not a landing-page hero */}
+      <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.25 }} />
+        </div>
+        <div className="relative flex items-center gap-3 px-4 py-3.5">
+          <img src="/hero-emblem.png" alt="" className="w-11 h-11 object-contain shrink-0 drop-shadow-lg" />
+          <div className="min-w-0 flex-1">
+            <div className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: c.accent }}>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
+              </span>
+              Season 2026 · Live
+            </div>
+            <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Welcome back{profileFirstName(session) ? `, ${profileFirstName(session)}` : ""}</div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="text-right font-mono leading-tight">
+              <div className="font-bold text-sm" style={{ color: c.text }}>{leagues.length}</div>
+              <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
+            </div>
+            <div className="w-px h-7" style={{ background: c.border }} />
+            <div className="text-right font-mono leading-tight">
+              <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs}</div>
+              <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
+            </div>
+            <div className="w-px h-7" style={{ background: c.border }} />
+            <div className="text-right font-mono leading-tight">
+              <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches}</div>
+              <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
+            </div>
+          </div>
         </div>
       </section>
 
+      {/* Menu tiles — every action gets equal weight, nothing singled out */}
+      <section className="grid grid-cols-4 gap-2 mt-4">
+        <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
+        <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
+        <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
+        <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadderChallenge} c={c} />
+      </section>
+
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadderChallenge={onOpenLadderChallenge} c={c} />
+
       {leagues.length === 0 && (
-        <section>
+        <section className="mt-8">
           <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>Start the first one — it takes about a minute.</div>
         </section>
       )}
 
-      <LeagueSection title="Fun leagues" icon="🎮" leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+      <LeagueSection title="Fun leagues" icon={Gamepad2} leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
         entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
 
       {cashLeagues.length > 0 && (
-        <LeagueSection title="Cash leagues" icon="💰" leagues={sortLeagues(cashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+        <LeagueSection title="Cash leagues" icon={Wallet} leagues={sortLeagues(cashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
@@ -5378,6 +5397,31 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         <Leaderboard leagues={leagues} session={session} embedded c={c} />
       </section>
     </div>
+  );
+}
+
+// Small helper — first name off the signed-in user's email, purely cosmetic
+// (falls back to nothing, which the caller already handles).
+function profileFirstName(session) {
+  const raw = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name;
+  return raw ? raw.split(" ")[0] : "";
+}
+
+// One equal-weight tile in the quick-action menu grid — icon on top, label
+// below, small badge count in the corner when relevant. Every action here
+// carries the same visual weight; none is "the" highlighted button.
+function MenuTile({ icon: Icon, label, badge, onClick, c }) {
+  return (
+    <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
+      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+      {badge > 0 && (
+        <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{badge}</span>
+      )}
+      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+        <Icon size={16} style={{ color: c.accent }} />
+      </span>
+      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{label}</span>
+    </button>
   );
 }
 
@@ -5390,6 +5434,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
   return (
     <section className="pt-5">
       <div className="flex items-center justify-between mb-2.5">
@@ -5406,12 +5451,21 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
         </div>
       </div>
       {rulesOpen && <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />}
-      <div className="no-scrollbar flex items-stretch gap-4 overflow-x-auto -mx-4 px-4 pb-1">
+      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
         {top5.map((row, i) => (
-          <div key={row.user_id} className="flex items-center gap-2 shrink-0"
-            style={{ borderRight: i < top5.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < top5.length - 1 ? 16 : 0 }}>
-            {i === 0 ? <Crown size={16} style={{ color: c.accent }} /> : (
-              <span className="font-mono text-xs font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
+          <div key={row.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+            style={{
+              background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
+              border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
+            }}>
+            {i < 3 ? (
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
+              </span>
+            ) : (
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                {i + 1}
+              </span>
             )}
             <div className="flex flex-col leading-tight">
               <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
@@ -5420,7 +5474,8 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadderChallenge, c }) {
           </div>
         ))}
         {myLadderRank && myLadderRank.rank_position > 5 && (
-          <button onClick={onOpenLadderChallenge} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px]" style={{ color: c.textFaint, paddingLeft: 2 }}>
+          <button onClick={onOpenLadderChallenge} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+            style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
             <Swords size={13} /> Climb it
           </button>
         )}
@@ -5466,32 +5521,39 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
   );
 }
 
-function LeagueSection({ title, icon, leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
+function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
   const pendingReviewCount = leagues.filter(canManageLeague).reduce((sum, l) =>
     sum + (l.members || []).filter((m) => m.payment_status === "pending").length, 0);
   if (leagues.length === 0 && !onCreate) return null;
   return (
     <section className="mt-8 first:mt-0">
       <div className="flex items-center justify-between mb-3">
-        <div className="font-mono text-xs uppercase tracking-[0.2em] flex items-center gap-2" style={{ color: c.textFaint }}>
-          <span>{icon}</span> {title} <span style={{ color: c.textFaint }}>({leagues.length})</span>
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}><Icon size={15} style={{ color: c.accent }} /></span>
+          <div className="font-extrabold uppercase tracking-tight text-lg leading-none flex items-center gap-2">
+            {title}
+            <span className="font-mono text-[10px] font-normal tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>{leagues.length}</span>
+          </div>
         </div>
         {pendingReviewCount > 0 && (
-          <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: c.redSoft, color: c.red }}>
-            {pendingReviewCount} payment{pendingReviewCount === 1 ? "" : "s"} to review
+          <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded shrink-0" style={{ background: c.redSoft, color: c.red }}>
+            {pendingReviewCount} to review
           </span>
         )}
       </div>
-      <div className="space-y-2">
+      <div className="no-scrollbar flex items-stretch gap-3 overflow-x-auto -mx-4 px-4 pb-1">
         {leagues.map((l) => (
           <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
             myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
         {onCreate && (
-          <button onClick={onCreate} className="w-full flex items-center justify-center gap-2 border border-dashed rounded-xl px-4 py-4 font-body text-sm font-semibold"
-            style={{ borderColor: c.borderStrong, color: c.textDim }}>
-            <Plus size={16} strokeWidth={2.5} /> Create your own league
+          <button onClick={onCreate} className="shrink-0 w-[132px] flex flex-col items-center justify-center gap-2 border border-dashed rounded-2xl font-body text-xs font-semibold"
+            style={{ borderColor: c.borderStrong, color: c.textFaint }}>
+            <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+              <Plus size={16} strokeWidth={2.5} style={{ color: c.textDim }} />
+            </span>
+            New league
           </button>
         )}
       </div>
@@ -5512,51 +5574,82 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
   const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
   const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
   const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
-  const stageLabel = l.format === "survivor" ? (l.final_stage_started ? " · Final stage" : ` · Stage ${l.current_stage}`)
-    : l.format === "groups_knockout" ? (l.final_stage_started ? " · Knockout stage" : " · Group stage") : "";
+  const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
+    : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
+  const progressPct = l.fixtures.length > 0 ? Math.round((played / l.fixtures.length) * 100) : 0;
+  const initial = (l.name || "?").trim().charAt(0).toUpperCase();
+  const needsAttention = (isAdmin && pendingCount > 0) || (canManageLeague(l) && pendingResultsCount > 0);
   return (
-    <div onClick={() => onOpen(l.id)} className="rounded-xl p-4 flex items-center justify-between cursor-pointer border"
-      style={{ background: c.surface, borderColor: c.border, borderLeft: isCash ? "3px solid #B8860B" : `1px solid ${c.border}` }}>
-      <div className="flex items-center gap-3 min-w-0">
-        {l.photo_url && (
-          <img src={l.photo_url} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" style={{ border: `1px solid ${c.border}` }} />
-        )}
-        <div className="min-w-0">
-          <div className="font-semibold text-lg leading-tight truncate flex items-center gap-2">
-            <span className="truncate">{l.name}</span>
-            {isAdmin && pendingCount > 0 && (
-              <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: c.redSoft, color: c.red }}>{pendingCount} pending</span>
-            )}
-            {canManageLeague(l) && pendingResultsCount > 0 && (
-              <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
-                <Camera size={9} /> {pendingResultsCount} result{pendingResultsCount === 1 ? "" : "s"}
-              </span>
-            )}
-          </div>
-          <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>
-            {l.fixtures.length === 0
-              ? `${formatLabel} · Registration open · ${l.teams.length} club${l.teams.length === 1 ? "" : "s"} joined`
-              : `${formatLabel}${stageLabel} · ${l.teams.length} clubs · ${played}/${l.fixtures.length} played${leader && leader.p > 0 ? ` · ${leader.name} leads` : ""}`}
-            {isCash && canSeePool && ` · Pool ${formatRand(pool)} (${approvedMembers.length}/${(l.members || []).length} paid)`}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <LeagueReactionBar league={l} session={session} onToggle={onToggleLeagueReaction} c={c} compact />
-        {joined ? (
-          paymentStatus === "pending" ? (
-            <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>Payment pending</span>
-          ) : paymentStatus === "rejected" ? (
-            <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Payment rejected</span>
-          ) : (
-            <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Joined</span>
-          )
-        ) : closed ? (
-          <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Entry closed</span>
+    <div onClick={() => onOpen(l.id)} className="group relative shrink-0 w-[168px] rounded-2xl cursor-pointer border overflow-hidden transition-transform active:scale-[0.97]"
+      style={{
+        background: c.surface,
+        borderColor: isCash ? "#B8860B55" : c.border,
+        boxShadow: isCash ? "0 0 0 1px rgba(184,134,11,0.12)" : "none",
+      }}>
+      {/* Crest banner */}
+      <div className="relative h-[86px] flex items-center justify-center overflow-hidden"
+        style={{ background: isCash ? "linear-gradient(150deg, #B8860B33, #B8860B0D)" : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
+        {l.photo_url ? (
+          <img src={l.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
-          <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border" style={{ borderColor: c.borderStrong }}>Join</button>
+          <span className="font-extrabold text-3xl" style={{ color: isCash ? "#B8860B" : c.accent, opacity: 0.85 }}>{initial}</span>
         )}
-        <ChevronRight size={18} style={{ color: c.textFaint }} />
+        <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 items-start">
+          {isCash && (
+            <span className="font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "#B8860B", color: "#fff" }}>Cash</span>
+          )}
+          {needsAttention && (
+            <span className="font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.red, color: "#fff" }}>!</span>
+          )}
+        </div>
+        <div className="absolute top-1.5 right-1.5">
+          <LeagueReactionBar league={l} session={session} onToggle={onToggleLeagueReaction} c={c} compact />
+        </div>
+        {l.fixtures.length === 0 ? (
+          <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Open</span>
+        ) : (
+          <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: c.bg + "55" }}>
+            <div className="h-full" style={{ width: `${progressPct}%`, background: c.accent }} />
+          </div>
+        )}
+      </div>
+
+      <div className="p-2.5">
+        <div className="font-extrabold text-sm leading-tight truncate">{l.name}</div>
+        <div className="font-mono text-[9px] uppercase tracking-wider truncate mt-0.5" style={{ color: c.textFaint }}>
+          {stageLabel || formatLabel}
+        </div>
+
+        <div className="flex items-center gap-1 mt-2 font-mono text-[9px]" style={{ color: c.textDim }}>
+          <Shield size={9} /> {l.teams.length}
+          {l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
+        </div>
+
+        {isCash && canSeePool && (
+          <div className="font-mono text-[9px] font-bold mt-1" style={{ color: "#B8860B" }}>{formatRand(pool)} pool</div>
+        )}
+        {leader && leader.p > 0 && (
+          <div className="flex items-center gap-1 font-mono text-[9px] truncate mt-1" style={{ color: c.textFaint }}>
+            <Crown size={9} style={{ color: c.accent }} /> <span className="truncate">{leader.name}</span>
+          </div>
+        )}
+
+        <div className="mt-2">
+          {joined ? (
+            paymentStatus === "pending" ? (
+              <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>Pending</span>
+            ) : paymentStatus === "rejected" ? (
+              <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Rejected</span>
+            ) : (
+              <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Joined</span>
+            )
+          ) : closed ? (
+            <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Closed</span>
+          ) : (
+            <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-bold px-2 py-1.5 rounded-full"
+              style={{ background: c.accent, color: c.accentText }}>Join</button>
+          )}
+        </div>
       </div>
     </div>
   );
