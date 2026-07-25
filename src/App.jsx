@@ -1126,16 +1126,38 @@ function RulesModal({ type, onClose, c }) {
   // Which section (if any) is currently being read aloud, keyed the same
   // way as pinnedKey. Tapping the speaker icon on the section that's
   // already playing stops it; tapping a different one cancels the first
-  // and starts the new one.
+  // and starts the new one. speakingLine tracks which line within that
+  // section the browser is currently voicing — -1 for the heading, or the
+  // item's index — so that exact line can be highlighted as it's read.
   const [speakingKey, setSpeakingKey] = useState(null);
+  const [speakingLine, setSpeakingLine] = useState(null);
   const speak = (key, heading, items) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    if (speakingKey === key) { setSpeakingKey(null); return; }
-    const utter = new SpeechSynthesisUtterance(`${heading}. ${items.join(". ")}`);
-    utter.onend = () => setSpeakingKey(null);
-    utter.onerror = () => setSpeakingKey(null);
+    if (speakingKey === key) { setSpeakingKey(null); setSpeakingLine(null); return; }
+
+    // Build the full text to read, remembering the character range each
+    // line (heading, then each item) occupies within it, so a boundary
+    // event's charIndex can be mapped back to "which line is this".
+    const segments = [];
+    let text = "";
+    const addLine = (lineText, lineIndex) => {
+      const chunk = `${lineText}. `;
+      segments.push({ start: text.length, end: text.length + chunk.length, lineIndex });
+      text += chunk;
+    };
+    addLine(heading, -1);
+    items.forEach((it, idx) => addLine(it, idx));
+
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.onboundary = (e) => {
+      const seg = segments.find((s) => e.charIndex >= s.start && e.charIndex < s.end);
+      if (seg) setSpeakingLine(seg.lineIndex);
+    };
+    utter.onend = () => { setSpeakingKey(null); setSpeakingLine(null); };
+    utter.onerror = () => { setSpeakingKey(null); setSpeakingLine(null); };
     setSpeakingKey(key);
+    setSpeakingLine(-1);
     window.speechSynthesis.speak(utter);
   };
   // Stop any in-progress reading if the player closes the modal mid-sentence.
@@ -1179,23 +1201,25 @@ function RulesModal({ type, onClose, c }) {
             searchResults.length ? (
               searchResults.map((r, ri) => {
                 const RIcon = r.catIcon;
+                const rKey = `${r.catKey}|${r.heading}`;
+                const isActiveSection = speakingKey === rKey;
                 return (
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <button
-                        onClick={() => setPinnedKey(`${r.catKey}|${r.heading}`)}
-                        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em]"
-                        style={{ color: c.accent }}
+                        onClick={() => setPinnedKey(rKey)}
+                        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded px-1 -mx-1"
+                        style={{ color: c.accent, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
                       >
                         <RIcon size={11} />
                         <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
                       </button>
                       <button
-                        onClick={() => speak(`${r.catKey}|${r.heading}`, `${r.catTitle} — ${r.heading}`, r.items)}
+                        onClick={() => speak(rKey, `${r.catTitle} — ${r.heading}`, r.items)}
                         className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full"
                         style={{
-                          background: speakingKey === `${r.catKey}|${r.heading}` ? c.accent : c.surface,
-                          color: speakingKey === `${r.catKey}|${r.heading}` ? c.bg : c.textFaint,
+                          background: isActiveSection ? c.accent : c.surface,
+                          color: isActiveSection ? c.bg : c.textFaint,
                         }}
                         aria-label="Read this section aloud"
                       >
@@ -1204,8 +1228,12 @@ function RulesModal({ type, onClose, c }) {
                     </div>
                     <ul className="space-y-1.5">
                       {r.items.map((it, i) => (
-                        <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
-                          <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
+                        <li
+                          key={i}
+                          className="font-body text-sm flex items-start gap-2 leading-snug rounded-lg px-1.5 py-1 -mx-1.5 transition-colors"
+                          style={{ color: c.textDim, background: isActiveSection && speakingLine === i ? c.surface : "transparent" }}
+                        >
+                          <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: isActiveSection && speakingLine === i ? c.accent : c.textFaint }} />
                           <span>{highlightMatch(it, q, c)}</span>
                         </li>
                       ))}
@@ -1219,32 +1247,45 @@ function RulesModal({ type, onClose, c }) {
               </div>
             )
           ) : (
-            data.sections.map((s) => (
-              <div key={s.heading}>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>{s.heading}</div>
-                  <button
-                    onClick={() => speak(`${type}|${s.heading}`, s.heading, s.items)}
-                    className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full"
-                    style={{
-                      background: speakingKey === `${type}|${s.heading}` ? c.accent : c.surface,
-                      color: speakingKey === `${type}|${s.heading}` ? c.bg : c.textFaint,
-                    }}
-                    aria-label="Read this section aloud"
-                  >
-                    <Volume2 size={12} />
-                  </button>
+            data.sections.map((s) => {
+              const sKey = `${type}|${s.heading}`;
+              const isActiveSection = speakingKey === sKey;
+              return (
+                <div key={s.heading}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div
+                      className="font-mono text-[11px] uppercase tracking-[0.2em] rounded px-1 -mx-1"
+                      style={{ color: c.textFaint, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
+                    >
+                      {s.heading}
+                    </div>
+                    <button
+                      onClick={() => speak(sKey, s.heading, s.items)}
+                      className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full"
+                      style={{
+                        background: isActiveSection ? c.accent : c.surface,
+                        color: isActiveSection ? c.bg : c.textFaint,
+                      }}
+                      aria-label="Read this section aloud"
+                    >
+                      <Volume2 size={12} />
+                    </button>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {s.items.map((it, i) => (
+                      <li
+                        key={i}
+                        className="font-body text-sm flex items-start gap-2 leading-snug rounded-lg px-1.5 py-1 -mx-1.5 transition-colors"
+                        style={{ color: c.textDim, background: isActiveSection && speakingLine === i ? c.surface : "transparent" }}
+                      >
+                        <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: isActiveSection && speakingLine === i ? c.accent : c.textFaint }} />
+                        <span>{it}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul className="space-y-1.5">
-                  {s.items.map((it, i) => (
-                    <li key={i} className="font-body text-sm flex items-start gap-2 leading-snug" style={{ color: c.textDim }}>
-                      <span className="shrink-0 mt-[7px] w-1 h-1 rounded-full" style={{ background: c.textFaint }} />
-                      <span>{it}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
