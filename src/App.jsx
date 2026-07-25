@@ -27,15 +27,41 @@ const BANK_DETAILS = {
   accountType: "Transact",
 };
 
-// Cash-league prize model: "the more you put in, the bigger your prize."
-// A place's cut of the pool is scaled by how much of the R200 max the
-// winner actually put in — someone who paid R10 into a R20,000 pool and
-// finishes 1st only draws (10/200) × 25% = 1.25% of the pool directly.
-// Whatever a place doesn't draw (because its winner under-paid) is pooled
-// as leftover and split back out across every winner, proportional to each
-// winner's own direct prize — see computeCashPrizes below.
 const PRIZE_PAYOUT_PERCENTAGES = [0.25, 0.20, 0.15, 0.12, 0.10, 0.08, 0.06, 0.04]; // 1st..8th, sums to 100% at full entry
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
+
+// Knockout and groups_knockout leagues cap payouts at the top 2 places (a
+// bracket only gives a clean ranking to the champion and whoever they beat
+// in the final — everyone knocked out earlier is a genuine tie in how far
+// they got) and reserve a flat 5% of the pool for the organizer off the top.
+// The champion/runner-up split (75%/20%, leaving that 5%) is still scaled
+// by how much each of them personally put in — same "the more you put in,
+// the bigger your prize" rule as round-robin — and any shortfall from
+// underpayment still gets redistributed between just the two of them, the
+// same way computeCashPrizes' leftover model works for round-robin. The
+// organizer's cut is untouched by any of that scaling — it's a flat
+// service fee, not a contribution-scaled prize.
+const KNOCKOUT_PRIZE_SPLIT = [0.75, 0.20]; // champion, runner-up — sums to 0.95, leaving the organizer's 0.05
+const KNOCKOUT_ORGANIZER_SHARE = 0.05;
+function isKnockoutFormat(league) {
+  return league.format === "knockout" || league.format === "groups_knockout";
+}
+
+// The organizer's flat 5% cut of a knockout/groups_knockout cash league's
+// pool — 0 for round-robin leagues (no organizer fee there) and 0 if the
+// league isn't cash or nobody's paid in yet. Flat off the total pool
+// regardless of anyone's individual contribution ratio.
+function organizerFee(league) {
+  if (!league || league.league_type !== "cash" || !isKnockoutFormat(league)) return 0;
+  const pool = (league.members || []).filter((m) => m.payment_status === "approved").reduce((sum, m) => sum + (m.entry_fee || 0), 0);
+  return pool * KNOCKOUT_ORGANIZER_SHARE;
+}
+
+// Round-robin formats pay out up to 8 places; knockout/groups_knockout pay
+// just the top 2 (see KNOCKOUT_PRIZE_SPLIT above).
+function cashPrizePlaceCount(league) {
+  return isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT.length : PRIZE_PAYOUT_PERCENTAGES.length;
+}
 
 const THEMES = {
   dark: {
@@ -479,10 +505,19 @@ function goalExtremes(rows) {
 
 
 // member id -> { rank, contribution, directPrize, redistributed, total }
-// for every member who actually won a place (top 8 by ranking, among
-// approved/paid members only). Works off whatever fixtures currently exist,
-// so callers decide whether that's a live projection or the final result —
-// see memberBalance and the "started/complete" lifecycle below.
+// for every member who actually won a place (top 8 by ranking for
+// round-robin leagues, champion + runner-up for knockout/groups_knockout —
+// see cashPrizePlaceCount — among approved/paid members only). Every place
+// is scaled by how much that member personally put in (entryRatio below),
+// and any shortfall from underpayment gets redistributed back across the
+// winners, proportional to their own direct prize — see the module comment
+// near KNOCKOUT_PRIZE_SPLIT for how the organizer's flat 5% reservation
+// fits into that for knockout formats. Works off whatever fixtures
+// currently exist, so callers decide whether that's a live projection or
+// the final result — see memberBalance and the "started/complete"
+// lifecycle below. Does NOT include the organizer's cut for knockout
+// formats — that's a flat fee, not a member prize, computed separately by
+// organizerFee().
 function computeCashPrizes(league) {
   const results = new Map();
   if (!league || league.league_type !== "cash") return results;
@@ -493,18 +528,25 @@ function computeCashPrizes(league) {
     .filter((m) => m.payment_status === "approved" && m.team_id)
     .map((m) => [m.team_id, m]));
 
+  const percentages = isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT : PRIZE_PAYOUT_PERCENTAGES;
+  // Round-robin reserves nothing for an organizer, so the full pool is up
+  // for leftover-redistribution; knockout reserves the flat 5% organizer
+  // cut first, so only the remaining 95% is what underpaid winners'
+  // shortfall gets redistributed out of.
+  const distributable = pool * (1 - (isKnockoutFormat(league) ? KNOCKOUT_ORGANIZER_SHARE : 0));
+
   const winners = [];
   for (const teamId of rankedTeamIds) {
-    if (winners.length >= PRIZE_PAYOUT_PERCENTAGES.length) break;
+    if (winners.length >= percentages.length) break;
     const member = approvedByTeamId.get(teamId);
     if (!member) continue; // only paid, approved members can draw a place
-    const sharePercent = PRIZE_PAYOUT_PERCENTAGES[winners.length];
+    const sharePercent = percentages[winners.length];
     const entryRatio = Math.min(member.entry_fee || 0, ENTRY_FEE_MAX) / ENTRY_FEE_MAX;
     const directPrize = sharePercent * entryRatio * pool;
     winners.push({ member, rank: winners.length + 1, directPrize });
   }
   const directTotal = winners.reduce((sum, w) => sum + w.directPrize, 0);
-  const leftover = Math.max(0, pool - directTotal);
+  const leftover = Math.max(0, distributable - directTotal);
   for (const w of winners) {
     const redistributed = directTotal > 0 ? (w.directPrize / directTotal) * leftover : 0;
     results.set(w.member.id, {
@@ -5003,6 +5045,9 @@ function PrizeBreakdownPanel({ league, c }) {
     .map((m) => ({ m, prize: prizes.get(m.id) }))
     .sort((a, b) => (a.prize?.rank || 99) - (b.prize?.rank || 99));
   const pool = rows.reduce((sum, r) => sum + (r.m.entry_fee || 0), 0);
+  const maxPlaces = cashPrizePlaceCount(league);
+  const knockoutFormat = isKnockoutFormat(league);
+  const orgFee = organizerFee(league);
 
   return (
     <div className="rounded-xl border mt-4" style={{ borderColor: c.border }}>
@@ -5013,7 +5058,10 @@ function PrizeBreakdownPanel({ league, c }) {
         </span>
       </div>
       <div className="px-4 pb-3 font-mono text-[11px]" style={{ color: c.textFaint }}>
-        Pool {formatRand(pool)} · top {Math.min(8, rows.length)} place{Math.min(8, rows.length) === 1 ? "" : "s"} paid{!complete ? " · updates live as results come in" : ""}
+        {knockoutFormat
+          ? `Pool ${formatRand(pool)} · 75% champion · 20% runner-up · 5% organizer fee`
+          : `Pool ${formatRand(pool)} · top ${Math.min(maxPlaces, rows.length)} place${Math.min(maxPlaces, rows.length) === 1 ? "" : "s"} paid`}
+        {!complete ? " · updates live as results come in" : ""}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full font-mono text-xs">
@@ -5036,6 +5084,15 @@ function PrizeBreakdownPanel({ league, c }) {
                 <td className="text-right px-4 py-2 font-semibold" style={{ color: prize ? c.greenText : c.text }}>{formatRand(Math.round(prize?.total || 0))}</td>
               </tr>
             ))}
+            {knockoutFormat && orgFee > 0 && (
+              <tr className="border-t" style={{ borderColor: c.border }}>
+                <td className="px-4 py-2" style={{ color: c.textFaint }}>Organizer fee (5%)</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
+                <td className="text-right px-4 py-2 font-semibold" style={{ color: c.text }}>{formatRand(Math.round(orgFee))}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
