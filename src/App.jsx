@@ -1092,13 +1092,13 @@ function highlightMatch(text, query, c) {
 }
 
 function RulesModal({ type, onClose, c }) {
-  // Which category's full list is showing. Starts at whatever the caller
-  // opened this modal with, but a player can jump to a different category
-  // by tapping a heading in their search results.
-  const [activeType, setActiveType] = useState(type);
-  const data = RULES_CONTENT[activeType];
+  const data = RULES_CONTENT[type];
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
+  // Which search-result section (if any) the player tapped the heading of —
+  // that section gets pinned to the top of the list, still with its search
+  // term highlighted, so they don't lose their place scrolling to re-find it.
+  const [pinnedKey, setPinnedKey] = useState(null);
 
   // Search runs across every rules category (league/ladder/challenge), not
   // just the one this modal was opened from — a player typing "forfeit"
@@ -1115,8 +1115,13 @@ function RulesModal({ type, onClose, c }) {
         if (items.length) out.push({ catKey: key, catTitle: cat.title, catIcon: cat.icon, heading: s.heading, items });
       }
     }
+    // Pinned section (if it's still in the results) floats to the top.
+    if (pinnedKey) {
+      const idx = out.findIndex((r) => `${r.catKey}|${r.heading}` === pinnedKey);
+      if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
+    }
     return out;
-  }, [q]);
+  }, [q, pinnedKey]);
 
   if (!data) return null;
   const Icon = data.icon;
@@ -1137,13 +1142,13 @@ function RulesModal({ type, onClose, c }) {
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setPinnedKey(null); }}
             placeholder="Search rules — e.g. forfeit, screenshot, deadline..."
             className="w-full font-body text-sm rounded-xl pl-9 pr-8 py-2.5 outline-none"
             style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}
           />
           {query && (
-            <button onClick={() => setQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
+            <button onClick={() => { setQuery(""); setPinnedKey(null); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
               <X size={12} />
             </button>
           )}
@@ -1157,13 +1162,12 @@ function RulesModal({ type, onClose, c }) {
                 return (
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
                     <button
-                      onClick={() => { setActiveType(r.catKey); setQuery(""); }}
+                      onClick={() => setPinnedKey(`${r.catKey}|${r.heading}`)}
                       className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] mb-2"
                       style={{ color: c.accent }}
                     >
                       <RIcon size={11} />
                       <span className="underline decoration-dotted underline-offset-2">{r.catTitle} — {r.heading}</span>
-                      <ChevronRight size={11} />
                     </button>
                     <ul className="space-y-1.5">
                       {r.items.map((it, i) => (
