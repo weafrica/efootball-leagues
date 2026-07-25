@@ -1091,6 +1091,36 @@ function highlightMatch(text, query, c) {
   );
 }
 
+// Picks the best available natural-sounding US English female voice out of
+// whatever the browser/OS ships. Browsers vary a lot here — Edge's "Online
+// (Natural)" voices and Chrome's Google voices sound far more human than
+// the default system voice, so we look for those by name first, then fall
+// back progressively (any en-US voice, then any English voice, then just
+// let the browser use its default).
+function pickBestVoice(voices) {
+  if (!voices || !voices.length) return null;
+  const preferredNames = [
+    "Microsoft Jenny Online (Natural)",
+    "Microsoft Aria Online (Natural)",
+    "Google US English",
+    "Samantha",
+    "Microsoft Zira",
+  ];
+  for (const name of preferredNames) {
+    const match = voices.find((v) => v.name.includes(name));
+    if (match) return match;
+  }
+  const maleHints = ["male", "david", "mark", "guy", "fred", "alex", "daniel", "james", "tom"];
+  const isLikelyFemale = (v) => !maleHints.some((h) => v.name.toLowerCase().includes(h));
+  const usVoices = voices.filter((v) => v.lang === "en-US" || v.lang === "en_US");
+  const usFemale = usVoices.find(isLikelyFemale);
+  if (usFemale) return usFemale;
+  if (usVoices.length) return usVoices[0];
+  const enVoices = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
+  const enFemale = enVoices.find(isLikelyFemale);
+  return enFemale || enVoices[0] || voices[0];
+}
+
 function RulesModal({ type, onClose, c }) {
   const data = RULES_CONTENT[type];
   const [query, setQuery] = useState("");
@@ -1131,6 +1161,19 @@ function RulesModal({ type, onClose, c }) {
   // item's index — so that exact line can be highlighted as it's read.
   const [speakingKey, setSpeakingKey] = useState(null);
   const [speakingLine, setSpeakingLine] = useState(null);
+
+  // The list of voices a browser exposes often isn't ready on first render
+  // — it loads asynchronously — so we listen for the change event too and
+  // pick the best natural-sounding one once it's available.
+  const [voices, setVoices] = useState([]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const loadVoices = () => setVoices(window.speechSynthesis.getVoices());
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   const speak = (key, heading, items) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
@@ -1150,6 +1193,9 @@ function RulesModal({ type, onClose, c }) {
     items.forEach((it, idx) => addLine(it, idx));
 
     const utter = new SpeechSynthesisUtterance(text);
+    const voice = pickBestVoice(voices);
+    if (voice) utter.voice = voice;
+    utter.lang = voice?.lang || "en-US";
     utter.onboundary = (e) => {
       const seg = segments.find((s) => e.charIndex >= s.start && e.charIndex < s.end);
       if (seg) setSpeakingLine(seg.lineIndex);
