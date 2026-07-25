@@ -27,40 +27,50 @@ const BANK_DETAILS = {
   accountType: "Transact",
 };
 
-const PRIZE_PAYOUT_PERCENTAGES = [0.25, 0.20, 0.15, 0.12, 0.10, 0.08, 0.06, 0.04]; // 1st..8th, sums to 100% at full entry
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
 
-// Knockout and groups_knockout leagues cap payouts at the top 2 places (a
-// bracket only gives a clean ranking to the champion and whoever they beat
-// in the final — everyone knocked out earlier is a genuine tie in how far
-// they got) and reserve a flat 5% of the pool for the organizer off the top.
-// The champion/runner-up split (75%/20%, leaving that 5%) is still scaled
-// by how much each of them personally put in — same "the more you put in,
-// the bigger your prize" rule as round-robin — and any shortfall from
-// underpayment still gets redistributed between just the two of them, the
-// same way computeCashPrizes' leftover model works for round-robin. The
-// organizer's cut is untouched by any of that scaling — it's a flat
-// service fee, not a contribution-scaled prize.
+// Every cash league — however it ends — reserves a flat 5% of the pool for
+// the organizer, untouched by anyone's contribution ratio, leaving the
+// remaining 95% to be split across a small number of places. Which places,
+// and how the 95% is divided between them, depends on how the league ends:
+// a round-robin table gives every club a real, defensible final position,
+// so it pays gold/silver/bronze (55%/25%/15%); a knockout bracket only
+// gives a clean ranking to the two finalists (everyone knocked out earlier
+// is a genuine tie in how far they got), so it pays just the champion and
+// runner-up (75%/20%). Either way, each place's share is still scaled by
+// how much that member personally put in — same "the more you put in, the
+// bigger your prize" rule — and any shortfall from underpayment gets
+// redistributed back across the paid places, proportional to their own
+// direct prize (see computeCashPrizes). Survivor leagues finish with a
+// round-robin stage, so they use the round-robin split too.
+const ORGANIZER_SHARE = 0.05;
 const KNOCKOUT_PRIZE_SPLIT = [0.75, 0.20]; // champion, runner-up — sums to 0.95, leaving the organizer's 0.05
-const KNOCKOUT_ORGANIZER_SHARE = 0.05;
+const ROUND_ROBIN_PRIZE_SPLIT = [0.55, 0.25, 0.15]; // gold, silver, bronze — sums to 0.95, leaving the organizer's 0.05
+
 function isKnockoutFormat(league) {
   return league.format === "knockout" || league.format === "groups_knockout";
 }
 
-// The organizer's flat 5% cut of a knockout/groups_knockout cash league's
-// pool — 0 for round-robin leagues (no organizer fee there) and 0 if the
-// league isn't cash or nobody's paid in yet. Flat off the total pool
-// regardless of anyone's individual contribution ratio.
-function organizerFee(league) {
-  if (!league || league.league_type !== "cash" || !isKnockoutFormat(league)) return 0;
-  const pool = (league.members || []).filter((m) => m.payment_status === "approved").reduce((sum, m) => sum + (m.entry_fee || 0), 0);
-  return pool * KNOCKOUT_ORGANIZER_SHARE;
+// Which prize-split array applies to this league's format — see the module
+// comment above ORGANIZER_SHARE for why knockout/groups_knockout differ
+// from every other (round-robin-ending) format.
+function cashPrizePercentages(league) {
+  return isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT : ROUND_ROBIN_PRIZE_SPLIT;
 }
 
-// Round-robin formats pay out up to 8 places; knockout/groups_knockout pay
-// just the top 2 (see KNOCKOUT_PRIZE_SPLIT above).
+// The organizer's flat 5% cut of any cash league's pool — 0 if the league
+// isn't cash or nobody's paid in yet. Flat off the total pool regardless of
+// anyone's individual contribution ratio.
+function organizerFee(league) {
+  if (!league || league.league_type !== "cash") return 0;
+  const pool = (league.members || []).filter((m) => m.payment_status === "approved").reduce((sum, m) => sum + (m.entry_fee || 0), 0);
+  return pool * ORGANIZER_SHARE;
+}
+
+// Round-robin-ending formats pay the top 3 (gold/silver/bronze);
+// knockout/groups_knockout pay just the top 2 (see cashPrizePercentages).
 function cashPrizePlaceCount(league) {
-  return isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT.length : PRIZE_PAYOUT_PERCENTAGES.length;
+  return cashPrizePercentages(league).length;
 }
 
 const THEMES = {
@@ -297,7 +307,12 @@ function resultEscalationReason(league, submission) {
   return null;
 }
 
-// Expired, unplayed fixtures count as a loss for both sides once past their deadline.
+// Expired, unplayed fixtures count as a loss for both sides once past their
+// deadline — and, per the no-show rule, both sides also concede 4 goals
+// (scoring 0 themselves), so each ends up with a -4 goal difference for
+// this fixture. This is a standings-table penalty only, not a real
+// scoreline — the fixture itself stays unplayed/scoreless in the database;
+// isExpired just tells computeStandings to treat it this way live.
 function computeStandings(teams, fixtures) {
   const table = {};
   teams.forEach((t) => { table[t.id] = { id: t.id, name: t.name, eliminated: t.eliminated, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
@@ -315,6 +330,7 @@ function computeStandings(teams, fixtures) {
       else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
     } else if (isExpired(f)) {
       h.p++; a.p++; h.l++; a.l++;
+      h.ga += 4; a.ga += 4; // no-show penalty: both concede 4, no points either way
     }
   });
   const rows = Object.values(table);
@@ -505,18 +521,18 @@ function goalExtremes(rows) {
 
 
 // member id -> { rank, contribution, directPrize, redistributed, total }
-// for every member who actually won a place (top 8 by ranking for
-// round-robin leagues, champion + runner-up for knockout/groups_knockout —
-// see cashPrizePlaceCount — among approved/paid members only). Every place
-// is scaled by how much that member personally put in (entryRatio below),
-// and any shortfall from underpayment gets redistributed back across the
-// winners, proportional to their own direct prize — see the module comment
-// near KNOCKOUT_PRIZE_SPLIT for how the organizer's flat 5% reservation
-// fits into that for knockout formats. Works off whatever fixtures
-// currently exist, so callers decide whether that's a live projection or
-// the final result — see memberBalance and the "started/complete"
-// lifecycle below. Does NOT include the organizer's cut for knockout
-// formats — that's a flat fee, not a member prize, computed separately by
+// for every member who actually won a place (top 3 — gold/silver/bronze —
+// for round-robin-ending leagues, champion + runner-up for
+// knockout/groups_knockout — see cashPrizePercentages — among
+// approved/paid members only). Every place is scaled by how much that
+// member personally put in (entryRatio below), and any shortfall from
+// underpayment gets redistributed back across the winners, proportional to
+// their own direct prize — see the module comment near ORGANIZER_SHARE for
+// how the organizer's flat 5% reservation fits into that. Works off
+// whatever fixtures currently exist, so callers decide whether that's a
+// live projection or the final result — see memberBalance and the
+// "started/complete" lifecycle below. Does NOT include the organizer's
+// cut — that's a flat fee, not a member prize, computed separately by
 // organizerFee().
 function computeCashPrizes(league) {
   const results = new Map();
@@ -528,12 +544,11 @@ function computeCashPrizes(league) {
     .filter((m) => m.payment_status === "approved" && m.team_id)
     .map((m) => [m.team_id, m]));
 
-  const percentages = isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT : PRIZE_PAYOUT_PERCENTAGES;
-  // Round-robin reserves nothing for an organizer, so the full pool is up
-  // for leftover-redistribution; knockout reserves the flat 5% organizer
-  // cut first, so only the remaining 95% is what underpaid winners'
-  // shortfall gets redistributed out of.
-  const distributable = pool * (1 - (isKnockoutFormat(league) ? KNOCKOUT_ORGANIZER_SHARE : 0));
+  const percentages = cashPrizePercentages(league);
+  // The organizer's flat 5% is reserved off the top of every cash league
+  // now, so only the remaining 95% is what underpaid winners' shortfall
+  // gets redistributed out of.
+  const distributable = pool * (1 - ORGANIZER_SHARE);
 
   const winners = [];
   for (const teamId of rankedTeamIds) {
@@ -5045,9 +5060,9 @@ function PrizeBreakdownPanel({ league, c }) {
     .map((m) => ({ m, prize: prizes.get(m.id) }))
     .sort((a, b) => (a.prize?.rank || 99) - (b.prize?.rank || 99));
   const pool = rows.reduce((sum, r) => sum + (r.m.entry_fee || 0), 0);
-  const maxPlaces = cashPrizePlaceCount(league);
   const knockoutFormat = isKnockoutFormat(league);
   const orgFee = organizerFee(league);
+  const medal = (rank) => (rank === 1 ? "🥇 " : rank === 2 ? "🥈 " : rank === 3 ? "🥉 " : `#${rank} `);
 
   return (
     <div className="rounded-xl border mt-4" style={{ borderColor: c.border }}>
@@ -5060,7 +5075,7 @@ function PrizeBreakdownPanel({ league, c }) {
       <div className="px-4 pb-3 font-mono text-[11px]" style={{ color: c.textFaint }}>
         {knockoutFormat
           ? `Pool ${formatRand(pool)} · 75% champion · 20% runner-up · 5% organizer fee`
-          : `Pool ${formatRand(pool)} · top ${Math.min(maxPlaces, rows.length)} place${Math.min(maxPlaces, rows.length) === 1 ? "" : "s"} paid`}
+          : `Pool ${formatRand(pool)} · 55% gold · 25% silver · 15% bronze · 5% organizer fee`}
         {!complete ? " · updates live as results come in" : ""}
       </div>
       <div className="overflow-x-auto">
@@ -5077,14 +5092,14 @@ function PrizeBreakdownPanel({ league, c }) {
           <tbody>
             {rows.map(({ m, prize }) => (
               <tr key={m.id} className="border-t" style={{ borderColor: c.border }}>
-                <td className="px-4 py-2">{prize ? `#${prize.rank} ` : ""}{m.display_name}</td>
+                <td className="px-4 py-2">{prize ? medal(prize.rank) : ""}{m.display_name}</td>
                 <td className="text-right px-2 py-2">{formatRand(m.entry_fee || 0)}</td>
                 <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.directPrize)) : "—"}</td>
                 <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.redistributed)) : "—"}</td>
                 <td className="text-right px-4 py-2 font-semibold" style={{ color: prize ? c.greenText : c.text }}>{formatRand(Math.round(prize?.total || 0))}</td>
               </tr>
             ))}
-            {knockoutFormat && orgFee > 0 && (
+            {orgFee > 0 && (
               <tr className="border-t" style={{ borderColor: c.border }}>
                 <td className="px-4 py-2" style={{ color: c.textFaint }}>Organizer fee (5%)</td>
                 <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
@@ -5331,7 +5346,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {expiredCount > 0 && (
         <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.redSoft, color: c.red }}>
-          <Clock size={13} /> {expiredCount} fixture{expiredCount === 1 ? "" : "s"} passed the 2-day deadline unplayed — both clubs recorded a loss automatically.
+          <Clock size={13} /> {expiredCount} fixture{expiredCount === 1 ? "" : "s"} passed the 2-day deadline unplayed — both clubs recorded a loss and conceded 4 goals automatically.
         </div>
       )}
 
@@ -6216,7 +6231,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {result.myFixtures.map((f) => (
                   <div key={f.id} className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     {twoLegged ? `Leg ${f.leg} (${f.home_team_id === result.team.id ? "Home" : "Away"}): ` : ""}
-                    {f.played ? `${f.home_score} – ${f.away_score}` : isExpired(f) ? <span style={{ color: c.red }}>Expired — recorded as a loss</span> : `Due by ${fmtDate(f.due_at)}`}
+                    {f.played ? `${f.home_score} – ${f.away_score}` : isExpired(f) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span> : `Due by ${fmtDate(f.due_at)}`}
                   </div>
                 ))}
                 {canSeePhones && (
@@ -6362,7 +6377,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
               <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
                 <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
                   {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}` : isExpired(fixture) ? " — expired, recorded as a loss" : ` — due ${fmtDate(fixture.due_at)}`}
+                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}` : isExpired(fixture) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
                 </div>
                 {canManage && (
                   <div className="flex items-center gap-2">
