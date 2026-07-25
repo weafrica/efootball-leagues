@@ -5,7 +5,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2,
+  TrendingUp, Swords, Volume2, Pause, Play, Square,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -1134,6 +1134,62 @@ function pickBestVoice(voices) {
   return enFemale || enVoices[0] || voices[0];
 }
 
+// Persisted across sessions so a player's chosen playback speed and recent
+// lookups are still there next time they open Rules.
+const RULES_SPEED_KEY = "efootball-rules-speed-v1";
+const RULES_RECENT_SEARCHES_KEY = "efootball-rules-recent-searches-v1";
+
+const SPEED_OPTIONS = [
+  { id: "slow", label: "Slow", rate: 0.75 },
+  { id: "normal", label: "Normal", rate: 1 },
+  { id: "fast", label: "Fast", rate: 1.35 },
+];
+const SPEED_RATES = Object.fromEntries(SPEED_OPTIONS.map((o) => [o.id, o.rate]));
+
+// Shown as chips under the search box before a player has searched anything
+// yet — the most common things people look up, until real recent-search
+// history takes over.
+const DEFAULT_SEARCH_CHIPS = ["forfeit", "screenshot", "deadline", "aggregate"];
+
+// Maps how players actually phrase things to the word that's really in the
+// rules text, so a search that comes up empty can still nudge them toward
+// the right term instead of just saying "no results".
+const SEARCH_ALIASES = {
+  "no show": "forfeit", "noshow": "forfeit", "no-show": "forfeit", "didn't show": "forfeit",
+  "not show": "forfeit", "afk": "forfeit", "quit": "forfeit", "rage quit": "forfeit", "ragequit": "forfeit",
+  "away goals": "aggregate", "away goal": "aggregate", "tie": "aggregate", "draw": "aggregate", "level": "aggregate",
+  "disconnect": "connection", "internet": "connection", "lag": "connection", "wifi": "connection", "dc": "connection",
+  "proof": "screenshot", "photo": "screenshot", "picture": "screenshot", "pic": "screenshot",
+  "money": "entry fee", "payout": "prize", "split": "prize", "cut": "organizer",
+  "late": "deadline", "time up": "deadline", "expired": "deadline", "out of time": "deadline",
+  "cheat": "foul play", "cheating": "foul play", "hacking": "foul play",
+  "rank": "standings", "position": "standings", "leaderboard": "standings",
+};
+
+// Best-effort, anonymous search-term logging — no personal data, just the
+// term and whether it matched anything, so admins can spot which rules
+// keep tripping players up (e.g. lots of "away goals" or "disconnect"
+// searches signals the rule text itself needs clarifying). Wrapped so a
+// missing table or offline connection never interrupts the player's search.
+async function logRulesSearch(term, hadResults) {
+  try {
+    await supabase.from("rules_search_logs").insert({ term, had_results: hadResults });
+  } catch (e) {
+    // Table may not exist yet, or the player's offline — logging is
+    // best-effort and silent either way.
+  }
+}
+
+// When a search comes up empty, suggest the real rules term the player
+// probably meant, based on SEARCH_ALIASES — falls back to null if nothing
+// in the alias map is a plausible match.
+function suggestForQuery(q) {
+  for (const [phrase, term] of Object.entries(SEARCH_ALIASES)) {
+    if (q.includes(phrase) || phrase.includes(q)) return term;
+  }
+  return null;
+}
+
 function RulesModal({ type, onClose, c }) {
   const data = RULES_CONTENT[type];
   const [query, setQuery] = useState("");
@@ -1191,6 +1247,72 @@ function RulesModal({ type, onClose, c }) {
   const [speakingKey, setSpeakingKey] = useState(null);
   const [speakingLine, setSpeakingLine] = useState(null);
 
+  // Playback speed — persisted so a player's choice sticks next time they
+  // open Rules, not just for this session.
+  const [speed, setSpeed] = useState(() => {
+    if (typeof window === "undefined") return "normal";
+    const saved = window.localStorage.getItem(RULES_SPEED_KEY);
+    return SPEED_RATES[saved] ? saved : "normal";
+  });
+
+  // "Read all" plays every section of this category in order, like a
+  // podcast, instead of one heading at a time. queueRef holds the ordered
+  // list of sections currently queued; queueIndexRef tracks progress
+  // through it for the "3 of 7" style progress label.
+  const [isReadingAll, setIsReadingAll] = useState(false);
+  const queueRef = useRef([]);
+  const queueIndexRef = useRef(0);
+  const currentSectionRef = useRef(null);
+  // Bumped on every stop/start so a cancel()-triggered onend from a
+  // *previous* utterance can't advance a queue or clear state that
+  // belongs to whatever started after it.
+  const playTokenRef = useRef(0);
+
+  // True pause/resume (rather than a hard stop) is desktop-only — see the
+  // isMobileDevice comment further down for why it's unreliable on phones.
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+
+  // Recent searches remembered across sessions, shown as tappable chips so
+  // players don't have to retype a common lookup. Falls back to a short
+  // list of common terms until there's any history yet.
+  const [recentSearches, setRecentSearches] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(RULES_RECENT_SEARCHES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const addRecentSearch = (term) => {
+    const clean = term.trim().toLowerCase();
+    if (clean.length < 2) return;
+    setRecentSearches((prev) => {
+      const next = [clean, ...prev.filter((t) => t !== clean)].slice(0, 6);
+      try { window.localStorage.setItem(RULES_RECENT_SEARCHES_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
+      return next;
+    });
+  };
+
+  // A short debounce after the player stops typing: log the term (for the
+  // "what confuses players" signal) and, if it's worth remembering, save
+  // it as a recent search chip.
+  useEffect(() => {
+    if (!q || q.length < 2) return undefined;
+    const t = setTimeout(() => {
+      addRecentSearch(query);
+      logRulesSearch(query.trim().toLowerCase(), !!(searchResults && searchResults.length));
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  // Keyboard navigation through search results — which result index (if
+  // any) is highlighted by arrow keys. Resets whenever the query changes.
+  const [activeIndex, setActiveIndex] = useState(-1);
+  useEffect(() => { setActiveIndex(-1); }, [q]);
+
   // The list of voices a browser exposes often isn't ready on first render
   // — it loads asynchronously — so we listen for the change event too and
   // pick the best natural-sounding one once it's available. Some older
@@ -1233,15 +1355,17 @@ function RulesModal({ type, onClose, c }) {
     if (resumeWatchdogRef.current) { clearInterval(resumeWatchdogRef.current); resumeWatchdogRef.current = null; }
   };
 
-  const speak = (key, heading, items) => {
+  // Core playback: builds the text + line-boundary segments for one
+  // section and speaks it, calling onFinish when it naturally ends (or
+  // errors). Both the single-section speak() and the "read all" queue
+  // funnel through this so pause/resume/speed/highlighting all work the
+  // same way regardless of which triggered it.
+  const runUtterance = (key, heading, items, onFinish, rateOverride) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     clearResumeWatchdog();
-    if (speakingKey === key) { setSpeakingKey(null); setSpeakingLine(null); return; }
+    const token = ++playTokenRef.current;
 
-    // Build the full text to read, remembering the character range each
-    // line (heading, then each item) occupies within it, so a boundary
-    // event's charIndex can be mapped back to "which line is this".
     const segments = [];
     let text = "";
     const addLine = (lineText, lineIndex) => {
@@ -1256,24 +1380,114 @@ function RulesModal({ type, onClose, c }) {
     const voice = pickBestVoice(voices);
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
+    utter.rate = rateOverride ?? SPEED_RATES[speed] ?? 1;
     utter.onboundary = (e) => {
+      if (playTokenRef.current !== token) return;
       const seg = segments.find((s) => e.charIndex >= s.start && e.charIndex < s.end);
       if (seg) setSpeakingLine(seg.lineIndex);
     };
-    utter.onend = () => { setSpeakingKey(null); setSpeakingLine(null); clearResumeWatchdog(); utteranceRef.current = null; };
-    utter.onerror = () => { setSpeakingKey(null); setSpeakingLine(null); clearResumeWatchdog(); utteranceRef.current = null; };
+    utter.onend = () => {
+      if (playTokenRef.current !== token) return;
+      clearResumeWatchdog();
+      utteranceRef.current = null;
+      onFinish();
+    };
+    utter.onerror = () => {
+      if (playTokenRef.current !== token) return;
+      clearResumeWatchdog();
+      utteranceRef.current = null;
+      onFinish();
+    };
     utteranceRef.current = utter;
+    currentSectionRef.current = { key, heading, items, onFinish };
     setSpeakingKey(key);
     setSpeakingLine(-1);
+    setIsPaused(false);
+    isPausedRef.current = false;
     window.speechSynthesis.speak(utter);
     if (!isMobileDevice) {
       resumeWatchdogRef.current = setInterval(() => {
+        if (playTokenRef.current !== token) { clearResumeWatchdog(); return; }
+        if (isPausedRef.current) return;
         if (!window.speechSynthesis.speaking) { clearResumeWatchdog(); return; }
         window.speechSynthesis.pause();
         window.speechSynthesis.resume();
       }, 5000);
     }
   };
+
+  // Hard stop — cancels speech entirely and clears all reading state,
+  // including a "read all" queue in progress. Used by the persistent
+  // "Reading… ⏹" bar's stop control.
+  const stopReading = () => {
+    playTokenRef.current++;
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    clearResumeWatchdog();
+    queueRef.current = [];
+    queueIndexRef.current = 0;
+    currentSectionRef.current = null;
+    setIsReadingAll(false);
+    setSpeakingKey(null);
+    setSpeakingLine(null);
+    setIsPaused(false);
+    isPausedRef.current = false;
+  };
+
+  // Reads (or stops) a single section — the speaker icon next to each
+  // heading.
+  const speak = (key, heading, items) => {
+    if (speakingKey === key && !isReadingAll) { stopReading(); return; }
+    setIsReadingAll(false);
+    queueRef.current = [];
+    runUtterance(key, heading, items, () => { setSpeakingKey(null); setSpeakingLine(null); currentSectionRef.current = null; });
+  };
+
+  // Advances through the "read all" queue one section at a time.
+  const playAt = (index) => {
+    const queue = queueRef.current;
+    if (index >= queue.length) { stopReading(); return; }
+    queueIndexRef.current = index;
+    playAt._current = queue[index];
+    runUtterance(queue[index].key, queue[index].heading, queue[index].items, () => playAt(index + 1));
+  };
+
+  // "Read all" — queues every section in this category and reads them
+  // start to finish, like a podcast, rather than one heading at a time.
+  const startReadAll = () => {
+    if (!data.sections.length) return;
+    queueRef.current = data.sections.map((s) => ({ key: `${type}|${s.heading}`, heading: s.heading, items: s.items }));
+    setIsReadingAll(true);
+    playAt(0);
+  };
+
+  // Pause/resume is desktop-only — see isMobileDevice above: on phones,
+  // pause()/resume() can silently kill playback instead of resuming it, so
+  // mobile players just get the stop control.
+  const togglePause = () => {
+    if (typeof window === "undefined" || !window.speechSynthesis || isMobileDevice) return;
+    if (isPausedRef.current) {
+      window.speechSynthesis.resume();
+      isPausedRef.current = false;
+      setIsPaused(false);
+    } else {
+      window.speechSynthesis.pause();
+      isPausedRef.current = true;
+      setIsPaused(true);
+    }
+  };
+
+  // Changing speed mid-read restarts the current section (or queue item)
+  // at the new rate — small UX cost, but simplest way to keep the rate in
+  // sync since the browser can't change an utterance's rate once started.
+  const changeSpeed = (newSpeed) => {
+    setSpeed(newSpeed);
+    try { window.localStorage.setItem(RULES_SPEED_KEY, newSpeed); } catch (e) { /* ignore */ }
+    if (currentSectionRef.current) {
+      const cur = currentSectionRef.current;
+      runUtterance(cur.key, cur.heading, cur.items, cur.onFinish, SPEED_RATES[newSpeed]);
+    }
+  };
+
   // Stop any in-progress reading if the player closes the modal mid-sentence.
   useEffect(() => {
     return () => {
@@ -1282,8 +1496,36 @@ function RulesModal({ type, onClose, c }) {
     };
   }, []);
 
+  // Esc closes the modal from anywhere inside it; Enter/arrow keys (added
+  // on the search input below) move through search results.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   if (!data) return null;
   const Icon = data.icon;
+  const suggestion = q && searchResults && !searchResults.length ? suggestForQuery(q) : null;
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === "ArrowDown") {
+      if (!q || !searchResults || !searchResults.length) return;
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, searchResults.length - 1));
+    } else if (e.key === "ArrowUp") {
+      if (!q || !searchResults || !searchResults.length) return;
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      if (!q || !searchResults || !searchResults.length) return;
+      e.preventDefault();
+      const r = searchResults[activeIndex >= 0 ? activeIndex : 0];
+      pinSection(`${r.catKey}|${r.heading}`);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
@@ -1296,12 +1538,13 @@ function RulesModal({ type, onClose, c }) {
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
 
-        <div className="relative mb-4 shrink-0">
+        <div className="relative mb-2 shrink-0">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
           <input
             type="text"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setPinnedKey(null); }}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search rules — e.g. forfeit, screenshot, deadline..."
             className="w-full font-body text-sm rounded-xl pl-9 pr-8 py-2.5 outline-none"
             style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}
@@ -1313,15 +1556,69 @@ function RulesModal({ type, onClose, c }) {
           )}
         </div>
 
-        <div ref={listRef} className="space-y-5 overflow-y-auto">
+        {!query && (
+          <div className="flex flex-wrap gap-1.5 mb-4 shrink-0">
+            {(recentSearches.length ? recentSearches : DEFAULT_SEARCH_CHIPS).map((term) => (
+              <button
+                key={term}
+                onClick={() => setQuery(term)}
+                className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
+                style={{ background: c.surface, color: c.textFaint, border: `1px solid ${c.border}` }}
+              >
+                {term}
+              </button>
+            ))}
+          </div>
+        )}
+        {query && <div className="mb-4 shrink-0" />}
+
+        <div ref={listRef} className="space-y-5 overflow-y-auto relative">
+          {speakingKey && (
+            <div
+              className="sticky top-0 z-10 flex items-center gap-2 rounded-xl px-3 py-2 mb-1 font-body text-xs"
+              style={{ background: c.bg, border: `1px solid ${c.borderStrong}`, boxShadow: `0 2px 8px rgba(0,0,0,0.15)` }}
+            >
+              <Volume2 size={13} style={{ color: c.accent }} className="shrink-0" />
+              <div className="flex-1 min-w-0 truncate" style={{ color: c.textDim }}>
+                {isReadingAll
+                  ? `Reading ${queueIndexRef.current + 1} of ${queueRef.current.length} — ${currentSectionRef.current?.heading || ""}`
+                  : `Reading — ${currentSectionRef.current?.heading || ""}`}
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0 rounded-full p-0.5" style={{ background: c.surface }}>
+                {SPEED_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => changeSpeed(opt.id)}
+                    className="font-mono text-[9px] uppercase px-1.5 py-1 rounded-full"
+                    style={{ background: speed === opt.id ? c.accent : "transparent", color: speed === opt.id ? c.accentText : c.textFaint }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              {!isMobileDevice && (
+                <button onClick={togglePause} className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }} aria-label={isPaused ? "Resume reading" : "Pause reading"}>
+                  {isPaused ? <Play size={11} /> : <Pause size={11} />}
+                </button>
+              )}
+              <button onClick={stopReading} className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }} aria-label="Stop reading">
+                <Square size={11} />
+              </button>
+            </div>
+          )}
           {q ? (
             searchResults.length ? (
               searchResults.map((r, ri) => {
                 const RIcon = r.catIcon;
                 const rKey = `${r.catKey}|${r.heading}`;
                 const isActiveSection = speakingKey === rKey;
+                const isKeyboardActive = activeIndex === ri;
                 return (
-                  <div key={`${r.catKey}-${r.heading}-${ri}`}>
+                  <div
+                    key={`${r.catKey}-${r.heading}-${ri}`}
+                    className="rounded-lg"
+                    style={isKeyboardActive ? { outline: `1px solid ${c.accent}`, outlineOffset: 2 } : undefined}
+                  >
                     <div className="flex items-center gap-2 mb-2">
                       <button
                         onClick={() => pinSection(pinnedKey === rKey ? null : rKey)}
@@ -1360,11 +1657,31 @@ function RulesModal({ type, onClose, c }) {
               })
             ) : (
               <div className="font-body text-sm text-center py-8" style={{ color: c.textFaint }}>
-                No rules match "{query}".
+                <div>No rules match "{query}".</div>
+                {suggestion && (
+                  <button
+                    onClick={() => setQuery(suggestion)}
+                    className="font-body text-sm mt-2 underline decoration-dotted underline-offset-2"
+                    style={{ color: c.accent }}
+                  >
+                    Try "{suggestion}" instead?
+                  </button>
+                )}
               </div>
             )
           ) : (
-            data.sections.map((s) => {
+            <>
+              <div className="flex items-center justify-between -mt-1">
+                <button
+                  onClick={isReadingAll ? stopReading : startReadAll}
+                  className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded-full px-2.5 py-1"
+                  style={{ background: isReadingAll ? c.accent : c.surface, color: isReadingAll ? c.accentText : c.textDim, border: `1px solid ${c.border}` }}
+                >
+                  {isReadingAll ? <Square size={11} /> : <Volume2 size={11} />}
+                  {isReadingAll ? "Stop reading all" : `Read all (${data.sections.length} sections)`}
+                </button>
+              </div>
+              {data.sections.map((s) => {
               const sKey = `${type}|${s.heading}`;
               const isActiveSection = speakingKey === sKey;
               return (
@@ -1402,7 +1719,8 @@ function RulesModal({ type, onClose, c }) {
                   </ul>
                 </div>
               );
-            })
+            })}
+            </>
           )}
         </div>
       </div>
