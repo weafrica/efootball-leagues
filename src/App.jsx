@@ -1134,15 +1134,20 @@ function RulesModal({ type, onClose, c }) {
   // just the one this modal was opened from — a player typing "forfeit"
   // should find it even if they opened this from the Ladder screen. Each
   // hit is tagged with which category it came from so results stay legible
-  // once they're mixed together.
+  // once they're mixed together. Clicking a heading pins that section AND
+  // expands it to show every rule under it (not just the matching ones) —
+  // the typed word still gets highlighted wherever it shows up.
   const searchResults = useMemo(() => {
     if (!q) return null;
     const out = [];
     for (const key of Object.keys(RULES_CONTENT)) {
       const cat = RULES_CONTENT[key];
       for (const s of cat.sections) {
-        const items = s.items.filter((it) => it.toLowerCase().includes(q));
-        if (items.length) out.push({ catKey: key, catTitle: cat.title, catIcon: cat.icon, heading: s.heading, items });
+        const matched = s.items.filter((it) => it.toLowerCase().includes(q));
+        if (matched.length) {
+          const isPinned = pinnedKey === `${key}|${s.heading}`;
+          out.push({ catKey: key, catTitle: cat.title, catIcon: cat.icon, heading: s.heading, items: isPinned ? s.items : matched, expanded: isPinned });
+        }
       }
     }
     // Pinned section (if it's still in the results) floats to the top.
@@ -1253,7 +1258,7 @@ function RulesModal({ type, onClose, c }) {
                   <div key={`${r.catKey}-${r.heading}-${ri}`}>
                     <div className="flex items-center gap-2 mb-2">
                       <button
-                        onClick={() => setPinnedKey(rKey)}
+                        onClick={() => setPinnedKey(pinnedKey === rKey ? null : rKey)}
                         className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] rounded px-1 -mx-1 min-w-0"
                         style={{ color: c.accent, background: isActiveSection && speakingLine === -1 ? c.surface : "transparent" }}
                       >
