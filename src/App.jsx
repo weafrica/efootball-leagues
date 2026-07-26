@@ -288,6 +288,24 @@ function resultConfirmHoursLeft(submission) {
   return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
 }
 
+// Direct/ladder challenges and open (random) challenges get the same 24h
+// window as league fixtures above — both tables store the report time in
+// result_reported_at, so one set of helpers covers both. Once expired, the
+// result is no longer the opponent's to confirm/dispute; it moves into the
+// admin review queue instead (see adminApproveChallengeResult and friends).
+function challengeResultConfirmDeadline(ch) {
+  return new Date(new Date(ch.result_reported_at).getTime() + RESULT_CONFIRM_WINDOW_HOURS * 60 * 60 * 1000);
+}
+function challengeResultConfirmExpired(ch) {
+  if (!ch.result_reported_at) return false;
+  return Date.now() >= challengeResultConfirmDeadline(ch).getTime();
+}
+function challengeResultHoursLeft(ch) {
+  if (!ch.result_reported_at) return null;
+  const ms = challengeResultConfirmDeadline(ch).getTime() - Date.now();
+  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
+}
+
 // If the same fixture has already had this many submissions disputed by the
 // opponent, the next one skips the 24h window entirely and goes straight to
 // the admin queue — two honest mistakes is a reasonable benefit of the
@@ -2242,29 +2260,8 @@ export default function App() {
     setChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
   };
 
-  // Calls the verify-result Edge Function, which (server-side, using the
-  // service role so it isn't bound by the "can't confirm your own report"
-  // RLS rule) re-reads the row we just wrote, downloads the screenshot we
-  // just uploaded, asks Claude to read the two on-screen usernames and
-  // scores off it, and — only on a clean match against what's actually
-  // saved on the row — flips result_status to "confirmed" right there.
-  // Runs after the normal "pending" write below, so if verification fails,
-  // errors, or the function simply isn't deployed, the result just sits
-  // pending exactly like it always has, waiting on the other player.
-  const verifyResultScreenshot = async (table, id) => {
-    try {
-      const { data, error } = await supabase.functions.invoke("verify-result", { body: { table, id } });
-      if (error || !data) return { verified: false };
-      return data;
-    } catch {
-      return { verified: false };
-    }
-  };
-
   // Either side of an accepted challenge can log the score first — it lands as
-  // "pending" until the other player confirms it (see confirmChallengeResult),
-  // unless the uploaded screenshot itself clearly backs up both usernames and
-  // both scores, in which case verifyResultScreenshot auto-confirms it below.
+  // "pending" until the other player confirms it (see confirmChallengeResult).
   // Scores are stored from the challenger's perspective (challenger_score /
   // opponent_score) regardless of who reports them, so the row has one
   // unambiguous scoreline no matter which side typed it in.
@@ -2287,10 +2284,8 @@ export default function App() {
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
 
-    const { verified } = await verifyResultScreenshot("challenges", challenge.id);
     await loadChallenges();
-    if (verified && challenge.is_ladder) await loadLadder();
-    showToast(verified ? "Screenshot matched — result auto-approved." : "Result logged — waiting for them to confirm.");
+    showToast("Result logged — waiting for them to confirm.");
   };
 
   // The player who *didn't* report the score confirms it — this is enforced
@@ -2325,6 +2320,28 @@ export default function App() {
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadChallenges();
     showToast("Result disputed — ask them to re-log it.");
+  };
+
+  // Admin-only fallback once challengeResultConfirmExpired(challenge) is true —
+  // the opponent had 24h to confirm/dispute and didn't, so an admin can
+  // settle it directly from the screenshot instead. Same two outcomes as
+  // the opponent's own confirm/dispute above.
+  const adminApproveChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("challenges")
+      .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
+    await loadChallenges();
+    if (challenge.is_ladder) await loadLadder();
+    showToast("Result approved.");
+  };
+  const adminRejectChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("challenges")
+      .update({ challenger_score: null, opponent_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
+    await loadChallenges();
+    showToast("Result rejected — they'll need to log it again.");
   };
 
   // The "random challenge" pool: broadcasts open to every other member, plus
@@ -2593,9 +2610,8 @@ export default function App() {
     const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
 
-    const { verified } = await verifyResultScreenshot("open_challenges", challenge.id);
     await loadOpenChallenges();
-    showToast(verified ? "Screenshot matched — result auto-approved." : "Result logged — waiting for them to confirm.");
+    showToast("Result logged — waiting for them to confirm.");
   };
 
   const confirmOpenChallengeResult = async (challenge) => {
@@ -2614,6 +2630,24 @@ export default function App() {
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadOpenChallenges();
     showToast("Result disputed — ask them to re-log it.");
+  };
+
+  // Admin-only fallback, same rule as adminApproveChallengeResult above.
+  const adminApproveOpenChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("open_challenges")
+      .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
+    await loadOpenChallenges();
+    showToast("Result approved.");
+  };
+  const adminRejectOpenChallengeResult = async (challenge) => {
+    const { error } = await supabase.from("open_challenges")
+      .update({ creator_score: null, accepted_by_score: null, result_status: null, result_reported_by: null, result_reported_at: null, result_photo_path: null })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
+    await loadOpenChallenges();
+    showToast("Result rejected — they'll need to log it again.");
   };
 
   useEffect(() => {
@@ -3574,6 +3608,8 @@ export default function App() {
             onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
             onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
             onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
+            onAdminApproveResult={adminApproveChallengeResult} onAdminRejectResult={adminRejectChallengeResult}
+            onAdminApproveResultOpen={adminApproveOpenChallengeResult} onAdminRejectResultOpen={adminRejectOpenChallengeResult}
             onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={() => setView("home")} showToast={showToast} c={c} />
@@ -4372,7 +4408,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -4412,6 +4448,15 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
     .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+  // Admin-only: results whose 24h opponent-confirm window has passed without
+  // a response — these move here instead of staying stuck waiting forever.
+  const escalatedChallenges = isAdmin
+    ? challenges.filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
+    : [];
+  const escalatedOpenChallenges = isAdmin
+    ? (openChallenges || []).filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
+    : [];
+
   const fireRandom = async () => {
     setSendingRandom(true);
     await onSendRandom();
@@ -4440,6 +4485,26 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
         <RulesButton label="Challenge Rules" onClick={() => setRulesOpen(true)} c={c} />
       </div>
       {rulesOpen && <RulesModal type="challenge" onClose={() => setRulesOpen(false)} c={c} />}
+
+      {isAdmin && (escalatedChallenges.length > 0 || escalatedOpenChallenges.length > 0) && (
+        <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
+            <AlertTriangle size={13} /> Needs admin review — opponent didn't respond within 24h
+          </div>
+          <div className="flex flex-col gap-2">
+            {escalatedChallenges.map((ch) => (
+              <AdminEscalatedResultRow key={`ch-${ch.id}`} nameA={ch.challenger_username} nameB={ch.opponent_username}
+                scoreA={ch.challenger_score} scoreB={ch.opponent_score} reportedByUsername={ch.result_reported_by === ch.challenger_id ? ch.challenger_username : ch.opponent_username}
+                onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
+            ))}
+            {escalatedOpenChallenges.map((ch) => (
+              <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
+                scoreA={ch.creator_score} scoreB={ch.accepted_by_score} reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
+                onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
         <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Random challenge</div>
@@ -5060,11 +5125,19 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
               {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
             </div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
+          {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
+          )}
+          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const h = challengeResultHoursLeft(ch); return h !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: h <= 3 ? c.red : c.textFaint }}>
+              {iReported ? `Goes to admin in ${h}h if they don't respond` : `Confirm within ${h}h or it goes to admin`}
+            </div>
+          ); })()}
+          {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
           )}
           {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
           {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
@@ -5082,7 +5155,7 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
             <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
@@ -5109,6 +5182,26 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
           <Camera size={13} /> View photo proof
         </button>
       )}
+    </div>
+  );
+}
+
+// A pending challenge/open-challenge result that's blown past its 24h
+// opponent-confirm window, shown to admins for a manual call — same
+// approve/reject choice the opponent would have had, just made by an admin
+// instead since the opponent didn't act in time.
+function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, onApprove, onReject, onViewProof, c }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+  return (
+    <div className="rounded-lg p-3 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm font-semibold truncate">{nameA} {scoreA} – {scoreB} {nameB}</div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Reported by {reportedByUsername}</div>
+      </div>
+      <button onClick={onViewProof} title="View photo proof" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Camera size={14} /></button>
+      <button onClick={() => run(onApprove)} disabled={busy} title="Approve" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+      <button onClick={() => run(onReject)} disabled={busy} title="Reject" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
     </div>
   );
 }
@@ -5168,17 +5261,20 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
           {ch.status === "accepted" && ch.result_status === "expired" && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>Expired, no result logged — you both dropped a spot</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
+          {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.result_reported_at, 2); return d !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 1 ? c.red : c.textFaint }}>
-              {iReported ? `Auto-confirms in ${d}d if they don't respond` : `Confirm within ${d}d or it auto-confirms`}
+          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const h = challengeResultHoursLeft(ch); return h !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: h <= 3 ? c.red : c.textFaint }}>
+              {iReported ? `Goes to admin in ${h}h if they don't respond` : `Confirm within ${h}h or it goes to admin`}
             </div>
           ); })()}
+          {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
+          )}
           {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
           {ch.status === "accepted" && !ch.result_status && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.responded_at, 7); return d !== null && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>{d}d left to log a result, or you both drop a spot</div>
@@ -5208,7 +5304,7 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && (
+        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
             <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
