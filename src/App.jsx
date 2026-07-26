@@ -5620,6 +5620,260 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Shareable leaderboard/ladder image export.
+//
+// Lets anyone download a themed PNG snapshot of a 10-club/10-player slice of
+// the Ladder or a league's standings table — same columns, same colours as
+// the on-screen table, just baked into an image they can post or send on
+// WhatsApp. Rendered with plain Canvas2D (no extra dependencies): we draw a
+// header, the column headings, up to 10 rows, and a small WeAfrica footer,
+// all pulled from the same theme object (`c`) the rest of the app uses so a
+// dark-mode screenshot looks dark and a light-mode one looks light.
+const SHARE_PAGE_SIZE = 10;
+const SHARE_BRAND = "weafrica.co.za";
+
+// Shrinks `text` with a trailing ellipsis until it fits inside `maxWidth`
+// for whatever font is currently set on `ctx` — canvas has no built-in
+// text-overflow, so this is the manual equivalent.
+function fitCanvasText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+  return t + "…";
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Column shape: { key, label, width (px), align: 'left'|'center',
+// isRank (gets a medal for top 3), isName (bold, left-aligned, primary
+// text colour), bold (points-style emphasis), get(row) => display string }.
+// Column widths across a config should sum to 968 (the table width below).
+const SHARE_STANDINGS_COLUMNS = [
+  { key: "rank", label: "#", width: 64, align: "center", isRank: true },
+  { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " · OUT" : r.atRisk ? " · AT RISK" : "") },
+  { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
+  { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
+  { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
+  { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
+  { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
+  { key: "pts", label: "Pts", width: 96, align: "center", bold: true, get: (r) => String(r.pts) },
+];
+const SHARE_LADDER_COLUMNS = [
+  { key: "rank", label: "#", width: 70, align: "center", isRank: true },
+  { key: "username", label: "Player", width: 588, align: "left", isName: true, get: (r) => r.username },
+  { key: "wins", label: "W", width: 155, align: "center", get: (r) => String(r.wins) },
+  { key: "losses", label: "L", width: 155, align: "center", get: (r) => String(r.losses) },
+];
+
+function drawShareCard(canvas, { c, kicker, title, subtitle, rangeLabel, totalCount, columns, rows }) {
+  const W = 1080, PAD = 56, TABLE_W = W - PAD * 2;
+  const TOPBAR_H = 8, HEADER_H = 214, COLHEAD_H = 58, ROW_H = 92, FOOTER_H = 104;
+  const H = TOPBAR_H + HEADER_H + COLHEAD_H + Math.max(rows.length, 1) * ROW_H + FOOTER_H;
+
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.textBaseline = "alphabetic";
+
+  // Background + top accent strip.
+  ctx.fillStyle = c.bg;
+  ctx.fillRect(0, 0, W, H);
+  const barGrad = ctx.createLinearGradient(0, 0, W, 0);
+  barGrad.addColorStop(0, c.accent);
+  barGrad.addColorStop(1, c.green);
+  ctx.fillStyle = barGrad;
+  ctx.fillRect(0, 0, W, TOPBAR_H);
+
+  let y = TOPBAR_H;
+
+  ctx.fillStyle = c.textFaint;
+  ctx.font = "700 24px monospace";
+  ctx.textAlign = "left";
+  ctx.fillText(kicker.toUpperCase(), PAD, y + 56);
+
+  ctx.fillStyle = c.text;
+  ctx.font = "800 56px Arial, sans-serif";
+  ctx.fillText(fitCanvasText(ctx, title.toUpperCase(), TABLE_W), PAD, y + 118);
+
+  ctx.fillStyle = c.textDim;
+  ctx.font = "500 26px monospace";
+  ctx.fillText(fitCanvasText(ctx, subtitle, TABLE_W), PAD, y + 158);
+
+  const pillLabel = `${rangeLabel} of ${totalCount}`;
+  ctx.font = "700 22px monospace";
+  const pillW = ctx.measureText(pillLabel).width + 40;
+  const pillH = 44, pillY = y + 178;
+  roundRectPath(ctx, PAD, pillY, pillW, pillH, pillH / 2);
+  ctx.fillStyle = c.surfaceHover;
+  ctx.fill();
+  ctx.fillStyle = c.accent;
+  ctx.fillText(pillLabel, PAD + 20, pillY + 29);
+
+  y += HEADER_H;
+
+  // Column header row.
+  ctx.fillStyle = c.surface;
+  ctx.fillRect(PAD, y, TABLE_W, COLHEAD_H);
+  let cx = PAD;
+  ctx.font = "700 20px monospace";
+  ctx.fillStyle = c.textFaint;
+  columns.forEach((col) => {
+    ctx.textAlign = col.align === "center" ? "center" : "left";
+    ctx.fillText(col.label.toUpperCase(), col.align === "center" ? cx + col.width / 2 : cx + 18, y + 37);
+    cx += col.width;
+  });
+  y += COLHEAD_H;
+
+  // Data rows.
+  const medalColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  rows.forEach((row, i) => {
+    if (i % 2 === 0) {
+      ctx.fillStyle = c.surface;
+      ctx.fillRect(PAD, y, TABLE_W, ROW_H);
+    }
+    let colX = PAD;
+    columns.forEach((col) => {
+      if (col.isRank) {
+        const medal = row.rank <= 3 ? medalColors[row.rank - 1] : null;
+        if (medal) {
+          ctx.beginPath();
+          ctx.arc(colX + col.width / 2, y + ROW_H / 2, 22, 0, Math.PI * 2);
+          ctx.fillStyle = medal + "33";
+          ctx.fill();
+          ctx.strokeStyle = medal;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = medal;
+        } else {
+          ctx.fillStyle = c.textFaint;
+        }
+        ctx.font = "800 24px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(String(row.rank), colX + col.width / 2, y + ROW_H / 2 + 8);
+      } else {
+        const val = col.get ? col.get(row) : String(row[col.key] ?? "");
+        ctx.font = col.isName ? "700 30px Arial, sans-serif" : col.bold ? "800 28px Arial, sans-serif" : "600 26px Arial, sans-serif";
+        ctx.fillStyle = col.isName ? c.text : col.bold ? c.accent : c.textDim;
+        ctx.textAlign = col.align === "center" ? "center" : "left";
+        const maxW = col.width - (col.align === "center" ? 16 : 32);
+        const tx = col.align === "center" ? colX + col.width / 2 : colX + 18;
+        ctx.fillText(fitCanvasText(ctx, val, maxW), tx, y + ROW_H / 2 + 10);
+      }
+      colX += col.width;
+    });
+    ctx.strokeStyle = c.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD, y + ROW_H);
+    ctx.lineTo(PAD + TABLE_W, y + ROW_H);
+    ctx.stroke();
+    y += ROW_H;
+  });
+
+  // Footer.
+  ctx.fillStyle = c.surface;
+  ctx.fillRect(0, y, W, FOOTER_H);
+  ctx.fillStyle = c.accent;
+  ctx.font = "800 26px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`Visit ${SHARE_BRAND}`, W / 2, y + FOOTER_H / 2 + 9);
+}
+
+// The range-picker + live preview shown when someone taps "Download image"
+// on the Ladder or a league's Standings table. `rows` should already be the
+// FULL ranked list (not a filtered/search subset) with a numeric `.rank`
+// field on every row — position ranges are sliced 10 at a time off of it.
+function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, defaultRank }) {
+  const totalCount = rows.length;
+  const pageCount = Math.max(1, Math.ceil(totalCount / SHARE_PAGE_SIZE));
+  const defaultPage = defaultRank ? Math.min(pageCount - 1, Math.max(0, Math.ceil(defaultRank / SHARE_PAGE_SIZE) - 1)) : 0;
+  const [page, setPage] = useState(defaultPage);
+  const canvasRef = useRef(null);
+
+  const pageRows = rows.slice(page * SHARE_PAGE_SIZE, page * SHARE_PAGE_SIZE + SHARE_PAGE_SIZE);
+  const rangeStart = page * SHARE_PAGE_SIZE + 1;
+  const rangeEnd = page * SHARE_PAGE_SIZE + pageRows.length;
+  const rangeLabel = `#${rangeStart}–${rangeEnd}`;
+
+  useEffect(() => {
+    if (!canvasRef.current || pageRows.length === 0) return;
+    drawShareCard(canvasRef.current, { c, kicker, title, subtitle, rangeLabel, totalCount, columns, rows: pageRows });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, rows, title, subtitle]);
+
+  const handleDownload = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeName = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "leaderboard";
+      a.href = url;
+      a.download = `${safeName}-${rangeStart}-${rangeEnd}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={onClose}>
+      <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+          <div className="flex items-center gap-2">
+            <Download size={16} style={{ color: c.accent }} />
+            <h3 className="font-body text-sm font-bold uppercase tracking-wide">Download image</h3>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
+        </div>
+
+        {pageCount > 1 && (
+          <div className="px-5 pb-2">
+            <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Choose position range</div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {Array.from({ length: pageCount }).map((_, i) => {
+                const s = i * SHARE_PAGE_SIZE + 1;
+                const e = Math.min(totalCount, s + SHARE_PAGE_SIZE - 1);
+                return (
+                  <button key={i} onClick={() => setPage(i)}
+                    className="shrink-0 font-mono text-xs font-semibold px-3 py-1.5 rounded-full"
+                    style={page === i ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textDim }}>
+                    {s}–{e}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 py-3">
+          <div className="rounded-xl overflow-hidden border" style={{ borderColor: c.border }}>
+            <canvas ref={canvasRef} className="w-full h-auto block" />
+          </div>
+        </div>
+
+        <div className="px-5 pb-5 pt-1 flex gap-2">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl font-body text-sm font-semibold" style={{ background: c.surface, color: c.textDim }}>Cancel</button>
+          <button onClick={handleDownload} className="flex-1 py-3 rounded-xl font-body text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: c.accent, color: c.accentText }}>
+            <Download size={15} /> Save image
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // The full permanent ladder — every member, ordered by rank_position, with
 // search-to-find and inline "Challenge" buttons on whichever (up to 3) rows
 // the viewer is actually allowed to challenge right now. LadderStrip and the
@@ -5627,6 +5881,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
 // from the CTA below for people who'd rather jump straight to it.
 function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
   const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
 
@@ -5635,6 +5890,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
   const searchResults = searching ? ladder.filter((r) => (r.username || "").toLowerCase().includes(q)) : [];
+  const shareRows = ladder.map((r) => ({ ...r, rank: r.rank_position }));
   const top10 = ladder.slice(0, 10);
   const rest = ladder.slice(10);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
@@ -5678,9 +5934,20 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           <TrendingUp size={20} style={{ color: c.accent }} />
           <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">The Ladder</h1>
         </div>
-        <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setShareOpen(true)} title="Download image" disabled={ladder.length === 0}
+            className="w-8 h-8 flex items-center justify-center rounded-full disabled:opacity-40" style={{ background: c.surface, color: c.textDim }}>
+            <Download size={14} />
+          </button>
+          <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+        </div>
       </div>
       {rulesOpen && <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />}
+      {shareOpen && (
+        <ShareRangeModal onClose={() => setShareOpen(false)} kicker="Permanent Ladder" title="The Ladder"
+          subtitle={`${ladder.length} player${ladder.length === 1 ? "" : "s"} · never resets`}
+          rows={shareRows} columns={SHARE_LADDER_COLUMNS} c={c} defaultRank={myLadderRank?.rank_position} />
+      )}
       <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
         One permanent ranking, shared by everyone — it never resets. {ladder.length} player{ladder.length === 1 ? "" : "s"}.
       </div>
@@ -6156,6 +6423,7 @@ function leagueGoalExtremes(standings, league) {
 
 function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, c }) {
   const [query, setQuery] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
   const q = query.trim().toLowerCase();
   const ranked = standings.map((r, i) => ({ ...r, rank: i + 1 }));
   const filtered = q ? ranked.filter((r) => r.name.toLowerCase().includes(q)) : ranked;
@@ -6174,6 +6442,7 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
     atRiskCount = Math.max(0, atRiskCount);
   }
   const cutoffRank = showsCutLine && atRiskCount > 0 ? standings.length - atRiskCount + 1 : null;
+  const shareRows = ranked.map((r) => ({ ...r, atRisk: cutoffRank !== null && r.rank >= cutoffRank && !r.eliminated }));
 
   return (
     <div className="-mx-4 px-4">
@@ -6182,10 +6451,21 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
           {stageFixtures.filter((f) => f.played).length} of {stageFixtures.length} matches played
           {isSurvivor ? ` · ${league.final_stage_started ? "final stage" : `stage ${league.current_stage}`}` : ""}
         </div>
-        {standings.length > STANDINGS_VISIBLE_ROWS && (
-          <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>{filtered.length} club{filtered.length === 1 ? "" : "s"}</div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {standings.length > STANDINGS_VISIBLE_ROWS && (
+            <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>{filtered.length} club{filtered.length === 1 ? "" : "s"}</div>
+          )}
+          <button onClick={() => setShareOpen(true)} title="Download image" disabled={standings.length === 0}
+            className="w-7 h-7 flex items-center justify-center rounded-full disabled:opacity-40" style={{ background: c.surfaceHover, color: c.textDim }}>
+            <Download size={13} />
+          </button>
+        </div>
       </div>
+      {shareOpen && (
+        <ShareRangeModal onClose={() => setShareOpen(false)} kicker={isSurvivor ? "Survivor Mode" : "League Standings"} title={league.name}
+          subtitle={`${stageFixtures.filter((f) => f.played).length} of ${stageFixtures.length} matches played`}
+          rows={shareRows} columns={SHARE_STANDINGS_COLUMNS} c={c} />
+      )}
 
       {cutoffRank && (
         <div className="flex items-center gap-1.5 mb-3 px-2 font-mono text-[11px]" style={{ color: c.red }}>
