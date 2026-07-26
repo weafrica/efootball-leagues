@@ -687,10 +687,10 @@ function timeAgo(iso) {
 // the way any social feed tells commenters apart at a glance.
 const AVATAR_HUES = [142, 168, 25, 45, 200, 280, 340, 10];
 
-// Days remaining until a ladder challenge deadline (accept-by or log-by).
-// The actual expiry/penalty is enforced server-side (process_stale_ladder_challenges);
-// this is purely the countdown shown in the UI. Returns null once it's passed
-// (server will have already resolved it by the time that's visible here).
+// Days remaining until a ladder challenge's accept-by deadline. Once this
+// hits 0 nothing resolves it automatically — it just becomes visible in the
+// admin queue (see escalatedLadderAccepts) for an admin to grant a walkover
+// or cancel the challenge.
 function ladderDaysLeft(fromISO, windowDays) {
   if (!fromISO) return null;
   const deadline = new Date(fromISO).getTime() + windowDays * 24 * 60 * 60 * 1000;
@@ -1094,12 +1094,11 @@ const RULES_CONTENT = {
     title: "Ladder Rules",
     sections: [
       { heading: "How it works", items: [
-        "One permanent ranking, shared by everyone — it never resets.",
+        "One permanent ranking, shared by everyone — it never resets. Ranked by points.",
         "You can only challenge one of the 3 names directly above you.",
-        "7 days to accept, or it's an automatic walkover win for the challenger.",
-        "7 days after accepting to log a result, or you both drop a spot.",
+        "5 days to accept, or it goes to an admin who decides whether to grant a walkover.",
         "Reported a score and they're ignoring it? It auto-confirms after 2 days — stalling doesn't work.",
-        "Win the challenge and you take their spot.",
+        "Win = 3 points, draw = 1 point, loss = 0. Rank is points first, most wins as the tiebreaker.",
         "A photo of the final scoreboard is required, same as everywhere else.",
       ]},
     ],
@@ -2222,8 +2221,8 @@ export default function App() {
   // else in the app — a team's display_name/phone are snapshotted at join
   // time too) — the opponent's phone stays off the row entirely until they
   // accept, so nobody's number is exposed before they've agreed to it.
-  // `isLadder` tags it so that, if it's ever confirmed as a win, the
-  // ladder-promotion trigger in Supabase actually moves the two of them.
+  // `isLadder` tags it so that, if it's ever confirmed, the points-awarding
+  // trigger in Supabase actually credits the two of them.
   const sendChallenge = async (opponent, isLadder = false) => {
     const { error } = await supabase.from("challenges").insert({
       challenger_id: session.user.id,
@@ -2342,6 +2341,38 @@ export default function App() {
     if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
     await loadChallenges();
     showToast("Result rejected — they'll need to log it again.");
+  };
+
+  // Admin-only fallback once a ladder challenge's 5-day accept window has
+  // passed with no response — an admin can grant the challenger a walkover
+  // instead of it auto-resolving. This is logged as a nominal 3-0 win and
+  // routed through the same confirmed-result update as a normal match, so
+  // trg_resolve_ladder_challenge awards the points/win/loss exactly like
+  // any other confirmed ladder result would.
+  const adminGrantLadderWalkover = async (challenge) => {
+    const { error } = await supabase.from("challenges").update({
+      status: "expired",
+      ladder_expiry: "walkover",
+      responded_at: new Date().toISOString(),
+      challenger_score: 3,
+      opponent_score: 0,
+      result_status: "confirmed",
+      result_confirmed_at: new Date().toISOString(),
+    }).eq("id", challenge.id);
+    if (error) { showToast(`Couldn't grant walkover: ${error.message}`); return; }
+    await loadChallenges();
+    await loadLadder();
+    showToast("Walkover granted — the ladder just updated.");
+  };
+  // The other admin option for the same queue — closes the challenge out
+  // with no ladder effect on either side, same as a normal decline.
+  const adminCancelLadderChallenge = async (challenge) => {
+    const { error } = await supabase.from("challenges")
+      .update({ status: "declined", responded_at: new Date().toISOString() })
+      .eq("id", challenge.id);
+    if (error) { showToast(`Couldn't cancel: ${error.message}`); return; }
+    await loadChallenges();
+    showToast("Challenge cancelled.");
   };
 
   // The "random challenge" pool: broadcasts open to every other member, plus
@@ -3610,6 +3641,7 @@ export default function App() {
             onConfirmResultOpen={confirmOpenChallengeResult} onDisputeResultOpen={disputeOpenChallengeResult}
             onAdminApproveResult={adminApproveChallengeResult} onAdminRejectResult={adminRejectChallengeResult}
             onAdminApproveResultOpen={adminApproveOpenChallengeResult} onAdminRejectResultOpen={adminRejectOpenChallengeResult}
+            onAdminGrantLadderWalkover={adminGrantLadderWalkover} onAdminCancelLadderChallenge={adminCancelLadderChallenge}
             onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={() => setView("home")} showToast={showToast} c={c} />
@@ -4408,7 +4440,7 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
+function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onAdminGrantLadderWalkover, onAdminCancelLadderChallenge, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -4456,6 +4488,12 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
   const escalatedOpenChallenges = isAdmin
     ? (openChallenges || []).filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
     : [];
+  // Admin-only: ladder challenges still pending after their 5-day accept
+  // window — these no longer auto-resolve as a walkover, so an admin picks
+  // between granting the walkover or cancelling the challenge.
+  const escalatedLadderAccepts = isAdmin
+    ? challenges.filter((ch) => ch.is_ladder && ch.status === "pending" && ladderDaysLeft(ch.created_at, 5) === 0)
+    : [];
 
   const fireRandom = async () => {
     setSendingRandom(true);
@@ -4501,6 +4539,20 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
               <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
                 scoreA={ch.creator_score} scoreB={ch.accepted_by_score} reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
                 onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && escalatedLadderAccepts.length > 0 && (
+        <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
+            <AlertTriangle size={13} /> Needs admin review — not accepted within 5 days
+          </div>
+          <div className="flex flex-col gap-2">
+            {escalatedLadderAccepts.map((ch) => (
+              <AdminEscalatedLadderAcceptRow key={`la-${ch.id}`} challengerUsername={ch.challenger_username} opponentUsername={ch.opponent_username}
+                onGrantWalkover={() => onAdminGrantLadderWalkover(ch)} onCancel={() => onAdminCancelLadderChallenge(ch)} c={c} />
             ))}
           </div>
         </div>
@@ -5206,6 +5258,29 @@ function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsern
   );
 }
 
+// A ladder challenge whose 5-day accept window has passed with no response,
+// shown to admins for a manual call — either grant the challenger the
+// walkover (a nominal 3-0 win, same points/rank effect as any other
+// confirmed ladder win) or cancel the challenge outright with no ladder
+// effect on either side.
+function AdminEscalatedLadderAcceptRow({ challengerUsername, opponentUsername, onGrantWalkover, onCancel, c }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+  return (
+    <div className="rounded-lg p-3 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="flex-1 min-w-0">
+        <div className="font-body text-sm font-semibold truncate">{challengerUsername} challenged {opponentUsername}</div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Never accepted or declined</div>
+      </div>
+      <button onClick={() => run(onGrantWalkover)} disabled={busy} title={`Grant walkover to ${challengerUsername}`}
+        className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+        Grant walkover
+      </button>
+      <button onClick={() => run(onCancel)} disabled={busy} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+    </div>
+  );
+}
+
 function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
   const [responding, setResponding] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -5247,9 +5322,9 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
           </div>
           {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
           {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
-          {ch.status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.created_at, 7); return d !== null && (
+          {ch.status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.created_at, 5); return d !== null && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>
-              {iAmChallenger ? `Walkover in ${d}d if they don't respond` : `Accept within ${d}d or you forfeit the spot`}
+              {iAmChallenger ? `Goes to admin in ${d}d if they don't respond` : `Accept within ${d}d or it goes to admin for a walkover decision`}
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
@@ -5257,9 +5332,6 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
               Final: you {myScore} – {theirScore} {counterpartUsername}
               {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
             </div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "expired" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>Expired, no result logged — you both dropped a spot</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
@@ -5276,11 +5348,8 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
           )}
           {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-          {ch.status === "accepted" && !ch.result_status && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.responded_at, 7); return d !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>{d}d left to log a result, or you both drop a spot</div>
-          ); })()}
           {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
-          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover — they didn't respond in time" : "Expired — you didn't respond in time"}</div>}
+          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover — admin closed it out" : "Expired — you didn't respond in time"}</div>}
         </div>
         {ch.status === "pending" && !iAmChallenger && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -5698,7 +5767,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, c }) {
             )}
             <div className="flex flex-col leading-tight">
               <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
-              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</span>
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
             </div>
           </div>
         ))}
@@ -5797,9 +5866,11 @@ const SHARE_STANDINGS_COLUMNS = [
 ];
 const SHARE_LADDER_COLUMNS = [
   { key: "rank", label: "#", width: 70, align: "center", isRank: true },
-  { key: "username", label: "Player", width: 588, align: "left", isName: true, get: (r) => r.username },
-  { key: "wins", label: "W", width: 155, align: "center", get: (r) => String(r.wins) },
-  { key: "losses", label: "L", width: 155, align: "center", get: (r) => String(r.losses) },
+  { key: "username", label: "Player", width: 438, align: "left", isName: true, get: (r) => r.username },
+  { key: "wins", label: "W", width: 110, align: "center", get: (r) => String(r.wins) },
+  { key: "draws", label: "D", width: 110, align: "center", get: (r) => String(r.draws) },
+  { key: "losses", label: "L", width: 110, align: "center", get: (r) => String(r.losses) },
+  { key: "points", label: "Pts", width: 130, align: "center", bold: true, get: (r) => String(r.points) },
 ];
 
 function drawShareCard(canvas, { c, kicker, title, subtitle, rangeLabel, totalCount, columns, rows }) {
@@ -6042,7 +6113,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-body text-sm truncate">{row.username}{isMe ? " (you)" : ""}</div>
-          <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.wins}W–{row.losses}L</div>
+          <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</div>
         </div>
         {canChallenge && (
           <button onClick={onOpenChallenge} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
@@ -6083,7 +6154,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
       {myLadderRank && (
         <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4" style={{ background: c.surfaceHover, border: `1px solid ${c.accent}55` }}>
           <div className="font-body text-sm">
-            You're <span className="font-bold" style={{ color: c.accent }}>#{myLadderRank.rank_position}</span> · {myLadderRank.wins}W–{myLadderRank.losses}L
+            You're <span className="font-bold" style={{ color: c.accent }}>#{myLadderRank.rank_position}</span> · {myLadderRank.points}pts · {myLadderRank.wins}W–{myLadderRank.losses}L
           </div>
           <button onClick={onOpenChallenge} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
             <Swords size={13} /> Climb it
@@ -6136,7 +6207,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
                   )}
                   <div className="flex flex-col leading-tight">
                     <span className="font-body font-semibold text-sm truncate max-w-[110px]">{r.username}{isMe ? " (you)" : ""}</span>
-                    <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{r.wins}W–{r.losses}L</span>
+                    <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{r.points}pts · {r.wins}W–{r.losses}L</span>
                   </div>
                   {canChallenge && (
                     <button onClick={onOpenChallenge} className="ml-1 font-body text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
