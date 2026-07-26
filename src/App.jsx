@@ -1005,7 +1005,7 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
         <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
-          {opponentUsername} will see this photo and needs to confirm the score before it counts.
+          If the screenshot clearly shows both usernames and this score, it's approved instantly. Otherwise {opponentUsername} will need to confirm it.
         </div>
 
         <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
@@ -2242,8 +2242,29 @@ export default function App() {
     setChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
   };
 
+  // Calls the verify-result Edge Function, which (server-side, using the
+  // service role so it isn't bound by the "can't confirm your own report"
+  // RLS rule) re-reads the row we just wrote, downloads the screenshot we
+  // just uploaded, asks Claude to read the two on-screen usernames and
+  // scores off it, and — only on a clean match against what's actually
+  // saved on the row — flips result_status to "confirmed" right there.
+  // Runs after the normal "pending" write below, so if verification fails,
+  // errors, or the function simply isn't deployed, the result just sits
+  // pending exactly like it always has, waiting on the other player.
+  const verifyResultScreenshot = async (table, id) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("verify-result", { body: { table, id } });
+      if (error || !data) return { verified: false };
+      return data;
+    } catch {
+      return { verified: false };
+    }
+  };
+
   // Either side of an accepted challenge can log the score first — it lands as
-  // "pending" until the other player confirms it (see confirmChallengeResult).
+  // "pending" until the other player confirms it (see confirmChallengeResult),
+  // unless the uploaded screenshot itself clearly backs up both usernames and
+  // both scores, in which case verifyResultScreenshot auto-confirms it below.
   // Scores are stored from the challenger's perspective (challenger_score /
   // opponent_score) regardless of who reports them, so the row has one
   // unambiguous scoreline no matter which side typed it in.
@@ -2265,8 +2286,11 @@ export default function App() {
     };
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
+
+    const { verified } = await verifyResultScreenshot("challenges", challenge.id);
     await loadChallenges();
-    showToast("Result logged — waiting for them to confirm.");
+    if (verified && challenge.is_ladder) await loadLadder();
+    showToast(verified ? "Screenshot matched — result auto-approved." : "Result logged — waiting for them to confirm.");
   };
 
   // The player who *didn't* report the score confirms it — this is enforced
@@ -2568,8 +2592,10 @@ export default function App() {
     };
     const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
+
+    const { verified } = await verifyResultScreenshot("open_challenges", challenge.id);
     await loadOpenChallenges();
-    showToast("Result logged — waiting for them to confirm.");
+    showToast(verified ? "Screenshot matched — result auto-approved." : "Result logged — waiting for them to confirm.");
   };
 
   const confirmOpenChallengeResult = async (challenge) => {
@@ -5029,7 +5055,10 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
         <div className="flex-1 min-w-0">
           <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
+              Final: you {myScore} – {theirScore} {counterpartUsername}
+              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
+            </div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
@@ -5131,7 +5160,10 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Final: you {myScore} – {theirScore} {counterpartUsername}</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
+              Final: you {myScore} – {theirScore} {counterpartUsername}
+              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
+            </div>
           )}
           {ch.status === "accepted" && ch.result_status === "expired" && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>Expired, no result logged — you both dropped a spot</div>
