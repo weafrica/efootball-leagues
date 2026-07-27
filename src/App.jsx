@@ -3875,10 +3875,12 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           minus anything that needs an account. Sign In is always one tap away. */}
       <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
-            <div className="text-lg font-extrabold tracking-tight uppercase">Matchday</div>
-          </div>
+          {shopOpen ? <div /> : (
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
+              <div className="text-lg font-extrabold tracking-tight uppercase">Matchday</div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
               {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
