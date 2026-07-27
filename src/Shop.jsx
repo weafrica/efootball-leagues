@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
-  Search, ClipboardList, Image as ImageIcon, Truck,
+  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -91,6 +91,7 @@ function StatusBadge({ status, c }) {
 export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth }) {
   const [subview, setSubview] = useState("browse");
   const [products, setProducts] = useState(null);
+  const [departments, setDepartments] = useState(null);
   const [cart, setCart] = useState(loadCart);
   const [activeProduct, setActiveProduct] = useState(null);
   const [myOrders, setMyOrders] = useState(null);
@@ -105,6 +106,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     if (!error) setProducts(data || []);
   };
   useEffect(() => { loadProducts(); }, []);
+
+  const loadDepartments = async () => {
+    const { data, error } = await supabase.from("shop_departments").select("*").order("position", { ascending: true });
+    if (!error) setDepartments(data || []);
+  };
+  useEffect(() => { loadDepartments(); }, []);
 
   const loadMyOrders = async () => {
     if (!session) return;
@@ -173,7 +180,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
             <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
           </div>
-          <ProductGrid products={visibleProducts} loading={products === null} onOpen={setActiveProduct} c={c} />
+          <DepartmentBrowser products={visibleProducts} departments={departments || []} loading={products === null} onOpen={setActiveProduct} c={c} />
         </>
       )}
 
@@ -201,7 +208,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       {subview === "my-orders" && <MyOrders orders={myOrders} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
-        <AdminProducts products={products} onReload={loadProducts} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} c={c} />
+        <AdminProducts products={products} departments={departments || []} onReload={loadProducts} onReloadDepartments={loadDepartments} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
         <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} c={c} />
@@ -223,6 +230,62 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 // ════════════════════════════════════════════════════════════════════
 // BROWSE
 // ════════════════════════════════════════════════════════════════════
+
+// Filter chips for "All" + each department (plus "Other" for anything
+// uncategorized), and — when "All" is selected — the products grouped into
+// a section per department, like walking through a real department store.
+function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
+  const [selected, setSelected] = useState("all");
+  if (loading) return <Spinner c={c} />;
+  if (products.length === 0) {
+    return (
+      <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+        No products yet — check back soon.
+      </div>
+    );
+  }
+
+  const deptIds = new Set(departments.map((d) => d.id));
+  const grouped = departments.map((d) => ({ dept: d, items: products.filter((p) => p.department_id === d.id) })).filter((g) => g.items.length > 0);
+  const uncategorized = products.filter((p) => !p.department_id || !deptIds.has(p.department_id));
+  const chips = [{ id: "all", name: "All" }, ...departments, ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other" }] : [])];
+
+  return (
+    <div>
+      {departments.length > 0 && (
+        <div className="flex gap-1.5 mb-4 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
+          {chips.map((d) => (
+            <button key={d.id} onClick={() => setSelected(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase"
+              style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+              {d.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected === "all" ? (
+        <div className="space-y-6">
+          {grouped.map(({ dept, items }) => (
+            <div key={dept.id}>
+              {departments.length > 0 && <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5" style={{ color: c.textFaint }}>{dept.name}</div>}
+              <ProductGrid products={items} loading={false} onOpen={onOpen} c={c} />
+            </div>
+          ))}
+          {uncategorized.length > 0 && (
+            <div>
+              {departments.length > 0 && <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5" style={{ color: c.textFaint }}>Other</div>}
+              <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} c={c} />
+            </div>
+          )}
+        </div>
+      ) : selected === "uncategorized" ? (
+        <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} c={c} />
+      ) : (
+        <ProductGrid products={products.filter((p) => p.department_id === selected)} loading={false} onOpen={onOpen} c={c} />
+      )}
+    </div>
+  );
+}
 
 function ProductGrid({ products, loading, onOpen, c }) {
   if (loading) return <Spinner c={c} />;
@@ -526,13 +589,15 @@ function MyOrders({ orders, c }) {
 // ADMIN — PRODUCTS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
+function AdminProducts({ products, departments, onReload, onReloadDepartments, showToast, onOpenOrders, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
+  const [managingDepts, setManagingDepts] = useState(false);
   const [query, setQuery] = useState("");
 
   if (products === null) return <Spinner c={c} />;
   const q = query.trim().toLowerCase();
   const filtered = q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
+  const deptById = new Map(departments.map((d) => [d.id, d]));
 
   const saveProduct = async (form, file) => {
     let image_url = editing?.image_url || null;
@@ -544,7 +609,7 @@ function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
       const { data: pub } = supabase.storage.from("shop-photos").getPublicUrl(path);
       image_url = pub.publicUrl;
     }
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url };
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null };
     const { error } = editing?.id
       ? await supabase.from("shop_products").update(payload).eq("id", editing.id)
       : await supabase.from("shop_products").insert(payload);
@@ -561,6 +626,10 @@ function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
     await onReload();
   };
 
+  if (managingDepts) {
+    return <AdminDepartments departments={departments} products={products} onReload={onReloadDepartments} showToast={showToast} onBack={() => setManagingDepts(false)} c={c} />;
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
@@ -568,7 +637,12 @@ function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
           <Package size={20} style={{ color: SHOP_GOLD }} />
           <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Products</h1>
         </div>
-        <button onClick={onOpenOrders} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Orders</button>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setManagingDepts(true)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.surface, color: c.textDim }}>
+            <LayoutGrid size={12} /> Departments
+          </button>
+          <button onClick={onOpenOrders} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Orders</button>
+        </div>
       </div>
 
       <div className="relative mb-3">
@@ -589,7 +663,10 @@ function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
-              <div className="font-mono text-[10px]" style={{ color: c.textDim }}>{formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}</div>
+              <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
+                {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}
+                {p.department_id && deptById.has(p.department_id) && ` · ${deptById.get(p.department_id).name}`}
+              </div>
             </div>
             <button onClick={() => setEditing(p)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Edit</button>
             <button onClick={() => deleteProduct(p)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
@@ -597,24 +674,25 @@ function AdminProducts({ products, onReload, showToast, onOpenOrders, c }) {
         ))}
       </div>
 
-      {editing && <ProductFormModal product={editing} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
+      {editing && <ProductFormModal product={editing} departments={departments} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
     </div>
   );
 }
 
-function ProductFormModal({ product, onClose, onSave, c }) {
+function ProductFormModal({ product, departments, onClose, onSave, c }) {
   const [name, setName] = useState(product.name || "");
   const [description, setDescription] = useState(product.description || "");
   const [price, setPrice] = useState(product.price ?? "");
   const [stockQty, setStockQty] = useState(product.stock_qty ?? 0);
   const [active, setActive] = useState(product.active ?? true);
+  const [departmentId, setDepartmentId] = useState(product.department_id || "");
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!name.trim() || !price) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active }, file);
+    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null }, file);
     setSaving(false);
     if (ok) onClose();
   };
@@ -645,6 +723,14 @@ function ProductFormModal({ product, onClose, onSave, c }) {
               <input type="number" min="0" value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
             </div>
           </div>
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Department</label>
+            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
+              <option value="">Uncategorized</option>
+              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
           <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-3 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
             <Upload size={15} /> {file ? file.name : "Product photo"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
@@ -661,6 +747,108 @@ function ProductFormModal({ product, onClose, onSave, c }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ADMIN — DEPARTMENTS
+// ════════════════════════════════════════════════════════════════════
+
+function AdminDepartments({ departments, products, onReload, showToast, onBack, c }) {
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const countFor = (deptId) => products.filter((p) => p.department_id === deptId).length;
+
+  const addDepartment = async () => {
+    if (!newName.trim()) return;
+    setAdding(true);
+    const nextPosition = departments.length > 0 ? Math.max(...departments.map((d) => d.position)) + 1 : 0;
+    const { error } = await supabase.from("shop_departments").insert({ name: newName.trim(), position: nextPosition });
+    setAdding(false);
+    if (error) { showToast(`Couldn't add department: ${error.message}`); return; }
+    setNewName("");
+    await onReload();
+  };
+
+  const renameDepartment = async (dept) => {
+    if (!renameValue.trim() || renameValue.trim() === dept.name) { setRenamingId(null); return; }
+    const { error } = await supabase.from("shop_departments").update({ name: renameValue.trim() }).eq("id", dept.id);
+    setRenamingId(null);
+    if (error) { showToast(`Couldn't rename: ${error.message}`); return; }
+    await onReload();
+  };
+
+  const deleteDepartment = async (dept) => {
+    const affected = countFor(dept.id);
+    const { error } = await supabase.from("shop_departments").delete().eq("id", dept.id);
+    if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+    showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Department deleted.");
+    await onReload();
+  };
+
+  // Swaps position with the neighbour above/below — reordering is just a
+  // two-row position swap, no drag-and-drop library needed.
+  const move = async (dept, direction) => {
+    const idx = departments.findIndex((d) => d.id === dept.id);
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= departments.length) return;
+    const other = departments[swapIdx];
+    await supabase.from("shop_departments").update({ position: other.position }).eq("id", dept.id);
+    await supabase.from("shop_departments").update({ position: dept.position }).eq("id", other.id);
+    await onReload();
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-5">
+        <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={14} /></button>
+        <LayoutGrid size={20} style={{ color: SHOP_GOLD }} />
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Departments</h1>
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New department name..."
+          onKeyDown={(e) => e.key === "Enter" && addDepartment()}
+          className="flex-1 border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        <button onClick={addDepartment} disabled={!newName.trim() || adding} className="font-body text-sm font-semibold px-4 py-2.5 rounded-full shrink-0" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: newName.trim() ? 1 : 0.5 }}>
+          Add
+        </button>
+      </div>
+
+      {departments.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          No departments yet — everything shows under "Other" until you add one.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {departments.map((d, i) => (
+            <div key={d.id} className="flex items-center gap-2 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="flex flex-col shrink-0">
+                <button onClick={() => move(d, -1)} disabled={i === 0} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === 0 ? 0.3 : 1 }}><ChevronUp size={13} /></button>
+                <button onClick={() => move(d, 1)} disabled={i === departments.length - 1} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === departments.length - 1 ? 0.3 : 1 }}><ChevronDown size={13} /></button>
+              </div>
+              {renamingId === d.id ? (
+                <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && renameDepartment(d)} onBlur={() => renameDepartment(d)}
+                  className="flex-1 border rounded-lg px-2 py-1.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.borderStrong, color: c.text }} />
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <div className="font-body text-sm font-semibold truncate">{d.name}</div>
+                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{countFor(d.id)} product{countFor(d.id) === 1 ? "" : "s"}</div>
+                </div>
+              )}
+              {renamingId !== d.id && (
+                <button onClick={() => { setRenamingId(d.id); setRenameValue(d.name); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Rename</button>
+              )}
+              <button onClick={() => deleteDepartment(d)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
