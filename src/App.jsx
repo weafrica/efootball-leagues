@@ -2085,6 +2085,8 @@ export default function App() {
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
+  const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared ?shop_product=<id> link — works signed in or as a guest
+  const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
   const c = THEMES[theme];
 
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); }, []);
@@ -2761,6 +2763,24 @@ export default function App() {
     }
     setHandledDeepLink(true);
   }, [leagues, handledDeepLink, showToast]);
+
+  // Handle a shared shop product link like ?shop_product=<id> — anyone can
+  // open one, signed in or not, so this runs independently of session state.
+  useEffect(() => {
+    if (handledShopDeepLink) return;
+    const params = new URLSearchParams(window.location.search);
+    const productId = params.get("shop_product");
+    if (productId) {
+      setShopDeepLinkProductId(productId);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    setHandledShopDeepLink(true);
+  }, [handledShopDeepLink]);
+
+  // Once signed in, a pending shop product link should jump straight to the shop.
+  useEffect(() => {
+    if (shopDeepLinkProductId && session) setView("shop");
+  }, [shopDeepLinkProductId, session]);
 
   const completeProfile = async (phone, username, photoFile) => {
     const { data, error } = await supabase.from("profiles")
@@ -3629,7 +3649,8 @@ export default function App() {
       <>
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme}
           onSignIn={(stay) => signInWithGoogle(stay)}
-          onRequireAuth={(reason) => setAuthPrompt(reason)} />
+          onRequireAuth={(reason) => setAuthPrompt(reason)}
+          initialShopProductId={shopDeepLinkProductId} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
             onCancel={() => setAuthPrompt(null)}
@@ -3715,7 +3736,7 @@ export default function App() {
                 c={c} />
             )}
             {view === "shop" && (
-              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={() => setView("home")} />
+              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={() => setView("home")} initialProductId={shopDeepLinkProductId} />
             )}
           </>
         )}
@@ -3776,9 +3797,12 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
+function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
-  const [shopOpen, setShopOpen] = useState(false);
+  const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
+  useEffect(() => {
+    if (initialShopProductId) setShopOpen(true);
+  }, [initialShopProductId]);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
   const activityRef = useRef(null);
@@ -3843,7 +3867,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {shopOpen ? (
-          <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} />
+          <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
         ) : (
           <>
         <ShopBanner onOpen={() => setShopOpen(true)} c={c} />

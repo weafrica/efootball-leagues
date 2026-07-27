@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
-  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown,
+  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -40,6 +40,13 @@ function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
   if (!digits) return null;
   return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+}
+
+// The query param a shared product link is opened with — anyone with the
+// link lands straight on that product, no account or admin access needed.
+const PRODUCT_LINK_PARAM = "shop_product";
+function buildProductLink(product) {
+  return `${window.location.origin}${window.location.pathname}?${PRODUCT_LINK_PARAM}=${product.id}`;
 }
 
 function loadCart() {
@@ -88,7 +95,7 @@ function StatusBadge({ status, c }) {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════
 
-export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth }) {
+export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth, initialProductId }) {
   const [subview, setSubview] = useState("browse");
   const [products, setProducts] = useState(null);
   const [departments, setDepartments] = useState(null);
@@ -96,10 +103,38 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [activeProduct, setActiveProduct] = useState(null);
   const [myOrders, setMyOrders] = useState(null);
   const [toast, setToast] = useState(null);
+  const [sharedLinkHandled, setSharedLinkHandled] = useState(false);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast((t) => (t === msg ? null : t)), 3000); };
 
   useEffect(() => { persistCart(cart); }, [cart]);
+
+  // A shared product link (?shop_product=<id>) lands here — open that
+  // product automatically once the catalog has loaded, for anyone,
+  // signed in or not. Only tried once per page load.
+  useEffect(() => {
+    if (sharedLinkHandled || !initialProductId || products === null) return;
+    const found = products.find((p) => String(p.id) === String(initialProductId));
+    if (found) setActiveProduct(found);
+    else showToast("That product link isn't available anymore.");
+    setSharedLinkHandled(true);
+  }, [initialProductId, products, sharedLinkHandled]);
+
+  // Anyone can share a link straight to a product — no sign-in or admin
+  // access required to generate or open one.
+  const shareProduct = async (product) => {
+    const url = buildProductLink(product);
+    if (navigator.share) {
+      try { await navigator.share({ title: product.name, text: `${product.name} — ${formatMoney(product.price)}`, url }); }
+      catch { /* user cancelled the share sheet */ }
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(url); showToast("Product link copied."); return; }
+      catch { /* fall through to showing the link itself */ }
+    }
+    showToast(url);
+  };
 
   const loadProducts = async () => {
     const { data, error } = await supabase.from("shop_products").select("*").order("created_at", { ascending: false });
@@ -215,7 +250,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal product={activeProduct} onClose={() => setActiveProduct(null)} onAdd={(qty) => { addToCart(activeProduct, qty); setActiveProduct(null); }} c={c} />
+        <ProductModal product={activeProduct} onClose={() => setActiveProduct(null)} onAdd={(qty) => { addToCart(activeProduct, qty); setActiveProduct(null); }} onShare={() => shareProduct(activeProduct)} c={c} />
       )}
 
       {subview === "browse" && cartCount > 0 && (
@@ -427,7 +462,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   );
 }
 
-function ProductModal({ product, onClose, onAdd, c }) {
+function ProductModal({ product, onClose, onAdd, onShare, c }) {
   const [qty, setQty] = useState(1);
   const outOfStock = (product.stock_qty ?? 0) === 0;
   return (
@@ -435,6 +470,7 @@ function ProductModal({ product, onClose, onAdd, c }) {
       <div className="w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl overflow-hidden max-h-[85vh] overflow-y-auto" style={{ background: c.bg }} onClick={(e) => e.stopPropagation()}>
         <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
           {product.image_url ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
+          <button onClick={onShare} aria-label="Share this product" title="Share this product" className="absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><Share2 size={15} /></button>
           <button onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><X size={16} /></button>
         </div>
         <div className="p-4">
