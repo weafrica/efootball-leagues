@@ -47,7 +47,19 @@ Deadlines keep things moving: 7 days to accept a ladder challenge or it's an aut
 3. Then paste in `supabase/ladder-deadlines-migration.sql` and run that too
 4. That's it — new members are added to the bottom of the ladder automatically when they set up their profile, existing members get slotted in by join date, and deadlines are enforced automatically from here on
 
-### 6. (Optional) Custom domain
+### 6. Turn on the WeAfrica Shop
+A full in-app store lives behind the gold "Shop now" banner — catalog, cart, and three checkout paths (WhatsApp order, manual EFT proof-of-payment, and a card-payment slot that's ready for a gateway once you have one).
+
+1. Go to Supabase → SQL Editor
+2. Paste in the contents of `supabase/shop-migration.sql` and run it — safe to run more than once. This creates the products/orders tables and two storage buckets (`shop-photos`, `shop-payment-proofs`)
+3. Open `src/Shop.jsx` and fill in the configuration block near the top:
+   - `SHOP_WHATSAPP_NUMBER` — the number orders get sent to (digits + country code, e.g. `"27821234567"`). Leave blank to hide that checkout option.
+   - `SHOP_BANK_DETAILS` — your real EFT/bank-transfer details, shown to buyers who choose that checkout option.
+   - `SHOP_GATEWAY_ENABLED` — leave `false` until you've wired up a real payment gateway (Paystack, Flutterwave, Yoco, etc.) in `payWithGateway()`. Until then the card option shows as locked.
+4. Reload the app — as an admin, tap the gear icon on the Shop page to add your first products (name, price, stock, photo). Everyone else sees only products marked "Visible in the shop"
+5. Orders submitted via EFT proof land in Shop → Orders (gear icon → Orders tab) for you to approve or reject; approving one automatically deducts stock
+
+### 7. (Optional) Custom domain
 In Vercel: Project → Settings → Domains → add your own domain and follow the DNS instructions shown.
 
 ## Local testing (optional)
