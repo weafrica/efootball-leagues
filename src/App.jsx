@@ -6,10 +6,19 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Zap, Flame, Gamepad2, Medal,
+  ShoppingBag, ExternalLink,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+
+// Storefront the "Shop now" banner links out to — swap this for your real
+// store URL (Shopify, WhatsApp catalog, etc). Opens in a new tab so nobody
+// loses their place in the app.
+const SHOP_NAME = "WeAfrica Shop";
+const SHOP_URL = "https://example.com/shop";
+const SHOP_GOLD = "#D4A017"; // brand accent, distinct from the app's green so the banner reads as a sponsor/store placement, not another app screen
+const openShop = () => window.open(SHOP_URL, "_blank", "noopener,noreferrer");
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 const ENTRY_FEE_MIN = 10;
@@ -3822,6 +3831,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
+        <ShopBanner c={c} />
+
         {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
             live-season pulse, stat strip), plus the one thing Home doesn't
             need: a way in. This is the page's entire "hero" now. */}
@@ -3875,7 +3886,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
 
         {/* Menu tiles — identical grid to the signed-in Home; every tile
             here just needs an account behind it, except Ladder, which is
-            public and simply scrolls down. */}
+            public and simply scrolls down. Shop lives in its own banner up
+            top, not buried in here. */}
         <section className="grid grid-cols-4 gap-2 mt-4">
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
@@ -3927,15 +3939,21 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
 
 // One equal-weight tile in the guest quick-action grid — same visual as the
 // signed-in Home's MenuTile, plus a small lock badge on anything that needs
-// an account. Ladder is the only unlocked one; it just scrolls down to
-// content that's already public.
-function GuestMenuTile({ icon: Icon, label, locked, onClick, c }) {
+// an account. Ladder just scrolls down to content that's already public;
+// Shop carries an "external" badge instead of a lock since it needs no
+// account, it just leaves the app.
+function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {
   return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {locked && (
         <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
           <Lock size={9} />
+        </span>
+      )}
+      {external && (
+        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
+          <ExternalLink size={9} />
         </span>
       )}
       <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
@@ -4173,6 +4191,37 @@ function GoogleIcon({ small }) {
       <path fill="#FBBC05" d="M3.97 10.73a5.4 5.4 0 010-3.46V4.94H.96a9 9 0 000 8.12l3.01-2.33z" />
       <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 00.96 4.94l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z" />
     </svg>
+  );
+}
+
+// Full-width promo banner for the WeAfrica Shop — sits above everything
+// else on both the login page and Home, so it reads as top billing rather
+// than one more icon buried in the menu grid. Deliberately in gold, not the
+// app's green, so it registers as a store placement rather than another
+// screen inside the app. The whole card is a tap target (not just the
+// pill), open to guests and members alike since browsing the store needs no
+// account.
+function ShopBanner({ c }) {
+  return (
+    <section onClick={openShop} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+      style={{ background: `linear-gradient(120deg, ${SHOP_GOLD}2E, ${c.surface})`, border: `1px solid ${SHOP_GOLD}55` }}>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="animate-glow-drift absolute -top-14 -right-8 w-36 h-36 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.22 }} />
+      </div>
+      <div className="relative flex items-center gap-3 px-4 py-3.5">
+        <span className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${SHOP_GOLD}22`, border: `1px solid ${SHOP_GOLD}55` }}>
+          <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: SHOP_GOLD }}>Official store</div>
+          <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">{SHOP_NAME}</div>
+          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone</div>
+        </div>
+        <span className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+          Shop now <ExternalLink size={12} />
+        </span>
+      </div>
+    </section>
   );
 }
 
@@ -5897,6 +5946,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
+      <ShopBanner c={c} />
+
       {/* Compact HUD banner — status strip, not a landing-page hero */}
       <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -5932,7 +5983,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </div>
       </section>
 
-      {/* Menu tiles — every action gets equal weight, nothing singled out */}
+      {/* Menu tiles — every action gets equal weight, nothing singled out.
+          Shop lives in its own banner up top, not buried in here. */}
       <section className="grid grid-cols-4 gap-2 mt-4">
         <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
         <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
@@ -5974,13 +6026,20 @@ function profileFirstName(session) {
 
 // One equal-weight tile in the quick-action menu grid — icon on top, label
 // below, small badge count in the corner when relevant. Every action here
-// carries the same visual weight; none is "the" highlighted button.
-function MenuTile({ icon: Icon, label, badge, onClick, c }) {
+// carries the same visual weight; none is "the" highlighted button. The
+// Shop tile carries an "external" badge instead of a count, since it leaves
+// the app rather than opening a screen inside it.
+function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
   return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {badge > 0 && (
         <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{badge}</span>
+      )}
+      {external && (
+        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
+          <ExternalLink size={9} />
+        </span>
       )}
       <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
         <Icon size={16} style={{ color: c.accent }} />
