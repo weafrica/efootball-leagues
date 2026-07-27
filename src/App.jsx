@@ -3759,15 +3759,15 @@ export default function App() {
 // which the parent turns into the AuthPromptModal.
 function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
-  const tablesRef = useRef(null);
   const ladderRef = useRef(null);
+  const tablesRef = useRef(null);
   const activityRef = useRef(null);
   const scrollTo = (ref) => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   // Everything a guest can see lives behind public_* views (granted SELECT
   // to anon in Supabase) — loaded once here and handed down as props so the
-  // ladder strip, league tables, and activity feed don't each fire their own
-  // round trip, and so the stats HUD can be computed from the same data.
+  // ladder strip, league sections, and activity feed don't each fire their
+  // own round trip, and so the HUD stats can be computed from the same data.
   const [guestData, setGuestData] = useState(null);
 
   useEffect(() => {
@@ -3796,15 +3796,12 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
 
   const totalClubs = guestData ? guestData.teams.length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
+  const isCashLeague = (l) => guestData?.extras.find((e) => e.league_id === l.id)?.league_type === "cash";
+  const funLeagues = guestData ? guestData.leagues.filter((l) => !isCashLeague(l)) : [];
+  const cashLeagues = guestData ? guestData.leagues.filter((l) => isCashLeague(l)) : [];
 
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
-      <style>{`
-        @keyframes medallionGlow { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.85; } }
-        .medallion-glow { animation: medallionGlow 4.5s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .medallion-glow { animation: none; opacity: 0.7; } }
-      `}</style>
-
       {/* Sticky guest header — same shell language as the signed-in Header,
           minus anything that needs an account. Sign In is always one tap away. */}
       <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
@@ -3825,99 +3822,99 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
-        {/* Hero */}
-        <div className="flex flex-col items-center text-center pt-8">
-          <div className="font-mono text-[11px] uppercase tracking-[0.35em] mb-6" style={{ color: c.accent }}>Season 2026</div>
-
-          <div className="relative w-48 h-48 sm:w-56 sm:h-56 mb-6">
-            <div className="medallion-glow absolute -inset-6 rounded-full" style={{ background: `radial-gradient(circle, ${c.accent}55 0%, ${c.accent}00 70%)`, filter: "blur(18px)" }} />
-            <div className="absolute inset-0 rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 1px ${c.accent}66, 0 20px 60px -10px rgba(0,0,0,0.5)` }}>
-              <img src="/hero-emblem.png" alt="" className="w-full h-full object-cover" style={{ transform: "scale(1.12)" }} />
-              <div className="absolute inset-0" style={{ background: `radial-gradient(circle, transparent 45%, ${c.bg}CC 92%)` }} />
-              <div className="absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 40px 10px ${c.bg}` }} />
+        {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
+            live-season pulse, stat strip), plus the one thing Home doesn't
+            need: a way in. This is the page's entire "hero" now. */}
+        <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.25 }} />
+          </div>
+          <div className="relative flex items-center gap-3 px-4 py-3.5">
+            <img src="/hero-emblem.png" alt="" className="w-11 h-11 object-contain shrink-0 drop-shadow-lg" />
+            <div className="min-w-0 flex-1">
+              <div className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: c.accent }}>
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
+                </span>
+                Season 2026 · Live
+              </div>
+              <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Run your table. Own your league.</div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className="text-right font-mono leading-tight">
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? guestData.leagues.length : "–"}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
+              </div>
+              <div className="w-px h-7" style={{ background: c.border }} />
+              <div className="text-right font-mono leading-tight">
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs || "–"}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
+              </div>
+              <div className="w-px h-7" style={{ background: c.border }} />
+              <div className="text-right font-mono leading-tight">
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches || "–"}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
+              </div>
             </div>
           </div>
-
-          <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight leading-[0.95] mb-3">
-            Run your table.<br />Own your league.
-          </h1>
-          <p className="font-body max-w-xs mb-6" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself. Have a look around first.</p>
-
-          <div className="flex items-center gap-2 mb-2">
-            <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-              <GoogleIcon /> Continue with Google
+          <div className="relative flex items-center justify-between gap-3 px-4 pb-3.5">
+            <p className="font-body text-xs" style={{ color: c.textDim }}>Have a look around — everything below is live. Sign in when you're ready to play.</p>
+            <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-2 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+              <GoogleIcon small /> Continue with Google
             </button>
           </div>
-          <label className="flex items-center gap-2 mb-1 mt-1 cursor-pointer select-none">
-            <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
-              <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
-              {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
-            </span>
-            <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
-          </label>
-          {!staySignedIn && (
-            <p className="font-mono text-[10px] text-center max-w-xs mt-2" style={{ color: c.textFaint }}>You'll be signed out automatically once you close this tab or browser.</p>
+        </section>
+
+        <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+          <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
+            <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
+            {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
+          </span>
+          <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
+        </label>
+
+        {/* Menu tiles — identical grid to the signed-in Home; every tile
+            here just needs an account behind it, except Ladder, which is
+            public and simply scrolls down. */}
+        <section className="grid grid-cols-4 gap-2 mt-4">
+          <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
+          <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
+          <GuestMenuTile icon={Swords} label="Challenges" locked onClick={() => onRequireAuth("Sign in to send and receive challenges.")} c={c} />
+          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
+        </section>
+
+        <div ref={ladderRef}>
+          {guestData ? (
+            <GuestLadderStrip ladder={guestData.ladder} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} c={c} />
+          ) : <div className="pt-8 flex justify-center"><Loader c={c} /></div>}
+        </div>
+
+        <div ref={tablesRef}>
+          {guestData && guestData.leagues.length === 0 && (
+            <section className="mt-8">
+              <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+                No leagues running yet — sign in and start the first one.
+              </div>
+            </section>
+          )}
+
+          {guestData && (
+            <>
+              <GuestLeagueSection title="Fun leagues" icon={Gamepad2} leagues={funLeagues} data={guestData}
+                onJoin={() => onRequireAuth("Sign in to join this league.")} c={c} />
+              <GuestLeagueSection title="Cash leagues" icon={Wallet} leagues={cashLeagues} data={guestData}
+                onJoin={() => onRequireAuth("Sign in to join this league.")} c={c} />
+            </>
           )}
         </div>
 
-        {/* Live stats HUD — same numbers a signed-in member sees on Home,
-            just without "Welcome back". Makes the place feel lived-in before
-            anyone signs in. */}
-        {guestData && guestData.leagues.length > 0 && (
-          <section className="relative mt-8 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
-            <div className="flex items-center justify-center gap-6 px-4 py-4">
-              <div className="text-center font-mono leading-tight">
-                <div className="font-bold text-lg" style={{ color: c.text }}>{guestData.leagues.length}</div>
-                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
-              </div>
-              <div className="w-px h-8" style={{ background: c.border }} />
-              <div className="text-center font-mono leading-tight">
-                <div className="font-bold text-lg" style={{ color: c.text }}>{totalClubs}</div>
-                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
-              </div>
-              <div className="w-px h-8" style={{ background: c.border }} />
-              <div className="text-center font-mono leading-tight">
-                <div className="font-bold text-lg" style={{ color: c.text }}>{totalMatches}</div>
-                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
-              </div>
-              <div className="w-px h-8" style={{ background: c.border }} />
-              <div className="text-center font-mono leading-tight">
-                <div className="font-bold text-lg" style={{ color: c.text }}>{guestData.ladder.length}</div>
-                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>on the ladder</div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Guest quick-nav — browsing is free, the locked tiles say so upfront */}
-        <section className="grid grid-cols-4 gap-2 mt-4">
-          <GuestMenuTile icon={Layers} label="Tables" onClick={() => scrollTo(tablesRef)} c={c} />
-          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
-          <GuestMenuTile icon={History} label="Activity" onClick={() => scrollTo(activityRef)} c={c} />
-          <GuestMenuTile icon={Swords} label="Challenges" locked onClick={() => onRequireAuth("Sign in to send and receive challenges.")} c={c} />
-        </section>
-
-        <div ref={ladderRef} className="pt-6">
-          {guestData ? (
-            <PublicLadderSection ladder={guestData.ladder} c={c} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} />
-          ) : <Loader c={c} />}
-        </div>
-
-        <div ref={activityRef} className="pt-8">
+        <section ref={activityRef} className="mt-10 pt-8" style={{ borderTop: `1px solid ${c.border}` }}>
           {guestData && (
             <PublicActivityFeed results={guestData.results} c={c} onChallenge={() => onRequireAuth("Sign in to send and receive challenges.")} />
           )}
-        </div>
+        </section>
 
-        <div ref={tablesRef} className="pt-2">
-          {guestData ? (
-            <PublicLeaguesSection data={guestData} c={c}
-              onJoin={() => onRequireAuth("Sign in to join this league.")}
-              onCreate={() => onRequireAuth("Sign in to create your own league.")} />
-          ) : <Loader c={c} />}
-        </div>
-
-        <div className="mt-12 pt-8 border-t text-center" style={{ borderColor: c.border }}>
+        <div className="mt-10 pt-8 border-t text-center" style={{ borderColor: c.border }}>
           <div className="font-body font-semibold text-sm mb-3" style={{ color: c.textDim }}>Ready to get in the game?</div>
           <button onClick={() => onSignIn(staySignedIn)} className="inline-flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
             <GoogleIcon /> Continue with Google
@@ -3928,10 +3925,10 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
   );
 }
 
-// One locked/unlocked quick-nav tile on the guest homepage. Unlocked tiles
-// (Tables, Ladder, Activity) just scroll down to content that's already
-// public; locked ones carry a small Lock badge and hand off to onRequireAuth
-// instead of pretending the action is available.
+// One equal-weight tile in the guest quick-action grid — same visual as the
+// signed-in Home's MenuTile, plus a small lock badge on anything that needs
+// an account. Ladder is the only unlocked one; it just scrolls down to
+// content that's already public.
 function GuestMenuTile({ icon: Icon, label, locked, onClick, c }) {
   return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
@@ -3979,82 +3976,53 @@ function AuthPromptModal({ reason, c, onCancel, onSignIn }) {
   );
 }
 
-// The ladder for guests — top 5 shown as a strip by default (same look the
-// login screen always had), with a "See full ladder" toggle that expands
-// into the same row layout LadderPage uses for signed-in members, minus the
-// Challenge buttons (there's nothing to challenge with, signed out). Reads
-// from public_ladder_full (all ranks; granted to anon), passed down already
-// loaded from PublicHome.
-function PublicLadderSection({ ladder, c, onClimb }) {
-  const [expanded, setExpanded] = useState(false);
+// The ladder for guests — visually identical to the signed-in Home's
+// LadderStrip (same horizontally-scrolling chips, same rank medals), just
+// swapping the "You're #N" shortcut for a locked "Climb it" prompt since
+// there's no signed-in member to rank. Reads from public_ladder_full (all
+// ranks; granted to anon), passed down already loaded from PublicHome.
+function GuestLadderStrip({ ladder, onClimb, c }) {
+  if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
-  const rest = ladder.slice(5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
-
   return (
-    <div className="w-full mb-2">
-      <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-center mb-2 flex items-center justify-center gap-1.5" style={{ color: c.textFaint }}>
-        <TrendingUp size={11} /> The Ladder — everyone's fighting for #1
-      </div>
-      {ladder.length === 0 ? (
-        <div className="text-center font-body text-xs py-3" style={{ color: c.textFaint }}>Nobody's climbed yet — be the first.</div>
-      ) : (
-        <>
-          <div className="no-scrollbar flex items-center justify-center gap-4 overflow-x-auto px-2">
-            {top5.map((row, i) => (
-              <div key={row.user_id || row.username + i} className="flex items-center gap-1.5 shrink-0"
-                style={{ borderRight: i < top5.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < top5.length - 1 ? 16 : 0 }}>
-                {i === 0 ? <Crown size={14} style={{ color: c.accent }} /> : (
-                  <span className="font-mono text-[11px] font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
-                )}
-                <span className="font-body font-semibold text-xs truncate max-w-[90px]">{row.username}</span>
-              </div>
-            ))}
-          </div>
-
-          {rest.length > 0 && (
-            <div className="flex justify-center mt-3">
-              <button onClick={() => setExpanded((v) => !v)} className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-                {expanded ? "Hide full ladder" : `See full ladder (${ladder.length})`} <ChevronDown size={11} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
-              </button>
-            </div>
-          )}
-
-          {expanded && (
-            <div className="flex flex-col gap-1.5 mt-3 max-h-[24rem] overflow-y-auto pr-0.5">
-              {ladder.map((row) => {
-                const rankIdx = row.rank_position - 1;
-                return (
-                  <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-                    {rankIdx >= 0 && rankIdx < 3 ? (
-                      <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
-                        {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
-                      </span>
-                    ) : (
-                      <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
-                    )}
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
-                      {row.username?.[0]?.toUpperCase() || "?"}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-body text-sm truncate">{row.username}</div>
-                      <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-      {onClimb && (
-        <div className="flex justify-center mt-3">
-          <button onClick={onClimb} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-1.5 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
-            <Lock size={11} /> Sign in to climb the ladder
-          </button>
+    <section className="pt-5">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
+          <TrendingUp size={12} /> The Ladder
         </div>
-      )}
-    </div>
+        <button onClick={onClimb} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+          <Lock size={10} /> {ladder.length} climbing
+        </button>
+      </div>
+      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
+        {top5.map((row, i) => (
+          <div key={row.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+            style={{
+              background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
+              border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
+            }}>
+            {i < 3 ? (
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
+              </span>
+            ) : (
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                {i + 1}
+              </span>
+            )}
+            <div className="flex flex-col leading-tight">
+              <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+            </div>
+          </div>
+        ))}
+        <button onClick={onClimb} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+          style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
+          <Lock size={11} /> {ladder.length > 5 ? "See full ladder" : "Climb it"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -4088,38 +4056,28 @@ function PublicActivityFeed({ results, c, onChallenge }) {
   );
 }
 
-// Shows standings for admin-created leagues to visitors who haven't signed in
-// yet — plus, unlike the old preview, a photo/description header (from
-// public_league_extra) and a "View all matches" toggle that expands into the
-// league's full match history, not just the current stage's table. Data is
-// loaded once by the parent (PublicHome) and passed down. onJoin, if passed,
-// puts a locked "Join" button on every card so browsing can turn straight
-// into a sign-in prompt without leaving the page.
-function PublicLeaguesSection({ data, c, onJoin, onCreate }) {
-  if (data.leagues.length === 0) {
-    return (
-      <div className="w-full mt-6 text-center font-body text-sm py-8 border border-dashed rounded-xl" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-        No leagues running yet — sign in and start the first one.
-      </div>
-    );
-  }
-
+// A section of league previews for guests — same header format as the
+// signed-in Home's LeagueSection (icon badge, title, count pill), but
+// stacked full-width standings previews instead of a horizontal card
+// carousel, since there's no detail page for a guest to tap through to.
+function GuestLeagueSection({ title, icon: Icon, leagues, data, onJoin, c }) {
+  if (leagues.length === 0) return null;
   return (
-    <div className="w-full mt-4 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Current tables</div>
-        {onCreate && (
-          <button onClick={onCreate} className="flex items-center gap-1 font-body text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}>
-            <Lock size={9} /> New league
-          </button>
-        )}
+    <section className="mt-8 first:mt-0">
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}><Icon size={15} style={{ color: c.accent }} /></span>
+        <div className="font-extrabold uppercase tracking-tight text-lg leading-none flex items-center gap-2">
+          {title}
+          <span className="font-mono text-[10px] font-normal tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>{leagues.length}</span>
+        </div>
       </div>
-      {data.leagues.map((l) => (
-        <PublicLeagueCard key={l.id} league={l} data={data} onJoin={onJoin} c={c} />
-      ))}
-    </div>
+      <div className="space-y-4">
+        {leagues.map((l) => <PublicLeagueCard key={l.id} league={l} data={data} onJoin={onJoin} c={c} />)}
+      </div>
+    </section>
   );
 }
+
 
 function PublicLeagueCard({ league: l, data, onJoin, c }) {
   const [showAllMatches, setShowAllMatches] = useState(false);
