@@ -1079,6 +1079,12 @@ const RULES_CONTENT = {
         "No response at all before the deadline = an automatic loss for whoever went silent.",
         "Agreed a time but they didn't show? Automatic forfeit.",
       ]},
+      { heading: "Arrangements", items: [
+        "📸 If you reject a time, offer a new one.",
+        "🤔 Otherwise it looks like you don't want to play.",
+        "📅 If you're busy, set and confirm the date.",
+        "✅ Can't make it? Give your opponent the win.",
+      ]},
       { heading: "On-pitch rules", items: [
         "15-minute halves (30 min total), up to 6 subs, no extra time or penalties — decided at 90 minutes.",
         "Bad connection during the match? That player takes the loss.",
@@ -1115,6 +1121,12 @@ const RULES_CONTENT = {
         "Win = 3 points, draw = 1 point, loss = 0. Rank is points first, most wins as the tiebreaker.",
         "A photo of the final scoreboard is required, same as everywhere else.",
       ]},
+      { heading: "Arrangements", items: [
+        "📸 If you reject a time, offer a new one.",
+        "🤔 Otherwise it looks like you don't want to play.",
+        "📅 If you're busy, set and confirm the date.",
+        "✅ Can't make it? Give your opponent the win.",
+      ]},
     ],
   },
   challenge: {
@@ -1124,6 +1136,12 @@ const RULES_CONTENT = {
       { heading: "Direct & random challenges", items: [
         "Direct — challenge one specific player, any time.",
         "Random — broadcast open to everyone; first to accept gets the match, everyone else misses out.",
+      ]},
+      { heading: "Arrangements", items: [
+        "📸 If you reject a time, offer a new one.",
+        "🤔 Otherwise it looks like you don't want to play.",
+        "📅 If you're busy, set and confirm the date.",
+        "✅ Can't make it? Give your opponent the win.",
       ]},
       { heading: "Reporting results", items: [
         "A screenshot of the final scoreboard is required, always.",
@@ -2085,7 +2103,7 @@ export default function App() {
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
-  const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared ?shop_product=<id> link — works signed in or as a guest
+  const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
   const c = THEMES[theme];
 
@@ -2764,15 +2782,14 @@ export default function App() {
     setHandledDeepLink(true);
   }, [leagues, handledDeepLink, showToast]);
 
-  // Handle a shared shop product link like ?shop_product=<id> — anyone can
-  // open one, signed in or not, so this runs independently of session state.
+  // Handle a shared shop product link like /shop/<id> — anyone can open
+  // one, signed in or not, so this runs independently of session state.
   useEffect(() => {
     if (handledShopDeepLink) return;
-    const params = new URLSearchParams(window.location.search);
-    const productId = params.get("shop_product");
-    if (productId) {
-      setShopDeepLinkProductId(productId);
-      window.history.replaceState({}, "", window.location.pathname);
+    const match = window.location.pathname.match(/^\/shop\/([^/]+)\/?$/);
+    if (match) {
+      setShopDeepLinkProductId(match[1]);
+      window.history.replaceState({}, "", "/");
     }
     setHandledShopDeepLink(true);
   }, [handledShopDeepLink]);

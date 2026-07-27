@@ -42,11 +42,12 @@ function waLink(phone, text) {
   return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 }
 
-// The query param a shared product link is opened with — anyone with the
-// link lands straight on that product, no account or admin access needed.
-const PRODUCT_LINK_PARAM = "shop_product";
+// Shared product links use a clean path — weafrica.co.za/shop/<id> — rather
+// than a query string, so they read like a real page and not like a param
+// dump. Requires the SPA fallback rewrite in vercel.json so any /shop/<id>
+// path still serves index.html.
 function buildProductLink(product) {
-  return `${window.location.origin}${window.location.pathname}?${PRODUCT_LINK_PARAM}=${product.id}`;
+  return `${window.location.origin}/shop/${product.id}`;
 }
 
 function loadCart() {
@@ -109,7 +110,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   useEffect(() => { persistCart(cart); }, [cart]);
 
-  // A shared product link (?shop_product=<id>) lands here — open that
+  // A shared product link (weafrica.co.za/shop/<id>) lands here — open that
   // product automatically once the catalog has loaded, for anyone,
   // signed in or not. Only tried once per page load.
   useEffect(() => {
