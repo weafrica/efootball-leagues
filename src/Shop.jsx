@@ -363,6 +363,10 @@ function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd,
 
   return (
     <div>
+      {selected === "all" && !q && (
+        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={setSelected} c={c} />
+      )}
+
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the shop..."
@@ -400,10 +404,6 @@ function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd,
         </div>
       )}
 
-      {selected === "all" && !q && departments.length > 1 && (
-        <DepartmentDirectory groups={grouped} onSelect={setSelected} c={c} />
-      )}
-
       {currentItems.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body mt-2" style={{ borderColor: c.borderStrong, color: c.textDim }}>
           {q ? `Nothing matching "${query}".` : "Nothing here yet."}
@@ -438,24 +438,62 @@ function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd,
   );
 }
 
-// The "store directory" — big tappable department tiles shown when
-// browsing everything, so picking an aisle doesn't depend on spotting the
-// right small chip. Uses each department's first product photo as a
-// representative image.
-function DepartmentDirectory({ groups, onSelect, c }) {
+// A small, curated set of accent gradients cycled across department tiles —
+// gives each "aisle" its own identity at a glance (handy once there are
+// enough departments that they'd otherwise blur together), and doubles as
+// a full-tile background for any department whose products don't have a
+// photo yet, so the store directory never shows an empty gray box.
+const DEPT_TINTS = [
+  "linear-gradient(135deg,#D4A017,#7A5A00)",
+  "linear-gradient(135deg,#2D6A4F,#0E2A1C)",
+  "linear-gradient(135deg,#7B3FA0,#341047)",
+  "linear-gradient(135deg,#1B6C8F,#0A2A38)",
+  "linear-gradient(135deg,#C4293A,#4A0F17)",
+  "linear-gradient(135deg,#B8860B,#3A2600)",
+  "linear-gradient(135deg,#3F6B4A,#12261A)",
+  "linear-gradient(135deg,#5B4B8A,#211A3A)",
+];
+
+// The store directory — the first thing a shopper sees when they open the
+// shop. Big tappable department tiles (photo where one exists, an accent
+// gradient where it doesn't) so picking an aisle is a glance-and-tap, not a
+// hunt through a small chip row. "Other" gets its own tile too, styled as
+// the catch-all it is rather than pretending to be a real department.
+function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
+  const tileCount = groups.length + (uncategorizedCount > 0 ? 1 : 0);
+  if (tileCount < 2) return null; // one aisle isn't a directory — skip straight to the grid
   return (
-    <div className="grid grid-cols-2 gap-2.5 mb-6">
-      {groups.map(({ dept, items }) => (
-        <button key={dept.id} onClick={() => onSelect(dept.id)} className="text-left rounded-xl overflow-hidden border relative" style={{ background: c.surface, borderColor: c.border }}>
-          <div className="aspect-[16/9] flex items-center justify-center" style={{ background: c.surfaceHover }}>
-            {items[0]?.image_url ? <img src={items[0].image_url} alt="" className="w-full h-full object-cover" /> : <LayoutGrid size={22} style={{ color: c.textFaint }} />}
-          </div>
-          <div className="p-2.5">
-            <div className="font-body text-sm font-semibold truncate">{dept.name}</div>
-            <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{items.length} item{items.length === 1 ? "" : "s"}</div>
-          </div>
-        </button>
-      ))}
+    <div className="mb-6">
+      <div className="flex items-center gap-1.5 mb-2.5">
+        <LayoutGrid size={13} style={{ color: SHOP_GOLD }} />
+        <span className="font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Shop by department</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        {groups.map(({ dept, items }, i) => {
+          const photo = items.find((it) => it.image_url)?.image_url;
+          return (
+            <button key={dept.id} onClick={() => onSelect(dept.id)}
+              className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
+              style={{ background: DEPT_TINTS[i % DEPT_TINTS.length] }}>
+              {photo && <img src={photo} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+              <div className="absolute inset-0" style={{ background: photo ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
+              <div className="absolute bottom-0 left-0 right-0 p-3">
+                <div className="text-white font-extrabold uppercase tracking-tight text-[13px] leading-tight truncate" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
+                <div className="text-white/85 font-mono text-[10px] mt-0.5">{items.length} item{items.length === 1 ? "" : "s"}</div>
+              </div>
+            </button>
+          );
+        })}
+        {uncategorizedCount > 0 && (
+          <button onClick={() => onSelect("uncategorized")}
+            className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] flex flex-col justify-end p-3 active:scale-[0.98] transition-transform border border-dashed"
+            style={{ background: c.surface, borderColor: c.borderStrong }}>
+            <LayoutGrid size={16} className="mb-auto mt-0.5" style={{ color: c.textFaint }} />
+            <div className="font-extrabold uppercase tracking-tight text-[13px] leading-tight" style={{ color: c.text }}>Other</div>
+            <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>{uncategorizedCount} item{uncategorizedCount === 1 ? "" : "s"}</div>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
