@@ -724,6 +724,10 @@ function avatarColor(seed) {
 // reads as "WhatsApp" at a glance rather than blending into the app's palette.
 const WHATSAPP_GREEN = "#25D366";
 
+// The one support line for the whole site — shown as a floating button on
+// every screen (signed in or not) so anyone can reach a human fast.
+const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
+
 // Builds a wa.me deep link with an optional prefilled message. wa.me opens
 // whichever WhatsApp variant — regular or Business — is installed as the
 // device's default handler for that number; there's no separate universal
@@ -789,6 +793,23 @@ function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
       <Phone size={11} /> {label || "Call"}
     </a>
 
+  );
+}
+
+// Site-wide quick-contact entry point — a floating round WhatsApp button
+// pinned to the corner of every screen, signed in or not, so reaching
+// support never depends on which page someone happens to be on. Opens a
+// prefilled chat to SUPPORT_WHATSAPP_NUMBER rather than a raw phone number,
+// same pattern as WhatsAppLink elsewhere in the app.
+function SupportWhatsAppButton() {
+  const href = waLink(SUPPORT_WHATSAPP_NUMBER, "Hi, I need help with the Matchday app.");
+  if (!href) return null;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" title="Chat to support on WhatsApp"
+      className="fixed bottom-6 right-5 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105"
+      style={{ background: WHATSAPP_GREEN, color: "#fff" }}>
+      <MessageCircle size={26} />
+    </a>
   );
 }
 
@@ -3833,6 +3854,7 @@ export default function App() {
           {toast}
         </div>
       )}
+      <SupportWhatsAppButton />
     </div>
   );
 }
@@ -4048,6 +4070,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           </>
         )}
       </main>
+      <SupportWhatsAppButton />
     </div>
   );
 }
@@ -4410,6 +4433,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
           {submitting ? "Saving..." : "Continue to Matchday"}
         </button>
       </div>
+      <SupportWhatsAppButton />
     </div>
   );
 }

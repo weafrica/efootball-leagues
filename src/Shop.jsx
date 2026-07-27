@@ -15,7 +15,7 @@ import {
 // option. Digits only, with country code, no spaces or symbols — e.g. a
 // South African number would be "27821234567". Leave blank to hide that
 // checkout option entirely.
-export const SHOP_WHATSAPP_NUMBER = "";
+export const SHOP_WHATSAPP_NUMBER = "+27694362789";
 
 // Shown to buyers who choose manual EFT/bank-transfer checkout. Replace
 // with your real banking details before going live.
