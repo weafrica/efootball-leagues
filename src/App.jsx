@@ -806,9 +806,9 @@ function SupportWhatsAppButton() {
   if (!href) return null;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" title="Chat to support on WhatsApp"
-      className="fixed bottom-6 right-5 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105"
+      className="fixed bottom-4 right-3 z-50 w-[18px] h-[18px] rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105"
       style={{ background: WHATSAPP_GREEN, color: "#fff" }}>
-      <MessageCircle size={26} />
+      <MessageCircle size={9} />
     </a>
   );
 }
