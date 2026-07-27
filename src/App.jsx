@@ -2782,6 +2782,11 @@ export default function App() {
     if (shopDeepLinkProductId && session) setView("shop");
   }, [shopDeepLinkProductId, session]);
 
+  // Browser tab title reflects where the shopper actually is.
+  useEffect(() => {
+    document.title = view === "shop" ? "Department Store" : "Matchday — eFootball Leagues";
+  }, [view]);
+
   const completeProfile = async (phone, username, photoFile) => {
     const { data, error } = await supabase.from("profiles")
       .insert({ user_id: session.user.id, phone, efootball_username: username })
@@ -3803,6 +3808,9 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   useEffect(() => {
     if (initialShopProductId) setShopOpen(true);
   }, [initialShopProductId]);
+  useEffect(() => {
+    document.title = shopOpen ? "Department Store" : "Matchday — eFootball Leagues";
+  }, [shopOpen]);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
   const activityRef = useRef(null);
