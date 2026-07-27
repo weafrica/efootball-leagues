@@ -2804,6 +2804,31 @@ export default function App() {
     document.title = view === "shop" ? "Department Store" : "Matchday — eFootball Leagues";
   }, [view]);
 
+  // Push a real browser history entry for every screen change, so the
+  // hardware/gesture back action moves between in-app screens (League →
+  // Home, Shop → Home, etc.) instead of leaving the site entirely — which
+  // previously looked like getting logged out, since coming back in reloaded
+  // the app from scratch.
+  const appNavFirstRef = useRef(true);
+  useEffect(() => {
+    const state = { appView: true, view, activeLeagueId };
+    const cur = window.history.state;
+    if (cur && cur.appView && cur.view === view && cur.activeLeagueId === activeLeagueId) return;
+    if (appNavFirstRef.current) { appNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
+    window.history.pushState(state, "");
+  }, [view, activeLeagueId]);
+
+  useEffect(() => {
+    const onPopState = (e) => {
+      const state = e.state;
+      if (!state || !state.appView) return; // not one of ours — leave it to whichever nav owns it
+      setView(state.view || "home");
+      setActiveLeagueId(state.activeLeagueId ?? null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const completeProfile = async (phone, username, photoFile) => {
     const { data, error } = await supabase.from("profiles")
       .insert({ user_id: session.user.id, phone, efootball_username: username })
@@ -3825,6 +3850,28 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   useEffect(() => {
     if (initialShopProductId) setShopOpen(true);
   }, [initialShopProductId]);
+
+  // Same real-history treatment as the signed-in app (see App()'s appNav
+  // effects) — a guest opening the shop and swiping back should land on the
+  // homepage, not leave the site.
+  const guestShopNavFirstRef = useRef(true);
+  useEffect(() => {
+    const state = { guestShopOpen: true, shopOpen };
+    const cur = window.history.state;
+    if (cur && cur.guestShopOpen && cur.shopOpen === shopOpen) return;
+    if (guestShopNavFirstRef.current) { guestShopNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
+    window.history.pushState(state, "");
+  }, [shopOpen]);
+
+  useEffect(() => {
+    const onPopState = (e) => {
+      const state = e.state;
+      if (!state || !("shopOpen" in state) || !state.guestShopOpen) return;
+      setShopOpen(!!state.shopOpen);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   useEffect(() => {
     document.title = shopOpen ? "Department Store" : "Matchday — eFootball Leagues";
   }, [shopOpen]);

@@ -110,6 +110,42 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   useEffect(() => { persistCart(cart); }, [cart]);
 
+  // Real browser-history navigation inside the shop itself: browsing → cart
+  // → checkout, and opening/closing a product modal, are all real history
+  // entries layered on top of whichever entry the parent (App or
+  // PublicHome) already pushed for "entering the shop". That way swiping
+  // back inside the shop steps back through cart/checkout/product screens
+  // one at a time, and only leaves the shop once you're back at its root.
+  const shopBaseStateRef = useRef(null);
+  useEffect(() => {
+    shopBaseStateRef.current = window.history.state || {};
+  }, []);
+  const shopNavFirstRef = useRef(true);
+  useEffect(() => {
+    const productId = activeProduct?.id ?? null;
+    const state = { ...(shopBaseStateRef.current || {}), shopNav: true, shopSubview: subview, shopProductId: productId };
+    const cur = window.history.state;
+    if (cur && cur.shopNav && cur.shopSubview === subview && (cur.shopProductId ?? null) === productId) return;
+    if (shopNavFirstRef.current) { shopNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
+    window.history.pushState(state, "");
+  }, [subview, activeProduct]);
+
+  useEffect(() => {
+    const onPopState = (e) => {
+      const state = e.state;
+      if (!state || !state.shopNav) return; // popped past our own entries — the parent's own listener handles leaving the shop
+      setSubview(state.shopSubview || "browse");
+      if (state.shopProductId && products) {
+        const found = products.find((p) => String(p.id) === String(state.shopProductId));
+        setActiveProduct(found || null);
+      } else {
+        setActiveProduct(null);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [products]);
+
   // A shared product link (weafrica.co.za/shop/<id>) lands here — open that
   // product automatically once the catalog has loaded, for anyone,
   // signed in or not. Only tried once per page load.
