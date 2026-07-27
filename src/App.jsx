@@ -801,8 +801,8 @@ function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
 // support never depends on which page someone happens to be on. Opens a
 // prefilled chat to SUPPORT_WHATSAPP_NUMBER rather than a raw phone number,
 // same pattern as WhatsAppLink elsewhere in the app.
-function SupportWhatsAppButton() {
-  const href = waLink(SUPPORT_WHATSAPP_NUMBER, "Hi, I need help with the Matchday app.");
+function SupportWhatsAppButton({ context }) {
+  const href = waLink(SUPPORT_WHATSAPP_NUMBER, `Hi, I need help with ${context || "the Matchday app"}.`);
   if (!href) return null;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" title="Chat to support on WhatsApp"
@@ -3854,7 +3854,7 @@ export default function App() {
           {toast}
         </div>
       )}
-      <SupportWhatsAppButton />
+      <SupportWhatsAppButton context={view === "shop" ? SHOP_NAME : "the Matchday app"} />
     </div>
   );
 }
@@ -4070,7 +4070,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           </>
         )}
       </main>
-      <SupportWhatsAppButton />
+      <SupportWhatsAppButton context={shopOpen ? SHOP_NAME : "the Matchday app"} />
     </div>
   );
 }
