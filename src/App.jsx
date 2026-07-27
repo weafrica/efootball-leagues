@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
+import ShopPage from "./Shop.jsx";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -12,13 +13,17 @@ import {
 const THEME_KEY = "efootball-theme-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
-// Storefront the "Shop now" banner links out to — swap this for your real
-// store URL (Shopify, WhatsApp catalog, etc). Opens in a new tab so nobody
-// loses their place in the app.
+// The "Shop now" banner opens the in-app WeAfrica Shop (see Shop.jsx) —
+// full catalog, cart, and checkout, no external site needed.
 const SHOP_NAME = "WeAfrica Shop";
-const SHOP_URL = "https://example.com/shop";
 const SHOP_GOLD = "#D4A017"; // brand accent, distinct from the app's green so the banner reads as a sponsor/store placement, not another app screen
-const openShop = () => window.open(SHOP_URL, "_blank", "noopener,noreferrer");
+
+// Promo badge on the shop banner — flip SHOP_PROMO_ACTIVE to true whenever
+// you're running a promotion, and edit the text to match. Flip it back to
+// false when the promo ends. No redeploy logic needed beyond editing these
+// two lines and shipping.
+const SHOP_PROMO_ACTIVE = false;
+const SHOP_PROMO_TEXT = "Sale";
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 const ENTRY_FEE_MIN = 10;
@@ -3676,7 +3681,7 @@ export default function App() {
                 openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
-                onCreate={() => setView("create")} onJoin={startJoin} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={() => setView("home")} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -3706,6 +3711,9 @@ export default function App() {
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
                 recentMatches={ladderResults}
                 c={c} />
+            )}
+            {view === "shop" && (
+              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={() => setView("home")} />
             )}
           </>
         )}
@@ -3768,6 +3776,7 @@ export default function App() {
 // which the parent turns into the AuthPromptModal.
 function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
+  const [shopOpen, setShopOpen] = useState(false);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
   const activityRef = useRef(null);
@@ -3831,7 +3840,11 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
-        <ShopBanner c={c} />
+        {shopOpen ? (
+          <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} />
+        ) : (
+          <>
+        <ShopBanner onOpen={() => setShopOpen(true)} c={c} />
 
         {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
             live-season pulse, stat strip), plus the one thing Home doesn't
@@ -3932,6 +3945,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
             <GoogleIcon /> Continue with Google
           </button>
         </div>
+          </>
+        )}
       </main>
     </div>
   );
@@ -4201,13 +4216,19 @@ function GoogleIcon({ small }) {
 // screen inside the app. The whole card is a tap target (not just the
 // pill), open to guests and members alike since browsing the store needs no
 // account.
-function ShopBanner({ c }) {
+function ShopBanner({ onOpen, c }) {
   return (
-    <section onClick={openShop} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+    <section onClick={onOpen} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
       style={{ background: `linear-gradient(120deg, ${SHOP_GOLD}2E, ${c.surface})`, border: `1px solid ${SHOP_GOLD}55` }}>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-14 -right-8 w-36 h-36 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.22 }} />
       </div>
+      {SHOP_PROMO_ACTIVE && (
+        <span className="absolute top-2.5 right-2.5 font-mono text-[10px] font-bold tracking-[0.1em] uppercase px-2 py-1 rounded-full shadow-sm"
+          style={{ background: "#E8433D", color: "#fff" }}>
+          {SHOP_PROMO_TEXT}
+        </span>
+      )}
       <div className="relative flex items-center gap-3 px-4 py-3.5">
         <span className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${SHOP_GOLD}22`, border: `1px solid ${SHOP_GOLD}55` }}>
           <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
@@ -4218,7 +4239,7 @@ function ShopBanner({ c }) {
           <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone</div>
         </div>
         <span className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
-          Shop now <ExternalLink size={12} />
+          Shop now <ChevronRight size={12} />
         </span>
       </div>
     </section>
@@ -5919,7 +5940,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
 
@@ -5946,7 +5967,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
-      <ShopBanner c={c} />
+      <ShopBanner onOpen={onOpenShop} c={c} />
 
       {/* Compact HUD banner — status strip, not a landing-page hero */}
       <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
