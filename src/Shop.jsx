@@ -213,7 +213,6 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const cartTotal = cart.reduce((sum, it) => sum + it.qty * it.price, 0);
 
   const goCheckout = () => {
-    if (!session) { onRequireAuth ? onRequireAuth("Sign in to check out.") : showToast("Sign in to check out."); return; }
     if (cart.length === 0) { showToast("Your cart is empty."); return; }
     setSubview("checkout");
   };
@@ -269,10 +268,14 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         <div className="pt-10 text-center">
           <CheckCircle2 size={40} style={{ color: c.greenText }} className="mx-auto mb-3" />
           <div className="font-extrabold uppercase tracking-tight text-xl mb-1.5">Order placed</div>
-          <p className="font-body text-sm mb-6" style={{ color: c.textDim }}>We've got it — check "My orders" for status updates.</p>
+          <p className="font-body text-sm mb-6" style={{ color: c.textDim }}>
+            {session ? `We've got it — check "My orders" for status updates.` : "We've got it — we'll reach out on the contact number you gave us."}
+          </p>
           <div className="flex items-center justify-center gap-2">
             <button onClick={() => setSubview("browse")} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>Keep browsing</button>
-            <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>My orders</button>
+            {session && (
+              <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>My orders</button>
+            )}
           </div>
         </div>
       )}
@@ -630,16 +633,26 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
   const [proofFile, setProofFile] = useState(null);
   const [note, setNote] = useState("");
   const [contactPhone, setContactPhone] = useState(profile?.phone || "");
+  const [guestName, setGuestName] = useState("");
 
-  const buyerUsername = profile?.efootball_username || session?.user?.email || "Shopper";
+  const buyerUsername = profile?.efootball_username || session?.user?.email || guestName.trim() || "Shopper";
+  // Anonymous shoppers don't have an auth-issued id, so proof uploads for
+  // guest orders go into their own folder rather than a user's storage path.
+  const guestFolderId = useRef(null);
+  if (!session && !guestFolderId.current) {
+    guestFolderId.current = (crypto.randomUUID ? crypto.randomUUID() : `guest-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  }
 
   const orderLines = () => cart.map((it) => `${it.qty}x ${it.name} — ${formatMoney(it.qty * it.price)}`).join("\n");
 
+  const missingGuestName = !session && !guestName.trim();
+
   const submitWhatsapp = async () => {
     if (!SHOP_WHATSAPP_NUMBER) { showToast("WhatsApp ordering isn't set up yet."); return; }
+    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
     setSubmitting(true);
     const { error: orderErr } = await supabase.from("shop_orders").insert({
-      user_id: session.user.id, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
+      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
       checkout_method: "whatsapp", status: "whatsapp_sent", subtotal: total, contact_phone: contactPhone || null, delivery_note: note || null,
     }).select().single().then(async ({ data, error }) => {
       if (error || !data) return { error };
@@ -655,15 +668,16 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
   };
 
   const submitManualProof = async () => {
+    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
     if (!proofFile) { showToast("Attach your proof of payment before submitting."); return; }
     setSubmitting(true);
     const ext = (proofFile.name.split(".").pop() || "dat").toLowerCase();
-    const path = `${session.user.id}/order-${Date.now()}.${ext}`;
+    const path = `${session?.user?.id || `guest-${guestFolderId.current}`}/order-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, proofFile);
     if (uploadErr) { setSubmitting(false); showToast(`Couldn't upload proof: ${uploadErr.message}`); return; }
 
     const { data: order, error: orderErr } = await supabase.from("shop_orders").insert({
-      user_id: session.user.id, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
+      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
       checkout_method: "manual_proof", status: "pending_review", subtotal: total,
       contact_phone: contactPhone || null, delivery_note: note || null, payment_proof_path: path,
     }).select().single();
@@ -717,6 +731,14 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
         </button>
       </div>
 
+      {!session && (
+        <div className="mb-4">
+          <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Your name</label>
+          <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="So we know who the order is from"
+            className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        </div>
+      )}
+
       <div className="mb-4">
         <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Contact number</label>
         <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Where can we reach you about this order?"
@@ -728,8 +750,8 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
           <p className="font-body text-sm" style={{ color: c.textDim }}>
             Your order summary will be sent to us on WhatsApp, and we'll confirm payment and delivery with you directly there.
           </p>
-          <button onClick={submitWhatsapp} disabled={submitting}
-            className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: "#25D366", color: "#fff", opacity: submitting ? 0.6 : 1 }}>
+          <button onClick={submitWhatsapp} disabled={submitting || missingGuestName}
+            className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: "#25D366", color: "#fff", opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
             <MessageCircle size={15} /> {submitting ? "Sending..." : "Order on WhatsApp"}
           </button>
         </div>
@@ -750,8 +772,8 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
             {proofFile ? proofFile.name : "Attach proof of payment"}
             <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => setProofFile(e.target.files?.[0] || null)} />
           </label>
-          <button onClick={submitManualProof} disabled={submitting}
-            className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: submitting ? 0.6 : 1 }}>
+          <button onClick={submitManualProof} disabled={submitting || missingGuestName}
+            className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
             {submitting ? "Submitting..." : "Submit order"}
           </button>
         </div>
