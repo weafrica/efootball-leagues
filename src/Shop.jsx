@@ -231,11 +231,18 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 // BROWSE
 // ════════════════════════════════════════════════════════════════════
 
-// Filter chips for "All" + each department (plus "Other" for anything
-// uncategorized), and — when "All" is selected — the products grouped into
-// a section per department, like walking through a real department store.
+// A department-store-style browse experience:
+//  - a "store directory" of tappable department tiles when nothing's
+//    filtered yet, each showing a representative photo and item count
+//  - a sticky row of chips (with counts) so switching aisles doesn't
+//    require scrolling back to the top
+//  - search that narrows within whichever department is selected
+//  - "All" groups products into a section per department, like walking
+//    the floor; a specific department (or a search) shows just its grid
 function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
   const [selected, setSelected] = useState("all");
+  const [query, setQuery] = useState("");
+
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
     return (
@@ -245,44 +252,103 @@ function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
     );
   }
 
+  const q = query.trim().toLowerCase();
+  const searchable = q ? products.filter((p) => p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)) : products;
+
   const deptIds = new Set(departments.map((d) => d.id));
-  const grouped = departments.map((d) => ({ dept: d, items: products.filter((p) => p.department_id === d.id) })).filter((g) => g.items.length > 0);
-  const uncategorized = products.filter((p) => !p.department_id || !deptIds.has(p.department_id));
-  const chips = [{ id: "all", name: "All" }, ...departments, ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other" }] : [])];
+  const grouped = departments
+    .map((d) => ({ dept: d, items: searchable.filter((p) => p.department_id === d.id) }))
+    .filter((g) => g.items.length > 0);
+  const uncategorized = searchable.filter((p) => !p.department_id || !deptIds.has(p.department_id));
+  // Chips (and directory tiles) only ever show departments that actually
+  // have something in them right now — no dead-end aisles.
+  const chips = [
+    { id: "all", name: "All", count: searchable.length },
+    ...grouped.map(({ dept, items }) => ({ id: dept.id, name: dept.name, count: items.length })),
+    ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: uncategorized.length }] : []),
+  ];
+
+  const currentItems = selected === "all" ? searchable
+    : selected === "uncategorized" ? uncategorized
+    : searchable.filter((p) => p.department_id === selected);
 
   return (
     <div>
+      <div className="relative mb-4">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the shop..."
+          className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+
       {departments.length > 0 && (
-        <div className="flex gap-1.5 mb-4 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
-          {chips.map((d) => (
-            <button key={d.id} onClick={() => setSelected(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase"
-              style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
-              {d.name}
-            </button>
-          ))}
+        <div className="sticky top-0 z-10 -mx-4 px-4 pb-1 pt-1" style={{ background: c.bg }}>
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+            {chips.map((d) => (
+              <button key={d.id} onClick={() => setSelected(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase flex items-center gap-1.5"
+                style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+                {d.name} <span style={{ opacity: 0.6 }}>{d.count}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      {selected === "all" ? (
-        <div className="space-y-6">
+      {selected === "all" && !q && departments.length > 1 && (
+        <DepartmentDirectory groups={grouped} onSelect={setSelected} c={c} />
+      )}
+
+      {currentItems.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body mt-2" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          {q ? `Nothing matching "${query}".` : "Nothing here yet."}
+        </div>
+      ) : selected === "all" ? (
+        <div className="space-y-6 mt-1">
           {grouped.map(({ dept, items }) => (
             <div key={dept.id}>
-              {departments.length > 0 && <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5" style={{ color: c.textFaint }}>{dept.name}</div>}
+              {departments.length > 0 && (
+                <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5 flex items-baseline gap-1.5" style={{ color: c.textFaint }}>
+                  {dept.name} <span style={{ opacity: 0.6 }}>({items.length})</span>
+                </div>
+              )}
               <ProductGrid products={items} loading={false} onOpen={onOpen} c={c} />
             </div>
           ))}
           {uncategorized.length > 0 && (
             <div>
-              {departments.length > 0 && <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5" style={{ color: c.textFaint }}>Other</div>}
+              {departments.length > 0 && (
+                <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5 flex items-baseline gap-1.5" style={{ color: c.textFaint }}>
+                  Other <span style={{ opacity: 0.6 }}>({uncategorized.length})</span>
+                </div>
+              )}
               <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} c={c} />
             </div>
           )}
         </div>
-      ) : selected === "uncategorized" ? (
-        <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} c={c} />
       ) : (
-        <ProductGrid products={products.filter((p) => p.department_id === selected)} loading={false} onOpen={onOpen} c={c} />
+        <div className="mt-2"><ProductGrid products={currentItems} loading={false} onOpen={onOpen} c={c} /></div>
       )}
+    </div>
+  );
+}
+
+// The "store directory" — big tappable department tiles shown when
+// browsing everything, so picking an aisle doesn't depend on spotting the
+// right small chip. Uses each department's first product photo as a
+// representative image.
+function DepartmentDirectory({ groups, onSelect, c }) {
+  return (
+    <div className="grid grid-cols-2 gap-2.5 mb-6">
+      {groups.map(({ dept, items }) => (
+        <button key={dept.id} onClick={() => onSelect(dept.id)} className="text-left rounded-xl overflow-hidden border relative" style={{ background: c.surface, borderColor: c.border }}>
+          <div className="aspect-[16/9] flex items-center justify-center" style={{ background: c.surfaceHover }}>
+            {items[0]?.image_url ? <img src={items[0].image_url} alt="" className="w-full h-full object-cover" /> : <LayoutGrid size={22} style={{ color: c.textFaint }} />}
+          </div>
+          <div className="p-2.5">
+            <div className="font-body text-sm font-semibold truncate">{dept.name}</div>
+            <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{items.length} item{items.length === 1 ? "" : "s"}</div>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
