@@ -147,7 +147,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
 
   return (
-    <div className="pt-8 pb-10">
+    <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
         <button onClick={subview === "browse" ? onBack : () => setSubview("browse")} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
           <ArrowLeft size={15} /> {subview === "browse" ? "Back" : "Shop"}
@@ -180,7 +180,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
             <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
           </div>
-          <DepartmentBrowser products={visibleProducts} departments={departments || []} loading={products === null} onOpen={setActiveProduct} c={c} />
+          <DepartmentBrowser products={visibleProducts} departments={departments || []} loading={products === null} onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
         </>
       )}
 
@@ -218,6 +218,17 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         <ProductModal product={activeProduct} onClose={() => setActiveProduct(null)} onAdd={(qty) => { addToCart(activeProduct, qty); setActiveProduct(null); }} c={c} />
       )}
 
+      {subview === "browse" && cartCount > 0 && (
+        <button onClick={() => setSubview("cart")}
+          className="fixed bottom-20 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-full sm:max-w-sm flex items-center justify-between gap-3 px-4 py-3 rounded-full shadow-lg z-40"
+          style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+          <span className="flex items-center gap-2 font-body text-sm font-semibold">
+            <ShoppingCart size={16} /> {cartCount} item{cartCount === 1 ? "" : "s"}
+          </span>
+          <span className="font-mono text-sm font-bold">View cart · {formatMoney(cartTotal)}</span>
+        </button>
+      )}
+
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full font-body text-sm font-medium shadow-lg z-50 max-w-[90vw] text-center" style={{ background: c.toastBg, color: c.toastText }}>
           {toast}
@@ -239,9 +250,11 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 //  - search that narrows within whichever department is selected
 //  - "All" groups products into a section per department, like walking
 //    the floor; a specific department (or a search) shows just its grid
-function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
+function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd, c }) {
   const [selected, setSelected] = useState("all");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("default");
+  const [inStockOnly, setInStockOnly] = useState(false);
 
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
@@ -253,7 +266,11 @@ function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
   }
 
   const q = query.trim().toLowerCase();
-  const searchable = q ? products.filter((p) => p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)) : products;
+  let searchable = q ? products.filter((p) => p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)) : products;
+  if (inStockOnly) searchable = searchable.filter((p) => p.stock_qty !== 0);
+  if (sort === "price_asc") searchable = [...searchable].sort((a, b) => a.price - b.price);
+  else if (sort === "price_desc") searchable = [...searchable].sort((a, b) => b.price - a.price);
+  else if (sort === "name") searchable = [...searchable].sort((a, b) => a.name.localeCompare(b.name));
 
   const deptIds = new Set(departments.map((d) => d.id));
   const grouped = departments
@@ -274,10 +291,28 @@ function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
 
   return (
     <div>
-      <div className="relative mb-4">
+      <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the shop..."
-          className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          className="w-full border rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        {query && (
+          <button onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5 mb-4 overflow-x-auto no-scrollbar">
+        <select value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-mono text-[11px] font-semibold pl-2.5 pr-1.5 py-1.5 rounded-full outline-none" style={{ background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
+          <option value="default">Sort: Featured</option>
+          <option value="price_asc">Price: Low to High</option>
+          <option value="price_desc">Price: High to Low</option>
+          <option value="name">Name: A–Z</option>
+        </select>
+        <button onClick={() => setInStockOnly((v) => !v)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase"
+          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+          In stock only
+        </button>
       </div>
 
       {departments.length > 0 && (
@@ -310,7 +345,7 @@ function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
                   {dept.name} <span style={{ opacity: 0.6 }}>({items.length})</span>
                 </div>
               )}
-              <ProductGrid products={items} loading={false} onOpen={onOpen} c={c} />
+              <ProductGrid products={items} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
             </div>
           ))}
           {uncategorized.length > 0 && (
@@ -320,12 +355,12 @@ function DepartmentBrowser({ products, departments, loading, onOpen, c }) {
                   Other <span style={{ opacity: 0.6 }}>({uncategorized.length})</span>
                 </div>
               )}
-              <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} c={c} />
+              <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
             </div>
           )}
         </div>
       ) : (
-        <div className="mt-2"><ProductGrid products={currentItems} loading={false} onOpen={onOpen} c={c} /></div>
+        <div className="mt-2"><ProductGrid products={currentItems} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} /></div>
       )}
     </div>
   );
@@ -353,7 +388,7 @@ function DepartmentDirectory({ groups, onSelect, c }) {
   );
 }
 
-function ProductGrid({ products, loading, onOpen, c }) {
+function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
     return (
@@ -364,19 +399,30 @@ function ProductGrid({ products, loading, onOpen, c }) {
   }
   return (
     <div className="grid grid-cols-2 gap-3">
-      {products.map((p) => (
-        <button key={p.id} onClick={() => onOpen(p)} className="text-left rounded-xl overflow-hidden border" style={{ background: c.surface, borderColor: c.border, opacity: p.active ? 1 : 0.5 }}>
-          <div className="aspect-square flex items-center justify-center" style={{ background: c.surfaceHover }}>
-            {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
+      {products.map((p) => {
+        const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0;
+        return (
+          <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
+            className="text-left rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border, opacity: p.active ? 1 : 0.5 }}>
+            <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
+              {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
+              {canQuickAdd && (
+                <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
+                  className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+                  <Plus size={14} />
+                </button>
+              )}
+            </div>
+            <div className="p-2.5">
+              <div className="font-body text-xs font-semibold truncate">{p.name}</div>
+              <div className="font-mono text-xs mt-0.5" style={{ color: SHOP_GOLD }}>{formatMoney(p.price)}</div>
+              {!p.active && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.textFaint }}>Hidden</div>}
+              {p.active && p.stock_qty === 0 && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.red }}>Out of stock</div>}
+            </div>
           </div>
-          <div className="p-2.5">
-            <div className="font-body text-xs font-semibold truncate">{p.name}</div>
-            <div className="font-mono text-xs mt-0.5" style={{ color: SHOP_GOLD }}>{formatMoney(p.price)}</div>
-            {!p.active && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.textFaint }}>Hidden</div>}
-            {p.active && p.stock_qty === 0 && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.red }}>Out of stock</div>}
-          </div>
-        </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
