@@ -2070,6 +2070,7 @@ export default function App() {
   const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
+  const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
   const c = THEMES[theme];
 
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); }, []);
@@ -2194,8 +2195,8 @@ export default function App() {
 
   // The permanent ladder — every member, ordered by rank_position. Never
   // resets (that's the whole point), unlike seasons/leagues elsewhere in the
-  // app. RLS only allows reading this while signed in; the login screen
-  // shows its own top-5 public view instead (see PublicLadderPreview).
+  // app. RLS only allows reading this while signed in; the homepage shows
+  // its own public_ladder_full view instead (see PublicLadderSection).
   const loadLadder = useCallback(async () => {
     await supabase.rpc("process_stale_ladder_challenges");
     const { data, error } = await supabase.from("ladder_ranks").select("*").order("rank_position", { ascending: true });
@@ -3609,7 +3610,20 @@ export default function App() {
   if (session === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: THEMES.dark.bg }}><Loader c={THEMES.dark} /></div>;
   }
-  if (!session) return <LoginScreen c={c} theme={theme} toggleTheme={toggleTheme} onSignIn={(stay) => signInWithGoogle(stay)} />;
+  if (!session) {
+    return (
+      <>
+        <PublicHome c={c} theme={theme} toggleTheme={toggleTheme}
+          onSignIn={(stay) => signInWithGoogle(stay)}
+          onRequireAuth={(reason) => setAuthPrompt(reason)} />
+        {authPrompt && (
+          <AuthPromptModal reason={authPrompt} c={c}
+            onCancel={() => setAuthPrompt(null)}
+            onSignIn={(stay) => signInWithGoogle(stay)} />
+        )}
+      </>
+    );
+  }
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: c.bg }}><Loader c={c} /></div>;
   }
@@ -3736,171 +3750,466 @@ export default function App() {
   );
 }
 
-function LoginScreen({ c, theme, toggleTheme, onSignIn }) {
+// The signed-out homepage. This *is* the site's front door now — visitors can
+// scroll the whole thing, see live tables and the ladder, and click around
+// freely. Nothing here loads from tables gated to signed-in users; it's all
+// public_* views (granted to anon in Supabase). The only thing this screen
+// does on its own is offer Google sign-in — every actual action (joining a
+// league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
+// which the parent turns into the AuthPromptModal.
+function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
+  const tablesRef = useRef(null);
+  const ladderRef = useRef(null);
+  const activityRef = useRef(null);
+  const scrollTo = (ref) => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // Everything a guest can see lives behind public_* views (granted SELECT
+  // to anon in Supabase) — loaded once here and handed down as props so the
+  // ladder strip, league tables, and activity feed don't each fire their own
+  // round trip, and so the stats HUD can be computed from the same data.
+  const [guestData, setGuestData] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes] = await Promise.all([
+        supabase.from("public_leagues").select("*"),
+        supabase.from("public_league_teams").select("*"),
+        supabase.from("public_league_fixtures").select("*"),
+        supabase.from("public_league_extra").select("*"),
+        supabase.from("public_ladder_full").select("*").order("rank_position", { ascending: true }),
+        supabase.from("public_challenge_results").select("*").order("result_confirmed_at", { ascending: false }).limit(50),
+      ]);
+      if (cancelled) return;
+      setGuestData({
+        leagues: leaguesRes.data || [],
+        teams: teamsRes.data || [],
+        fixtures: fixturesRes.data || [],
+        extras: extraRes.data || [],
+        ladder: ladderRes.data || [],
+        results: resultsRes.data || [],
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const totalClubs = guestData ? guestData.teams.length : 0;
+  const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
+
   return (
-    <div className="min-h-screen flex flex-col items-center px-6 py-10" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
+    <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       <style>{`
         @keyframes medallionGlow { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.85; } }
         .medallion-glow { animation: medallionGlow 4.5s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) { .medallion-glow { animation: none; opacity: 0.7; } }
       `}</style>
 
-      <div className="w-full flex items-center justify-between max-w-md">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={14} color={c.accent} /></div>
-          <span className="font-extrabold text-sm uppercase tracking-wider">Matchday</span>
-        </div>
-        <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
-          {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[70vh] w-full">
-        <div className="font-mono text-[11px] uppercase tracking-[0.35em] mb-6" style={{ color: c.accent }}>Season 2026</div>
-
-        <div className="relative w-64 h-64 sm:w-72 sm:h-72 mb-8">
-          <div className="medallion-glow absolute -inset-6 rounded-full" style={{ background: `radial-gradient(circle, ${c.accent}55 0%, ${c.accent}00 70%)`, filter: "blur(18px)" }} />
-          <div className="absolute inset-0 rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 1px ${c.accent}66, 0 20px 60px -10px rgba(0,0,0,0.5)` }}>
-            <img src="/hero-emblem.png" alt="" className="w-full h-full object-cover" style={{ transform: "scale(1.12)" }} />
-            <div className="absolute inset-0" style={{ background: `radial-gradient(circle, transparent 45%, ${c.bg}CC 92%)` }} />
-            <div className="absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 40px 10px ${c.bg}` }} />
+      {/* Sticky guest header — same shell language as the signed-in Header,
+          minus anything that needs an account. Sign In is always one tap away. */}
+      <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
+        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
+            <div className="text-lg font-extrabold tracking-tight uppercase">Matchday</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+            <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
+              <GoogleIcon small /> Sign in
+            </button>
           </div>
         </div>
+      </header>
 
-        <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight text-center leading-[0.95] mb-3">
-          Run your table.<br />Own your league.
-        </h1>
-        <p className="font-body text-center max-w-xs mb-6" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself.</p>
+      <main className="max-w-3xl mx-auto px-4 pb-24">
+        {/* Hero */}
+        <div className="flex flex-col items-center text-center pt-8">
+          <div className="font-mono text-[11px] uppercase tracking-[0.35em] mb-6" style={{ color: c.accent }}>Season 2026</div>
 
-        <PublicLadderPreview c={c} />
+          <div className="relative w-48 h-48 sm:w-56 sm:h-56 mb-6">
+            <div className="medallion-glow absolute -inset-6 rounded-full" style={{ background: `radial-gradient(circle, ${c.accent}55 0%, ${c.accent}00 70%)`, filter: "blur(18px)" }} />
+            <div className="absolute inset-0 rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 1px ${c.accent}66, 0 20px 60px -10px rgba(0,0,0,0.5)` }}>
+              <img src="/hero-emblem.png" alt="" className="w-full h-full object-cover" style={{ transform: "scale(1.12)" }} />
+              <div className="absolute inset-0" style={{ background: `radial-gradient(circle, transparent 45%, ${c.bg}CC 92%)` }} />
+              <div className="absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 40px 10px ${c.bg}` }} />
+            </div>
+          </div>
 
-        <label className="flex items-center gap-2 mb-5 mt-2 cursor-pointer select-none">
+          <h1 className="text-4xl sm:text-5xl font-extrabold uppercase tracking-tight leading-[0.95] mb-3">
+            Run your table.<br />Own your league.
+          </h1>
+          <p className="font-body max-w-xs mb-6" style={{ color: c.textDim }}>Create an eFootball league, invite people to join, log results — the table updates itself. Have a look around first.</p>
+
+          <div className="flex items-center gap-2 mb-2">
+            <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+              <GoogleIcon /> Continue with Google
+            </button>
+          </div>
+          <label className="flex items-center gap-2 mb-1 mt-1 cursor-pointer select-none">
+            <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
+              <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
+              {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
+            </span>
+            <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
+          </label>
+          {!staySignedIn && (
+            <p className="font-mono text-[10px] text-center max-w-xs mt-2" style={{ color: c.textFaint }}>You'll be signed out automatically once you close this tab or browser.</p>
+          )}
+        </div>
+
+        {/* Live stats HUD — same numbers a signed-in member sees on Home,
+            just without "Welcome back". Makes the place feel lived-in before
+            anyone signs in. */}
+        {guestData && guestData.leagues.length > 0 && (
+          <section className="relative mt-8 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
+            <div className="flex items-center justify-center gap-6 px-4 py-4">
+              <div className="text-center font-mono leading-tight">
+                <div className="font-bold text-lg" style={{ color: c.text }}>{guestData.leagues.length}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
+              </div>
+              <div className="w-px h-8" style={{ background: c.border }} />
+              <div className="text-center font-mono leading-tight">
+                <div className="font-bold text-lg" style={{ color: c.text }}>{totalClubs}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
+              </div>
+              <div className="w-px h-8" style={{ background: c.border }} />
+              <div className="text-center font-mono leading-tight">
+                <div className="font-bold text-lg" style={{ color: c.text }}>{totalMatches}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
+              </div>
+              <div className="w-px h-8" style={{ background: c.border }} />
+              <div className="text-center font-mono leading-tight">
+                <div className="font-bold text-lg" style={{ color: c.text }}>{guestData.ladder.length}</div>
+                <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>on the ladder</div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Guest quick-nav — browsing is free, the locked tiles say so upfront */}
+        <section className="grid grid-cols-4 gap-2 mt-4">
+          <GuestMenuTile icon={Layers} label="Tables" onClick={() => scrollTo(tablesRef)} c={c} />
+          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
+          <GuestMenuTile icon={History} label="Activity" onClick={() => scrollTo(activityRef)} c={c} />
+          <GuestMenuTile icon={Swords} label="Challenges" locked onClick={() => onRequireAuth("Sign in to send and receive challenges.")} c={c} />
+        </section>
+
+        <div ref={ladderRef} className="pt-6">
+          {guestData ? (
+            <PublicLadderSection ladder={guestData.ladder} c={c} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} />
+          ) : <Loader c={c} />}
+        </div>
+
+        <div ref={activityRef} className="pt-8">
+          {guestData && (
+            <PublicActivityFeed results={guestData.results} c={c} onChallenge={() => onRequireAuth("Sign in to send and receive challenges.")} />
+          )}
+        </div>
+
+        <div ref={tablesRef} className="pt-2">
+          {guestData ? (
+            <PublicLeaguesSection data={guestData} c={c}
+              onJoin={() => onRequireAuth("Sign in to join this league.")}
+              onCreate={() => onRequireAuth("Sign in to create your own league.")} />
+          ) : <Loader c={c} />}
+        </div>
+
+        <div className="mt-12 pt-8 border-t text-center" style={{ borderColor: c.border }}>
+          <div className="font-body font-semibold text-sm mb-3" style={{ color: c.textDim }}>Ready to get in the game?</div>
+          <button onClick={() => onSignIn(staySignedIn)} className="inline-flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+            <GoogleIcon /> Continue with Google
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// One locked/unlocked quick-nav tile on the guest homepage. Unlocked tiles
+// (Tables, Ladder, Activity) just scroll down to content that's already
+// public; locked ones carry a small Lock badge and hand off to onRequireAuth
+// instead of pretending the action is available.
+function GuestMenuTile({ icon: Icon, label, locked, onClick, c }) {
+  return (
+    <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
+      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+      {locked && (
+        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
+          <Lock size={9} />
+        </span>
+      )}
+      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+        <Icon size={16} style={{ color: c.accent }} />
+      </span>
+      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{label}</span>
+    </button>
+  );
+}
+
+// The "sign in to continue" gate — shown over whatever the guest was just
+// looking at, rather than yanking them off to a separate page. Reused for
+// every login-gated action (join, challenges, climbing the ladder, creating
+// a league) with a short reason line so it's clear what unlocks once they do.
+function AuthPromptModal({ reason, c, onCancel, onSignIn }) {
+  const [staySignedIn, setStaySignedIn] = useState(true);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onCancel}>
+      <div className="w-full max-w-sm rounded-2xl p-6 border flex flex-col items-center text-center" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <button onClick={onCancel} className="self-end -mt-2 -mr-2 mb-1" style={{ color: c.textFaint }}><X size={16} /></button>
+        <div className="w-11 h-11 rounded-full flex items-center justify-center mb-3" style={{ background: c.surfaceHover }}>
+          <Lock size={16} style={{ color: c.accent }} />
+        </div>
+        <div className="font-body font-bold text-base mb-1">Sign in to continue</div>
+        <div className="font-body text-xs mb-5" style={{ color: c.textDim }}>{reason}</div>
+        <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full mb-3" style={{ background: c.accent, color: c.accentText }}>
+          <GoogleIcon /> Continue with Google
+        </button>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
           <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
             <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
             {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
           </span>
           <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
         </label>
-
-        <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-          <GoogleIcon /> Continue with Google
-        </button>
-        {!staySignedIn && (
-          <p className="font-mono text-[10px] text-center max-w-xs mt-3" style={{ color: c.textFaint }}>You'll be signed out automatically once you close this tab or browser.</p>
-        )}
       </div>
-      <PublicLeaguePreview c={c} />
     </div>
   );
 }
 
-// The ladder's top 5, for people who haven't signed in yet — reads from the
-// public_ladder_top view (granted to anon in Supabase). Deliberately styled
-// as a plain scrollable line, not a card, so it sits naturally under the
-// headline rather than looking like a separate widget.
-function PublicLadderPreview({ c }) {
-  const [rows, setRows] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    supabase.from("public_ladder_top").select("*").order("rank_position", { ascending: true })
-      .then(({ data }) => { if (!cancelled) setRows(data || []); });
-    return () => { cancelled = true; };
-  }, []);
-
-  if (!rows || rows.length === 0) return null;
+// The ladder for guests — top 5 shown as a strip by default (same look the
+// login screen always had), with a "See full ladder" toggle that expands
+// into the same row layout LadderPage uses for signed-in members, minus the
+// Challenge buttons (there's nothing to challenge with, signed out). Reads
+// from public_ladder_full (all ranks; granted to anon), passed down already
+// loaded from PublicHome.
+function PublicLadderSection({ ladder, c, onClimb }) {
+  const [expanded, setExpanded] = useState(false);
+  const top5 = ladder.slice(0, 5);
+  const rest = ladder.slice(5);
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
 
   return (
-    <div className="w-full max-w-md mb-2">
+    <div className="w-full mb-2">
       <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-center mb-2 flex items-center justify-center gap-1.5" style={{ color: c.textFaint }}>
         <TrendingUp size={11} /> The Ladder — everyone's fighting for #1
       </div>
-      <div className="no-scrollbar flex items-center justify-center gap-4 overflow-x-auto px-2">
-        {rows.map((row, i) => (
-          <div key={row.username + i} className="flex items-center gap-1.5 shrink-0"
-            style={{ borderRight: i < rows.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < rows.length - 1 ? 16 : 0 }}>
-            {i === 0 ? <Crown size={14} style={{ color: c.accent }} /> : (
-              <span className="font-mono text-[11px] font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
-            )}
-            <span className="font-body font-semibold text-xs truncate max-w-[90px]">{row.username}</span>
+      {ladder.length === 0 ? (
+        <div className="text-center font-body text-xs py-3" style={{ color: c.textFaint }}>Nobody's climbed yet — be the first.</div>
+      ) : (
+        <>
+          <div className="no-scrollbar flex items-center justify-center gap-4 overflow-x-auto px-2">
+            {top5.map((row, i) => (
+              <div key={row.user_id || row.username + i} className="flex items-center gap-1.5 shrink-0"
+                style={{ borderRight: i < top5.length - 1 ? `1px solid ${c.border}` : "none", paddingRight: i < top5.length - 1 ? 16 : 0 }}>
+                {i === 0 ? <Crown size={14} style={{ color: c.accent }} /> : (
+                  <span className="font-mono text-[11px] font-semibold" style={{ color: c.textFaint }}>#{i + 1}</span>
+                )}
+                <span className="font-body font-semibold text-xs truncate max-w-[90px]">{row.username}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-// Shows standings for admin-created leagues to visitors who haven't signed in yet.
-// Reads from public_leagues / public_league_teams / public_league_fixtures views,
-// which must be granted SELECT access for the `anon` role in Supabase.
-function PublicLeaguePreview({ c }) {
-  const [data, setData] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [leaguesRes, teamsRes, fixturesRes] = await Promise.all([
-        supabase.from("public_leagues").select("*"),
-        supabase.from("public_league_teams").select("*"),
-        supabase.from("public_league_fixtures").select("*"),
-      ]);
-      if (cancelled) return;
-      setData({
-        leagues: leaguesRes.data || [],
-        teams: teamsRes.data || [],
-        fixtures: fixturesRes.data || [],
-      });
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  if (!data || data.leagues.length === 0) return null;
-
-  return (
-    <div className="w-full max-w-md mt-4 space-y-6">
-      <div className="font-mono text-xs uppercase tracking-[0.2em] text-center" style={{ color: c.textFaint }}>Current tables</div>
-      {data.leagues.map((l) => {
-        const leagueTeams = data.teams.filter((t) => t.league_id === l.id);
-        const isStaged = l.format === "survivor" || l.format === "groups_knockout";
-        const leagueFixtures = data.fixtures.filter((f) => f.league_id === l.id && (!isStaged || f.stage === l.current_stage));
-        const inGroupStage = l.format === "groups_knockout" && !l.final_stage_started;
-
-        if (inGroupStage) {
-          if (leagueTeams.length === 0) return null;
-          return (
-            <div key={l.id} className="rounded-xl border p-4" style={{ borderColor: c.border, background: c.surface }}>
-              <div className="font-semibold text-sm mb-3">{l.name}</div>
-              <GroupTables league={{ ...l, teams: leagueTeams }} groupStageFixtures={leagueFixtures} c={c} />
+          {rest.length > 0 && (
+            <div className="flex justify-center mt-3">
+              <button onClick={() => setExpanded((v) => !v)} className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+                {expanded ? "Hide full ladder" : `See full ladder (${ladder.length})`} <ChevronDown size={11} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
+              </button>
             </div>
-          );
-        }
+          )}
 
-        const activeTeams = l.format === "survivor" ? leagueTeams.filter((t) => !t.eliminated) : leagueTeams;
-        const standings = computeStandings(activeTeams, leagueFixtures);
-        if (standings.length === 0) return null;
-        const n = standings.length;
-        const zoneFor = (idx) => {
-          if (idx === 0 && n > 4) return c.accent;
-          if (idx < Math.ceil(n / 3) && n > 6) return c.green;
-          if (idx >= n - Math.max(1, Math.floor(n / 4)) && n > 6) return c.red;
-          return "transparent";
-        };
-        return (
-          <div key={l.id} className="rounded-xl border p-4" style={{ borderColor: c.border, background: c.surface }}>
-            <div className="font-semibold text-sm mb-3">{l.name}</div>
-            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={leagueFixtures}
-              isSurvivor={l.format === "survivor"} league={l} c={c} />
-          </div>
-        );
-      })}
+          {expanded && (
+            <div className="flex flex-col gap-1.5 mt-3 max-h-[24rem] overflow-y-auto pr-0.5">
+              {ladder.map((row) => {
+                const rankIdx = row.rank_position - 1;
+                return (
+                  <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+                    {rankIdx >= 0 && rankIdx < 3 ? (
+                      <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
+                        {rankIdx === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[rankIdx] }} />}
+                      </span>
+                    ) : (
+                      <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
+                    )}
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
+                      {row.username?.[0]?.toUpperCase() || "?"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-body text-sm truncate">{row.username}</div>
+                      <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+      {onClimb && (
+        <div className="flex justify-center mt-3">
+          <button onClick={onClimb} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-1.5 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+            <Lock size={11} /> Sign in to climb the ladder
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function GoogleIcon() {
+// Platform-wide "who just played" feed for guests — reuses the exact same
+// CommunityResultRow the signed-in Challenges screen uses, fed from
+// public_challenge_results (granted to anon; already existed for the
+// signed-in feed, this just drops the session check). myId is always null
+// here since there's no signed-in member to highlight rows for.
+function PublicActivityFeed({ results, c, onChallenge }) {
+  if (!results || results.length === 0) return null;
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18">
+    <div className="w-full">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
+          <History size={12} /> Recent activity
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{results.length} shown</div>
+      </div>
+      <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>Confirmed challenge results across Matchday, most recent first.</div>
+      <div className="flex flex-col gap-1.5 max-h-[24rem] overflow-y-auto pr-0.5">
+        {results.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={null} c={c} />)}
+      </div>
+      {onChallenge && (
+        <div className="flex justify-center mt-3">
+          <button onClick={onChallenge} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-1.5 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+            <Lock size={11} /> Sign in to send a challenge
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Shows standings for admin-created leagues to visitors who haven't signed in
+// yet — plus, unlike the old preview, a photo/description header (from
+// public_league_extra) and a "View all matches" toggle that expands into the
+// league's full match history, not just the current stage's table. Data is
+// loaded once by the parent (PublicHome) and passed down. onJoin, if passed,
+// puts a locked "Join" button on every card so browsing can turn straight
+// into a sign-in prompt without leaving the page.
+function PublicLeaguesSection({ data, c, onJoin, onCreate }) {
+  if (data.leagues.length === 0) {
+    return (
+      <div className="w-full mt-6 text-center font-body text-sm py-8 border border-dashed rounded-xl" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+        No leagues running yet — sign in and start the first one.
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full mt-4 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Current tables</div>
+        {onCreate && (
+          <button onClick={onCreate} className="flex items-center gap-1 font-body text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}>
+            <Lock size={9} /> New league
+          </button>
+        )}
+      </div>
+      {data.leagues.map((l) => (
+        <PublicLeagueCard key={l.id} league={l} data={data} onJoin={onJoin} c={c} />
+      ))}
+    </div>
+  );
+}
+
+function PublicLeagueCard({ league: l, data, onJoin, c }) {
+  const [showAllMatches, setShowAllMatches] = useState(false);
+  const extra = data.extras.find((e) => e.league_id === l.id);
+  const leagueTeams = data.teams.filter((t) => t.league_id === l.id);
+  const allLeagueFixtures = data.fixtures.filter((f) => f.league_id === l.id);
+  const isStaged = l.format === "survivor" || l.format === "groups_knockout";
+  const leagueFixtures = allLeagueFixtures.filter((f) => !isStaged || f.stage === l.current_stage);
+  const inGroupStage = l.format === "groups_knockout" && !l.final_stage_started;
+  const teamName = (id) => leagueTeams.find((t) => t.id === id)?.name || "TBD";
+
+  const header = (
+    <div className="flex items-center justify-between mb-3 gap-2">
+      <div className="min-w-0">
+        <div className="font-semibold text-sm truncate">{l.name}</div>
+        {extra?.league_type === "cash" && (
+          <div className="font-mono text-[9px] uppercase tracking-wide mt-0.5" style={{ color: c.accent }}>Cash league</div>
+        )}
+      </div>
+      {onJoin && (
+        <button onClick={onJoin} className="flex items-center gap-1 font-body text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}>
+          <Lock size={9} /> Join
+        </button>
+      )}
+    </div>
+  );
+
+  const photoAndDescription = (extra?.photo_url || extra?.description) && (
+    <div className="mb-3 -mt-1">
+      {extra?.photo_url && <img src={extra.photo_url} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />}
+      {extra?.description && <p className="font-body text-xs" style={{ color: c.textDim }}>{extra.description}</p>}
+    </div>
+  );
+
+  const allMatchesToggle = allLeagueFixtures.length > 0 && (
+    <div className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
+      <button onClick={() => setShowAllMatches((v) => !v)} className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+        {showAllMatches ? "Hide match history" : `View all matches (${allLeagueFixtures.length})`} <ChevronDown size={11} style={{ transform: showAllMatches ? "rotate(180deg)" : "none" }} />
+      </button>
+      {showAllMatches && (
+        <div className="flex flex-col gap-1 mt-2.5 max-h-72 overflow-y-auto pr-0.5">
+          {allLeagueFixtures.map((f) => (
+            <div key={f.id} className="flex items-center justify-between gap-2 font-body text-xs px-2 py-1.5 rounded" style={{ background: c.surfaceHover }}>
+              <span className="truncate flex-1 text-right" style={{ color: f.played && f.home_score > f.away_score ? c.text : c.textFaint, fontWeight: f.played && f.home_score > f.away_score ? 600 : 400 }}>{teamName(f.home_team_id)}</span>
+              <span className="font-mono text-[11px] shrink-0" style={{ color: c.textFaint }}>{f.played ? `${f.home_score}–${f.away_score}` : "vs"}</span>
+              <span className="truncate flex-1" style={{ color: f.played && f.away_score > f.home_score ? c.text : c.textFaint, fontWeight: f.played && f.away_score > f.home_score ? 600 : 400 }}>{teamName(f.away_team_id)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  if (inGroupStage) {
+    if (leagueTeams.length === 0) return null;
+    return (
+      <div className="rounded-xl border p-4" style={{ borderColor: c.border, background: c.surface }}>
+        {header}
+        {photoAndDescription}
+        <GroupTables league={{ ...l, teams: leagueTeams }} groupStageFixtures={leagueFixtures} c={c} />
+        {allMatchesToggle}
+      </div>
+    );
+  }
+
+  const activeTeams = l.format === "survivor" ? leagueTeams.filter((t) => !t.eliminated) : leagueTeams;
+  const standings = computeStandings(activeTeams, leagueFixtures);
+  if (standings.length === 0) return null;
+  const n = standings.length;
+  const zoneFor = (idx) => {
+    if (idx === 0 && n > 4) return c.accent;
+    if (idx < Math.ceil(n / 3) && n > 6) return c.green;
+    if (idx >= n - Math.max(1, Math.floor(n / 4)) && n > 6) return c.red;
+    return "transparent";
+  };
+  return (
+    <div className="rounded-xl border p-4" style={{ borderColor: c.border, background: c.surface }}>
+      {header}
+      {photoAndDescription}
+      <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={leagueFixtures}
+        isSurvivor={l.format === "survivor"} league={l} c={c} />
+      {allMatchesToggle}
+    </div>
+  );
+}
+
+function GoogleIcon({ small }) {
+  const size = small ? 13 : 18;
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18">
       <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 01-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
       <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.87-3.04.87-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 009 18z" />
       <path fill="#FBBC05" d="M3.97 10.73a5.4 5.4 0 010-3.46V4.94H.96a9 9 0 000 8.12l3.01-2.33z" />
