@@ -1150,7 +1150,7 @@ const RULES_CONTENT = {
     sections: [
       { heading: "How it works", items: [
         "One permanent ranking, shared by everyone — it never resets. Ranked by points.",
-        "You can only challenge names that are up to 10 points ahead of you.",
+        "You can only challenge names that are up to 10 points ahead of you — or level with you on points, for your first ladder match.",
         "5 days to accept, or it goes to an admin who decides whether to grant a walkover.",
         "Reported a score and they're ignoring it? It auto-confirms after 2 days — stalling doesn't work.",
         "Win = 3 points, draw = 1 point, loss = 0. Rank is points first, most wins as the tiebreaker.",
@@ -2275,14 +2275,19 @@ export default function App() {
 
   // The only people the signed-in member is allowed to send a ladder
   // challenge to: anyone ranked above them whose points total is within 10
-  // points of their own (i.e. up to 10 points ahead). Ordered closest points
-  // first, since that's the one worth trying first.
+  // points of their own (i.e. up to 10 points ahead). Before your first
+  // ladder match, everyone starts at 0 points, so "ahead of you" alone would
+  // leave you with nobody to challenge — for that first match only, clubs
+  // level with you on points are eligible too. Ordered closest points first,
+  // since that's the one worth trying first.
   const ladderTargets = useMemo(() => {
     if (!ladder || !session) return [];
     const mine = ladder.find((r) => r.user_id === session.user.id);
     if (!mine) return [];
+    const playedNoMatches = mine.wins + mine.draws + mine.losses === 0;
     return ladder
-      .filter((r) => r.points > mine.points && r.points - mine.points <= 10)
+      .filter((r) => r.user_id !== mine.user_id)
+      .filter((r) => (playedNoMatches && r.points === mine.points) || (r.points > mine.points && r.points - mine.points <= 10))
       .sort((a, b) => a.points - b.points);
   }, [ladder, session]);
   const myLadderRank = useMemo(() => (ladder && session ? ladder.find((r) => r.user_id === session.user.id) : null), [ladder, session]);
