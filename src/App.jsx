@@ -8,7 +8,7 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Zap, Flame, Gamepad2, Medal,
-  ShoppingBag, ExternalLink,
+  ShoppingBag, ExternalLink, Shirt, Package,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -4367,6 +4367,12 @@ function ShopBanner({ onOpen, c }) {
       style={{ background: `linear-gradient(120deg, ${SHOP_GOLD}2E, ${c.surface})`, border: `1px solid ${SHOP_GOLD}55` }}>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-14 -right-8 w-36 h-36 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.22 }} />
+        {/* Small "products" bobbing and glowing in the banner's corner —
+            purely decorative, just enough motion to make the banner feel
+            like a live store front rather than a static ad card. */}
+        <ShoppingBag size={13} className="animate-product-float absolute top-2.5 right-20" style={{ color: SHOP_GOLD, animationDelay: "0s" }} />
+        <Shirt size={15} className="animate-product-float absolute top-8 right-9" style={{ color: SHOP_GOLD, animationDelay: "0.5s" }} />
+        <Package size={12} className="animate-product-float absolute bottom-2.5 right-16" style={{ color: SHOP_GOLD, animationDelay: "1s" }} />
       </div>
       {SHOP_PROMO_ACTIVE && (
         <span className="absolute top-2.5 right-2.5 font-mono text-[10px] font-bold tracking-[0.1em] uppercase px-2 py-1 rounded-full shadow-sm"

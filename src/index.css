@@ -17,3 +17,16 @@ body {
   20%, 22%, 24%, 55% { opacity: 0.35; }
 }
 .animate-flicker { animation: matchday-flicker 2.4s infinite; }
+
+/* Small decorative "product" glyphs on the shop banner — bob up and down
+   while pulsing a glow, each icon offset with its own animation-delay so
+   they don't all move in lockstep. */
+@keyframes product-bump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes product-glow {
+  0%, 100% { opacity: 0.55; filter: drop-shadow(0 0 2px currentColor); }
+  50% { opacity: 1; filter: drop-shadow(0 0 7px currentColor) drop-shadow(0 0 14px currentColor); }
+}
+.animate-product-float { animation: product-bump 2.4s ease-in-out infinite, product-glow 2.4s ease-in-out infinite; }
