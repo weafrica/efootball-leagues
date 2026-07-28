@@ -1150,7 +1150,7 @@ const RULES_CONTENT = {
     sections: [
       { heading: "How it works", items: [
         "One permanent ranking, shared by everyone — it never resets. Ranked by points.",
-        "You can only challenge one of the 3 names directly above you.",
+        "You can only challenge names that are up to 10 points ahead of you.",
         "5 days to accept, or it goes to an admin who decides whether to grant a walkover.",
         "Reported a score and they're ignoring it? It auto-confirms after 2 days — stalling doesn't work.",
         "Win = 3 points, draw = 1 point, loss = 0. Rank is points first, most wins as the tiebreaker.",
@@ -2274,15 +2274,16 @@ export default function App() {
   }, []);
 
   // The only people the signed-in member is allowed to send a ladder
-  // challenge to: the (up to) 3 names directly above them. Ordered closest
-  // rank first, since that's the one worth trying first.
+  // challenge to: anyone ranked above them whose points total is within 10
+  // points of their own (i.e. up to 10 points ahead). Ordered closest points
+  // first, since that's the one worth trying first.
   const ladderTargets = useMemo(() => {
     if (!ladder || !session) return [];
     const mine = ladder.find((r) => r.user_id === session.user.id);
     if (!mine) return [];
     return ladder
-      .filter((r) => r.rank_position < mine.rank_position && r.rank_position >= mine.rank_position - 3)
-      .sort((a, b) => b.rank_position - a.rank_position);
+      .filter((r) => r.points > mine.points && r.points - mine.points <= 10)
+      .sort((a, b) => a.points - b.points);
   }, [ladder, session]);
   const myLadderRank = useMemo(() => (ladder && session ? ladder.find((r) => r.user_id === session.user.id) : null), [ladder, session]);
 
@@ -6300,7 +6301,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, c }) {
 }
 
 // The picker for who a member is allowed to send a ladder challenge to —
-// always just the (up to) 3 names directly above them, closest first.
+// anyone ranked above them within 10 points, closest first.
 function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onCancel}>
@@ -6314,7 +6315,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
         </p>
         {targets.length === 0 ? (
           <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>
-            {myRank && myRank.rank_position === 1 ? "You're #1 — nobody left to challenge." : "No one directly above you yet."}
+            {myRank && myRank.rank_position === 1 ? "You're #1 — nobody left to challenge." : "No one within 10 points of you yet."}
           </div>
         ) : (
           <div className="space-y-2">
