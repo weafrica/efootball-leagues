@@ -6306,8 +6306,12 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, c }) {
 }
 
 // The picker for who a member is allowed to send a ladder challenge to —
-// anyone ranked above them within 10 points, closest first.
+// anyone ranked above them within 10 points, closest first. A search box lets
+// them type a name to jump straight to it instead of scrolling the list.
 function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const filtered = q ? targets.filter((t) => (t.username || "").toLowerCase().includes(q)) : targets;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onCancel}>
       <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text }} onClick={(e) => e.stopPropagation()}>
@@ -6318,13 +6322,22 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
         <p className="font-body text-xs mb-4" style={{ color: c.textDim }}>
           {myRank ? `You're #${myRank.rank_position}. Beat one of these and their spot is yours.` : "You'll get a ladder spot once your profile is set up."}
         </p>
+        {targets.length > 0 && (
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by eFootball username"
+              className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          </div>
+        )}
         {targets.length === 0 ? (
           <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>
             {myRank && myRank.rank_position === 1 ? "You're #1 — nobody left to challenge." : "No one within 10 points of you yet."}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>No one eligible matches "{query}".</div>
         ) : (
-          <div className="space-y-2">
-            {targets.map((t) => (
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {filtered.map((t) => (
               <div key={t.user_id} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: c.surface }}>
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-mono text-xs font-semibold shrink-0" style={{ color: c.textFaint }}>#{t.rank_position}</span>
