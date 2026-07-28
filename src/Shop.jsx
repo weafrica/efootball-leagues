@@ -327,6 +327,36 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 // BROWSE
 // ════════════════════════════════════════════════════════════════════
 
+// Categories nest arbitrarily deep under a department — a category's
+// parent_category_id points at another category, or is null at the top
+// level. No depth is special-cased; these helpers just walk the flat
+// array however far the tree actually goes.
+function categoryChildren(categories, parentId) {
+  return categories.filter((cat) => (cat.parent_category_id || null) === parentId).sort((a, b) => a.position - b.position);
+}
+function categoryDescendantIds(categories, catId) {
+  const result = [];
+  const stack = categoryChildren(categories, catId);
+  while (stack.length) {
+    const cat = stack.pop();
+    result.push(cat.id);
+    stack.push(...categoryChildren(categories, cat.id));
+  }
+  return result;
+}
+function categoryPathName(categories, catId) {
+  const byId = new Map(categories.map((cat) => [cat.id, cat]));
+  const parts = [];
+  let cur = byId.get(catId);
+  while (cur) { parts.unshift(cur.name); cur = cur.parent_category_id ? byId.get(cur.parent_category_id) : null; }
+  return parts.join(" › ");
+}
+// Depth-first flatten of a department's category tree, each entry tagged
+// with its depth — used to render an indented <select> in the product form.
+function flattenCategoryTree(categories, parentId = null, depth = 0) {
+  return categoryChildren(categories, parentId).flatMap((cat) => [{ ...cat, depth }, ...flattenCategoryTree(categories, cat.id, depth + 1)]);
+}
+
 // A department-store-style browse experience:
 //  - a "store directory" of tappable department tiles when nothing's
 //    filtered yet, each showing a representative photo and item count
@@ -337,15 +367,21 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 //    the floor; a specific department (or a search) shows just its grid
 function DepartmentBrowser({ products, departments, categories, loading, onOpen, onQuickAdd, c }) {
   const [selected, setSelected] = useState("all");
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  // catPath is the breadcrumb trail of category ids drilled into within the
+  // selected department — [] means "at the department root". There's no cap
+  // on its length, so browsing goes exactly as deep as the category tree does.
+  const [catPath, setCatPath] = useState([]);
+  const [catFilter, setCatFilter] = useState("all"); // "all" | "direct" — within the current tree level
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
   const [inStockOnly, setInStockOnly] = useState(false);
 
-  // Picking a department always resets whatever category sub-filter was
+  // Picking a department always resets whatever category drill-down was
   // active in the previously-selected department — categories don't carry
   // across departments.
-  const selectDept = (id) => { setSelected(id); setSelectedCategory("all"); };
+  const selectDept = (id) => { setSelected(id); setCatPath([]); setCatFilter("all"); };
+  const goToCatDepth = (depth) => { setCatPath((p) => p.slice(0, depth)); setCatFilter("all"); };
+  const drillInto = (catId) => { setCatPath((p) => [...p, catId]); setCatFilter("all"); };
 
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
@@ -376,26 +412,29 @@ function DepartmentBrowser({ products, departments, categories, loading, onOpen,
     ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: uncategorized.length }] : []),
   ];
 
-  // When a real department is selected, offer a second row of chips for its
-  // categories (only departments have categories — "Other" and "All" don't).
+  // When a real department is selected, walk however deep the category tree
+  // at the current breadcrumb position goes. currentCatId is the category
+  // we're "inside" (null = department root, not inside any category yet).
   const deptItems = searchable.filter((p) => p.department_id === selected);
   const deptCategories = categories.filter((cat) => cat.department_id === selected);
-  const catIds = new Set(deptCategories.map((cat) => cat.id));
-  const catGrouped = deptCategories
-    .map((cat) => ({ cat, items: deptItems.filter((p) => p.category_id === cat.id) }))
-    .filter((g) => g.items.length > 0);
-  const catUncategorized = deptItems.filter((p) => !p.category_id || !catIds.has(p.category_id));
-  const categoryChips = deptCategories.length > 0 ? [
-    { id: "all", name: "All", count: deptItems.length },
-    ...catGrouped.map(({ cat, items }) => ({ id: cat.id, name: cat.name, count: items.length })),
-    ...(catUncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: catUncategorized.length }] : []),
+  const currentCatId = catPath.length ? catPath[catPath.length - 1] : null;
+  const itemsForCat = (catId) => {
+    const ids = new Set([catId, ...categoryDescendantIds(deptCategories, catId)]);
+    return deptItems.filter((p) => p.category_id && ids.has(p.category_id));
+  };
+  const directItems = deptItems.filter((p) => (p.category_id || null) === currentCatId);
+  const childCats = categoryChildren(deptCategories, currentCatId);
+  const categoryChips = childCats.length > 0 ? [
+    { id: "all", name: "All", count: currentCatId === null ? deptItems.length : itemsForCat(currentCatId).length },
+    ...childCats.map((cat) => ({ id: cat.id, name: cat.name, count: itemsForCat(cat.id).length })),
+    ...(directItems.length > 0 ? [{ id: "direct", name: "Other", count: directItems.length }] : []),
   ] : [];
 
   const currentItems = selected === "all" ? searchable
     : selected === "uncategorized" ? uncategorized
-    : selectedCategory === "all" ? deptItems
-    : selectedCategory === "uncategorized" ? catUncategorized
-    : deptItems.filter((p) => p.category_id === selectedCategory);
+    : catFilter === "direct" ? directItems
+    : currentCatId === null ? deptItems
+    : itemsForCat(currentCatId);
 
   return (
     <div>
@@ -440,12 +479,36 @@ function DepartmentBrowser({ products, departments, categories, loading, onOpen,
         </div>
       )}
 
+      {catPath.length > 0 && (
+        <div className="flex items-center gap-1 mb-2 flex-wrap font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+          <button onClick={() => goToCatDepth(0)} className="underline underline-offset-2">{departments.find((d) => d.id === selected)?.name}</button>
+          {catPath.map((id, i) => {
+            const cat = categories.find((cc) => cc.id === id);
+            const isLast = i === catPath.length - 1;
+            return (
+              <span key={id} className="flex items-center gap-1">
+                <span style={{ opacity: 0.5 }}>›</span>
+                {isLast ? <span style={{ color: c.textDim }}>{cat?.name}</span>
+                  : <button onClick={() => goToCatDepth(i + 1)} className="underline underline-offset-2">{cat?.name}</button>}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {categoryChips.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4 -mt-1">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
           {categoryChips.map((cat) => (
-            <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase flex items-center gap-1"
-              style={selectedCategory === cat.id ? { background: SHOP_GOLD, color: "#1a1200" } : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }}>
+            <button key={cat.id}
+              onClick={() => (cat.id === "all" || cat.id === "direct") ? setCatFilter(cat.id) : drillInto(cat.id)}
+              className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase flex items-center gap-1"
+              style={
+                (cat.id === "all" && catFilter === "all") || (cat.id === "direct" && catFilter === "direct")
+                  ? { background: SHOP_GOLD, color: "#1a1200" }
+                  : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }
+              }>
               {cat.name} <span style={{ opacity: 0.7 }}>{cat.count}</span>
+              {cat.id !== "all" && cat.id !== "direct" && categoryChildren(categories, cat.id).length > 0 && <span style={{ opacity: 0.7 }}>›</span>}
             </button>
           ))}
         </div>
@@ -956,7 +1019,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
                 {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}
                 {p.department_id && deptById.has(p.department_id) && ` · ${deptById.get(p.department_id).name}`}
-                {p.category_id && catById.has(p.category_id) && ` › ${catById.get(p.category_id).name}`}
+                {p.category_id && catById.has(p.category_id) && ` › ${categoryPathName(categories, p.category_id)}`}
               </div>
             </div>
             <button onClick={() => setEditing(p)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Edit</button>
@@ -982,8 +1045,10 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [saving, setSaving] = useState(false);
 
   // Categories are scoped to a department — switching departments (or
-  // clearing it) drops any category that no longer belongs to it.
-  const deptCategories = departmentId ? categories.filter((cat) => cat.department_id === departmentId) : [];
+  // clearing it) drops any category that no longer belongs to it. The tree
+  // can go arbitrarily deep, so it's flattened with indentation for the
+  // <select>, rather than assuming any fixed number of levels.
+  const deptCategories = departmentId ? flattenCategoryTree(categories.filter((cat) => cat.department_id === departmentId)) : [];
   useEffect(() => {
     if (categoryId && !deptCategories.some((cat) => cat.id === categoryId)) setCategoryId("");
   }, [departmentId]);
@@ -1036,7 +1101,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
                 className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
                 <option value="">Uncategorized</option>
-                {deptCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                {deptCategories.map((cat) => <option key={cat.id} value={cat.id}>{"\u00A0\u00A0\u00A0\u00A0".repeat(cat.depth)}{cat.depth > 0 ? "↳ " : ""}{cat.name}</option>)}
               </select>
             </div>
           )}
@@ -1182,27 +1247,46 @@ function AdminDepartments({ departments, categories, products, onReload, onReloa
 // ADMIN — CATEGORIES (scoped to one department)
 // ════════════════════════════════════════════════════════════════════
 
-// The second level of the browse hierarchy: every category belongs to
-// exactly one department. Mirrors AdminDepartments' add/rename/reorder/
-// delete pattern, just filtered down to `department.id`.
+// The category level(s) of the browse hierarchy: every category belongs to
+// exactly one department, and can itself have subcategories, which can have
+// their own subcategories, and so on — there's no cap on how deep this goes.
+// Top-level add mirrors AdminDepartments' add/rename/reorder/delete pattern;
+// CategoryRow below recurses to render (and let you extend) the rest of the tree.
 function AdminCategories({ department, categories, products, onReload, showToast, onBack, c }) {
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [addingUnder, setAddingUnder] = useState(null); // id of the category currently showing an "add subcategory" input
+  const [subName, setSubName] = useState("");
+  const [addingSub, setAddingSub] = useState(false);
 
   const deptCategories = categories.filter((cat) => cat.department_id === department.id);
+  const topLevel = categoryChildren(deptCategories, null);
   const countFor = (catId) => products.filter((p) => p.category_id === catId).length;
 
-  const addCategory = async () => {
-    if (!newName.trim()) return;
-    setAdding(true);
-    const nextPosition = deptCategories.length > 0 ? Math.max(...deptCategories.map((cat) => cat.position)) + 1 : 0;
-    const { error } = await supabase.from("shop_categories").insert({ name: newName.trim(), department_id: department.id, position: nextPosition });
-    setAdding(false);
-    if (error) { showToast(`Couldn't add category: ${error.message}`); return; }
-    setNewName("");
+  const addCategory = async (parentId, name) => {
+    if (!name.trim()) return false;
+    const siblings = categoryChildren(deptCategories, parentId);
+    const nextPosition = siblings.length > 0 ? Math.max(...siblings.map((cat) => cat.position)) + 1 : 0;
+    const { error } = await supabase.from("shop_categories").insert({ name: name.trim(), department_id: department.id, parent_category_id: parentId, position: nextPosition });
+    if (error) { showToast(`Couldn't add category: ${error.message}`); return false; }
     await onReload();
+    return true;
+  };
+
+  const addTopLevel = async () => {
+    setAdding(true);
+    const ok = await addCategory(null, newName);
+    setAdding(false);
+    if (ok) setNewName("");
+  };
+
+  const addSub = async (parentId) => {
+    setAddingSub(true);
+    const ok = await addCategory(parentId, subName);
+    setAddingSub(false);
+    if (ok) { setSubName(""); setAddingUnder(null); }
   };
 
   const renameCategory = async (cat) => {
@@ -1214,18 +1298,23 @@ function AdminCategories({ department, categories, products, onReload, showToast
   };
 
   const deleteCategory = async (cat) => {
-    const affected = countFor(cat.id);
+    const descendants = categoryDescendantIds(deptCategories, cat.id);
+    const affected = countFor(cat.id) + descendants.reduce((sum, id) => sum + countFor(id), 0);
     const { error } = await supabase.from("shop_categories").delete().eq("id", cat.id);
     if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
-    showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Category deleted.");
+    const subNote = descendants.length > 0 ? ` (and ${descendants.length} subcategor${descendants.length === 1 ? "y" : "ies"})` : "";
+    showToast(affected > 0 ? `Deleted${subNote} — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : `Category deleted${subNote}.`);
     await onReload();
   };
 
+  // Reordering swaps position with a neighbour among the same parent's
+  // children only — siblings at every depth reorder independently.
   const move = async (cat, direction) => {
-    const idx = deptCategories.findIndex((c2) => c2.id === cat.id);
+    const siblings = categoryChildren(deptCategories, cat.parent_category_id || null);
+    const idx = siblings.findIndex((c2) => c2.id === cat.id);
     const swapIdx = idx + direction;
-    if (swapIdx < 0 || swapIdx >= deptCategories.length) return;
-    const other = deptCategories[swapIdx];
+    if (swapIdx < 0 || swapIdx >= siblings.length) return;
+    const other = siblings[swapIdx];
     await supabase.from("shop_categories").update({ position: other.position }).eq("id", cat.id);
     await supabase.from("shop_categories").update({ position: cat.position }).eq("id", other.id);
     await onReload();
@@ -1243,41 +1332,90 @@ function AdminCategories({ department, categories, products, onReload, showToast
       </div>
 
       <div className="flex items-center gap-2 mb-4">
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New category name..."
-          onKeyDown={(e) => e.key === "Enter" && addCategory()}
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New top-level category name..."
+          onKeyDown={(e) => e.key === "Enter" && addTopLevel()}
           className="flex-1 border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
-        <button onClick={addCategory} disabled={!newName.trim() || adding} className="font-body text-sm font-semibold px-4 py-2.5 rounded-full shrink-0" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: newName.trim() ? 1 : 0.5 }}>
+        <button onClick={addTopLevel} disabled={!newName.trim() || adding} className="font-body text-sm font-semibold px-4 py-2.5 rounded-full shrink-0" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: newName.trim() ? 1 : 0.5 }}>
           Add
         </button>
       </div>
 
-      {deptCategories.length === 0 ? (
+      {topLevel.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
           No categories in "{department.name}" yet — everything in it shows under "Other" until you add one.
         </div>
       ) : (
         <div className="space-y-1.5">
-          {deptCategories.map((cat, i) => (
-            <div key={cat.id} className="flex items-center gap-2 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
-              <div className="flex flex-col shrink-0">
-                <button onClick={() => move(cat, -1)} disabled={i === 0} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === 0 ? 0.3 : 1 }}><ChevronUp size={13} /></button>
-                <button onClick={() => move(cat, 1)} disabled={i === deptCategories.length - 1} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === deptCategories.length - 1 ? 0.3 : 1 }}><ChevronDown size={13} /></button>
-              </div>
-              {renamingId === cat.id ? (
-                <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && renameCategory(cat)} onBlur={() => renameCategory(cat)}
-                  className="flex-1 border rounded-lg px-2 py-1.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.borderStrong, color: c.text }} />
-              ) : (
-                <div className="min-w-0 flex-1">
-                  <div className="font-body text-sm font-semibold truncate">{cat.name}</div>
-                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{countFor(cat.id)} product{countFor(cat.id) === 1 ? "" : "s"}</div>
-                </div>
-              )}
-              {renamingId !== cat.id && (
-                <button onClick={() => { setRenamingId(cat.id); setRenameValue(cat.name); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Rename</button>
-              )}
-              <button onClick={() => deleteCategory(cat)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
+          {topLevel.map((cat) => (
+            <CategoryRow key={cat.id} cat={cat} depth={0} deptCategories={deptCategories} countFor={countFor}
+              renamingId={renamingId} renameValue={renameValue} setRenamingId={setRenamingId} setRenameValue={setRenameValue}
+              renameCategory={renameCategory} deleteCategory={deleteCategory} move={move}
+              addingUnder={addingUnder} setAddingUnder={setAddingUnder} subName={subName} setSubName={setSubName}
+              addSub={addSub} addingSub={addingSub} c={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One row of the category tree, recursing into its own children — this is
+// what lets nesting go arbitrarily deep instead of stopping at one level.
+function CategoryRow({ cat, depth, deptCategories, countFor, renamingId, renameValue, setRenamingId, setRenameValue, renameCategory, deleteCategory, move, addingUnder, setAddingUnder, subName, setSubName, addSub, addingSub, c }) {
+  const kids = categoryChildren(deptCategories, cat.id);
+  const siblings = categoryChildren(deptCategories, cat.parent_category_id || null);
+  const idx = siblings.findIndex((s) => s.id === cat.id);
+  const isRenaming = renamingId === cat.id;
+  const isAddingSub = addingUnder === cat.id;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border, marginLeft: depth * 18 }}>
+        <div className="flex flex-col shrink-0">
+          <button onClick={() => move(cat, -1)} disabled={idx === 0} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: idx === 0 ? 0.3 : 1 }}><ChevronUp size={13} /></button>
+          <button onClick={() => move(cat, 1)} disabled={idx === siblings.length - 1} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: idx === siblings.length - 1 ? 0.3 : 1 }}><ChevronDown size={13} /></button>
+        </div>
+        {isRenaming ? (
+          <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && renameCategory(cat)} onBlur={() => renameCategory(cat)}
+            className="flex-1 border rounded-lg px-2 py-1.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.borderStrong, color: c.text }} />
+        ) : (
+          <div className="min-w-0 flex-1">
+            <div className="font-body text-sm font-semibold truncate">{cat.name}</div>
+            <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>
+              {countFor(cat.id)} product{countFor(cat.id) === 1 ? "" : "s"}
+              {kids.length > 0 && ` · ${kids.length} subcategor${kids.length === 1 ? "y" : "ies"}`}
             </div>
+          </div>
+        )}
+        {!isRenaming && (
+          <button onClick={() => { setAddingUnder(isAddingSub ? null : cat.id); setSubName(""); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>+ Sub</button>
+        )}
+        {!isRenaming && (
+          <button onClick={() => { setRenamingId(cat.id); setRenameValue(cat.name); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Rename</button>
+        )}
+        <button onClick={() => deleteCategory(cat)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
+      </div>
+
+      {isAddingSub && (
+        <div className="flex items-center gap-2 mt-1.5 mb-1.5" style={{ marginLeft: (depth + 1) * 18 }}>
+          <input autoFocus value={subName} onChange={(e) => setSubName(e.target.value)} placeholder={`New category under "${cat.name}"...`}
+            onKeyDown={(e) => e.key === "Enter" && addSub(cat.id)}
+            className="flex-1 border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          <button onClick={() => addSub(cat.id)} disabled={!subName.trim() || addingSub} className="font-body text-xs font-semibold px-3 py-2 rounded-full shrink-0" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: subName.trim() ? 1 : 0.5 }}>
+            Add
+          </button>
+        </div>
+      )}
+
+      {kids.length > 0 && (
+        <div className="space-y-1.5 mt-1.5">
+          {kids.map((child) => (
+            <CategoryRow key={child.id} cat={child} depth={depth + 1} deptCategories={deptCategories} countFor={countFor}
+              renamingId={renamingId} renameValue={renameValue} setRenamingId={setRenamingId} setRenameValue={setRenameValue}
+              renameCategory={renameCategory} deleteCategory={deleteCategory} move={move}
+              addingUnder={addingUnder} setAddingUnder={setAddingUnder} subName={subName} setSubName={setSubName}
+              addSub={addSub} addingSub={addingSub} c={c} />
           ))}
         </div>
       )}
