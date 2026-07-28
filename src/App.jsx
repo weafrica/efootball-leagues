@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import ShopPage from "./Shop.jsx";
+import TermsPage from "./Terms.jsx";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -810,6 +811,19 @@ function SupportWhatsAppButton({ context }) {
       style={{ background: WHATSAPP_GREEN, color: "#fff" }}>
       <MessageCircle size={9} />
     </a>
+  );
+}
+
+// Small persistent "Terms" link, mirroring the WhatsApp support button on the
+// opposite corner — keeps the Terms & Conditions one tap away from every
+// screen without crowding the header.
+function TermsFooterLink({ onOpen, c }) {
+  return (
+    <button onClick={onOpen} title="Terms & Conditions"
+      className="fixed bottom-4 left-3 z-50 font-mono text-[9px] uppercase tracking-wider underline underline-offset-2"
+      style={{ color: c.textFaint }}>
+      Terms
+    </button>
   );
 }
 
@@ -3806,6 +3820,9 @@ export default function App() {
             {view === "shop" && (
               <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={() => setView("home")} initialProductId={shopDeepLinkProductId} />
             )}
+            {view === "terms" && (
+              <TermsPage c={c} onBack={() => setView("home")} />
+            )}
           </>
         )}
       </main>
@@ -3855,6 +3872,7 @@ export default function App() {
         </div>
       )}
       <SupportWhatsAppButton context={view === "shop" ? SHOP_NAME : "the Matchday app"} />
+      <TermsFooterLink onOpen={() => setView("terms")} c={c} />
     </div>
   );
 }
@@ -3869,6 +3887,7 @@ export default function App() {
 function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
+  const [termsOpen, setTermsOpen] = useState(false);
   useEffect(() => {
     if (initialShopProductId) setShopOpen(true);
   }, [initialShopProductId]);
@@ -3964,6 +3983,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {shopOpen ? (
           <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
+        ) : termsOpen ? (
+          <TermsPage c={c} onBack={() => setTermsOpen(false)} />
         ) : (
           <>
         <ShopBanner onOpen={() => setShopOpen(true)} c={c} />
@@ -4071,6 +4092,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
         )}
       </main>
       <SupportWhatsAppButton context={shopOpen ? SHOP_NAME : "the Matchday app"} />
+      <TermsFooterLink onOpen={() => setTermsOpen(true)} c={c} />
     </div>
   );
 }
@@ -4375,10 +4397,12 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const fileInputRef = useRef(null);
   const usernameTrimmed = username.trim();
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
-  const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord;
+  const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord && agreedToTerms;
 
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
@@ -4427,13 +4451,31 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+27 82 123 4567" type="tel"
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         <p className="font-body text-xs mb-5" style={{ color: c.textFaint }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
+        <label className="flex items-start gap-2.5 mb-5 cursor-pointer">
+          <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
+            className="mt-0.5 w-4 h-4 shrink-0 rounded" style={{ accentColor: c.accent }} />
+          <span className="font-body text-xs" style={{ color: c.textDim }}>
+            I'm 18 or older and I agree to the{" "}
+            <button type="button" onClick={() => setTermsOpen(true)} className="underline font-semibold" style={{ color: c.text }}>
+              Terms &amp; Conditions
+            </button>, including how cash league entry fees, prize pools, and results work.
+          </span>
+        </label>
         <button disabled={!valid || submitting} onClick={submit}
+          title={!agreedToTerms ? "Agree to the Terms & Conditions to continue" : undefined}
           className="w-full font-body font-semibold px-4 py-3 rounded-full"
           style={valid ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
           {submitting ? "Saving..." : "Continue to Matchday"}
         </button>
       </div>
       <SupportWhatsAppButton />
+      {termsOpen && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: c.bg }}>
+          <div className="max-w-3xl mx-auto px-4">
+            <TermsPage c={c} onBack={() => setTermsOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
