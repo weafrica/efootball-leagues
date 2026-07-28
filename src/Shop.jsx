@@ -100,6 +100,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [subview, setSubview] = useState("browse");
   const [products, setProducts] = useState(null);
   const [departments, setDepartments] = useState(null);
+  const [categories, setCategories] = useState(null);
   const [cart, setCart] = useState(loadCart);
   const [activeProduct, setActiveProduct] = useState(null);
   const [myOrders, setMyOrders] = useState(null);
@@ -185,6 +186,15 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
   useEffect(() => { loadDepartments(); }, []);
 
+  // Categories are a second, optional level under a department (e.g.
+  // department "Kits" -> categories "Home", "Away", "Training"). A category
+  // always belongs to exactly one department.
+  const loadCategories = async () => {
+    const { data, error } = await supabase.from("shop_categories").select("*").order("position", { ascending: true });
+    if (!error) setCategories(data || []);
+  };
+  useEffect(() => { loadCategories(); }, []);
+
   const loadMyOrders = async () => {
     if (!session) return;
     const { data, error } = await supabase.from("shop_orders").select("*, shop_order_items(*)")
@@ -251,7 +261,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
             <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
           </div>
-          <DepartmentBrowser products={visibleProducts} departments={departments || []} loading={products === null} onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
+          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null} onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
         </>
       )}
 
@@ -283,7 +293,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       {subview === "my-orders" && <MyOrders orders={myOrders} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
-        <AdminProducts products={products} departments={departments || []} onReload={loadProducts} onReloadDepartments={loadDepartments} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} c={c} />
+        <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
         <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} c={c} />
@@ -325,11 +335,17 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 //  - search that narrows within whichever department is selected
 //  - "All" groups products into a section per department, like walking
 //    the floor; a specific department (or a search) shows just its grid
-function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd, c }) {
+function DepartmentBrowser({ products, departments, categories, loading, onOpen, onQuickAdd, c }) {
   const [selected, setSelected] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
   const [inStockOnly, setInStockOnly] = useState(false);
+
+  // Picking a department always resets whatever category sub-filter was
+  // active in the previously-selected department — categories don't carry
+  // across departments.
+  const selectDept = (id) => { setSelected(id); setSelectedCategory("all"); };
 
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
@@ -360,14 +376,31 @@ function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd,
     ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: uncategorized.length }] : []),
   ];
 
+  // When a real department is selected, offer a second row of chips for its
+  // categories (only departments have categories — "Other" and "All" don't).
+  const deptItems = searchable.filter((p) => p.department_id === selected);
+  const deptCategories = categories.filter((cat) => cat.department_id === selected);
+  const catIds = new Set(deptCategories.map((cat) => cat.id));
+  const catGrouped = deptCategories
+    .map((cat) => ({ cat, items: deptItems.filter((p) => p.category_id === cat.id) }))
+    .filter((g) => g.items.length > 0);
+  const catUncategorized = deptItems.filter((p) => !p.category_id || !catIds.has(p.category_id));
+  const categoryChips = deptCategories.length > 0 ? [
+    { id: "all", name: "All", count: deptItems.length },
+    ...catGrouped.map(({ cat, items }) => ({ id: cat.id, name: cat.name, count: items.length })),
+    ...(catUncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: catUncategorized.length }] : []),
+  ] : [];
+
   const currentItems = selected === "all" ? searchable
     : selected === "uncategorized" ? uncategorized
-    : searchable.filter((p) => p.department_id === selected);
+    : selectedCategory === "all" ? deptItems
+    : selectedCategory === "uncategorized" ? catUncategorized
+    : deptItems.filter((p) => p.category_id === selectedCategory);
 
   return (
     <div>
       {selected === "all" && !q && (
-        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={setSelected} c={c} />
+        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={selectDept} c={c} />
       )}
 
       <div className="relative mb-3">
@@ -398,12 +431,23 @@ function DepartmentBrowser({ products, departments, loading, onOpen, onQuickAdd,
         <div className="sticky top-0 z-10 -mx-4 px-4 pb-1 pt-1" style={{ background: c.bg }}>
           <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
             {chips.map((d) => (
-              <button key={d.id} onClick={() => setSelected(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase flex items-center gap-1.5"
+              <button key={d.id} onClick={() => selectDept(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase flex items-center gap-1.5"
                 style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
                 {d.name} <span style={{ opacity: 0.6 }}>{d.count}</span>
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {categoryChips.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4 -mt-1">
+          {categoryChips.map((cat) => (
+            <button key={cat.id} onClick={() => setSelectedCategory(cat.id)} className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase flex items-center gap-1"
+              style={selectedCategory === cat.id ? { background: SHOP_GOLD, color: "#1a1200" } : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }}>
+              {cat.name} <span style={{ opacity: 0.7 }}>{cat.count}</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -834,7 +878,7 @@ function MyOrders({ orders, c }) {
 // ADMIN — PRODUCTS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminProducts({ products, departments, onReload, onReloadDepartments, showToast, onOpenOrders, c }) {
+function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
   const [managingDepts, setManagingDepts] = useState(false);
   const [query, setQuery] = useState("");
@@ -843,6 +887,7 @@ function AdminProducts({ products, departments, onReload, onReloadDepartments, s
   const q = query.trim().toLowerCase();
   const filtered = q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
   const deptById = new Map(departments.map((d) => [d.id, d]));
+  const catById = new Map(categories.map((cat) => [cat.id, cat]));
 
   const saveProduct = async (form, file) => {
     let image_url = editing?.image_url || null;
@@ -854,7 +899,7 @@ function AdminProducts({ products, departments, onReload, onReloadDepartments, s
       const { data: pub } = supabase.storage.from("shop-photos").getPublicUrl(path);
       image_url = pub.publicUrl;
     }
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null };
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null };
     const { error } = editing?.id
       ? await supabase.from("shop_products").update(payload).eq("id", editing.id)
       : await supabase.from("shop_products").insert(payload);
@@ -872,7 +917,7 @@ function AdminProducts({ products, departments, onReload, onReloadDepartments, s
   };
 
   if (managingDepts) {
-    return <AdminDepartments departments={departments} products={products} onReload={onReloadDepartments} showToast={showToast} onBack={() => setManagingDepts(false)} c={c} />;
+    return <AdminDepartments departments={departments} categories={categories} products={products} onReload={onReloadDepartments} onReloadCategories={onReloadCategories} showToast={showToast} onBack={() => setManagingDepts(false)} c={c} />;
   }
 
   return (
@@ -911,6 +956,7 @@ function AdminProducts({ products, departments, onReload, onReloadDepartments, s
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
                 {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}
                 {p.department_id && deptById.has(p.department_id) && ` · ${deptById.get(p.department_id).name}`}
+                {p.category_id && catById.has(p.category_id) && ` › ${catById.get(p.category_id).name}`}
               </div>
             </div>
             <button onClick={() => setEditing(p)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Edit</button>
@@ -919,25 +965,33 @@ function AdminProducts({ products, departments, onReload, onReloadDepartments, s
         ))}
       </div>
 
-      {editing && <ProductFormModal product={editing} departments={departments} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
+      {editing && <ProductFormModal product={editing} departments={departments} categories={categories} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
     </div>
   );
 }
 
-function ProductFormModal({ product, departments, onClose, onSave, c }) {
+function ProductFormModal({ product, departments, categories, onClose, onSave, c }) {
   const [name, setName] = useState(product.name || "");
   const [description, setDescription] = useState(product.description || "");
   const [price, setPrice] = useState(product.price ?? "");
   const [stockQty, setStockQty] = useState(product.stock_qty ?? 0);
   const [active, setActive] = useState(product.active ?? true);
   const [departmentId, setDepartmentId] = useState(product.department_id || "");
+  const [categoryId, setCategoryId] = useState(product.category_id || "");
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // Categories are scoped to a department — switching departments (or
+  // clearing it) drops any category that no longer belongs to it.
+  const deptCategories = departmentId ? categories.filter((cat) => cat.department_id === departmentId) : [];
+  useEffect(() => {
+    if (categoryId && !deptCategories.some((cat) => cat.id === categoryId)) setCategoryId("");
+  }, [departmentId]);
 
   const submit = async () => {
     if (!name.trim() || !price) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null }, file);
+    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null }, file);
     setSaving(false);
     if (ok) onClose();
   };
@@ -976,6 +1030,16 @@ function ProductFormModal({ product, departments, onClose, onSave, c }) {
               {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>
+          {departmentId && deptCategories.length > 0 && (
+            <div>
+              <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Category</label>
+              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
+                <option value="">Uncategorized</option>
+                {deptCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+              </select>
+            </div>
+          )}
           <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-3 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
             <Upload size={15} /> {file ? file.name : "Product photo"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
@@ -1000,13 +1064,15 @@ function ProductFormModal({ product, departments, onClose, onSave, c }) {
 // ADMIN — DEPARTMENTS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminDepartments({ departments, products, onReload, showToast, onBack, c }) {
+function AdminDepartments({ departments, categories, products, onReload, onReloadCategories, showToast, onBack, c }) {
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [managingCatsFor, setManagingCatsFor] = useState(null); // department object, or null
 
   const countFor = (deptId) => products.filter((p) => p.department_id === deptId).length;
+  const catCountFor = (deptId) => categories.filter((cat) => cat.department_id === deptId).length;
 
   const addDepartment = async () => {
     if (!newName.trim()) return;
@@ -1029,10 +1095,12 @@ function AdminDepartments({ departments, products, onReload, showToast, onBack, 
 
   const deleteDepartment = async (dept) => {
     const affected = countFor(dept.id);
+    const affectedCats = catCountFor(dept.id);
     const { error } = await supabase.from("shop_departments").delete().eq("id", dept.id);
     if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
     showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Department deleted.");
     await onReload();
+    if (affectedCats > 0) await onReloadCategories(); // its categories cascade-delete with it
   };
 
   // Swaps position with the neighbour above/below — reordering is just a
@@ -1046,6 +1114,13 @@ function AdminDepartments({ departments, products, onReload, showToast, onBack, 
     await supabase.from("shop_departments").update({ position: dept.position }).eq("id", other.id);
     await onReload();
   };
+
+  if (managingCatsFor) {
+    return (
+      <AdminCategories department={managingCatsFor} categories={categories} products={products}
+        onReload={onReloadCategories} showToast={showToast} onBack={() => setManagingCatsFor(null)} c={c} />
+    );
+  }
 
   return (
     <div>
@@ -1083,13 +1158,125 @@ function AdminDepartments({ departments, products, onReload, showToast, onBack, 
               ) : (
                 <div className="min-w-0 flex-1">
                   <div className="font-body text-sm font-semibold truncate">{d.name}</div>
-                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{countFor(d.id)} product{countFor(d.id) === 1 ? "" : "s"}</div>
+                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>
+                    {countFor(d.id)} product{countFor(d.id) === 1 ? "" : "s"} · {catCountFor(d.id)} categor{catCountFor(d.id) === 1 ? "y" : "ies"}
+                  </div>
                 </div>
+              )}
+              {renamingId !== d.id && (
+                <button onClick={() => setManagingCatsFor(d)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Categories</button>
               )}
               {renamingId !== d.id && (
                 <button onClick={() => { setRenamingId(d.id); setRenameValue(d.name); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Rename</button>
               )}
               <button onClick={() => deleteDepartment(d)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ADMIN — CATEGORIES (scoped to one department)
+// ════════════════════════════════════════════════════════════════════
+
+// The second level of the browse hierarchy: every category belongs to
+// exactly one department. Mirrors AdminDepartments' add/rename/reorder/
+// delete pattern, just filtered down to `department.id`.
+function AdminCategories({ department, categories, products, onReload, showToast, onBack, c }) {
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const deptCategories = categories.filter((cat) => cat.department_id === department.id);
+  const countFor = (catId) => products.filter((p) => p.category_id === catId).length;
+
+  const addCategory = async () => {
+    if (!newName.trim()) return;
+    setAdding(true);
+    const nextPosition = deptCategories.length > 0 ? Math.max(...deptCategories.map((cat) => cat.position)) + 1 : 0;
+    const { error } = await supabase.from("shop_categories").insert({ name: newName.trim(), department_id: department.id, position: nextPosition });
+    setAdding(false);
+    if (error) { showToast(`Couldn't add category: ${error.message}`); return; }
+    setNewName("");
+    await onReload();
+  };
+
+  const renameCategory = async (cat) => {
+    if (!renameValue.trim() || renameValue.trim() === cat.name) { setRenamingId(null); return; }
+    const { error } = await supabase.from("shop_categories").update({ name: renameValue.trim() }).eq("id", cat.id);
+    setRenamingId(null);
+    if (error) { showToast(`Couldn't rename: ${error.message}`); return; }
+    await onReload();
+  };
+
+  const deleteCategory = async (cat) => {
+    const affected = countFor(cat.id);
+    const { error } = await supabase.from("shop_categories").delete().eq("id", cat.id);
+    if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+    showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Category deleted.");
+    await onReload();
+  };
+
+  const move = async (cat, direction) => {
+    const idx = deptCategories.findIndex((c2) => c2.id === cat.id);
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= deptCategories.length) return;
+    const other = deptCategories[swapIdx];
+    await supabase.from("shop_categories").update({ position: other.position }).eq("id", cat.id);
+    await supabase.from("shop_categories").update({ position: cat.position }).eq("id", other.id);
+    await onReload();
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-5">
+        <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={14} /></button>
+        <LayoutGrid size={20} style={{ color: SHOP_GOLD }} />
+        <div>
+          <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Categories</h1>
+          <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>in {department.name}</div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New category name..."
+          onKeyDown={(e) => e.key === "Enter" && addCategory()}
+          className="flex-1 border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        <button onClick={addCategory} disabled={!newName.trim() || adding} className="font-body text-sm font-semibold px-4 py-2.5 rounded-full shrink-0" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: newName.trim() ? 1 : 0.5 }}>
+          Add
+        </button>
+      </div>
+
+      {deptCategories.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          No categories in "{department.name}" yet — everything in it shows under "Other" until you add one.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {deptCategories.map((cat, i) => (
+            <div key={cat.id} className="flex items-center gap-2 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="flex flex-col shrink-0">
+                <button onClick={() => move(cat, -1)} disabled={i === 0} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === 0 ? 0.3 : 1 }}><ChevronUp size={13} /></button>
+                <button onClick={() => move(cat, 1)} disabled={i === deptCategories.length - 1} className="w-6 h-4 flex items-center justify-center" style={{ color: c.textDim, opacity: i === deptCategories.length - 1 ? 0.3 : 1 }}><ChevronDown size={13} /></button>
+              </div>
+              {renamingId === cat.id ? (
+                <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && renameCategory(cat)} onBlur={() => renameCategory(cat)}
+                  className="flex-1 border rounded-lg px-2 py-1.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.borderStrong, color: c.text }} />
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <div className="font-body text-sm font-semibold truncate">{cat.name}</div>
+                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{countFor(cat.id)} product{countFor(cat.id) === 1 ? "" : "s"}</div>
+                </div>
+              )}
+              {renamingId !== cat.id && (
+                <button onClick={() => { setRenamingId(cat.id); setRenameValue(cat.name); }} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Rename</button>
+              )}
+              <button onClick={() => deleteCategory(cat)} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}><Trash2 size={13} /></button>
             </div>
           ))}
         </div>
