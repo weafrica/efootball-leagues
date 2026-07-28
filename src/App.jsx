@@ -3821,6 +3821,10 @@ export default function App() {
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
                 recentMatches={ladderResults}
+                challenges={challenges} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)} onRemove={removeChallenge}
+                onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
+                onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
+                onViewResultProof={viewChallengeResultProof} showToast={showToast}
                 c={c} />
             )}
             {view === "shop" && (
@@ -6616,11 +6620,26 @@ function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, d
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches, c }) {
+function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
+  challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
   const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
+  const myId = session?.user?.id;
+
+  // Every ladder challenge (sent or received, any status) that involves me —
+  // shown right here on the ladder instead of only in the Challenges tab.
+  const myLadderChallenges = useMemo(() => {
+    if (!challenges || !myId) return [];
+    return challenges
+      .filter((ch) => ch.is_ladder && (ch.challenger_id === myId || ch.opponent_id === myId))
+      .sort((a, b) => {
+        const rank = (ch) => (ch.status === "pending" && ch.opponent_id === myId ? 0 : ch.status === "accepted" ? 1 : ch.status === "pending" ? 2 : 3);
+        return rank(a) - rank(b) || new Date(b.created_at) - new Date(a.created_at);
+      });
+  }, [challenges, myId]);
 
   if (!ladder) return <Loader c={c} />;
 
@@ -6698,6 +6717,23 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
             <Swords size={13} /> Climb it
           </button>
         </div>
+      )}
+
+      {myLadderChallenges.length > 0 && (
+        <div className="mb-6">
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your ladder challenges</div>
+          <div className="flex flex-col gap-2">
+            {myLadderChallenges.map((ch) => (
+              <ChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
+                onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof}
+                onOpenChat={setChatModal} c={c} />
+            ))}
+          </div>
+        </div>
+      )}
+      {chatModal && (
+        <ChallengeChatModal challengeId={chatModal.challengeId} kind={chatModal.kind} myId={myId}
+          counterpartUsername={chatModal.counterpartUsername} onClose={() => setChatModal(null)} showToast={showToast} c={c} />
       )}
 
       <div className="relative mb-4">
