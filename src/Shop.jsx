@@ -149,11 +149,30 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => {
     const onPopState = (e) => {
       const state = e.state;
-      if (!state || !state.shopNav) return; // popped past our own entries — the parent's own listener handles leaving the shop
-      setSubview(state.shopSubview || "browse");
-      if (state.shopProductId && products) {
-        const found = products.find((p) => String(p.id) === String(state.shopProductId));
-        setActiveProduct(found || null);
+      if (!state) return;
+      if (state.shopNav) {
+        setSubview(state.shopSubview || "browse");
+        if (state.shopProductId && products) {
+          const found = products.find((p) => String(p.id) === String(state.shopProductId));
+          setActiveProduct(found || null);
+        } else {
+          setActiveProduct(null);
+        }
+        return;
+      }
+      // Landing back on the bare entry the parent pushed for "entering the
+      // shop" (no shopNav tag, since that entry belongs to the parent, not
+      // us) still means "shop root, nothing open" from this component's own
+      // point of view — reset local state to match instead of silently
+      // ignoring it, or the *next* back press would jump straight past this
+      // point to wherever's beneath the shop entirely (e.g. Home).
+      if (state.appView && state.view === "shop") {
+        setSubview("browse");
+        setActiveProduct(null);
+      }
+      // Anything else has popped past our own entries — the parent's own
+      // listener handles leaving the shop.
+    };
       } else {
         setActiveProduct(null);
       }
