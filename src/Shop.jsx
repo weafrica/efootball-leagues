@@ -117,17 +117,32 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   // PublicHome) already pushed for "entering the shop". That way swiping
   // back inside the shop steps back through cart/checkout/product screens
   // one at a time, and only leaves the shop once you're back at its root.
-  const shopBaseStateRef = useRef(null);
-  useEffect(() => {
-    shopBaseStateRef.current = window.history.state || {};
-  }, []);
+  //
+  // The base context here is hardcoded (appView: true, view: "shop",
+  // activeLeagueId: null) rather than captured from window.history.state at
+  // mount, because this component only ever renders while the parent's
+  // `view` is already "shop" — and capturing it dynamically raced against
+  // the parent's own history push (child effects run before parent effects
+  // within the same commit), which meant the very first shop navigation
+  // could silently overwrite the entry the parent had just pushed for
+  // "entering the shop" before it existed, leaving nothing correct to land
+  // on and making back skip straight past every shop screen.
   const shopNavFirstRef = useRef(true);
   useEffect(() => {
+    // Skip the very first run entirely — the parent (App/PublicHome) has
+    // already pushed a real entry for "entering the shop" by the time this
+    // renders, so there's nothing more to record for the initial browse
+    // view. ShopPage re-mounts fresh every single time the shop is opened
+    // (unlike the parent, which only mounts once for the whole session), so
+    // treating this "first write" the same way the parent treats its own
+    // would mean *every* shop visit does a destructive replaceState over
+    // whatever entry was already current — silently overwriting the very
+    // entry the parent just created.
+    if (shopNavFirstRef.current) { shopNavFirstRef.current = false; return; }
     const productId = activeProduct?.id ?? null;
-    const state = { ...(shopBaseStateRef.current || {}), shopNav: true, shopSubview: subview, shopProductId: productId };
+    const state = { appView: true, view: "shop", activeLeagueId: null, shopNav: true, shopSubview: subview, shopProductId: productId };
     const cur = window.history.state;
     if (cur && cur.shopNav && cur.shopSubview === subview && (cur.shopProductId ?? null) === productId) return;
-    if (shopNavFirstRef.current) { shopNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
     window.history.pushState(state, "");
   }, [subview, activeProduct]);
 
