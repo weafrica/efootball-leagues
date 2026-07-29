@@ -147,6 +147,20 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     return () => window.removeEventListener("popstate", onPopState);
   }, [products]);
 
+  // Same fix as the main app's goBack: the shop's own "Back"/"X" controls
+  // used to call setSubview(...) or setActiveProduct(null) directly, which
+  // *pushes* a fresh history entry rather than stepping back through the
+  // ones the effect above already laid down (browse → cart → checkout,
+  // product modal open/close). That clutters the real history stack with
+  // duplicates, so the hardware/gesture back action often re-lands on a
+  // screen you'd already left instead of the one before it. Using real
+  // browser back navigation here lets the popstate handler above restore
+  // the true previous shop screen instead.
+  const shopGoBack = () => {
+    if (window.history.state?.shopNav) window.history.back();
+    else setSubview("browse");
+  };
+
   // A shared product link (weafrica.co.za/shop/<id>) lands here — open that
   // product automatically once the catalog has loaded, for anyone,
   // signed in or not. Only tried once per page load.
@@ -230,7 +244,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   return (
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
-        <button onClick={subview === "browse" ? onBack : () => setSubview("browse")} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
+        <button onClick={subview === "browse" ? onBack : shopGoBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
           <ArrowLeft size={15} /> {subview === "browse" ? "Back" : "Shop"}
         </button>
         <div className="flex items-center gap-2">
@@ -266,12 +280,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {subview === "cart" && (
-        <CartView cart={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onCheckout={goCheckout} onContinue={() => setSubview("browse")} c={c} />
+        <CartView cart={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onCheckout={goCheckout} onContinue={shopGoBack} c={c} />
       )}
 
       {subview === "checkout" && (
         <CheckoutView cart={cart} total={cartTotal} session={session} profile={profile}
-          onDone={() => { clearCart(); setSubview("confirm"); }} onBack={() => setSubview("cart")} showToast={showToast} c={c} />
+          onDone={() => { clearCart(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
       )}
 
       {subview === "confirm" && (
@@ -300,7 +314,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal product={activeProduct} onClose={() => setActiveProduct(null)} onAdd={(qty) => { addToCart(activeProduct, qty); setActiveProduct(null); }} onShare={() => shareProduct(activeProduct)} c={c} />
+        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty) => { addToCart(activeProduct, qty); shopGoBack(); }} onShare={() => shareProduct(activeProduct)} c={c} />
       )}
 
       {subview === "browse" && cartCount > 0 && (
