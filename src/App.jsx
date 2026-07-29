@@ -2587,7 +2587,25 @@ export default function App() {
       .order("result_confirmed_at", { ascending: false })
       .limit(100);
     if (error) { console.error("Couldn't load ladder results:", error.message); setLadderResults([]); return; }
-    setLadderResults(data || []);
+    const rows = data || [];
+
+    // The screenshots live in a private storage bucket, so the raw path
+    // alone isn't viewable — each one needs a signed URL. Fetch them all
+    // in a single batched call (createSignedUrls) rather than one request
+    // per row, and attach the result as `photo_url` on each match.
+    const paths = rows.map((r) => r.result_photo_path).filter(Boolean);
+    if (paths.length === 0) { setLadderResults(rows); return; }
+    const { data: signed, error: signErr } = await supabase.storage
+      .from("result-proofs")
+      .createSignedUrls(paths, 3600);
+    if (signErr) {
+      console.error("Couldn't sign ladder result photos:", signErr.message);
+      setLadderResults(rows);
+      return;
+    }
+    const urlByPath = {};
+    (signed || []).forEach((s) => { if (s.signedUrl) urlByPath[s.path] = s.signedUrl; });
+    setLadderResults(rows.map((r) => ({ ...r, photo_url: r.result_photo_path ? urlByPath[r.result_photo_path] : null })));
   }, [session]);
 
 
@@ -6822,6 +6840,16 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
               const opponentWins = m.opponent_score > m.challenger_score;
               return (
                 <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+                  {m.photo_url ? (
+                    <a href={m.photo_url} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full screenshot">
+                      <img src={m.photo_url} alt="Match result proof" className="w-10 h-10 rounded-md object-cover"
+                        style={{ border: `1px solid ${c.border}` }} />
+                    </a>
+                  ) : (
+                    <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+                      <Camera size={14} style={{ color: c.textFaint }} />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="font-body text-sm truncate flex items-center gap-1.5">
                       <span style={{ fontWeight: challengerWins ? 700 : 500, color: challengerWins ? c.text : c.textFaint }}>{m.challenger_username}</span>
