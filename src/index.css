@@ -2,8 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body {
   margin: 0;
+  /* Stops the browser's elastic "rubber-band" bounce when swiping past the
+     left/right edge on mobile — that bounce is what was revealing a white
+     sliver of the blank page underneath the app's own themed background. */
+  overscroll-behavior-x: none;
+  /* Guards against any element accidentally wider than the viewport
+     creating real horizontal scroll (as opposed to just the bounce). */
+  overflow-x: hidden;
 }
 
 .font-body { font-family: 'Work Sans', sans-serif; }

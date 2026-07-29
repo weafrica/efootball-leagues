@@ -2142,6 +2142,17 @@ export default function App() {
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
   const c = THEMES[theme];
 
+  // The app's own content div paints its themed background, but the real
+  // <html>/<body> behind it never did — on mobile, an edge swipe triggers
+  // the browser's natural elastic overscroll bounce, which briefly reveals
+  // whatever's behind the content (blank white by default) before snapping
+  // back. Keeping the page's actual background in sync with the theme means
+  // that bounce reveals the right color instead of a white sliver.
+  useEffect(() => {
+    document.documentElement.style.background = c.bg;
+    document.body.style.background = c.bg;
+  }, [c.bg]);
+
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); }, []);
 
   // Guards the three destructive admin actions (delete league, remove a club, reject a
