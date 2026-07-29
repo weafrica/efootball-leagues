@@ -2301,11 +2301,9 @@ export default function App() {
   const toggleLadderPause = async () => {
     if (!myLadderRank) return;
     const next = !myLadderRank.challenges_paused;
-    const { error } = await supabase.from("ladder_ranks")
-      .update({ challenges_paused: next })
-      .eq("user_id", session.user.id);
+    const { error } = await supabase.rpc("set_ladder_pause", { paused: next });
     if (error) { showToast(`Couldn't update pause status: ${error.message}`); return; }
-    setLadder((prev) => (prev || []).map((r) => (r.user_id === session.user.id ? { ...r, challenges_paused: next } : r)));
+    await loadLadder();
     showToast(next ? "Ladder challenges paused — you won't receive new ones until you unpause." : "Ladder challenges resumed.");
   };
 
