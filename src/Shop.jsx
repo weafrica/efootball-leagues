@@ -288,11 +288,13 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     setSubview("checkout");
   };
 
+  const atShopRoot = subview === "browse" && !activeProduct;
+
   return (
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
-        <button onClick={subview === "browse" ? onBack : shopGoBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
-          <ArrowLeft size={15} /> {subview === "browse" ? "Back" : "Shop"}
+        <button onClick={atShopRoot ? onBack : shopGoBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
+          <ArrowLeft size={15} /> {atShopRoot ? "Back" : "Shop"}
         </button>
         <div className="flex items-center gap-2">
           {session && (
