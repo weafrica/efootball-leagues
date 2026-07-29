@@ -2287,10 +2287,27 @@ export default function App() {
     const playedNoMatches = mine.wins + mine.draws + mine.losses === 0;
     return ladder
       .filter((r) => r.user_id !== mine.user_id)
+      .filter((r) => !r.challenges_paused)
       .filter((r) => (playedNoMatches && r.points === mine.points) || (r.points > mine.points && r.points - mine.points <= 10))
       .sort((a, b) => a.points - b.points);
   }, [ladder, session]);
   const myLadderRank = useMemo(() => (ladder && session ? ladder.find((r) => r.user_id === session.user.id) : null), [ladder, session]);
+
+  // Lets a member stop receiving new ladder challenges — e.g. if they're
+  // swamped with a backlog and want a breather. Doesn't affect challenges
+  // already sent/accepted, only blocks brand-new ones from landing on them
+  // (enforced both here, by excluding paused players from ladderTargets, and
+  // server-side via trg_block_paused_ladder_challenge so it can't be bypassed).
+  const toggleLadderPause = async () => {
+    if (!myLadderRank) return;
+    const next = !myLadderRank.challenges_paused;
+    const { error } = await supabase.from("ladder_ranks")
+      .update({ challenges_paused: next })
+      .eq("user_id", session.user.id);
+    if (error) { showToast(`Couldn't update pause status: ${error.message}`); return; }
+    setLadder((prev) => (prev || []).map((r) => (r.user_id === session.user.id ? { ...r, challenges_paused: next } : r)));
+    showToast(next ? "Ladder challenges paused — you won't receive new ones until you unpause." : "Ladder challenges resumed.");
+  };
 
   // Sends a challenge to another member. Snapshots the challenger's own
   // username/phone onto the row right away (same pattern used everywhere
@@ -3836,6 +3853,7 @@ export default function App() {
             {view === "ladder" && (
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
                 onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")}
+                onTogglePause={toggleLadderPause}
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
                 recentMatches={ladderResults}
@@ -6638,7 +6656,7 @@ function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, d
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
+function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
   challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, c }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -6687,7 +6705,12 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           {row.username?.[0]?.toUpperCase() || "?"}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="font-body text-sm truncate">{row.username}{isMe ? " (you)" : ""}</div>
+          <div className="font-body text-sm truncate flex items-center gap-1.5">
+            {row.username}{isMe ? " (you)" : ""}
+            {row.challenges_paused && (
+              <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>Paused</span>
+            )}
+          </div>
           <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</div>
         </div>
         {canChallenge && (
@@ -6727,12 +6750,24 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
       </div>
 
       {myLadderRank && (
-        <div className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4" style={{ background: c.surfaceHover, border: `1px solid ${c.accent}55` }}>
-          <div className="font-body text-sm">
-            You're <span className="font-bold" style={{ color: c.accent }}>#{myLadderRank.rank_position}</span> · {myLadderRank.points}pts · {myLadderRank.wins}W–{myLadderRank.losses}L
+        <div className="rounded-xl px-4 py-3 mb-4" style={{ background: c.surfaceHover, border: `1px solid ${c.accent}55` }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-body text-sm">
+              You're <span className="font-bold" style={{ color: c.accent }}>#{myLadderRank.rank_position}</span> · {myLadderRank.points}pts · {myLadderRank.wins}W–{myLadderRank.losses}L
+              {myLadderRank.challenges_paused && (
+                <div className="font-mono text-[10px] uppercase tracking-wide mt-0.5" style={{ color: c.red }}>Challenges paused — no one can challenge you</div>
+              )}
+            </div>
+            <button onClick={onOpenChallenge} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+              <Swords size={13} /> Climb it
+            </button>
           </div>
-          <button onClick={onOpenChallenge} className="flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
-            <Swords size={13} /> Climb it
+          <button onClick={onTogglePause}
+            className="w-full mt-2.5 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
+            style={myLadderRank.challenges_paused
+              ? { background: c.accent, color: c.accentText, borderColor: c.accent }
+              : { background: "transparent", borderColor: c.borderStrong, color: c.textDim }}>
+            {myLadderRank.challenges_paused ? <><Play size={13} /> Resume ladder challenges</> : <><Pause size={13} /> Pause ladder challenges</>}
           </button>
         </div>
       )}
