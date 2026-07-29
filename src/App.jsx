@@ -2116,8 +2116,14 @@ export default function App() {
   const [profile, setProfile] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leagues, setLeagues] = useState(null);
-  const [view, setView] = useState("home");
-  const [activeLeagueId, setActiveLeagueId] = useState(null);
+  // A hard refresh re-mounts the whole app from scratch, so React state
+  // always starts from these defaults — but the browser itself preserves
+  // window.history.state across a reload of the same entry (it's tied to
+  // the URL/history entry, not the page's in-memory state). Reading it here
+  // means a refresh lands back on whichever screen the appNav effect below
+  // last recorded, instead of always bouncing to Home.
+  const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
+  const [activeLeagueId, setActiveLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLeagueId : null) ?? null);
   const [toast, setToast] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
   const [handledDeepLink, setHandledDeepLink] = useState(false);

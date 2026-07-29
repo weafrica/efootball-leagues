@@ -97,7 +97,7 @@ function StatusBadge({ status, c }) {
 // ════════════════════════════════════════════════════════════════════
 
 export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth, initialProductId }) {
-  const [subview, setSubview] = useState("browse");
+  const [subview, setSubview] = useState(() => (window.history.state?.shopNav ? window.history.state.shopSubview : null) || "browse");
   const [products, setProducts] = useState(null);
   const [departments, setDepartments] = useState(null);
   const [categories, setCategories] = useState(null);
@@ -106,6 +106,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [myOrders, setMyOrders] = useState(null);
   const [toast, setToast] = useState(null);
   const [sharedLinkHandled, setSharedLinkHandled] = useState(false);
+  const [restoredProductHandled, setRestoredProductHandled] = useState(false);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast((t) => (t === msg ? null : t)), 3000); };
 
@@ -201,6 +202,22 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     else showToast("That product link isn't available anymore.");
     setSharedLinkHandled(true);
   }, [initialProductId, products, sharedLinkHandled]);
+
+  // Same idea as the shared-link effect above, but for a plain refresh: the
+  // subview itself is restored synchronously from history state (see the
+  // useState above), but a product modal can't be resolved until the
+  // catalog has actually loaded, so it's restored here once `products`
+  // arrives. Skipped whenever a shared-link product is already being
+  // handled, so the two don't race each other.
+  useEffect(() => {
+    if (restoredProductHandled || initialProductId || products === null) return;
+    const restoredId = window.history.state?.shopNav ? window.history.state.shopProductId : null;
+    if (restoredId) {
+      const found = products.find((p) => String(p.id) === String(restoredId));
+      if (found) setActiveProduct(found);
+    }
+    setRestoredProductHandled(true);
+  }, [initialProductId, products, restoredProductHandled]);
 
   // Anyone can share a link straight to a product — no sign-in or admin
   // access required to generate or open one.
