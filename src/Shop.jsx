@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
-  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2,
+  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -293,9 +293,16 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   return (
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
-        <button onClick={atShopRoot ? onBack : shopGoBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
-          <ArrowLeft size={15} /> {atShopRoot ? "Back" : "Shop"}
-        </button>
+        {atShopRoot ? (
+          <button onClick={onBack} className="flex items-center gap-1.5" title="Back to Matchday">
+            <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={11} color={c.accent} /></div>
+            <div className="text-xs font-extrabold tracking-tight uppercase" style={{ color: c.textDim }}>Matchday</div>
+          </button>
+        ) : (
+          <button onClick={shopGoBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
+            <ArrowLeft size={15} /> Shop
+          </button>
+        )}
         <div className="flex items-center gap-2">
           {session && (
             <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} title="My orders"
