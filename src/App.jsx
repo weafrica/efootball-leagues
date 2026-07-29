@@ -2914,6 +2914,22 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  // Every in-app "← Back" button used to call setView("home") directly —
+  // which *pushes* a new history entry rather than stepping back through
+  // the ones already there. Repeat that a few times while browsing around
+  // and the real history stack fills up with duplicate "home" entries, so
+  // the hardware/gesture back action often lands on one of those instead of
+  // wherever the person actually came from. Using real browser back
+  // navigation here lets the popstate handler above restore the true
+  // previous screen instead. The appNav effect always replaces the very
+  // first entry with the initial view, so there's always something to go
+  // back to; the setView("home") fallback only matters if that assumption
+  // is ever wrong (e.g. history was cleared externally).
+  const goBack = useCallback(() => {
+    if (window.history.state?.appView) window.history.back();
+    else setView("home");
+  }, []);
+
   const completeProfile = async (phone, username, photoFile) => {
     const { data, error } = await supabase.from("profiles")
       .insert({ user_id: session.user.id, phone, efootball_username: username })
@@ -3811,7 +3827,7 @@ export default function App() {
       )}
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
-          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={() => setView("home")} c={c} />
+          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
         ) : view === "challenges" ? (
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
             boardComments={boardComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
@@ -3827,7 +3843,7 @@ export default function App() {
             onAdminGrantLadderWalkover={adminGrantLadderWalkover} onAdminCancelLadderChallenge={adminCancelLadderChallenge}
             onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
-            onBack={() => setView("home")} showToast={showToast} c={c} />
+            onBack={goBack} showToast={showToast} c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (
@@ -3838,13 +3854,13 @@ export default function App() {
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} c={c} />
             )}
-            {view === "create" && <CreateLeague onCancel={() => setView("home")} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
+            {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
               <LeagueDetail league={activeLeague} session={session} isAdmin={isAdmin} joined={isMemberOf(activeLeague)}
                 myUsername={profile?.efootball_username || session.user.email}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
                 myPaymentStatus={myPaymentStatus(activeLeague)}
-                onBack={() => setView("home")} onJoin={() => startJoin(activeLeague.id)}
+                onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription}
@@ -3857,11 +3873,11 @@ export default function App() {
                 onToggleLeagueReaction={toggleLeagueReaction} c={c} />
             )}
             {view === "leaderboard" && (
-              <Leaderboard leagues={leagues} session={session} onBack={() => setView("home")} c={c} />
+              <Leaderboard leagues={leagues} session={session} onBack={goBack} c={c} />
             )}
             {view === "ladder" && (
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
-                onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={() => setView("home")}
+                onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={goBack}
                 onTogglePause={toggleLadderPause}
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
@@ -3873,10 +3889,10 @@ export default function App() {
                 c={c} />
             )}
             {view === "shop" && (
-              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={() => setView("home")} initialProductId={shopDeepLinkProductId} />
+              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={goBack} initialProductId={shopDeepLinkProductId} />
             )}
             {view === "terms" && (
-              <TermsPage c={c} onBack={() => setView("home")} />
+              <TermsPage c={c} onBack={goBack} />
             )}
           </>
         )}
