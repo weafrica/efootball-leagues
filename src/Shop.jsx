@@ -173,10 +173,6 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       // Anything else has popped past our own entries — the parent's own
       // listener handles leaving the shop.
     };
-      } else {
-        setActiveProduct(null);
-      }
-    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [products]);
