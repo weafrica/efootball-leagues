@@ -16,7 +16,7 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Zap, Flame, Gamepad2, Medal,
-  ShoppingBag, ExternalLink, Shirt, Package,
+  ShoppingBag, ExternalLink, Shirt, Package, Menu,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -3937,6 +3937,8 @@ export default function App() {
           onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
           onOpenChallenges={openChallengesScreen}
           challengeBadge={incomingPendingCount}
+          onOpenCreate={() => setView("create")}
+          grabbableCount={(openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id).length}
           onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} onOpenLadder={openLadderScreen} />
       )}
       <main className="max-w-3xl mx-auto px-4 pb-24">
@@ -6300,7 +6302,21 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
   );
 }
 
-function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder }) {
+function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCreate, grabbableCount }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
+  const menuItems = [
+    { icon: Plus, label: "New league", onClick: onOpenCreate },
+    { icon: Shuffle, label: "Random", onClick: onOpenChallenges, badge: grabbableCount },
+    { icon: Swords, label: "Challenges", onClick: onOpenChallenges },
+    { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
+  ];
   return (
     <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
       <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -6318,13 +6334,6 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
             <MessageCircle size={13} /> <span className="hidden sm:inline">Suggest</span>
           </button>
           <button onClick={onOpenLeaderboard} title="Leaderboard" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "leaderboard" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Trophy size={14} /></button>
-          <button onClick={onOpenLadder} title="Ladder" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "ladder" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><TrendingUp size={14} /></button>
-          <button onClick={onOpenChallenges} title="Challenges" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={view === "challenges" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
-            <Target size={14} />
-            {challengeBadge > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center font-mono text-[8px] font-bold" style={{ background: c.red, color: "#fff" }}>{challengeBadge}</span>
-            )}
-          </button>
           {isAdmin && (
             <button onClick={onOpenAccounts} title="All accounts" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "accounts" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Shield size={14} /></button>
           )}
@@ -6335,6 +6344,36 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
             {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <Settings2 size={14} />}
           </button>
           <button onClick={onSignOut} title={userEmail} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><LogOut size={14} /></button>
+
+          {/* Hamburger — the 4 main quick actions (New league, Random,
+              Challenges, Ladder), tucked behind one always-visible icon
+              instead of spread across the bar, with a dropdown panel that
+              opens right under it. */}
+          <div ref={menuRef} className="relative">
+            <button onClick={() => setMenuOpen((v) => !v)} title="Menu" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={menuOpen ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+              <Menu size={16} />
+              {(challengeBadge > 0 || grabbableCount > 0) && (
+                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center font-mono text-[8px] font-bold" style={{ background: c.red, color: "#fff" }}>{challengeBadge + grabbableCount}</span>
+              )}
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-10 w-48 rounded-xl border shadow-lg overflow-hidden z-50" style={{ background: c.bg, borderColor: c.borderStrong }}>
+                {menuItems.map((it) => (
+                  <button key={it.label} onClick={() => { setMenuOpen(false); it.onClick?.(); }}
+                    className="w-full flex items-center gap-2.5 font-body text-sm font-semibold px-3.5 py-2.5 text-left"
+                    style={{ color: c.text }}>
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
+                      <it.icon size={13} style={{ color: c.accent }} />
+                    </span>
+                    {it.label}
+                    {it.badge > 0 && (
+                      <span className="ml-auto min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{it.badge}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>
@@ -6404,12 +6443,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
-      {/* Quick-action bar — the same 4 actions as the tile grid further
-          down, but pinned right under the header (sticky, offset by the
-          header's own height) so they're reachable without scrolling,
-          even once the page is scrolled a long way down. */}
-      <HomeQuickBar onCreate={onCreate} onOpenChallenges={onOpenChallenges} onOpenLadder={onOpenLadder} grabbableCount={grabbableChallenges.length} c={c} />
-
       <ShopBanner onOpen={onOpenShop} c={c} />
 
       {/* Compact HUD banner — status strip, not a landing-page hero */}
@@ -6486,36 +6519,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 function profileFirstName(session) {
   const raw = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name;
   return raw ? raw.split(" ")[0] : "";
-}
-
-// Sticky quick-action bar pinned under the header on Home — same 4 actions
-// as the tile grid below, just always on screen (not scrolled away) so
-// they're one tap away no matter how far down the page a member is.
-function HomeQuickBar({ onCreate, onOpenChallenges, onOpenLadder, grabbableCount, c }) {
-  const items = [
-    { icon: Plus, label: "New league", onClick: onCreate },
-    { icon: Shuffle, label: "Random", onClick: onOpenChallenges, badge: grabbableCount },
-    { icon: Swords, label: "Challenges", onClick: onOpenChallenges },
-    { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
-  ];
-  return (
-    <div className="sticky top-14 z-30 pt-2 pb-2 -mt-2 mb-2" style={{ background: `${c.bg}F2`, backdropFilter: "blur(6px)" }}>
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar rounded-full border p-1.5" style={{ background: c.surface, borderColor: c.border }}>
-        {items.map((it) => (
-          <button key={it.label} onClick={it.onClick}
-            className="relative flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold pl-2 pr-3.5 py-1.5 rounded-full">
-            <span className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
-              <it.icon size={12} style={{ color: c.accent }} />
-            </span>
-            <span style={{ color: c.text }}>{it.label}</span>
-            {it.badge > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full flex items-center justify-center font-mono text-[8px] font-bold" style={{ background: c.red, color: "#fff" }}>{it.badge}</span>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 // One equal-weight tile in the quick-action menu grid — icon on top, label
