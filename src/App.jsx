@@ -158,6 +158,22 @@ const THEMES = {
   },
 };
 
+// The Ladder gets its own look — black, gold and red, matching the "Ladder
+// Battles / No Mercy" badge — instead of following the app's normal
+// light/dark theme toggle. It's the one permanent, always-on competition, so
+// it's meant to read as its own thing wherever it shows up (the Home strip
+// and its own full page). Same key shape as THEMES.dark/light so it can be
+// dropped in as a straight replacement for the `c` prop everywhere the
+// Ladder's components already thread it through — buttons, modals, rows —
+// without touching each one by hand.
+const LADDER_THEME = {
+  bg: "#0A0806", surface: "rgba(232,185,35,0.06)", surfaceHover: "rgba(232,185,35,0.12)",
+  border: "rgba(232,185,35,0.25)", borderStrong: "rgba(232,185,35,0.45)", text: "#F5EEDC",
+  textDim: "rgba(245,238,220,0.6)", textFaint: "rgba(245,238,220,0.38)", accent: "#E8B923",
+  accentText: "#0A0806", green: "#2D6A4F", greenSoft: "rgba(45,106,79,0.35)", greenText: "#7FC9A2",
+  red: "#C81E3A", redSoft: "rgba(200,30,58,0.25)", toastBg: "#F5EEDC", toastText: "#0A0806",
+};
+
 const FORMATS = [
   { id: "single_round_robin", label: "Single Round Robin", desc: "Every club plays every other club once.", available: true },
   { id: "double_round_robin", label: "Double Round Robin", desc: "Home and away — every club plays every other club twice.", available: true },
@@ -6446,53 +6462,61 @@ function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
 // the page rather than a widget bolted onto it. Shows the top 5 by
 // rank_position (which never resets) plus, if the viewer has a spot on it
 // themselves, a quiet "you're #N" line that opens the challenge picker.
-function LadderStrip({ ladder, myLadderRank, onOpenLadder, c }) {
+function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
+  const c = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
   const [rulesOpen, setRulesOpen] = useState(false);
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
   return (
     <section className="pt-5">
-      <div className="flex items-center justify-between mb-2.5">
-        <button onClick={onOpenLadder} className="font-mono text-[11px] tracking-[0.25em] uppercase flex items-center gap-1.5" style={{ color: c.textFaint }}>
-          <TrendingUp size={12} /> The Ladder
-        </button>
-        <div className="flex items-center gap-2 shrink-0">
-          <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
-          {myLadderRank && (
-            <button onClick={onOpenLadder} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
-              You're #{myLadderRank.rank_position} <ChevronRight size={12} />
-            </button>
-          )}
-        </div>
-      </div>
-      {rulesOpen && <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />}
-      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
-        {top5.map((row, i) => (
-          <div key={row.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
-            style={{
-              background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
-              border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
-            }}>
-            {i < 3 ? (
-              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
-                {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
-              </span>
-            ) : (
-              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
-                {i + 1}
-              </span>
-            )}
-            <div className="flex flex-col leading-tight">
-              <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
-              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+      <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
+        className="w-full rounded-2xl p-3.5 text-left cursor-pointer" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${c.borderStrong}` }} />
+            <div className="leading-tight">
+              <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: c.accent }}>Ladder Battles</div>
+              <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: c.red }}>No Mercy</div>
             </div>
           </div>
-        ))}
-        <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
-          style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
-          <Swords size={13} /> {myLadderRank && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
-        </button>
+          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+            {myLadderRank && (
+              <button onClick={onOpenLadder} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+                You're #{myLadderRank.rank_position} <ChevronRight size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+        {rulesOpen && <div onClick={(e) => e.stopPropagation()}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} /></div>}
+        <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
+          {top5.map((row, i) => (
+            <div key={row.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+              style={{
+                background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
+                border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
+              }}>
+              {i < 3 ? (
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                  {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
+                </span>
+              ) : (
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                  {i + 1}
+                </span>
+              )}
+              <div className="flex flex-col leading-tight">
+                <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: c.text }}>{row.username}</span>
+                <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+              </div>
+            </div>
+          ))}
+          <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+            style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
+            <Swords size={13} /> {myLadderRank && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -6810,7 +6834,8 @@ function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, d
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
 function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
-  challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, c }) {
+  challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast }) {
+  const c = LADDER_THEME; // the Ladder always renders in its own black/gold/red look, not the app's normal theme
   const [rulesOpen, setRulesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -6883,13 +6908,16 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
   };
 
   return (
-    <div className="pt-8">
+    <div className="-mx-4 px-4 pt-8 pb-10" style={{ background: c.bg, color: c.text }}>
       <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> Home</button>
 
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <TrendingUp size={20} style={{ color: c.accent }} />
-          <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">The Ladder</h1>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <img src="/ladder-battles-badge.jpg" alt="" className="w-14 h-14 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${c.borderStrong}` }} />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none" style={{ color: c.accent }}>Ladder Battles</h1>
+            <div className="font-mono text-[11px] tracking-[0.35em] uppercase mt-1" style={{ color: c.red }}>No Mercy</div>
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setShareOpen(true)} title="Download image" disabled={ladder.length === 0}
@@ -6905,7 +6933,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
           subtitle={`${ladder.length} player${ladder.length === 1 ? "" : "s"} · never resets`}
           rows={shareRows} columns={SHARE_LADDER_COLUMNS} c={c} defaultRank={myLadderRank?.rank_position} />
       )}
-      <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
+      <div className="font-mono text-xs mb-4 mt-3" style={{ color: c.textFaint }}>
         One permanent ranking, shared by everyone — it never resets. {ladder.length} player{ladder.length === 1 ? "" : "s"}.
       </div>
 
