@@ -2196,6 +2196,7 @@ export default function App() {
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
+  const [teamAvatars, setTeamAvatars] = useState({}); // team_id -> avatar_url, for club photos on the Table (mirrors the guest view's version)
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
   const [recentResults, setRecentResults] = useState(null); // last 100 confirmed challenge results, platform-wide (community feed)
@@ -2327,6 +2328,18 @@ export default function App() {
     if (error) { showToast("Couldn't load members."); setChallengeMembers([]); return; }
     setChallengeMembers(data || []);
   }, [showToast]);
+
+  // Club-owner photos for the Table, same source the signed-out guest view
+  // uses (public_team_avatars: team_id -> avatar_url only, nothing else
+  // about the owning member). Loaded once alongside leagues so every
+  // league's Table can show them without a fetch of its own.
+  const loadTeamAvatars = useCallback(async () => {
+    const { data, error } = await supabase.from("public_team_avatars").select("*");
+    if (error) return;
+    const map = {};
+    (data || []).forEach((row) => { if (row.avatar_url) map[row.team_id] = row.avatar_url; });
+    setTeamAvatars(map);
+  }, []);
 
   // Every challenge the signed-in member is involved in, either as the one who
   // sent it or the one who received it.
@@ -2885,7 +2898,8 @@ export default function App() {
     loadOpenChallenges();
     loadLadder();
     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers]);
+    loadTeamAvatars(); // also feeds the Table's club photos
+  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
@@ -3954,7 +3968,7 @@ export default function App() {
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
                 onRespondToResultSubmission={respondToResultSubmission}
                 onPostComment={postComment} onDeleteComment={deleteComment} onToggleReaction={toggleCommentReaction}
-                onToggleLeagueReaction={toggleLeagueReaction} c={c} />
+                onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} c={c} />
             )}
             {view === "leaderboard" && (
               <Leaderboard leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack} c={c} />
@@ -8051,7 +8065,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -8334,8 +8348,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {tab === "table" && (
         <div>
           {inGroupStage
-            ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} c={c} />
-            : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} c={c} />}
+            ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} avatarByTeamId={avatarByTeamId} c={c} />
+            : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} avatarByTeamId={avatarByTeamId} c={c} />}
           <CommentsSection league={league} session={session} canComment={joined || canManage}
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false}
             emptyText="No results posted yet — they'll show up here as matches are played."
