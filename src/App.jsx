@@ -6404,6 +6404,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
+      {/* Quick-action bar — the same 4 actions as the tile grid further
+          down, but pinned right under the header (sticky, offset by the
+          header's own height) so they're reachable without scrolling,
+          even once the page is scrolled a long way down. */}
+      <HomeQuickBar onCreate={onCreate} onOpenChallenges={onOpenChallenges} onOpenLadder={onOpenLadder} grabbableCount={grabbableChallenges.length} c={c} />
+
       <ShopBanner onOpen={onOpenShop} c={c} />
 
       {/* Compact HUD banner — status strip, not a landing-page hero */}
@@ -6480,6 +6486,36 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 function profileFirstName(session) {
   const raw = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name;
   return raw ? raw.split(" ")[0] : "";
+}
+
+// Sticky quick-action bar pinned under the header on Home — same 4 actions
+// as the tile grid below, just always on screen (not scrolled away) so
+// they're one tap away no matter how far down the page a member is.
+function HomeQuickBar({ onCreate, onOpenChallenges, onOpenLadder, grabbableCount, c }) {
+  const items = [
+    { icon: Plus, label: "New league", onClick: onCreate },
+    { icon: Shuffle, label: "Random", onClick: onOpenChallenges, badge: grabbableCount },
+    { icon: Swords, label: "Challenges", onClick: onOpenChallenges },
+    { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
+  ];
+  return (
+    <div className="sticky top-14 z-30 pt-2 pb-2 -mt-2 mb-2" style={{ background: `${c.bg}F2`, backdropFilter: "blur(6px)" }}>
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar rounded-full border p-1.5" style={{ background: c.surface, borderColor: c.border }}>
+        {items.map((it) => (
+          <button key={it.label} onClick={it.onClick}
+            className="relative flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold pl-2 pr-3.5 py-1.5 rounded-full">
+            <span className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+              <it.icon size={12} style={{ color: c.accent }} />
+            </span>
+            <span style={{ color: c.text }}>{it.label}</span>
+            {it.badge > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full flex items-center justify-center font-mono text-[8px] font-bold" style={{ background: c.red, color: "#fff" }}>{it.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // One equal-weight tile in the quick-action menu grid — icon on top, label
