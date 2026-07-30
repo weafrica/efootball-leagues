@@ -6322,9 +6322,6 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
   // the edge was simply never reachable). Two buttons — profile + this
   // menu — always fit.
   const menuItems = [
-    { icon: Plus, label: "New league", onClick: onOpenCreate },
-    { icon: Shuffle, label: "Random", onClick: onOpenChallenges, badge: grabbableCount },
-    { icon: Swords, label: "Challenges", onClick: onOpenChallenges, badge: challengeBadge },
     { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
     { icon: Trophy, label: "Leaderboard", onClick: onOpenLeaderboard },
     { icon: MessageCircle, label: "Suggest something", onClick: onOpenSuggestion },
