@@ -2884,7 +2884,8 @@ export default function App() {
     loadChallenges();
     loadOpenChallenges();
     loadLadder();
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder]);
+    loadChallengeMembers(); // also feeds the Leaderboard's profile photos
+  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
@@ -3935,7 +3936,7 @@ export default function App() {
                 openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -3956,7 +3957,7 @@ export default function App() {
                 onToggleLeagueReaction={toggleLeagueReaction} c={c} />
             )}
             {view === "leaderboard" && (
-              <Leaderboard leagues={leagues} session={session} onBack={goBack} c={c} />
+              <Leaderboard leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack} c={c} />
             )}
             {view === "ladder" && (
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
@@ -4915,9 +4916,22 @@ function SeasonPicker({ value, seasons, anchor, cur, onChange, c }) {
 // scrollable panel; typing a username searches the FULL ranked list (not
 // just the top 10) so someone can find themselves — or anyone else —
 // wherever they actually sit.
-function Leaderboard({ leagues, session, onBack, embedded, c }) {
+function Leaderboard({ leagues, session, memberAvatars, myAvatarUrl, onBack, embedded, c }) {
   const [metric, setMetric] = useState("wins");
   const [query, setQuery] = useState("");
+  // memberAvatars is the same platform-wide roster the Challenges picker uses
+  // (user_id + username + avatar_url) — reused here purely as a lookup so
+  // ranked rows (keyed by user_id) can show a real photo instead of just an
+  // initial, without the leaderboard needing to fetch anything of its own.
+  // That roster only lists *other* members (see list_challengeable_members),
+  // so the signed-in user's own photo is layered in separately from their
+  // profile, or their own row would fall back to initials.
+  const avatarByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, m.avatar_url || null); });
+    if (session && myAvatarUrl) map.set(session.user.id, myAvatarUrl);
+    return map;
+  }, [memberAvatars, session, myAvatarUrl]);
   const anchor = useMemo(() => seasonAnchor(leagues), [leagues]);
   const cur = currentSeason(anchor);
   const [season, setSeason] = useState(seasonKey(cur));
@@ -4948,7 +4962,7 @@ function Leaderboard({ leagues, session, onBack, embedded, c }) {
     <div key={r.userId} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
       style={{ background: session && r.userId === session.user.id ? c.surfaceHover : c.surface, border: session && r.userId === session.user.id ? `1px solid ${c.accent}` : "1px solid transparent" }}>
       <span className="w-6 text-center font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{medal(r.rank) || `#${r.rank}`}</span>
-      <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{r.name?.[0]?.toUpperCase() || "?"}</div>
+      <MemberAvatar url={r.userId ? avatarByUserId.get(r.userId) : null} username={r.name} size={28} c={c} />
       <div className="min-w-0 flex-1">
         <div className="font-body text-sm truncate">{r.name}{session && r.userId === session.user.id ? " (you)" : ""}</div>
         <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{statLine(r)}</div>
@@ -6283,7 +6297,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
 
@@ -6375,7 +6389,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
       )}
 
       <section className="mt-10 pt-8" style={{ borderTop: `1px solid ${c.border}` }}>
-        <Leaderboard leagues={leagues} session={session} embedded c={c} />
+        <Leaderboard leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} embedded c={c} />
       </section>
     </div>
   );
