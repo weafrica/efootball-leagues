@@ -668,13 +668,16 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
       </div>
       <div className="grid grid-cols-2 gap-2.5">
         {groups.map(({ dept, items }, i) => {
-          const photo = items.find((it) => it.image_url)?.image_url;
+          // Distinct products' photos (not the same item repeated) — up to 4,
+          // arranged as a collage so the tile itself hints at what's actually
+          // in the department before anyone taps in.
+          const photos = [...new Set(items.map((it) => it.image_url).filter(Boolean))].slice(0, 4);
           return (
             <button key={dept.id} onClick={() => onSelect(dept.id)}
               className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
               style={{ background: DEPT_TINTS[i % DEPT_TINTS.length] }}>
-              {photo && <img src={photo} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />}
-              <div className="absolute inset-0" style={{ background: photo ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
+              {photos.length > 0 && <DeptTileCollage photos={photos} />}
+              <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
               <div className="absolute bottom-0 left-0 right-0 p-3">
                 <div className="text-white font-extrabold uppercase tracking-tight text-[13px] leading-tight truncate" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
                 <div className="text-white/85 font-mono text-[10px] mt-0.5">{items.length} item{items.length === 1 ? "" : "s"}</div>
@@ -692,6 +695,38 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// The collage behind a department tile — 1 photo fills the whole tile same
+// as before, but 2+ distinct products' photos split the tile between them
+// (a big lead shot plus smaller stacked ones) so the directory itself shows
+// a spread of what's inside rather than a single item standing in for the
+// whole aisle.
+function DeptTileCollage({ photos }) {
+  if (photos.length === 1) {
+    return <img src={photos[0]} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />;
+  }
+  if (photos.length === 2) {
+    return (
+      <div className="absolute inset-0 grid grid-cols-2 gap-[1.5px]">
+        {photos.map((src, i) => <img key={i} src={src} alt="" loading="lazy" className="w-full h-full object-cover" />)}
+      </div>
+    );
+  }
+  if (photos.length === 3) {
+    return (
+      <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-[1.5px]">
+        <img src={photos[0]} alt="" loading="lazy" className="w-full h-full object-cover row-span-2" />
+        <img src={photos[1]} alt="" loading="lazy" className="w-full h-full object-cover" />
+        <img src={photos[2]} alt="" loading="lazy" className="w-full h-full object-cover" />
+      </div>
+    );
+  }
+  return (
+    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-[1.5px]">
+      {photos.map((src, i) => <img key={i} src={src} alt="" loading="lazy" className="w-full h-full object-cover" />)}
     </div>
   );
 }
