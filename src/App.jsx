@@ -4957,7 +4957,7 @@ function Leaderboard({ leagues, session, onBack, embedded, c }) {
 
       <div className="flex items-center gap-2 mb-1">
         <Trophy size={20} style={{ color: c.accent }} />
-        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard</h1>
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard (build check v2)</h1>
       </div>
       <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
         {season === "all" ? "Ranked by results across every league, all-time" : "Ranked by results across every league this season"}
