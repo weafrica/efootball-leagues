@@ -551,17 +551,26 @@ function computeRecentMatches(leagues, bounds) {
 
 // Platform-wide leaderboard: aggregates every played fixture for every
 // person across every league they've fielded a team in (grouped by user_id,
-// not team, so someone's record follows them between leagues). Only people
-// who've actually played a match show up — reactions/comments don't count
-// toward this, match results do. Pass `bounds` ({start, end} Dates) to scope
-// it to one season; pass null/undefined for the all-time board.
+// not team, so someone's record follows them between leagues). A club that
+// hasn't been claimed by a signed-up member yet — e.g. a name from a
+// league's pre-listed open-registration team sheet that nobody has joined
+// under — has no user to attribute its results to, so it's kept as its own
+// row keyed by team instead, named after the club. Without this fallback
+// those clubs' wins would silently vanish from the Leaderboard (though they'd
+// still count on that league's own Table, since computeStandings works off
+// fixtures/teams directly) — which is exactly why a club leading its
+// league's table could still be missing from the platform-wide rankings.
+// Pass `bounds` ({start, end} Dates) to scope it to one season; pass
+// null/undefined for the all-time board.
 function computeGlobalLeaderboard(leagues, bounds) {
-  const byUser = new Map();
+  const byKey = new Map();
   (leagues || []).forEach((l) => {
-    (l.members || []).forEach((m) => {
-      if (!m.team_id) return;
-      const team = l.teams.find((t) => t.id === m.team_id);
-      if (!team) return;
+    const ownerByTeamId = new Map();
+    (l.members || []).forEach((m) => { if (m.team_id) ownerByTeamId.set(m.team_id, m); });
+    (l.teams || []).forEach((team) => {
+      const owner = ownerByTeamId.get(team.id);
+      const key = owner ? `u:${owner.user_id}` : `t:${team.id}`;
+      const name = owner ? owner.display_name : team.name;
       const played = l.fixtures.filter((f) => {
         if (!f.played || f.away_team_id === null) return false;
         if (f.home_team_id !== team.id && f.away_team_id !== team.id) return false;
@@ -570,9 +579,9 @@ function computeGlobalLeaderboard(leagues, bounds) {
         return at >= bounds.start && at < bounds.end;
       });
       if (played.length === 0) return;
-      let acc = byUser.get(m.user_id);
-      if (!acc) { acc = { userId: m.user_id, name: m.display_name, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 }; byUser.set(m.user_id, acc); }
-      acc.name = m.display_name; // most recently seen display name wins
+      let acc = byKey.get(key);
+      if (!acc) { acc = { key, userId: owner ? owner.user_id : null, name, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 }; byKey.set(key, acc); }
+      acc.name = name; // most recently seen name wins
       played.forEach((f) => {
         const isHome = f.home_team_id === team.id;
         const gf = isHome ? f.home_score : f.away_score;
@@ -582,7 +591,7 @@ function computeGlobalLeaderboard(leagues, bounds) {
       });
     });
   });
-  return [...byUser.values()].map((r) => ({ ...r, gd: r.gf - r.ga, winRate: r.p ? r.w / r.p : 0, pts: r.w * 3 + r.d }));
+  return [...byKey.values()].map((r) => ({ ...r, gd: r.gf - r.ga, winRate: r.p ? r.w / r.p : 0, pts: r.w * 3 + r.d }));
 }
 
 // Picks out the top scorer and the best defensive record (fewest goals
@@ -599,7 +608,7 @@ function goalExtremes(rows) {
   const top = byMost[0];
   let least = byFewestConceded[0];
   if (rows.length < 2) return { top, least: null };
-  if (least === top || (least.userId !== undefined && least.userId === top.userId) || (least.id !== undefined && least.id === top.id)) {
+  if (least === top || (least.key !== undefined && least.key === top.key) || (least.userId !== undefined && least.userId != null && least.userId === top.userId) || (least.id !== undefined && least.id === top.id)) {
     least = byFewestConceded[1];
   }
   return { top, least };
