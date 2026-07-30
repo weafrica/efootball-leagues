@@ -1,7 +1,14 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
-import ShopPage from "./Shop.jsx";
-import TermsPage from "./Terms.jsx";
+// Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
+// thousand lines, and neither it nor the Terms page is needed for the
+// initial render — bundling them in eagerly meant every single visitor
+// downloaded and parsed that code up front even if they never open the
+// shop or read the terms. Splitting them into their own chunks (Vite does
+// this automatically for a dynamic import()) shrinks the JS the browser
+// has to fetch and parse before the app is interactive.
+const ShopPage = lazy(() => import("./Shop.jsx"));
+const TermsPage = lazy(() => import("./Terms.jsx"));
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -13,6 +20,23 @@ import {
 
 const THEME_KEY = "efootball-theme-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+
+// Used by every "refresh this every few seconds while a screen is open"
+// effect below. A background tab (phone screen off, switched app,
+// minimized browser) was still firing every poll on schedule for data
+// nobody could see — this skips the actual fetch while hidden, and catches
+// up immediately the moment it becomes visible again instead of waiting
+// for the next tick.
+function useVisibilityPoll(callback, intervalMs, enabled) {
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => { if (!document.hidden) callback(); };
+    const id = setInterval(tick, intervalMs);
+    const onVisible = () => { if (!document.hidden) callback(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
+  }, [callback, intervalMs, enabled]);
+}
 
 // The "Shop now" banner opens the in-app WeAfrica Shop (see Shop.jsx) —
 // full catalog, cart, and checkout, no external site needed.
@@ -2825,37 +2849,27 @@ export default function App() {
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
   // the same way the random-challenge pool refreshes itself.
-  useEffect(() => {
-    if ((view !== "home" && view !== "ladder") || !profile) return;
-    const id = setInterval(loadLadder, 8000);
-    return () => clearInterval(id);
-  }, [view, profile, loadLadder]);
+  useVisibilityPoll(loadLadder, 8000, (view === "home" || view === "ladder") && !!profile);
 
   // While the Challenges screen — or Home, where the random-challenge
   // notification banner lives — is open, poll the random-challenge pool
   // every few seconds. It's a race to accept, so members want to see it
   // move without having to manually refresh.
-  useEffect(() => {
-    if (view !== "challenges" && view !== "home") return;
-    const id = setInterval(loadOpenChallenges, 4000);
-    return () => clearInterval(id);
-  }, [view, loadOpenChallenges]);
+  useVisibilityPoll(loadOpenChallenges, 4000, view === "challenges" || view === "home");
 
   // Same idea for the community results feed, on a slower clock — new
   // confirmed results trickle in rather than needing a race-to-accept refresh.
   useEffect(() => {
     if (view !== "challenges") return;
     loadRecentResults();
-    const id = setInterval(loadRecentResults, 20000);
-    return () => clearInterval(id);
   }, [view, loadRecentResults]);
+  useVisibilityPoll(loadRecentResults, 20000, view === "challenges");
 
   useEffect(() => {
     if (view !== "challenges") return;
     loadBoardComments();
-    const id = setInterval(loadBoardComments, 15000);
-    return () => clearInterval(id);
   }, [view, loadBoardComments]);
+  useVisibilityPoll(loadBoardComments, 15000, view === "challenges");
 
   // Handle a shared deep link like ?league=<id> once leagues have loaded.
   useEffect(() => {
@@ -3898,10 +3912,14 @@ export default function App() {
                 c={c} />
             )}
             {view === "shop" && (
-              <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={goBack} initialProductId={shopDeepLinkProductId} />
+              <Suspense fallback={<Loader c={c} />}>
+                <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={goBack} initialProductId={shopDeepLinkProductId} />
+              </Suspense>
             )}
             {view === "terms" && (
-              <TermsPage c={c} onBack={goBack} />
+              <Suspense fallback={<Loader c={c} />}>
+                <TermsPage c={c} onBack={goBack} />
+              </Suspense>
             )}
           </>
         )}
@@ -4062,9 +4080,13 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {shopOpen ? (
-          <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
+          <Suspense fallback={<Loader c={c} />}>
+            <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
+          </Suspense>
         ) : termsOpen ? (
-          <TermsPage c={c} onBack={() => setTermsOpen(false)} />
+          <Suspense fallback={<Loader c={c} />}>
+            <TermsPage c={c} onBack={() => setTermsOpen(false)} />
+          </Suspense>
         ) : (
           <>
         <ShopBanner onOpen={() => setShopOpen(true)} c={c} />
@@ -4558,7 +4580,9 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
       {termsOpen && (
         <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: c.bg }}>
           <div className="max-w-3xl mx-auto px-4">
-            <TermsPage c={c} onBack={() => setTermsOpen(false)} />
+            <Suspense fallback={<Loader c={c} />}>
+              <TermsPage c={c} onBack={() => setTermsOpen(false)} />
+            </Suspense>
           </div>
         </div>
       )}
