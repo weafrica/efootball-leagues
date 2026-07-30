@@ -6308,48 +6308,49 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
   useEffect(() => {
     if (!menuOpen) return;
     const onClick = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    // touchstart as well as mousedown — mousedown alone can fire late (or
+    // not at all before the next tap) on touch devices, which was part of
+    // why this menu was unreliable on mobile.
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("touchstart", onClick); };
   }, [menuOpen]);
+
+  // Everything except Edit profile now lives in here — on a narrow phone
+  // screen, the old row of 7-8 separate icon buttons ran wider than the
+  // viewport itself (the page clips horizontal overflow, so anything past
+  // the edge was simply never reachable). Two buttons — profile + this
+  // menu — always fit.
   const menuItems = [
     { icon: Plus, label: "New league", onClick: onOpenCreate },
     { icon: Shuffle, label: "Random", onClick: onOpenChallenges, badge: grabbableCount },
-    { icon: Swords, label: "Challenges", onClick: onOpenChallenges },
+    { icon: Swords, label: "Challenges", onClick: onOpenChallenges, badge: challengeBadge },
     { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
+    { icon: Trophy, label: "Leaderboard", onClick: onOpenLeaderboard },
+    { icon: MessageCircle, label: "Suggest something", onClick: onOpenSuggestion },
+    ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: onOpenAccounts }] : []),
+    { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
+    { icon: LogOut, label: "Sign out", onClick: onSignOut },
   ];
+
   return (
     <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
       <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-        <button onClick={() => setView("home")} className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
-          <div className="text-lg font-extrabold tracking-tight uppercase">Matchday</div>
+        <button onClick={() => setView("home")} className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
+          <div className="text-lg font-extrabold tracking-tight uppercase truncate">Matchday</div>
         </button>
         {view === "league" && activeLeague && (
-          <div className="hidden sm:block font-mono text-xs uppercase tracking-wider" style={{ color: c.textFaint }}>
+          <div className="hidden sm:block font-mono text-xs uppercase tracking-wider shrink-0" style={{ color: c.textFaint }}>
             {activeLeague.teams.length} clubs · {activeLeague.fixtures.filter((f) => f.played).length}/{activeLeague.fixtures.length} played
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <button onClick={onOpenSuggestion} title="Suggest something" className="flex items-center gap-1.5 px-3 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
-            <MessageCircle size={13} /> <span className="hidden sm:inline">Suggest</span>
-          </button>
-          <button onClick={onOpenLeaderboard} title="Leaderboard" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "leaderboard" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Trophy size={14} /></button>
-          {isAdmin && (
-            <button onClick={onOpenAccounts} title="All accounts" className="w-8 h-8 flex items-center justify-center rounded-full" style={view === "accounts" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}><Shield size={14} /></button>
-          )}
-          <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
-            {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
-          <button onClick={onEditProfile} title="Edit profile" className="w-8 h-8 flex items-center justify-center rounded-full overflow-hidden" style={{ background: c.surface, color: c.textDim }}>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={onEditProfile} title="Edit profile" className="w-8 h-8 flex items-center justify-center rounded-full overflow-hidden shrink-0" style={{ background: c.surface, color: c.textDim }}>
             {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <Settings2 size={14} />}
           </button>
-          <button onClick={onSignOut} title={userEmail} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><LogOut size={14} /></button>
 
-          {/* Hamburger — the 4 main quick actions (New league, Random,
-              Challenges, Ladder), tucked behind one always-visible icon
-              instead of spread across the bar, with a dropdown panel that
-              opens right under it. */}
-          <div ref={menuRef} className="relative">
+          <div ref={menuRef} className="relative shrink-0">
             <button onClick={() => setMenuOpen((v) => !v)} title="Menu" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={menuOpen ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
               <Menu size={16} />
               {(challengeBadge > 0 || grabbableCount > 0) && (
@@ -6357,7 +6358,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
               )}
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-10 w-48 rounded-xl border shadow-lg overflow-hidden z-50" style={{ background: c.bg, borderColor: c.borderStrong }}>
+              <div className="absolute right-0 top-10 w-52 max-w-[85vw] rounded-xl border shadow-lg overflow-hidden z-50" style={{ background: c.bg, borderColor: c.borderStrong }}>
                 {menuItems.map((it) => (
                   <button key={it.label} onClick={() => { setMenuOpen(false); it.onClick?.(); }}
                     className="w-full flex items-center gap-2.5 font-body text-sm font-semibold px-3.5 py-2.5 text-left"
@@ -6365,9 +6366,9 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
                     <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
                       <it.icon size={13} style={{ color: c.accent }} />
                     </span>
-                    {it.label}
+                    <span className="truncate">{it.label}</span>
                     {it.badge > 0 && (
-                      <span className="ml-auto min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{it.badge}</span>
+                      <span className="ml-auto shrink-0 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{it.badge}</span>
                     )}
                   </button>
                 ))}
