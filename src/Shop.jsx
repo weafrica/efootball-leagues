@@ -512,11 +512,11 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   };
   const directItems = deptItems.filter((p) => (p.category_id || null) === currentCatId);
   const childCats = categoryChildren(deptCategories, currentCatId);
-  const categoryChips = childCats.length > 0 ? [
-    { id: "all", name: "All", count: currentCatId === null ? deptItems.length : itemsForCat(currentCatId).length },
-    ...childCats.map((cat) => ({ id: cat.id, name: cat.name, count: itemsForCat(cat.id).length })),
-    ...(directItems.length > 0 ? [{ id: "direct", name: "Other", count: directItems.length }] : []),
-  ] : [];
+  // "All" is just the default state (nothing to tap for it), so the only
+  // real filter chip left once subcategories get their own tiles below is
+  // "Other" — items filed directly in this category rather than in one of
+  // its subcategories.
+  const showDirectFilter = childCats.length > 0 && directItems.length > 0;
 
   const currentItems = selected === "all" ? searchable
     : selected === "uncategorized" ? uncategorized
@@ -584,21 +584,22 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
         </div>
       )}
 
-      {categoryChips.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
-          {categoryChips.map((cat) => (
-            <button key={cat.id}
-              onClick={() => (cat.id === "all" || cat.id === "direct") ? setCatFilter(cat.id) : drillInto(cat.id)}
-              className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase flex items-center gap-1"
-              style={
-                (cat.id === "all" && catFilter === "all") || (cat.id === "direct" && catFilter === "direct")
-                  ? { background: SHOP_GOLD, color: "#1a1200" }
-                  : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }
-              }>
-              {cat.name} <span style={{ opacity: 0.7 }}>{cat.count}</span>
-              {cat.id !== "all" && cat.id !== "direct" && categoryChildren(categories, cat.id).length > 0 && <span style={{ opacity: 0.7 }}>›</span>}
-            </button>
-          ))}
+      {childCats.length > 0 && (
+        <CategoryShowcase categories={childCats} allCategories={deptCategories} itemsForCat={itemsForCat} onSelect={drillInto} c={c} />
+      )}
+
+      {showDirectFilter && (
+        <div className="flex gap-1.5 mb-4">
+          <button onClick={() => setCatFilter("all")}
+            className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase"
+            style={catFilter === "all" ? { background: SHOP_GOLD, color: "#1a1200" } : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }}>
+            All <span style={{ opacity: 0.7 }}>{itemsForCat(currentCatId).length}</span>
+          </button>
+          <button onClick={() => setCatFilter("direct")}
+            className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase"
+            style={catFilter === "direct" ? { background: SHOP_GOLD, color: "#1a1200" } : { background: "transparent", color: c.textFaint, border: `1px solid ${c.border}` }}>
+            Other <span style={{ opacity: 0.7 }}>{directItems.length}</span>
+          </button>
         </div>
       )}
 
@@ -727,6 +728,49 @@ function DeptTileCollage({ photos }) {
   return (
     <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-[1.5px]">
       {photos.map((src, i) => <img key={i} src={src} alt="" loading="lazy" className="w-full h-full object-cover" />)}
+    </div>
+  );
+}
+
+// Same idea as DepartmentShowcase, one level (or several) further in — each
+// subcategory gets its own photo-collage tile instead of a plain text chip,
+// so drilling into a category still shows a spread of what's actually
+// inside before tapping. Reused at every depth of the tree: a subcategory's
+// own children look exactly the same way when you drill in again. Slightly
+// smaller and quieter (bordered surface, not a colored gradient) than the
+// top-level department tiles, so the hierarchy still reads at a glance.
+function CategoryShowcase({ categories, allCategories, itemsForCat, onSelect, c }) {
+  if (categories.length === 0) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2 mb-4">
+      {categories.map((cat) => {
+        const items = itemsForCat(cat.id);
+        const photos = [...new Set(items.map((it) => it.image_url).filter(Boolean))].slice(0, 4);
+        const hasChildren = categoryChildren(allCategories, cat.id).length > 0;
+        return (
+          <button key={cat.id} onClick={() => onSelect(cat.id)}
+            className="text-left rounded-xl overflow-hidden relative aspect-[16/10] active:scale-[0.98] transition-transform border"
+            style={{ background: c.surface, borderColor: c.border }}>
+            {photos.length > 0 ? <DeptTileCollage photos={photos} /> : (
+              <div className="absolute inset-0 flex items-center justify-center" style={{ background: c.surfaceHover }}>
+                <LayoutGrid size={16} style={{ color: c.textFaint }} />
+              </div>
+            )}
+            <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.1) 55%, rgba(0,0,0,0) 100%)" : "transparent" }} />
+            {hasChildren && (
+              <span className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center font-mono text-[10px]"
+                style={{ background: "rgba(0,0,0,0.45)", color: "#fff" }}>›</span>
+            )}
+            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+              <div className="font-extrabold uppercase tracking-tight text-[12px] leading-tight truncate"
+                style={{ color: photos.length > 0 ? "#fff" : c.text, textShadow: photos.length > 0 ? "0 1px 3px rgba(0,0,0,0.4)" : "none" }}>{cat.name}</div>
+              <div className="font-mono text-[9px] mt-0.5" style={{ color: photos.length > 0 ? "rgba(255,255,255,0.85)" : c.textFaint }}>
+                {items.length} item{items.length === 1 ? "" : "s"}
+              </div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
