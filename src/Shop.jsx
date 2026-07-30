@@ -107,6 +107,14 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [toast, setToast] = useState(null);
   const [sharedLinkHandled, setSharedLinkHandled] = useState(false);
   const [restoredProductHandled, setRestoredProductHandled] = useState(false);
+  // Which department/category the shopper has drilled into on the browse
+  // screen — "all"/[] means the shop's own root (department directory, no
+  // category selected). Lifted up from DepartmentBrowser (rather than kept
+  // local to it) so drilling in/out can be tracked in the same real
+  // browser-history stack as everything else — otherwise swipe-back has
+  // nothing to step through and jumps straight past every drill-down level.
+  const [shopDept, setShopDept] = useState(() => (window.history.state?.shopNav ? window.history.state.shopDept : null) || "all");
+  const [shopCatPath, setShopCatPath] = useState(() => (window.history.state?.shopNav && Array.isArray(window.history.state.shopCatPath)) ? window.history.state.shopCatPath : []);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast((t) => (t === msg ? null : t)), 3000); };
 
@@ -141,11 +149,13 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     // entry the parent just created.
     if (shopNavFirstRef.current) { shopNavFirstRef.current = false; return; }
     const productId = activeProduct?.id ?? null;
-    const state = { appView: true, view: "shop", activeLeagueId: null, shopNav: true, shopSubview: subview, shopProductId: productId };
+    const state = { appView: true, view: "shop", activeLeagueId: null, shopNav: true, shopSubview: subview, shopProductId: productId, shopDept, shopCatPath };
     const cur = window.history.state;
-    if (cur && cur.shopNav && cur.shopSubview === subview && (cur.shopProductId ?? null) === productId) return;
+    const catPathEqual = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
+    if (cur && cur.shopNav && cur.shopSubview === subview && (cur.shopProductId ?? null) === productId
+      && (cur.shopDept || "all") === shopDept && catPathEqual(cur.shopCatPath || [], shopCatPath)) return;
     window.history.pushState(state, "");
-  }, [subview, activeProduct]);
+  }, [subview, activeProduct, shopDept, shopCatPath]);
 
   useEffect(() => {
     const onPopState = (e) => {
@@ -153,6 +163,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       if (!state) return;
       if (state.shopNav) {
         setSubview(state.shopSubview || "browse");
+        setShopDept(state.shopDept || "all");
+        setShopCatPath(Array.isArray(state.shopCatPath) ? state.shopCatPath : []);
         if (state.shopProductId && products) {
           const found = products.find((p) => String(p.id) === String(state.shopProductId));
           setActiveProduct(found || null);
@@ -169,6 +181,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       // point to wherever's beneath the shop entirely (e.g. Home).
       if (state.appView && state.view === "shop") {
         setSubview("browse");
+        setShopDept("all");
+        setShopCatPath([]);
         setActiveProduct(null);
       }
       // Anything else has popped past our own entries — the parent's own
@@ -288,7 +302,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     setSubview("checkout");
   };
 
-  const atShopRoot = subview === "browse" && !activeProduct;
+  const atShopRoot = subview === "browse" && !activeProduct && shopDept === "all" && shopCatPath.length === 0;
 
   return (
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
@@ -331,7 +345,9 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
             <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
           </div>
-          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null} onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
+          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
+            selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
+            onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
         </>
       )}
 
@@ -435,23 +451,24 @@ function flattenCategoryTree(categories, parentId = null, depth = 0) {
 //  - search that narrows within whichever department is selected
 //  - "All" groups products into a section per department, like walking
 //    the floor; a specific department (or a search) shows just its grid
-function DepartmentBrowser({ products, departments, categories, loading, onOpen, onQuickAdd, c }) {
-  const [selected, setSelected] = useState("all");
-  // catPath is the breadcrumb trail of category ids drilled into within the
-  // selected department — [] means "at the department root". There's no cap
-  // on its length, so browsing goes exactly as deep as the category tree does.
-  const [catPath, setCatPath] = useState([]);
+function DepartmentBrowser({ products, departments, categories, loading, selected, setSelected, catPath, setCatPath, onOpen, onQuickAdd, c }) {
   const [catFilter, setCatFilter] = useState("all"); // "all" | "direct" — within the current tree level
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
   const [inStockOnly, setInStockOnly] = useState(false);
 
+  // catFilter is a sub-filter within whichever level selected/catPath already
+  // point at (not itself a drill-down layer worth a back-navigation step),
+  // so it just resets whenever the actual level changes — including when
+  // that change comes from a swipe-back restoring a shallower level.
+  useEffect(() => { setCatFilter("all"); }, [selected, catPath]);
+
   // Picking a department always resets whatever category drill-down was
   // active in the previously-selected department — categories don't carry
   // across departments.
-  const selectDept = (id) => { setSelected(id); setCatPath([]); setCatFilter("all"); };
-  const goToCatDepth = (depth) => { setCatPath((p) => p.slice(0, depth)); setCatFilter("all"); };
-  const drillInto = (catId) => { setCatPath((p) => [...p, catId]); setCatFilter("all"); };
+  const selectDept = (id) => { setSelected(id); setCatPath([]); };
+  const goToCatDepth = (depth) => { setCatPath((p) => p.slice(0, depth)); };
+  const drillInto = (catId) => { setCatPath((p) => [...p, catId]); };
 
   if (loading) return <Spinner c={c} />;
   if (products.length === 0) {
