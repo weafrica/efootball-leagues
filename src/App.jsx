@@ -4147,6 +4147,25 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
     return () => { cancelled = true; };
   }, []);
 
+  // Two real products, picked at random, floating on the shop banner below.
+  // Fetched once per visit (this effect only ever runs on mount, same as
+  // the guestData load above) and re-picked from that fresh list every
+  // time — so a guest landing on the page gets a different pair each time,
+  // without needing an account or touching the shop itself.
+  const [shopPicks, setShopPicks] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from("shop_products").select("id, name, price, image_url").not("image_url", "is", null);
+      if (cancelled) return;
+      const pool = data || [];
+      if (pool.length === 0) { setShopPicks([]); return; }
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      setShopPicks(shuffled.slice(0, 2));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const totalClubs = guestData ? guestData.teams.length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
   const isCashLeague = (l) => guestData?.extras.find((e) => e.league_id === l.id)?.league_type === "cash";
@@ -4187,7 +4206,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           </Suspense>
         ) : (
           <>
-        <ShopBanner onOpen={() => setShopOpen(true)} c={c} />
+        <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
 
         {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
             live-season pulse, stat strip), plus the one thing Home doesn't
@@ -4561,18 +4580,23 @@ function GoogleIcon({ small }) {
 // screen inside the app. The whole card is a tap target (not just the
 // pill), open to guests and members alike since browsing the store needs no
 // account.
-function ShopBanner({ onOpen, c }) {
+function ShopBanner({ onOpen, picks, onOpenPick, c }) {
+  const hasPicks = picks && picks.length > 0;
   return (
     <section onClick={onOpen} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
       style={{ background: `linear-gradient(120deg, ${SHOP_GOLD}2E, ${c.surface})`, border: `1px solid ${SHOP_GOLD}55` }}>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-14 -right-8 w-36 h-36 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.22 }} />
-        {/* Small "products" bobbing and glowing in the banner's corner —
-            purely decorative, just enough motion to make the banner feel
-            like a live store front rather than a static ad card. */}
-        <ShoppingBag size={13} className="animate-product-float absolute top-2.5 right-20" style={{ color: SHOP_GOLD, animationDelay: "0s" }} />
-        <Shirt size={15} className="animate-product-float absolute top-8 right-9" style={{ color: SHOP_GOLD, animationDelay: "0.5s" }} />
-        <Package size={12} className="animate-product-float absolute bottom-2.5 right-16" style={{ color: SHOP_GOLD, animationDelay: "1s" }} />
+        {!hasPicks && (
+          /* Small "products" bobbing and glowing in the banner's corner —
+             purely decorative fallback shown only while the real picks
+             below are loading, or if the shop has nothing with a photo yet. */
+          <>
+            <ShoppingBag size={13} className="animate-product-float absolute top-2.5 right-20" style={{ color: SHOP_GOLD, animationDelay: "0s" }} />
+            <Shirt size={15} className="animate-product-float absolute top-8 right-9" style={{ color: SHOP_GOLD, animationDelay: "0.5s" }} />
+            <Package size={12} className="animate-product-float absolute bottom-2.5 right-16" style={{ color: SHOP_GOLD, animationDelay: "1s" }} />
+          </>
+        )}
       </div>
       {SHOP_PROMO_ACTIVE && (
         <span className="absolute top-2.5 right-2.5 font-mono text-[10px] font-bold tracking-[0.1em] uppercase px-2 py-1 rounded-full shadow-sm"
@@ -4593,6 +4617,32 @@ function ShopBanner({ onOpen, c }) {
           Shop now <ChevronRight size={12} />
         </span>
       </div>
+      {hasPicks && (
+        // Two real products, picked at random on every visit (see
+        // PublicHome) — bobbing hexagon badges instead of generic icon
+        // glyphs, so this reads as "here's what's actually in stock right
+        // now" rather than a static ad. A fresh pair shows up each time
+        // someone lands on the login page.
+        <div className="relative flex items-center gap-3 px-4 pb-3.5 pt-1">
+          <span className="font-mono text-[9px] uppercase tracking-wider shrink-0" style={{ color: c.textFaint }}>Fresh in store</span>
+          <div className="flex items-center gap-4 ml-auto pr-1">
+            {picks.map((p, i) => (
+              <button key={p.id} onClick={(e) => { e.stopPropagation(); onOpenPick?.(p.id); }}
+                className="animate-pick-bob flex flex-col items-center"
+                style={{ animationDelay: i === 0 ? "0s" : "0.9s" }}>
+                <span className="animate-pick-ring hex-clip w-11 h-11 overflow-hidden flex items-center justify-center"
+                  style={{ "--pick-ring": SHOP_GOLD, background: c.surface }}>
+                  <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                </span>
+                <span className="font-mono text-[8px] font-bold mt-1 px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                  style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+                  {formatRand(p.price)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -37,3 +37,23 @@ html, body {
   50% { opacity: 1; filter: drop-shadow(0 0 7px currentColor) drop-shadow(0 0 14px currentColor); }
 }
 .animate-product-float { animation: product-bump 2.4s ease-in-out infinite, product-glow 2.4s ease-in-out infinite; }
+
+/* Real product picks floating on the guest login page's shop banner — a
+   bigger bob (with a little rotation wobble, so the hexagon reads as
+   "alive" rather than just sliding up and down) plus its own glow pulse
+   on the ring around the product photo. Two independent badges use
+   staggered animation-delay so they never move in lockstep. */
+@keyframes pick-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-10px) rotate(3deg); }
+}
+@keyframes pick-ring-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--pick-ring, #D4A017)55, 0 0 10px 0 var(--pick-ring, #D4A017)33; }
+  50% { box-shadow: 0 0 0 1px var(--pick-ring, #D4A017)aa, 0 0 22px 4px var(--pick-ring, #D4A017)66; }
+}
+.animate-pick-bob { animation: pick-bob 3.2s ease-in-out infinite; }
+.animate-pick-ring { animation: pick-ring-glow 3.2s ease-in-out infinite; }
+
+/* Hexagon crop for the floating product photos — an "exciting" shape vs. a
+   plain square/circle, still just CSS so no extra image assets needed. */
+.hex-clip { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%); }
