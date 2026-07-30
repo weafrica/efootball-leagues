@@ -2270,7 +2270,6 @@ export default function App() {
   // sent it or the one who received it.
   const loadChallenges = useCallback(async () => {
     if (!session) return;
-    await supabase.rpc("process_stale_ladder_challenges");
     const { data, error } = await supabase.from("challenges")
       .select("*")
       .or(`challenger_id.eq.${session.user.id},opponent_id.eq.${session.user.id}`)
@@ -2284,7 +2283,6 @@ export default function App() {
   // app. RLS only allows reading this while signed in; the homepage shows
   // its own public_ladder_full view instead (see PublicLadderSection).
   const loadLadder = useCallback(async () => {
-    await supabase.rpc("process_stale_ladder_challenges");
     const { data, error } = await supabase.from("ladder_ranks").select("*").order("rank_position", { ascending: true });
     if (error) { console.error("Couldn't load the ladder:", error.message); setLadder([]); return; }
     setLadder(data || []);
@@ -3818,7 +3816,12 @@ export default function App() {
   }
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
 
-  const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); loadRecentResults(); loadBoardComments(); };
+  // loadRecentResults and loadBoardComments aren't called here even though
+  // this is "opening" the screen — the effects that poll them already fire
+  // immediately the moment `view` becomes "challenges" (see below), so
+  // calling them again here just fired the same two requests twice back to
+  // back on every single visit to this screen.
+  const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); };
   const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
 
   return (
@@ -5011,7 +5014,7 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
 // has one, otherwise the same colored-initial fallback used for comments.
 function MemberAvatar({ url, username, size = 32, c }) {
   if (url) {
-    return <img src={url} alt="" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
+    return <img src={url} alt="" loading="lazy" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
   }
   return (
     <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
@@ -6693,6 +6696,13 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
   const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
+  // How many rows of "#11 and below" are actually rendered — the ladder has
+  // no cap on membership (it's the permanent, ever-growing one), so with
+  // hundreds of players this was putting every single row (and every
+  // avatar image) into the DOM on every visit regardless of whether anyone
+  // scrolled that far. Render a first page and let "Show more" reveal the
+  // rest on demand instead.
+  const [restShown, setRestShown] = useState(30);
   const targetIds = useMemo(() => new Set((targets || []).map((t) => t.user_id)), [targets]);
   const myId = session?.user?.id;
 
@@ -6882,7 +6892,13 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
                 #11 and below ({rest.length})
               </div>
               <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
-                {rest.map(row)}
+                {rest.slice(0, restShown).map(row)}
+                {restShown < rest.length && (
+                  <button onClick={() => setRestShown((n) => n + 30)}
+                    className="w-full font-mono text-[11px] font-semibold py-2 rounded-lg" style={{ background: c.surfaceHover, color: c.textDim }}>
+                    Show 30 more ({rest.length - restShown} left)
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -6908,7 +6924,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
                 <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
                   {m.photo_url ? (
                     <a href={m.photo_url} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full screenshot">
-                      <img src={m.photo_url} alt="Match result proof" className="w-10 h-10 rounded-md object-cover"
+                      <img src={m.photo_url} alt="Match result proof" loading="lazy" className="w-10 h-10 rounded-md object-cover"
                         style={{ border: `1px solid ${c.border}` }} />
                     </a>
                   ) : (
@@ -7008,7 +7024,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
       <div className="relative h-[86px] flex items-center justify-center overflow-hidden"
         style={{ background: isCash ? "linear-gradient(150deg, #B8860B33, #B8860B0D)" : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
         {l.photo_url ? (
-          <img src={l.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={l.photo_url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span className="font-extrabold text-3xl" style={{ color: isCash ? "#B8860B" : c.accent, opacity: 0.85 }}>{initial}</span>
         )}
@@ -8845,7 +8861,7 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
         {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
         {cm.photo_url && (
           <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
-            <img src={cm.photo_url} alt="" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
+            <img src={cm.photo_url} alt="" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
           </button>
         )}
         {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}

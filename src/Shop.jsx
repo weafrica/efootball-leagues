@@ -672,7 +672,7 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
             <button key={dept.id} onClick={() => onSelect(dept.id)}
               className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
               style={{ background: DEPT_TINTS[i % DEPT_TINTS.length] }}>
-              {photo && <img src={photo} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+              {photo && <img src={photo} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />}
               <div className="absolute inset-0" style={{ background: photo ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
               <div className="absolute bottom-0 left-0 right-0 p-3">
                 <div className="text-white font-extrabold uppercase tracking-tight text-[13px] leading-tight truncate" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
@@ -713,7 +713,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
             className="text-left rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border, opacity: p.active ? 1 : 0.5 }}>
             <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
-              {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
+              {p.image_url ? <img src={p.image_url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
               {canQuickAdd && (
                 <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
                   className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -791,7 +791,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
             {cart.map((it) => (
               <div key={it.productId} className="flex items-center gap-3 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
                 <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
-                  {it.image_url ? <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <ImageIcon size={16} style={{ color: c.textFaint }} />}
+                  {it.image_url ? <img src={it.image_url} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={16} style={{ color: c.textFaint }} />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-body text-xs font-semibold truncate">{it.name}</div>
