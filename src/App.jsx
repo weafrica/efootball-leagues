@@ -2868,7 +2868,8 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
     await loadOpenChallenges();
-    showToast("Result confirmed.");
+    await loadLadder(); // random challenges now count toward ladder points too
+    showToast("Result confirmed — the ladder just updated.");
   };
 
   const disputeOpenChallengeResult = async (challenge) => {
@@ -2887,6 +2888,7 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
     await loadOpenChallenges();
+    await loadLadder(); // random challenges now count toward ladder points too
     showToast("Result approved.");
   };
   const adminRejectOpenChallengeResult = async (challenge) => {
@@ -3453,6 +3455,7 @@ export default function App() {
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
     await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
     await loadLeagues();
+    await loadLadder(); // league results now count toward ladder points too
     showToast(`Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
   };
 
@@ -3524,6 +3527,7 @@ export default function App() {
     }
 
     await loadLeagues();
+    await loadLadder(); // league results now count toward ladder points too
     showToast(`Result approved — posted to comments as ${submission.submitted_by_username}.`);
   };
 
