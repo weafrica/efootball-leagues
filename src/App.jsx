@@ -38,6 +38,34 @@ function useVisibilityPoll(callback, intervalMs, enabled) {
   }, [callback, intervalMs, enabled]);
 }
 
+// Subscribes to Postgres changes on `table` and re-runs `callback` (an
+// existing loader, e.g. loadLadder) whenever a row changes — rather than
+// hand-merging the changed row into state, which would mean two separate
+// code paths (fetch-and-parse vs. realtime-patch) that could quietly drift
+// out of sync. Re-running the same loader keeps a single source of truth;
+// the only thing that changes is what triggers it. Debounced, since several
+// rows can change in the same instant (e.g. a confirmed result touching
+// both ladder_ranks rows at once) and each would otherwise fire its own
+// refetch. This is deliberately paired with useVisibilityPoll elsewhere as
+// a slow safety net — a dropped realtime connection (which does happen on
+// flaky mobile networks) just means falling back to that poll instead of
+// going stale indefinitely.
+function useRealtimeRefresh(table, callback, enabled) {
+  useEffect(() => {
+    if (!enabled) return;
+    let debounceId = null;
+    const trigger = () => {
+      clearTimeout(debounceId);
+      debounceId = setTimeout(() => { if (!document.hidden) callback(); }, 400);
+    };
+    const channel = supabase
+      .channel(`realtime:${table}:${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table }, trigger)
+      .subscribe();
+    return () => { clearTimeout(debounceId); supabase.removeChannel(channel); };
+  }, [table, callback, enabled]);
+}
+
 // The "Shop now" banner opens the in-app WeAfrica Shop (see Shop.jsx) —
 // full catalog, cart, and checkout, no external site needed.
 const SHOP_NAME = "WeAfrica Shop";
@@ -2849,13 +2877,23 @@ export default function App() {
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
   // the same way the random-challenge pool refreshes itself.
-  useVisibilityPoll(loadLadder, 8000, (view === "home" || view === "ladder") && !!profile);
+  // Previously this list only ever refreshed after the signed-in member's
+  // own actions (accept, decline, log a result, etc.) — if the *other*
+  // side of a challenge acted, there was no live update at all, only
+  // whatever was loaded on the last visit to this screen. This subscribes
+  // it properly instead of adding a new poll for something that never
+  // polled before.
+  useRealtimeRefresh("challenges", loadChallenges, !!session);
+
+  useRealtimeRefresh("ladder_ranks", loadLadder, (view === "home" || view === "ladder") && !!profile);
+  useVisibilityPoll(loadLadder, 60000, (view === "home" || view === "ladder") && !!profile);
 
   // While the Challenges screen — or Home, where the random-challenge
   // notification banner lives — is open, poll the random-challenge pool
   // every few seconds. It's a race to accept, so members want to see it
   // move without having to manually refresh.
-  useVisibilityPoll(loadOpenChallenges, 4000, view === "challenges" || view === "home");
+  useRealtimeRefresh("open_challenges", loadOpenChallenges, view === "challenges" || view === "home");
+  useVisibilityPoll(loadOpenChallenges, 30000, view === "challenges" || view === "home");
 
   // Same idea for the community results feed, on a slower clock — new
   // confirmed results trickle in rather than needing a race-to-accept refresh.
@@ -2863,13 +2901,17 @@ export default function App() {
     if (view !== "challenges") return;
     loadRecentResults();
   }, [view, loadRecentResults]);
-  useVisibilityPoll(loadRecentResults, 20000, view === "challenges");
+  useRealtimeRefresh("challenges", loadRecentResults, view === "challenges");
+  useRealtimeRefresh("open_challenges", loadRecentResults, view === "challenges");
+  useVisibilityPoll(loadRecentResults, 60000, view === "challenges");
 
   useEffect(() => {
     if (view !== "challenges") return;
     loadBoardComments();
   }, [view, loadBoardComments]);
-  useVisibilityPoll(loadBoardComments, 15000, view === "challenges");
+  useRealtimeRefresh("challenge_board_comments", loadBoardComments, view === "challenges");
+  useRealtimeRefresh("challenge_board_comment_likes", loadBoardComments, view === "challenges");
+  useVisibilityPoll(loadBoardComments, 60000, view === "challenges");
 
   // Handle a shared deep link like ?league=<id> once leagues have loaded.
   useEffect(() => {
