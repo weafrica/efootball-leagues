@@ -4088,15 +4088,21 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes] = await Promise.all([
+      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes] = await Promise.all([
         supabase.from("public_leagues").select("*"),
         supabase.from("public_league_teams").select("*"),
         supabase.from("public_league_fixtures").select("*"),
         supabase.from("public_league_extra").select("*"),
         supabase.from("public_ladder_full").select("*").order("rank_position", { ascending: true }),
         supabase.from("public_challenge_results").select("*").order("result_confirmed_at", { ascending: false }).limit(50),
+        // Club-owner photos for the standings tables below — team_id ->
+        // avatar_url only (see public_team_avatars view), nothing else about
+        // the owning member is exposed to guests.
+        supabase.from("public_team_avatars").select("*"),
       ]);
       if (cancelled) return;
+      const avatarByTeamId = {};
+      (teamAvatarsRes.data || []).forEach((row) => { if (row.avatar_url) avatarByTeamId[row.team_id] = row.avatar_url; });
       setGuestData({
         leagues: leaguesRes.data || [],
         teams: teamsRes.data || [],
@@ -4104,6 +4110,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
         extras: extraRes.data || [],
         ladder: ladderRes.data || [],
         results: resultsRes.data || [],
+        avatarByTeamId,
       });
     })();
     return () => { cancelled = true; };
@@ -4231,9 +4238,9 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           {guestData && (
             <>
               <GuestLeagueSection title="Fun leagues" icon={Gamepad2} leagues={funLeagues} data={guestData}
-                onJoin={() => onRequireAuth("Sign in to join this league.")} c={c} />
+                onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
               <GuestLeagueSection title="Cash leagues" icon={Wallet} leagues={cashLeagues} data={guestData}
-                onJoin={() => onRequireAuth("Sign in to join this league.")} c={c} />
+                onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
             </>
           )}
         </div>
@@ -4400,7 +4407,7 @@ function PublicActivityFeed({ results, c, onChallenge }) {
 // signed-in Home's LeagueSection (icon badge, title, count pill), but
 // stacked full-width standings previews instead of a horizontal card
 // carousel, since there's no detail page for a guest to tap through to.
-function GuestLeagueSection({ title, icon: Icon, leagues, data, onJoin, c }) {
+function GuestLeagueSection({ title, icon: Icon, leagues, data, onJoin, avatarByTeamId, c }) {
   if (leagues.length === 0) return null;
   return (
     <section className="mt-8 first:mt-0">
@@ -4412,14 +4419,14 @@ function GuestLeagueSection({ title, icon: Icon, leagues, data, onJoin, c }) {
         </div>
       </div>
       <div className="space-y-4">
-        {leagues.map((l) => <PublicLeagueCard key={l.id} league={l} data={data} onJoin={onJoin} c={c} />)}
+        {leagues.map((l) => <PublicLeagueCard key={l.id} league={l} data={data} onJoin={onJoin} avatarByTeamId={avatarByTeamId} c={c} />)}
       </div>
     </section>
   );
 }
 
 
-function PublicLeagueCard({ league: l, data, onJoin, c }) {
+function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   const [showAllMatches, setShowAllMatches] = useState(false);
   const extra = data.extras.find((e) => e.league_id === l.id);
   const leagueTeams = data.teams.filter((t) => t.league_id === l.id);
@@ -4477,7 +4484,7 @@ function PublicLeagueCard({ league: l, data, onJoin, c }) {
       <div className="rounded-xl border p-4" style={{ borderColor: c.border, background: c.surface }}>
         {header}
         {photoAndDescription}
-        <GroupTables league={{ ...l, teams: leagueTeams }} groupStageFixtures={leagueFixtures} c={c} />
+        <GroupTables league={{ ...l, teams: leagueTeams }} groupStageFixtures={leagueFixtures} avatarByTeamId={avatarByTeamId} c={c} />
         {allMatchesToggle}
       </div>
     );
@@ -4498,7 +4505,7 @@ function PublicLeagueCard({ league: l, data, onJoin, c }) {
       {header}
       {photoAndDescription}
       <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={leagueFixtures}
-        isSurvivor={l.format === "survivor"} league={l} c={c} />
+        isSurvivor={l.format === "survivor"} league={l} avatarByTeamId={avatarByTeamId} c={c} />
       {allMatchesToggle}
     </div>
   );
@@ -7388,7 +7395,7 @@ function leagueGoalExtremes(standings, league) {
   return goalExtremes(named);
 }
 
-function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, c }) {
+function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, c }) {
   const [query, setQuery] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const q = query.trim().toLowerCase();
@@ -7471,8 +7478,11 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
                   <tr key={r.id} className="border-b" style={{ borderColor: c.border, opacity: r.eliminated ? 0.4 : 1, height: STANDINGS_ROW_HEIGHT, background: atRisk ? c.redSoft : "transparent" }}>
                     <td className="py-2.5 pl-2 relative"><span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: atRisk ? c.red : zoneFor(r.rank - 1) }} /><span style={{ color: c.textFaint }}>{r.rank}</span></td>
                     <td className="py-2.5 font-body font-medium">
-                      {r.name}
-                      {r.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : atRisk ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>AT RISK</span> : ""}
+                      <div className="flex items-center gap-2">
+                        {avatarByTeamId && <MemberAvatar url={avatarByTeamId[r.id]} username={r.name} size={20} c={c} />}
+                        <span className="truncate">{r.name}</span>
+                        {r.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : atRisk ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>AT RISK</span> : ""}
+                      </div>
                     </td>
                     <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.p}</td>
                     <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.w}</td>
@@ -7687,7 +7697,7 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
   );
 }
 
-function GroupTables({ league, groupStageFixtures, c }) {
+function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
   const groupsCount = league.groups_count || 0;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);
 
@@ -7709,7 +7719,7 @@ function GroupTables({ league, groupStageFixtures, c }) {
                 <span className="normal-case font-body text-[11px]" style={{ color: c.greenText }}>· top {Math.min(qualifiers, n)} advance</span>
               )}
             </div>
-            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} c={c} />
+            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} c={c} />
           </div>
         );
       })}
