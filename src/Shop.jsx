@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import { compressImage } from "./utils/imageCompress";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
@@ -865,9 +866,10 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
     if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
     if (!proofFile) { showToast("Attach your proof of payment before submitting."); return; }
     setSubmitting(true);
-    const ext = (proofFile.name.split(".").pop() || "dat").toLowerCase();
+    const compressedProof = await compressImage(proofFile, { maxDimension: 1600, quality: 0.85 });
+    const ext = (compressedProof.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session?.user?.id || `guest-${guestFolderId.current}`}/order-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, proofFile);
+    const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, compressedProof);
     if (uploadErr) { setSubmitting(false); showToast(`Couldn't upload proof: ${uploadErr.message}`); return; }
 
     const { data: order, error: orderErr } = await supabase.from("shop_orders").insert({
@@ -1039,9 +1041,10 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
   const deptById = new Map(departments.map((d) => [d.id, d]));
   const catById = new Map(categories.map((cat) => [cat.id, cat]));
 
-  const saveProduct = async (form, file) => {
+  const saveProduct = async (form, rawFile) => {
     let image_url = editing?.image_url || null;
-    if (file) {
+    if (rawFile) {
+      const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("shop-photos").upload(path, file, { upsert: true });

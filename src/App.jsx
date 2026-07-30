@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
+import { compressImage } from "./utils/imageCompress";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -2422,8 +2423,9 @@ export default function App() {
   // Scores are stored from the challenger's perspective (challenger_score /
   // opponent_score) regardless of who reports them, so the row has one
   // unambiguous scoreline no matter which side typed it in.
-  const reportChallengeResult = async (challenge, myScore, theirScore, file) => {
-    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+  const reportChallengeResult = async (challenge, myScore, theirScore, rawFile) => {
+    if (!rawFile) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/challenge-${challenge.id}-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
@@ -2798,8 +2800,9 @@ export default function App() {
   // Same report → confirm/dispute flow as reportChallengeResult, on the
   // open_challenges table instead — scores are stored from the creator's
   // perspective (creator_score / accepted_by_score) regardless of who logs it.
-  const reportOpenChallengeResult = async (challenge, myScore, theirScore, file) => {
-    if (!file) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+  const reportOpenChallengeResult = async (challenge, myScore, theirScore, rawFile) => {
+    if (!rawFile) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/open-challenge-${challenge.id}-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
@@ -3009,7 +3012,8 @@ export default function App() {
   // Uploads (or replaces) the signed-in member's own profile photo to the public
   // "avatars" bucket and saves the resulting URL onto their profiles row. Same
   // upload-then-link pattern as league/comment photos elsewhere in the app.
-  const updateProfilePhoto = async (file) => {
+  const updateProfilePhoto = async (rawFile) => {
+    const file = await compressImage(rawFile, { maxDimension: 512, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
@@ -3288,14 +3292,15 @@ export default function App() {
   // Joins a cash league: registers/claims the club, uploads the proof of payment to
   // private storage, and creates the member row with payment_status "pending" —
   // it only becomes a confirmed registration once an admin approves it.
-  const joinCashLeague = async (league, fee, file) => {
+  const joinCashLeague = async (league, fee, rawFile) => {
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return false; }
     if (isMemberOf(league)) { showToast("You've already joined this league."); return false; }
-    if (!file) { showToast("Attach your proof of payment before submitting."); return false; }
+    if (!rawFile) { showToast("Attach your proof of payment before submitting."); return false; }
 
     const result = await claimOrRegisterTeam(league);
     if (result.error) return false;
 
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const feeNum = clampFee(fee);
     const ext = (file.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session.user.id}/${league.id}-${Date.now()}.${ext}`;
@@ -3316,8 +3321,9 @@ export default function App() {
   };
 
   // Lets a member with a rejected payment upload fresh proof without losing their club.
-  const resubmitCashPayment = async (league, member, fee, file) => {
-    if (!file) { showToast("Attach your proof of payment before submitting."); return false; }
+  const resubmitCashPayment = async (league, member, fee, rawFile) => {
+    if (!rawFile) { showToast("Attach your proof of payment before submitting."); return false; }
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const feeNum = clampFee(fee);
     const ext = (file.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session.user.id}/${league.id}-${Date.now()}.${ext}`;
@@ -3414,8 +3420,9 @@ export default function App() {
   // entry, but it lands as a pending row instead of writing the fixture
   // directly, and a photo of the scoreboard is mandatory. The fixture itself
   // is only updated once an admin/creator approves it (see approveResult).
-  const submitMatchResult = async (league, fixture, homeScore, awayScore, file) => {
-    if (!file) { showToast("Attach a photo of the final scoreboard before submitting."); return false; }
+  const submitMatchResult = async (league, fixture, homeScore, awayScore, rawFile) => {
+    if (!rawFile) { showToast("Attach a photo of the final scoreboard before submitting."); return false; }
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/${fixture.id}-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
@@ -3686,7 +3693,8 @@ export default function App() {
     showToast(`You left ${league.name}.`);
   };
 
-  const updateLeaguePhoto = async (league, file) => {
+  const updateLeaguePhoto = async (league, rawFile) => {
+    const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
     const ext = file.name.split(".").pop();
     const path = `${league.id}-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true });
@@ -3722,9 +3730,10 @@ export default function App() {
     const username = profile?.efootball_username || session.user.email;
     let photo_url = photoUrl || null;
     if (!photo_url && file) {
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
+      const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, file);
+      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed);
       if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("comment-photos").getPublicUrl(path);
       photo_url = pub.publicUrl;
