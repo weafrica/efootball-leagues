@@ -57,3 +57,17 @@ html, body {
 /* Hexagon crop for the floating product photos — an "exciting" shape vs. a
    plain square/circle, still just CSS so no extra image assets needed. */
 .hex-clip { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%); }
+
+/* The referee notification mascot — replaces the old plain-text toast.
+   Slides in from off-screen right to dead center, holds while her message
+   is visible, then slides back out to the left. Uses calc() on top of the
+   -50%/-50% centering translate so the same rule works at any screen size. */
+@keyframes referee-in {
+  0% { transform: translate(calc(-50% + 100vw), -50%) scale(0.85); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.04); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+@keyframes referee-out {
+  0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(calc(-50% - 100vw), -50%) scale(0.85); opacity: 0; }
+}

@@ -905,6 +905,30 @@ function TermsFooterLink({ onOpen, c }) {
   );
 }
 
+// The "referee" notification mascot — drop-in replacement for the old
+// plain-text bottom toast. Slides in from the right to dead center of the
+// screen with her message in a speech bubble, holds briefly, then slides
+// back out to the left (see the referee-in/referee-out keyframes in
+// index.css). Two photo variants alternate at random each time one fires
+// (see the queueing logic in App()) just for a bit of visual variety —
+// pointer-events stay off throughout so she never blocks a tap on
+// whatever's underneath her.
+function RefereeNotification({ data, c }) {
+  const isFullBody = data.variant === "fullbody";
+  return (
+    <div className="fixed top-1/2 left-1/2 z-[100] flex flex-col items-center pointer-events-none"
+      style={{ animation: `${data.phase === "out" ? "referee-out" : "referee-in"} 450ms ease-out forwards` }}>
+      <div className="px-4 py-2 rounded-2xl font-body text-sm font-medium shadow-lg max-w-[80vw] text-center mb-2"
+        style={{ background: c.toastBg, color: c.toastText }}>
+        {data.msg}
+      </div>
+      <img src={isFullBody ? "/referee-fullbody.jpg" : "/referee-closeup.png"} alt=""
+        className="select-none" draggable={false}
+        style={{ height: isFullBody ? "38vh" : "26vh", maxHeight: 340, filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.35))" }} />
+    </div>
+  );
+}
+
 function Loader({ c }) {
   return (
     <div className="flex items-center justify-center h-64">
@@ -2202,7 +2226,8 @@ export default function App() {
   // last recorded, instead of always bouncing to Home.
   const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
   const [activeLeagueId, setActiveLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLeagueId : null) ?? null);
-  const [toast, setToast] = useState(null);
+  const [refereeQueue, setRefereeQueue] = useState([]); // [{ id, msg }] — messages waiting to be shown
+  const [activeReferee, setActiveReferee] = useState(null); // { id, msg, variant, phase: "in" | "hold" | "out" } — currently on screen
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
@@ -2238,7 +2263,42 @@ export default function App() {
     document.body.style.background = c.bg;
   }, [c.bg]);
 
-  const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); }, []);
+  // Same call signature as the old showToast(msg) — every existing call
+  // site across the app is untouched, this just queues the message for the
+  // referee mascot instead of setting a plain toast string.
+  const showToast = useCallback((msg) => {
+    setRefereeQueue((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, msg }]);
+  }, []);
+
+  // Pulls the next queued message onto screen once nothing's currently
+  // showing — so firing several actions in quick succession (e.g.
+  // confirming a few results back to back) queues them one after another
+  // instead of interrupting or overlapping.
+  useEffect(() => {
+    if (activeReferee || refereeQueue.length === 0) return;
+    const next = refereeQueue[0];
+    setRefereeQueue((prev) => prev.slice(1));
+    const variant = Math.random() < 0.5 ? "closeup" : "fullbody";
+    setActiveReferee({ ...next, variant, phase: "in" });
+  }, [activeReferee, refereeQueue]);
+
+  // Walks the current notification through in -> hold -> out -> gone, at
+  // which point the effect above picks up the next queued one, if any.
+  useEffect(() => {
+    if (!activeReferee) return;
+    if (activeReferee.phase === "in") {
+      const t = setTimeout(() => setActiveReferee((cur) => (cur ? { ...cur, phase: "hold" } : cur)), 450);
+      return () => clearTimeout(t);
+    }
+    if (activeReferee.phase === "hold") {
+      const t = setTimeout(() => setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur)), 2400);
+      return () => clearTimeout(t);
+    }
+    if (activeReferee.phase === "out") {
+      const t = setTimeout(() => setActiveReferee(null), 450);
+      return () => clearTimeout(t);
+    }
+  }, [activeReferee]);
 
   // Guards the three destructive admin actions (delete league, remove a club, reject a
   // club's payment) behind 5 sequential, increasingly explicit confirmations instead of a
@@ -4090,11 +4150,7 @@ export default function App() {
           onCancel={() => setLadderChallengeOpen(false)} c={c} />
       )}
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full font-body text-sm font-medium shadow-lg z-50 max-w-[90vw] text-center" style={{ background: c.toastBg, color: c.toastText }}>
-          {toast}
-        </div>
-      )}
+      {activeReferee && <RefereeNotification data={activeReferee} c={c} />}
       <SupportWhatsAppButton context={view === "shop" ? SHOP_NAME : "the Matchday app"} />
       <TermsFooterLink onOpen={() => setView("terms")} c={c} />
     </div>
