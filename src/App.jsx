@@ -924,12 +924,22 @@ function RefereeNotification({ data, c }) {
   return (
     <div className="fixed top-1/2 left-1/2 z-[100] flex flex-col items-center pointer-events-none"
       style={{ animation: `${data.phase === "out" ? "referee-out" : "referee-in"} 450ms ease-out forwards` }}>
-      <div className="flex items-center gap-2 px-4 py-2 rounded-2xl font-body text-sm font-medium shadow-lg max-w-[80vw] text-center mb-2"
-        style={{ background: c.toastBg, color: c.toastText }}>
-        <span>{data.msg}</span>
+      <div className="relative flex items-center gap-3 pl-4 pr-3 py-2.5 max-w-[80vw] mb-2 shadow-lg"
+        style={{
+          background: `linear-gradient(135deg, ${c.bg} 0%, ${c.surfaceHover} 100%)`,
+          border: `1.5px solid ${c.accent}`,
+          boxShadow: `0 0 22px ${c.accent}4D, 0 10px 24px rgba(0,0,0,0.45)`,
+          clipPath: "polygon(3% 0%, 100% 0%, 97% 100%, 0% 100%)",
+        }}>
+        {/* Accent stripe down the left edge, like a HUD callout tab */}
+        <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: c.accent }} />
+        <span className="font-display text-base font-bold uppercase tracking-wide text-center leading-tight"
+          style={{ color: c.text, textShadow: `0 0 12px ${c.accent}66` }}>
+          {data.msg}
+        </span>
         <button onClick={() => commentSpeech.speak(data.id, data.msg)} title="Read notification aloud"
-          className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.toastText }}>
-          <Volume2 size={12} />
+          className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.textDim }}>
+          <Volume2 size={14} />
         </button>
       </div>
       <img src={isFullBody ? "/referee-fullbody.png" : "/referee-closeup.png"} alt=""

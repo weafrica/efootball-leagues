@@ -15,6 +15,7 @@ html, body {
 
 .font-body { font-family: 'Work Sans', sans-serif; }
 .font-mono { font-family: 'JetBrains Mono', monospace; }
+.font-display { font-family: 'Barlow Condensed', 'Oswald', sans-serif; }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
