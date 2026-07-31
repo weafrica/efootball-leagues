@@ -2379,6 +2379,27 @@ export default function App() {
     setLadder(data || []);
   }, []);
 
+  // Every confirmed challenge/fixture/random-challenge result attempts a
+  // ladder update, but it only actually lands if both players are on the
+  // ladder and within 10 points of each other (see apply_ladder_result in
+  // the DB). This reads back the row that attempt logged so toasts can say
+  // what really happened instead of always claiming "the ladder updated."
+  // Returns null if there's nothing to say (log row not written yet, or a
+  // logging error) — callers fall back to a plain confirmation toast.
+  const describeLadderOutcome = async (source, sourceId) => {
+    const { data, error } = await supabase.from("ladder_result_log")
+      .select("applied, reason")
+      .eq("source", source).eq("source_id", sourceId)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (error || !data) return null;
+    if (!data.applied) {
+      if (data.reason === "gap_too_large") return "too far apart in points to affect the ladder.";
+      if (data.reason === "not_on_ladder") return "one of you isn't on the ladder, so it wasn't affected.";
+      return null;
+    }
+    return "the ladder just updated.";
+  };
+
   // The only people the signed-in member is allowed to send a ladder
   // challenge to: anyone ranked above them whose points total is within 10
   // points of their own (i.e. up to 10 points ahead). Before your first
@@ -2495,8 +2516,9 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
     await loadChallenges();
-    if (challenge.is_ladder) await loadLadder();
-    showToast(challenge.is_ladder ? "Result confirmed — the ladder just updated." : "Result confirmed.");
+    await loadLadder();
+    const outcome = await describeLadderOutcome("challenge", challenge.id);
+    showToast(outcome ? `Result confirmed — ${outcome}` : "Result confirmed.");
   };
 
   // Same signed-URL pattern as downloadResultProof, but for a challenge/open
@@ -2529,8 +2551,9 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
     await loadChallenges();
-    if (challenge.is_ladder) await loadLadder();
-    showToast("Result approved.");
+    await loadLadder();
+    const outcome = await describeLadderOutcome("challenge", challenge.id);
+    showToast(outcome ? `Result approved — ${outcome}` : "Result approved.");
   };
   const adminRejectChallengeResult = async (challenge) => {
     const { error } = await supabase.from("challenges")
@@ -2560,7 +2583,8 @@ export default function App() {
     if (error) { showToast(`Couldn't grant walkover: ${error.message}`); return; }
     await loadChallenges();
     await loadLadder();
-    showToast("Walkover granted — the ladder just updated.");
+    const outcome = await describeLadderOutcome("challenge", challenge.id);
+    showToast(outcome ? `Walkover granted — ${outcome}` : "Walkover granted.");
   };
   // The other admin option for the same queue — closes the challenge out
   // with no ladder effect on either side, same as a normal decline.
@@ -2868,8 +2892,9 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
     await loadOpenChallenges();
-    await loadLadder(); // random challenges now count toward ladder points too
-    showToast("Result confirmed — the ladder just updated.");
+    await loadLadder(); // random challenges count toward ladder points, when eligible (see describeLadderOutcome)
+    const outcome = await describeLadderOutcome("open_challenge", challenge.id);
+    showToast(outcome ? `Result confirmed — ${outcome}` : "Result confirmed.");
   };
 
   const disputeOpenChallengeResult = async (challenge) => {
@@ -2888,8 +2913,9 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
     await loadOpenChallenges();
-    await loadLadder(); // random challenges now count toward ladder points too
-    showToast("Result approved.");
+    await loadLadder(); // random challenges count toward ladder points, when eligible (see describeLadderOutcome)
+    const outcome = await describeLadderOutcome("open_challenge", challenge.id);
+    showToast(outcome ? `Result approved — ${outcome}` : "Result approved.");
   };
   const adminRejectOpenChallengeResult = async (challenge) => {
     const { error } = await supabase.from("open_challenges")
@@ -3455,8 +3481,9 @@ export default function App() {
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
     await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
     await loadLeagues();
-    await loadLadder(); // league results now count toward ladder points too
-    showToast(`Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
+    await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
+    const outcome = await describeLadderOutcome("fixture", fixture.id);
+    showToast(outcome ? `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName} — ${outcome}` : `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
   };
 
   // A joined, non-managing player's version of recordResult: same score
@@ -3527,8 +3554,9 @@ export default function App() {
     }
 
     await loadLeagues();
-    await loadLadder(); // league results now count toward ladder points too
-    showToast(`Result approved — posted to comments as ${submission.submitted_by_username}.`);
+    await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
+    const outcome = await describeLadderOutcome("fixture", submission.fixture_id);
+    showToast(outcome ? `Result approved — posted to comments as ${submission.submitted_by_username} — ${outcome}` : `Result approved — posted to comments as ${submission.submitted_by_username}.`);
   };
 
   const rejectResult = (league, submission) => {
