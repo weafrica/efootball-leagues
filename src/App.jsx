@@ -409,6 +409,38 @@ function resultEscalationReason(league, submission) {
   return null;
 }
 
+// The signed-in player's next `limit` opponents across every league they've
+// fielded a club in — used for the "Up next" strip at the top of Home.
+// Pulled straight off each league's live fixtures (not scoped to one stage),
+// so it naturally follows the player from group stage into a knockout
+// bracket once those fixtures exist. Byes (away_team_id === null) and
+// already-played fixtures are skipped; fixtures with no due_at yet sort to
+// the end rather than falling out of the list.
+function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
+  const rows = [];
+  (leagues || []).forEach((l) => {
+    const team = myTeam ? myTeam(l) : null;
+    if (!team) return;
+    (l.fixtures || []).forEach((f) => {
+      if (f.played || f.away_team_id === null) return;
+      if (f.home_team_id !== team.id && f.away_team_id !== team.id) return;
+      const opponentId = f.home_team_id === team.id ? f.away_team_id : f.home_team_id;
+      const opponent = l.teams.find((t) => t.id === opponentId);
+      if (!opponent) return;
+      rows.push({
+        fixtureId: f.id, leagueId: l.id, leagueName: l.name, team, opponent,
+        isHome: f.home_team_id === team.id, round: f.round, due_at: f.due_at, expired: isExpired(f),
+      });
+    });
+  });
+  rows.sort((a, b) => {
+    const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+    const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+    return ad - bd;
+  });
+  return rows.slice(0, limit);
+}
+
 // Expired, unplayed fixtures count as a loss for both sides once past their
 // deadline — and, per the no-show rule, both sides also concede 4 goals
 // (scoring 0 themselves), so each ends up with a -4 goal difference for
@@ -4149,7 +4181,7 @@ export default function App() {
           <>
             {view === "home" && (
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} myPaymentStatus={myPaymentStatus}
-                canManageLeague={canManageLeague} session={session} onToggleLeagueReaction={toggleLeagueReaction}
+                canManageLeague={canManageLeague} myTeam={myTeam} session={session} onToggleLeagueReaction={toggleLeagueReaction}
                 openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
@@ -6595,7 +6627,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
 
@@ -6620,8 +6652,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const totalClubs = leagues.reduce((sum, l) => sum + l.teams.length, 0);
   const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
 
+  const myUpcomingFixtures = computeMyUpcomingFixtures(leagues, myTeam, 5);
+
   return (
     <div>
+      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
+
       <ShopBanner onOpen={onOpenShop} c={c} />
 
       {/* Compact HUD banner — status strip, not a landing-page hero */}
@@ -6690,6 +6726,34 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         <Leaderboard leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} embedded c={c} />
       </section>
     </div>
+  );
+}
+
+// The very top of Home for a signed-in player with clubs in flight: a
+// horizontally-scrolling strip of their next 5 opponents across every
+// league, soonest due date first. Renders nothing for a visitor with no
+// upcoming fixtures (new signups, or someone only spectating), so it never
+// leaves an empty band above the Shop banner.
+function UpNextStrip({ fixtures, onOpen, c }) {
+  if (!fixtures || fixtures.length === 0) return null;
+  return (
+    <section className="mt-4">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Up next</div>
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
+        {fixtures.map((f) => (
+          <button key={f.fixtureId} onClick={() => onOpen(f.leagueId)}
+            className="shrink-0 w-40 text-left rounded-xl p-3 font-body"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+            <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
+            <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>{f.opponent.name}</div>
+            <div className="font-mono text-[10px] mt-1.5" style={{ color: c.textDim }}>
+              {f.isHome ? "Home" : "Away"}
+              {f.expired ? <span style={{ color: c.red }}> · Expired</span> : f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
