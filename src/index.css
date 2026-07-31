@@ -103,3 +103,20 @@ html, body {
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 .referee-bubble-pop { animation: referee-bubble-pop 320ms ease-out 260ms both; }
+
+/* A soft vignette behind the whole scene while she's on screen — darkens
+   whatever content is underneath just enough that she and her message pop
+   against a busy page, without ever blocking taps (pointer-events-none,
+   applied from the wrapper in App.jsx). Fades in/out in step with her own
+   slide animation. */
+@keyframes referee-vignette-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes referee-vignette-out { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* A quick expanding-ring "impact" burst timed to the bubble's pop-in —
+   like a HUD confirm chime rendered visually. One-shot, same reasoning
+   as referee-bubble-pop about not replaying mid-read. */
+@keyframes referee-impact-ring {
+  0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.3); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.1); }
+}
+.referee-impact-ring { animation: referee-impact-ring 500ms ease-out 260ms both; }
