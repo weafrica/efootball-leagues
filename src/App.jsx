@@ -2395,6 +2395,7 @@ export default function App() {
     if (!data.applied) {
       if (data.reason === "gap_too_large") return "too far apart in points to affect the ladder.";
       if (data.reason === "not_on_ladder") return "one of you isn't on the ladder, so it wasn't affected.";
+      if (data.reason === "pair_cooldown") return "you two already have 2 ladder results today — this one's just for the record.";
       return null;
     }
     return "the ladder just updated.";
