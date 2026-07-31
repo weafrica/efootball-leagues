@@ -924,7 +924,7 @@ function RefereeNotification({ data, c }) {
   return (
     <div className="fixed top-1/2 left-1/2 z-[100] flex flex-col items-center pointer-events-none"
       style={{ animation: `${data.phase === "out" ? "referee-out" : "referee-in"} 450ms ease-out forwards` }}>
-      <div className="relative flex items-center gap-3 pl-4 pr-3 py-2.5 max-w-[80vw] mb-2 shadow-lg"
+      <div className="referee-bubble-pop relative flex flex-col gap-1 pl-4 pr-3 py-2.5 max-w-[85vw] md:max-w-sm shadow-lg"
         style={{
           background: `linear-gradient(135deg, ${c.bg} 0%, ${c.surfaceHover} 100%)`,
           border: `1.5px solid ${c.accent}`,
@@ -933,18 +933,35 @@ function RefereeNotification({ data, c }) {
         }}>
         {/* Accent stripe down the left edge, like a HUD callout tab */}
         <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: c.accent }} />
-        <span className="font-display text-base font-bold uppercase tracking-wide text-center leading-tight"
-          style={{ color: c.text, textShadow: `0 0 12px ${c.accent}66` }}>
-          {data.msg}
-        </span>
-        <button onClick={() => commentSpeech.speak(data.id, data.msg)} title="Read notification aloud"
-          className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.textDim }}>
-          <Volume2 size={14} />
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.15em] mb-0.5" style={{ color: c.accent }}>
+              Referee
+            </div>
+            <span className="font-display font-bold uppercase tracking-wide leading-tight block"
+              style={{ color: c.text, fontSize: "clamp(13px, 4vw, 17px)", textShadow: `0 0 12px ${c.accent}66` }}>
+              {data.msg}
+            </span>
+          </div>
+          <button onClick={() => commentSpeech.speak(data.id, data.msg)} title="Read notification aloud"
+            className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.textDim }}>
+            <Volume2 size={16} />
+          </button>
+        </div>
       </div>
-      <img src={isFullBody ? "/referee-fullbody.png" : "/referee-closeup.png"} alt=""
-        className="select-none" draggable={false}
-        style={{ height: isFullBody ? "38vh" : "26vh", maxHeight: 340, filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.35))" }} />
+      {/* Thin glowing connector linking the callout to the mascot below it */}
+      <span className="w-[2px] h-3" style={{ background: `linear-gradient(${c.accent}, transparent)` }} />
+      <div className="relative flex items-center justify-center">
+        <span className="referee-spotlight pointer-events-none absolute left-1/2 top-1/2 rounded-full"
+          style={{
+            width: isFullBody ? 200 : 240, height: isFullBody ? 200 : 240,
+            background: `radial-gradient(circle, ${c.accent}55 0%, transparent 70%)`,
+            filter: "blur(18px)", zIndex: 0,
+          }} />
+        <img src={isFullBody ? "/referee-fullbody.png" : "/referee-closeup.png"} alt=""
+          className="referee-idle-sway select-none relative" draggable={false}
+          style={{ height: isFullBody ? "38vh" : "26vh", maxHeight: 340, zIndex: 1, filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.35))" }} />
+      </div>
     </div>
   );
 }
