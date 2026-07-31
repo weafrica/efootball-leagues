@@ -5,6 +5,7 @@ import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy,
+  AlertTriangle,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -97,6 +98,37 @@ function StatusBadge({ status, c }) {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════
 
+// Guards destructive admin actions (delete product, department, category)
+// behind several sequential confirmations rather than one click — same
+// pattern as Matchday's own ConfirmStepModal, kept as a local copy here
+// since Shop.jsx loads as its own lazy chunk and manages its own toast
+// state independently of the rest of the app. `flow` is
+// { steps, step, action } from requestConfirm/advanceConfirm below.
+function ConfirmStepModal({ flow, onCancel, onAdvance, c }) {
+  if (!flow) return null;
+  const { steps, step } = flow;
+  const isLast = step === steps.length - 1;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl p-5" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="flex items-center gap-2 mb-3" style={{ color: "#E63946" }}>
+          <AlertTriangle size={16} />
+          <span className="font-mono text-[10px] uppercase tracking-wider">Confirm {step + 1} of {steps.length}</span>
+        </div>
+        <div className="text-sm mb-5" style={{ color: c.text }}>{steps[step]}</div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 text-sm font-semibold px-4 py-2.5 rounded-full" style={{ background: c.surface, color: c.text }}>
+            Cancel
+          </button>
+          <button onClick={onAdvance} className="flex-1 text-sm font-semibold px-4 py-2.5 rounded-full" style={{ background: "#E63946", color: "#fff" }}>
+            {isLast ? "Yes, do it" : "Yes, continue"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth, initialProductId }) {
   const [subview, setSubview] = useState(() => (window.history.state?.shopNav ? window.history.state.shopSubview : null) || "browse");
   const [products, setProducts] = useState(null);
@@ -106,6 +138,22 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [activeProduct, setActiveProduct] = useState(null);
   const [myOrders, setMyOrders] = useState(null);
   const [toast, setToast] = useState(null);
+  // Guards deleting a product, department, or category behind several
+  // sequential confirmations — same requestConfirm/advanceConfirm shape
+  // Matchday's admin actions use. { steps, step, action }
+  const [confirmFlow, setConfirmFlow] = useState(null);
+  const requestConfirm = (steps, action) => setConfirmFlow({ steps, step: 0, action });
+  const cancelConfirm = () => setConfirmFlow(null);
+  const advanceConfirm = () => {
+    setConfirmFlow((prev) => {
+      if (!prev) return prev;
+      if (prev.step >= prev.steps.length - 1) {
+        prev.action();
+        return null;
+      }
+      return { ...prev, step: prev.step + 1 };
+    });
+  };
   const [sharedLinkHandled, setSharedLinkHandled] = useState(false);
   const [restoredProductHandled, setRestoredProductHandled] = useState(false);
   // Which department/category the shopper has drilled into on the browse
@@ -380,7 +428,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       {subview === "my-orders" && <MyOrders orders={myOrders} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
-        <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} c={c} />
+        <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} requestConfirm={requestConfirm} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
         <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} c={c} />
@@ -400,6 +448,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
           <span className="font-mono text-sm font-bold">View cart · {formatMoney(cartTotal)}</span>
         </button>
       )}
+
+      <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full font-body text-sm font-medium shadow-lg z-50 max-w-[90vw] text-center" style={{ background: c.toastBg, color: c.toastText }}>
@@ -1109,7 +1159,7 @@ function MyOrders({ orders, c }) {
 // ADMIN — PRODUCTS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, c }) {
+function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, requestConfirm, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
   const [managingDepts, setManagingDepts] = useState(false);
   const [query, setQuery] = useState("");
@@ -1141,15 +1191,21 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     return true;
   };
 
-  const deleteProduct = async (product) => {
-    const { error } = await supabase.from("shop_products").delete().eq("id", product.id);
-    if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
-    showToast("Product deleted.");
-    await onReload();
+  const deleteProduct = (product) => {
+    requestConfirm([
+      `Delete "${product.name}"? This can't be undone.`,
+      `Are you sure? It will be permanently removed from the shop.`,
+      `Final check — click to permanently delete "${product.name}".`,
+    ], async () => {
+      const { error } = await supabase.from("shop_products").delete().eq("id", product.id);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      showToast("Product deleted.");
+      await onReload();
+    });
   };
 
   if (managingDepts) {
-    return <AdminDepartments departments={departments} categories={categories} products={products} onReload={onReloadDepartments} onReloadCategories={onReloadCategories} showToast={showToast} onBack={() => setManagingDepts(false)} c={c} />;
+    return <AdminDepartments departments={departments} categories={categories} products={products} onReload={onReloadDepartments} onReloadCategories={onReloadCategories} showToast={showToast} requestConfirm={requestConfirm} onBack={() => setManagingDepts(false)} c={c} />;
   }
 
   return (
@@ -1298,7 +1354,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
 // ADMIN — DEPARTMENTS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminDepartments({ departments, categories, products, onReload, onReloadCategories, showToast, onBack, c }) {
+function AdminDepartments({ departments, categories, products, onReload, onReloadCategories, showToast, requestConfirm, onBack, c }) {
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
@@ -1327,14 +1383,20 @@ function AdminDepartments({ departments, categories, products, onReload, onReloa
     await onReload();
   };
 
-  const deleteDepartment = async (dept) => {
+  const deleteDepartment = (dept) => {
     const affected = countFor(dept.id);
     const affectedCats = catCountFor(dept.id);
-    const { error } = await supabase.from("shop_departments").delete().eq("id", dept.id);
-    if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
-    showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Department deleted.");
-    await onReload();
-    if (affectedCats > 0) await onReloadCategories(); // its categories cascade-delete with it
+    requestConfirm([
+      `Delete "${dept.name}"? ${affected > 0 ? `${affected} product${affected === 1 ? "" : "s"} will move to "Other".` : "This can't be undone."}`,
+      `Are you sure? ${affectedCats > 0 ? `Its ${affectedCats} categor${affectedCats === 1 ? "y" : "ies"} will be deleted too.` : "This department will be gone for good."}`,
+      `Final check — click to permanently delete "${dept.name}".`,
+    ], async () => {
+      const { error } = await supabase.from("shop_departments").delete().eq("id", dept.id);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      showToast(affected > 0 ? `Deleted — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : "Department deleted.");
+      await onReload();
+      if (affectedCats > 0) await onReloadCategories(); // its categories cascade-delete with it
+    });
   };
 
   // Swaps position with the neighbour above/below — reordering is just a
@@ -1352,7 +1414,7 @@ function AdminDepartments({ departments, categories, products, onReload, onReloa
   if (managingCatsFor) {
     return (
       <AdminCategories department={managingCatsFor} categories={categories} products={products}
-        onReload={onReloadCategories} showToast={showToast} onBack={() => setManagingCatsFor(null)} c={c} />
+        onReload={onReloadCategories} showToast={showToast} requestConfirm={requestConfirm} onBack={() => setManagingCatsFor(null)} c={c} />
     );
   }
 
@@ -1421,7 +1483,7 @@ function AdminDepartments({ departments, categories, products, onReload, onReloa
 // their own subcategories, and so on — there's no cap on how deep this goes.
 // Top-level add mirrors AdminDepartments' add/rename/reorder/delete pattern;
 // CategoryRow below recurses to render (and let you extend) the rest of the tree.
-function AdminCategories({ department, categories, products, onReload, showToast, onBack, c }) {
+function AdminCategories({ department, categories, products, onReload, showToast, requestConfirm, onBack, c }) {
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
@@ -1466,14 +1528,20 @@ function AdminCategories({ department, categories, products, onReload, showToast
     await onReload();
   };
 
-  const deleteCategory = async (cat) => {
+  const deleteCategory = (cat) => {
     const descendants = categoryDescendantIds(deptCategories, cat.id);
     const affected = countFor(cat.id) + descendants.reduce((sum, id) => sum + countFor(id), 0);
-    const { error } = await supabase.from("shop_categories").delete().eq("id", cat.id);
-    if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
     const subNote = descendants.length > 0 ? ` (and ${descendants.length} subcategor${descendants.length === 1 ? "y" : "ies"})` : "";
-    showToast(affected > 0 ? `Deleted${subNote} — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : `Category deleted${subNote}.`);
-    await onReload();
+    requestConfirm([
+      `Delete "${cat.name}"${subNote}? ${affected > 0 ? `${affected} product${affected === 1 ? "" : "s"} will move to "Other".` : "This can't be undone."}`,
+      `Are you sure you want to remove "${cat.name}"${subNote}?`,
+      `Final check — click to permanently delete "${cat.name}".`,
+    ], async () => {
+      const { error } = await supabase.from("shop_categories").delete().eq("id", cat.id);
+      if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
+      showToast(affected > 0 ? `Deleted${subNote} — ${affected} product${affected === 1 ? "" : "s"} moved to "Other".` : `Category deleted${subNote}.`);
+      await onReload();
+    });
   };
 
   // Reordering swaps position with a neighbour among the same parent's

@@ -2826,12 +2826,12 @@ export default function App() {
       return direct.reduce((sum, d) => sum + 1 + countDescendants(d.id), 0);
     };
     const replyCount = countDescendants(comment.id);
-    const message = comment.parent_comment_id
-      ? "Delete this reply? This can't be undone."
-      : replyCount > 0
-        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
-        : "Delete this comment? This can't be undone.";
-    requestConfirm([message], async () => {
+    const noun = comment.parent_comment_id ? "reply" : replyCount > 0 ? `comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "comment";
+    requestConfirm([
+      `Delete this ${noun}? This can't be undone.`,
+      `Are you sure? Once it's gone, it's gone for good.`,
+      `Final check — click to permanently delete this ${noun}.`,
+    ], async () => {
       const { error } = await supabase.from("challenge_board_comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
       await loadBoardComments();
@@ -2933,12 +2933,12 @@ export default function App() {
       return direct.reduce((sum, d) => sum + 1 + countDescendants(d.id), 0);
     };
     const replyCount = countDescendants(comment.id);
-    const message = comment.parent_comment_id
-      ? "Delete this reply? This can't be undone."
-      : replyCount > 0
-        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
-        : "Delete this comment? This can't be undone.";
-    requestConfirm([message], async () => {
+    const noun = comment.parent_comment_id ? "reply" : replyCount > 0 ? `comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "comment";
+    requestConfirm([
+      `Delete this ${noun}? This can't be undone.`,
+      `Are you sure? Once it's gone, it's gone for good.`,
+      `Final check — click to permanently delete this ${noun}.`,
+    ], async () => {
       const { error } = await supabase.from("ladder_comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
       await loadLadderComments();
@@ -3709,6 +3709,7 @@ export default function App() {
     requestConfirm([
       `Reject this result submitted by ${submission.submitted_by_username}? They'll be able to resubmit.`,
       `Are you sure? The match will stay unplayed until someone resubmits.`,
+      `Final check — click to reject this result.`,
     ], async () => {
       const { error } = await supabase.rpc("reject_result_submission", { p_submission_id: submission.id, p_note: null });
       if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
@@ -3778,6 +3779,7 @@ export default function App() {
     requestConfirm([
       `Dispute this result submitted by ${submission.submitted_by_username}? They'll be able to resubmit.`,
       `Are you sure? The match will stay unplayed until someone resubmits.`,
+      `Final check — click to dispute this result.`,
     ], post);
   };
 
@@ -3896,19 +3898,24 @@ export default function App() {
   // league hasn't started yet (fixtures.length === 0) — once fixtures exist, wiping
   // the team would blow away results/standings for everyone else, so post-start we
   // just drop their membership and leave the (now unclaimed) club record in place.
-  const leaveLeague = async (league) => {
+  const leaveLeague = (league) => {
     const membership = myMembership(league);
     if (!membership) return;
-    if (!window.confirm(`Leave "${league.name}"? This can't be undone.`)) return;
-    const team = membership.team_id ? league.teams.find((t) => t.id === membership.team_id) : null;
-    const { error } = await supabase.from("members").delete().eq("id", membership.id);
-    if (error) { showToast(`Couldn't leave: ${error.message}`); return; }
-    if (team && league.fixtures.length === 0) {
-      await supabase.from("teams").delete().eq("id", team.id);
-    }
-    if (activeLeagueId === league.id) { setView("home"); setActiveLeagueId(null); }
-    await loadLeagues();
-    showToast(`You left ${league.name}.`);
+    requestConfirm([
+      `Leave "${league.name}"? This can't be undone.`,
+      `Are you sure? You'll lose access to this league.`,
+      `Final check — click to leave "${league.name}" for good.`,
+    ], async () => {
+      const team = membership.team_id ? league.teams.find((t) => t.id === membership.team_id) : null;
+      const { error } = await supabase.from("members").delete().eq("id", membership.id);
+      if (error) { showToast(`Couldn't leave: ${error.message}`); return; }
+      if (team && league.fixtures.length === 0) {
+        await supabase.from("teams").delete().eq("id", team.id);
+      }
+      if (activeLeagueId === league.id) { setView("home"); setActiveLeagueId(null); }
+      await loadLeagues();
+      showToast(`You left ${league.name}.`);
+    });
   };
 
   const updateLeaguePhoto = async (league, rawFile) => {
@@ -3980,12 +3987,12 @@ export default function App() {
 
   const deleteComment = (comment, league) => {
     const replyCount = (league?.comments || []).filter((c) => c.parent_comment_id === comment.id).length;
-    const message = comment.parent_comment_id
-      ? `Delete this reply? This can't be undone.`
-      : replyCount > 0
-        ? `Delete this comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}? This can't be undone.`
-        : `Delete this comment? This can't be undone.`;
-    requestConfirm([message], async () => {
+    const noun = comment.parent_comment_id ? "reply" : replyCount > 0 ? `comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "comment";
+    requestConfirm([
+      `Delete this ${noun}? This can't be undone.`,
+      `Are you sure? Once it's gone, it's gone for good.`,
+      `Final check — click to permanently delete this ${noun}.`,
+    ], async () => {
       const { error } = await supabase.from("comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
       await loadLeagues();
