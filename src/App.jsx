@@ -915,12 +915,22 @@ function TermsFooterLink({ onOpen, c }) {
 // whatever's underneath her.
 function RefereeNotification({ data, c }) {
   const isFullBody = data.variant === "fullbody";
+  // Same singleton used by the rules player and comment rows — tapping this
+  // speaker reads the notification aloud with whatever voice/engine those
+  // already use, and toggles off (id -> null) the same way a comment's
+  // speaker does if tapped again mid-read.
+  const speakingId = useCommentSpeakingId();
+  const isSpeaking = speakingId === data.id;
   return (
     <div className="fixed top-1/2 left-1/2 z-[100] flex flex-col items-center pointer-events-none"
       style={{ animation: `${data.phase === "out" ? "referee-out" : "referee-in"} 450ms ease-out forwards` }}>
-      <div className="px-4 py-2 rounded-2xl font-body text-sm font-medium shadow-lg max-w-[80vw] text-center mb-2"
+      <div className="flex items-center gap-2 px-4 py-2 rounded-2xl font-body text-sm font-medium shadow-lg max-w-[80vw] text-center mb-2"
         style={{ background: c.toastBg, color: c.toastText }}>
-        {data.msg}
+        <span>{data.msg}</span>
+        <button onClick={() => commentSpeech.speak(data.id, data.msg)} title="Read notification aloud"
+          className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.toastText }}>
+          <Volume2 size={12} />
+        </button>
       </div>
       <img src={isFullBody ? "/referee-fullbody.png" : "/referee-closeup.png"} alt=""
         className="select-none" draggable={false}
@@ -2282,6 +2292,13 @@ export default function App() {
     setActiveReferee({ ...next, variant, phase: "in" });
   }, [activeReferee, refereeQueue]);
 
+  // Whichever comment/notification is currently being read aloud — shared
+  // with the rules player and comment rows via the same commentSpeech
+  // singleton. Used below to keep the referee on screen for as long as her
+  // own notification is being read, instead of dismissing her on the usual
+  // timer partway through.
+  const refereeSpeakingId = useCommentSpeakingId();
+
   // Walks the current notification through in -> hold -> out -> gone, at
   // which point the effect above picks up the next queued one, if any.
   useEffect(() => {
@@ -2291,6 +2308,10 @@ export default function App() {
       return () => clearTimeout(t);
     }
     if (activeReferee.phase === "hold") {
+      // Someone tapped the speaker on this notification — hold off the
+      // usual auto-dismiss timer. The effect below sends her to "out" the
+      // moment the reading actually finishes instead.
+      if (refereeSpeakingId === activeReferee.id) return;
       const t = setTimeout(() => setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur)), 2400);
       return () => clearTimeout(t);
     }
@@ -2298,7 +2319,20 @@ export default function App() {
       const t = setTimeout(() => setActiveReferee(null), 450);
       return () => clearTimeout(t);
     }
-  }, [activeReferee]);
+  }, [activeReferee, refereeSpeakingId]);
+
+  // Once a speaker-triggered read of the active notification ends (its id
+  // drops out of commentSpeech's speakingId), send her straight into the
+  // "out" animation rather than waiting on — or restarting — the hold
+  // timer above.
+  const prevRefereeSpeakingIdRef = useRef(null);
+  useEffect(() => {
+    const wasSpeakingId = prevRefereeSpeakingIdRef.current;
+    prevRefereeSpeakingIdRef.current = refereeSpeakingId;
+    if (wasSpeakingId && refereeSpeakingId === null && activeReferee?.id === wasSpeakingId && activeReferee.phase !== "out") {
+      setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur));
+    }
+  }, [refereeSpeakingId, activeReferee]);
 
   // Guards the three destructive admin actions (delete league, remove a club, reject a
   // club's payment) behind 5 sequential, increasingly explicit confirmations instead of a
