@@ -922,7 +922,7 @@ function RefereeNotification({ data, c }) {
         style={{ background: c.toastBg, color: c.toastText }}>
         {data.msg}
       </div>
-      <img src={isFullBody ? "/referee-fullbody.jpg" : "/referee-closeup.png"} alt=""
+      <img src={isFullBody ? "/referee-fullbody.png" : "/referee-closeup.png"} alt=""
         className="select-none" draggable={false}
         style={{ height: isFullBody ? "38vh" : "26vh", maxHeight: 340, filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.35))" }} />
     </div>
