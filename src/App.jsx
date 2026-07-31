@@ -4182,7 +4182,9 @@ export default function App() {
             {view === "home" && (
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} myPaymentStatus={myPaymentStatus}
                 canManageLeague={canManageLeague} myTeam={myTeam} session={session} onToggleLeagueReaction={toggleLeagueReaction}
-                openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
+                challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
+                onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
+                onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
                 onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} c={c} />
@@ -6627,13 +6629,33 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, openChallenges, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
+  const myId = session?.user?.id;
 
   // Open random challenges anyone but the signed-in member can still grab —
   // same "unaccepted and up for grabs" definition ChallengesScreen uses.
   const grabbableChallenges = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id);
+
+  // Accepted challenges (direct or random) sitting with no score logged yet,
+  // on either the challenge or open-challenge track — surfaced right at the
+  // top of Home so an opponent can log a result without first digging into
+  // Challenges or the Ladder screen.
+  const pendingResultItems = [
+    ...(challenges || [])
+      .filter((ch) => ch.status === "accepted" && !ch.result_status && (ch.challenger_id === myId || ch.opponent_id === myId))
+      .map((ch) => ({
+        id: `ch-${ch.id}`, kind: "challenge", isLadder: ch.is_ladder, challenge: ch,
+        opponentUsername: ch.challenger_id === myId ? ch.opponent_username : ch.challenger_username,
+      })),
+    ...(openChallenges || [])
+      .filter((ch) => ch.status === "accepted" && !ch.result_status && (ch.creator_id === myId || ch.accepted_by === myId))
+      .map((ch) => ({
+        id: `open-${ch.id}`, kind: "open", challenge: ch,
+        opponentUsername: ch.creator_id === myId ? ch.accepted_by_username : ch.creator_username,
+      })),
+  ].sort((a, b) => new Date(b.challenge.created_at) - new Date(a.challenge.created_at));
 
   // Leagues that need the viewer's attention (something to review, or their
   // own payment needs sorting out) float to the top of each section; the
@@ -6656,6 +6678,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   return (
     <div>
+      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
+
       <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
 
       <ShopBanner onOpen={onOpenShop} c={c} />
@@ -6749,6 +6773,37 @@ function UpNextStrip({ fixtures, onOpen, c }) {
             <div className="font-mono text-[10px] mt-1.5" style={{ color: c.textDim }}>
               {f.isHome ? "Home" : "Away"}
               {f.expired ? <span style={{ color: c.red }}> · Expired</span> : f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Sits at the very top of Home, above even "Up next" — accepted challenges
+// (direct or random, ladder or not) waiting on the signed-in member to log a
+// score. Lets an opponent upload their result the moment they land on the
+// homepage instead of having to find their way into Challenges or the
+// Ladder screen first. Renders nothing when nothing's waiting.
+function PendingResultsStrip({ items, onOpenLogResult, onOpenLogResultOpen, c }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <section className="mt-4">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5" style={{ color: c.red }}>
+        <Trophy size={11} /> {items.length > 1 ? "Results to log" : "Result to log"}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
+        {items.map((item) => (
+          <button key={item.id} onClick={() => (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge))}
+            className="shrink-0 w-44 text-left rounded-xl p-3 font-body"
+            style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
+            <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
+              {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
+            </div>
+            <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>vs {item.opponentUsername}</div>
+            <div className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5" style={{ background: c.accent, color: c.accentText }}>
+              <Trophy size={11} /> Log result
             </div>
           </button>
         ))}
