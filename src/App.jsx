@@ -2365,6 +2365,13 @@ export default function App() {
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
   const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
+  // Set when a player taps an "Up next" card on Home wanting to log that
+  // specific fixture's result — activeLeagueId flips first and the league's
+  // full data may not be loaded into `leagues` yet on the same tick, so this
+  // just remembers the intent; the effect below picks it up once the league
+  // (and that fixture) actually appear in `activeLeague`, then opens
+  // resultModal for it and clears itself.
+  const [pendingLogFixtureId, setPendingLogFixtureId] = useState(null);
   const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } — logging a score for an accepted challenge
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
@@ -3335,6 +3342,33 @@ export default function App() {
   };
 
   const activeLeague = useMemo(() => (leagues || []).find((l) => l.id === activeLeagueId) || null, [leagues, activeLeagueId]);
+
+  // Picks up the intent set by tapping an "Up next" card on Home (see
+  // pendingLogFixtureId above) once activeLeague's fixtures/teams are
+  // actually available, and opens the same SubmitResultModal the manual
+  // "Find your opponent" flow uses — pre-filled with that exact fixture, so
+  // the player lands ready to enter a score and attach their photo rather
+  // than having to search for themselves.
+  useEffect(() => {
+    if (!pendingLogFixtureId || !activeLeague) return;
+    const fixture = activeLeague.fixtures.find((f) => f.id === pendingLogFixtureId);
+    if (!fixture) return; // not loaded into this league's data yet — wait for the next update
+    setPendingLogFixtureId(null);
+    if (fixture.played) return; // already logged elsewhere in the meantime — just land on the league
+    if (isExpired(fixture)) {
+      showToast("That match passed its 2-day deadline without a result — both clubs received a loss. It's no longer loggable.");
+      return;
+    }
+    const homeTeam = activeLeague.teams.find((t) => t.id === fixture.home_team_id);
+    const awayTeam = fixture.away_team_id ? activeLeague.teams.find((t) => t.id === fixture.away_team_id) : null;
+    if (!homeTeam || !awayTeam) return;
+    const subs = (activeLeague.result_submissions || []).filter((s) => s.fixture_id === fixture.id);
+    const pending = subs.find((s) => s.status === "pending");
+    const existing = pending || subs.filter((s) => s.status === "rejected").sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    if (pending) { showToast("This result is already awaiting confirmation."); return; }
+    setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing });
+  }, [pendingLogFixtureId, activeLeague, showToast]);
+
   const incomingPendingCount = useMemo(() =>
     (challenges || []).filter((ch) => session && ch.opponent_id === session.user.id && ch.status === "pending").length,
     [challenges, session]);
@@ -4235,7 +4269,7 @@ export default function App() {
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
-                onOpen={(id) => { setActiveLeagueId(id); setView("league"); }}
+                onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
@@ -6811,7 +6845,7 @@ function UpNextStrip({ fixtures, onOpen, c }) {
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Up next</div>
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
         {fixtures.map((f) => (
-          <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId)}
+          <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId, f.fixtureId)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId); }}
             className="shrink-0 w-40 text-left rounded-xl p-3 font-body cursor-pointer"
             style={{ background: c.surface, border: `1px solid ${c.border}` }}>
