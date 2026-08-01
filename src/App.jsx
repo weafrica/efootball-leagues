@@ -7894,8 +7894,13 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
   const { top: leagueTopScorer, least: leagueLeastScorer } = useMemo(() => leagueGoalExtremes(standings, league), [standings, league]);
 
   // In an active (non-final) survivor stage, work out exactly which clubs
-  // are currently sitting in the cut zone for this stage.
-  const showsCutLine = isSurvivor && !league.final_stage_started && standings.length > 0;
+  // are currently sitting in the cut zone for this stage. Gated on at least
+  // one match actually being played/expired in the stage — with 0 played,
+  // every club is tied 0-0-0 and the "bottom N" would just be an arbitrary
+  // alphabetical slice, wrongly painting untouched clubs red as if they
+  // were already doomed.
+  const stageHasResults = stageFixtures.some((f) => f.played || isExpired(f));
+  const showsCutLine = isSurvivor && !league.final_stage_started && standings.length > 0 && stageHasResults;
   let atRiskCount = 0;
   if (showsCutLine) {
     atRiskCount = Math.max(1, Math.round(standings.length * (league.survivor_elimination_percent / 100)));
