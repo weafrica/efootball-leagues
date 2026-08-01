@@ -6271,13 +6271,13 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
         </div>
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
@@ -6435,13 +6435,13 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
         )}
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
@@ -6860,8 +6860,8 @@ function UpNextStrip({ fixtures, onOpen, c }) {
                 // Stop the click from also bubbling up and opening the league —
                 // tapping WhatsApp here should only open WhatsApp.
                 <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                  <WhatsAppLink phone={f.opponent.phone} iconOnly
-                    text={`Hi, it's ${f.team.name} — let's lock in a time for our match${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""}.`} c={c} />
+                  <WhatsAppCallLink phone={f.opponent.phone} iconOnly
+                    text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️`} c={c} />
                 </div>
               )}
             </div>
@@ -9724,8 +9724,8 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}. No postponements once that passes, so let's lock in a time before then.`} c={c} />
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9766,8 +9766,8 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}. No postponements once that passes, so let's lock in a time before then.`} c={c} />
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}, let's lock in the time ⚽🕹️`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9796,8 +9796,8 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}. No postponements once that passes, so let's lock in a time before then.`} c={c} />
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9888,8 +9888,8 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
           {canSeePhones ? (
             result.opponent.phone ? (
               <div className="mt-1.5">
-                <WhatsAppLink phone={result.opponent.phone} iconOnly
-                  text={`Hi, it's ${result.team.name} — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}. No postponements once that passes, so let's lock in a time before then.`} c={c} />
+                <WhatsAppCallLink phone={result.opponent.phone} iconOnly
+                  text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}, let's lock in the time ⚽🕹️`} c={c} />
               </div>
             ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
           ) : (
