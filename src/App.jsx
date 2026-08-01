@@ -9001,14 +9001,10 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {tab === "fixtures" && (
         <div className="space-y-6">
-          {(inGroupStage || inKnockoutBracket) && canManage && (
-            inGroupStage
-              ? <GroupFixturesList league={league} groupStageFixtures={groupStageFixtures} canManage={canManage} joined={joined}
-                  getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-                  onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
-              : <KnockoutFixturesList league={league} bracketFixtures={stageFixtures} canManage={canManage} joined={joined}
-                  getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult} canSeePhones={canSeePhones}
-                  onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
+          {inGroupStage && canManage && (
+            <GroupFixturesList league={league} groupStageFixtures={groupStageFixtures} canManage={canManage} joined={joined}
+              getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+              onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
           {(inGroupStage || inKnockoutBracket) && joined && !canManage && myTeam && (
             <NextOpponentCard league={league} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
