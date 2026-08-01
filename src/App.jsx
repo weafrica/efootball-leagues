@@ -6201,14 +6201,12 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
         </div>
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "open", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "open", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
@@ -6367,14 +6365,12 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
         )}
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "direct", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => onOpenChat({ challengeId: ch.id, kind: "direct", counterpartUsername })} title="Message" className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0" style={{ background: "rgba(59,130,246,0.14)", color: "#3B82F6" }}><MessageCircle size={13} /></button>
             <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} — I'm calling to arrange the match, via weAfrica.`} c={c} />
           </div>
         )}
@@ -8344,6 +8340,9 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
       <div className="flex items-center gap-3">
         <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{m.display_name[0]?.toUpperCase()}</div>
         <span className="font-body text-sm flex-1">{m.display_name}</span>
+        {canManage && t?.phone && (
+          <WhatsAppLink phone={t.phone} iconOnly text={`Hi ${m.display_name}, this is weAfrica admin Saul.`} c={c} />
+        )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
           <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}>
