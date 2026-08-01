@@ -360,6 +360,32 @@ function isExpired(fixture) {
   return !fixture.played && !!fixture.due_at && new Date(fixture.due_at) < new Date();
 }
 
+// Earliest not-yet-played, fully-paired fixture for a given team (used for
+// the "next fixture" status message). Sorted by due date first so a fixture
+// with no due date yet falls back to round order.
+function nextFixtureForTeam(league, teamId) {
+  return (league.fixtures || [])
+    .filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
+    .sort((a, b) => {
+      const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+      const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+      return ad !== bd ? ad - bd : a.round - b.round;
+    })[0] || null;
+}
+
+// Earliest not-yet-played, fully-paired fixture across the whole league —
+// used as the status message's fallback for spectators or once a member's
+// own club has no games left to schedule.
+function nextFixtureForLeague(league) {
+  return (league.fixtures || [])
+    .filter((f) => !f.played && f.away_team_id !== null)
+    .sort((a, b) => {
+      const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+      const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+      return ad !== bd ? ad - bd : a.round - b.round;
+    })[0] || null;
+}
+
 // A submitted result gives the opponent 24 hours to confirm or dispute it
 // (see respondToResultSubmission) before it escalates to the admin override
 // queue. These three helpers are the single source of truth for that window
@@ -8335,6 +8361,29 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
   );
 }
 
+// Single status line at the top of every league (any format, cash or fun):
+// before kickoff it names the start date; once fixtures exist it switches
+// automatically to the next unplayed fixture's due date — the viewer's own
+// club's next game if they have one, otherwise the league's next game overall.
+function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
+  if (notStarted) {
+    return (
+      <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, color: c.textDim }}>
+        <Clock size={13} style={{ color: c.accent }} />
+        {league.starts_at ? <>League starts {fmtDate(league.starts_at)}.</> : "Start date to be confirmed by the organizer."}
+      </div>
+    );
+  }
+  const upcoming = (myTeam && !myTeam.eliminated ? nextFixtureForTeam(league, myTeam.id) : null) || nextFixtureForLeague(league);
+  if (!upcoming) return null;
+  return (
+    <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, color: c.textDim }}>
+      <Clock size={13} style={{ color: c.accent }} />
+      Next fixture due {fmtDate(upcoming.due_at)}.
+    </div>
+  );
+}
+
 function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, c }) {
   return (
     <div className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
@@ -8617,6 +8666,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           descOpen={descOpen} setDescOpen={setDescOpen} c={c} />
       )}
 
+      <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />
+
       {notStarted ? (
         <div>
           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
@@ -8686,8 +8737,11 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       )}
 
       {joined && myTeam && myTeam.eliminated && (
-        <div className="rounded-xl p-3 mb-5 font-body text-xs" style={{ background: c.redSoft, color: c.red }}>
-          {myTeam.name} has been eliminated — you no longer have access to other players' phone numbers in this league.
+        <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center justify-between gap-3 flex-wrap" style={{ background: c.redSoft, color: c.red }}>
+          <span>You have been eliminated — you can now join one of the available leagues.</span>
+          <button onClick={onBack} className="shrink-0 font-body font-semibold px-3 py-1.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
+            Browse leagues
+          </button>
         </div>
       )}
 
