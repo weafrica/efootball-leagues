@@ -887,12 +887,12 @@ function waLink(phone, text) {
 // iconOnly, renders as a plain round icon button and drops the text label —
 // used in fixtures where we show the WhatsApp entry point but not the raw
 // number itself.
-function WhatsAppLink({ phone, text, label, iconOnly, c }) {
+function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
   const href = waLink(phone, text);
   if (!href) return null;
   if (iconOnly) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp"
+      <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp" onClick={onClick}
         className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0"
         style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
         <MessageCircle size={14} />
@@ -900,7 +900,7 @@ function WhatsAppLink({ phone, text, label, iconOnly, c }) {
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp"
+    <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp" onClick={onClick}
       className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
       style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
       <MessageCircle size={11} /> {label || "WhatsApp"}
@@ -3702,6 +3702,17 @@ export default function App() {
     ], () => applyPaymentReview(member, status));
   };
 
+  // Fired when an admin taps the WhatsApp icon next to a member — flags that
+  // member red (for every admin) until the due date the message was about
+  // passes. dueAt is skipped (nothing to store) for messages with no date,
+  // e.g. the "you've been eliminated" text.
+  const markWaReminder = async (member, dueAt) => {
+    if (!dueAt) return;
+    const { error } = await supabase.from("members").update({ wa_reminder_due_at: dueAt }).eq("id", member.id);
+    if (error) return; // best effort — don't interrupt the WhatsApp send with a toast
+    await loadLeagues();
+  };
+
   // Admin/creator entering a result directly (no approval step needed, it's
   // their own call) — but a photo of the final scoreboard is required here
   // too, same as submitMatchResult's rule for regular players. Once saved,
@@ -4280,7 +4291,7 @@ export default function App() {
                 myPaymentStatus={myPaymentStatus(activeLeague)}
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
-                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment}
+                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
@@ -8465,14 +8476,54 @@ function adminStatusMessage(m, t, league) {
   return `Hey ${name}! 👋 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
-function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, c }) {
+// The date an "upcoming league / upcoming fixture" WhatsApp text is really
+// about — league kickoff before fixtures exist, otherwise the club's next
+// fixture due date. Returns null for the eliminated/no-date messages, since
+// those aren't "upcoming" reminders and have no due date to reset against.
+function adminStatusReminderDate(m, t, league) {
+  if (t?.eliminated) return null;
+  const notStarted = league.fixtures.length === 0;
+  if (notStarted) return league.starts_at || null;
+  const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
+  return upcoming ? upcoming.due_at : null;
+}
+
+// Red "reminded" highlight for a member row. members.wa_reminder_due_at is
+// set (by every admin, via markWaReminder below) the moment someone sends
+// that member the WhatsApp text, and stored in Supabase so the highlight is
+// the same for every admin looking at the league, not just whoever sent it.
+// It's active only while it matches the CURRENT due date and that date
+// hasn't passed yet — so it clears the instant the deadline passes, and
+// also clears early if a newer fixture becomes the upcoming one before the
+// old date even arrives.
+function isWaReminderActive(m, dueAt) {
+  return !!dueAt && m.wa_reminder_due_at === dueAt && new Date(dueAt) > new Date();
+}
+
+// Re-render on a slow tick purely so a reminder's red highlight clears
+// itself in an open tab once its due date quietly passes, without needing
+// a page refresh or a league data reload to notice.
+function useNow(intervalMs = 60000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
+
+function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, c }) {
+  useNow();
+  const reminderDueAt = adminStatusReminderDate(m, t, league);
+  const reminded = isWaReminderActive(m, reminderDueAt);
   return (
-    <div className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+    <div className="rounded-lg px-4 py-2.5 border transition-colors"
+      style={reminded ? { background: c.redSoft, borderColor: c.red } : { background: c.surface, borderColor: "transparent" }}>
       <div className="flex items-center gap-3">
         <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{m.display_name[0]?.toUpperCase()}</div>
         <span className="font-body text-sm flex-1">{m.display_name}</span>
         {canManage && t?.phone && (
-          <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)} c={c} />
+          <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)}
+            onClick={() => onMarkWaReminder(m, reminderDueAt)} c={c} />
         )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
@@ -8624,7 +8675,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -8785,7 +8836,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
                 m ? (
                   <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
                     isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} c={c} />
+                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
                 ) : (
                   <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
                     <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
@@ -8968,7 +9019,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
                   <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
                     isCash={league.league_type === "cash"} canManage={canManage}
                     isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} c={c} />
+                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
               ))}
             </div>
           )}
