@@ -6811,16 +6811,27 @@ function UpNextStrip({ fixtures, onOpen, c }) {
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Up next</div>
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
         {fixtures.map((f) => (
-          <button key={f.fixtureId} onClick={() => onOpen(f.leagueId)}
-            className="shrink-0 w-40 text-left rounded-xl p-3 font-body"
+          <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId); }}
+            className="shrink-0 w-40 text-left rounded-xl p-3 font-body cursor-pointer"
             style={{ background: c.surface, border: `1px solid ${c.border}` }}>
             <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
             <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>{f.opponent.name}</div>
-            <div className="font-mono text-[10px] mt-1.5" style={{ color: c.textDim }}>
-              {f.isHome ? "Home" : "Away"}
-              {f.expired ? <span style={{ color: c.red }}> · Expired</span> : f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+            <div className="flex items-center justify-between gap-1.5 mt-1.5">
+              <div className="font-mono text-[10px] min-w-0 truncate" style={{ color: c.textDim }}>
+                {f.isHome ? "Home" : "Away"}
+                {f.expired ? <span style={{ color: c.red }}> · Expired</span> : f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+              </div>
+              {f.opponent.phone && (
+                // Stop the click from also bubbling up and opening the league —
+                // tapping WhatsApp here should only open WhatsApp.
+                <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                  <WhatsAppLink phone={f.opponent.phone} iconOnly
+                    text={`Hi, it's ${f.team.name} — let's lock in a time for our match${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""}.`} c={c} />
+                </div>
+              )}
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </section>
