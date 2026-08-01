@@ -8384,6 +8384,28 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
   );
 }
 
+// Builds the admin's WhatsApp icon message for a member, based on that
+// member's club status right now: eliminated, not-yet-started league, or
+// the next fixture due date. Kept upbeat on purpose — this is the message
+// that lands in a player's WhatsApp, not a formal notice.
+function adminStatusMessage(m, t, league) {
+  const name = m.display_name || "there";
+  if (t?.eliminated) {
+    return `Hey ${name}! 🔴 Tough one — you've been eliminated from ${league.name}. But the fun doesn't stop here, jump into one of our other available leagues and get straight back in the fight! 🔥`;
+  }
+  const notStarted = league.fixtures.length === 0;
+  if (notStarted) {
+    return league.starts_at
+      ? `Hey ${name}! 🎉 ${league.name} kicks off ${fmtDate(league.starts_at)} — get ready, it's going to be a good one! 🏆⚽`
+      : `Hey ${name}! 🎉 ${league.name} is filling up fast — we'll confirm the kickoff date soon, get hyped! 🏆⚽`;
+  }
+  const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
+  if (upcoming) {
+    return `Hey ${name}! ⚡ Your next fixture in ${league.name} is due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent and bring the heat! 🔥⚽`;
+  }
+  return `Hey ${name}! 👋 This is weAfrica admin Saul, checking in on ${league.name}.`;
+}
+
 function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, c }) {
   return (
     <div className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
@@ -8391,7 +8413,7 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
         <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{m.display_name[0]?.toUpperCase()}</div>
         <span className="font-body text-sm flex-1">{m.display_name}</span>
         {canManage && t?.phone && (
-          <WhatsAppLink phone={t.phone} iconOnly text={`Hi ${m.display_name}, this is weAfrica admin Saul.`} c={c} />
+          <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)} c={c} />
         )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
