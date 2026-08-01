@@ -27,6 +27,11 @@ Account number: <your account number>
 Branch code: <your branch code>
 Reference: your order number (shown after you submit)`;
 
+// Shown alongside SHOP_BANK_DETAILS as an alternative way to pay manually.
+export const SHOP_MUKURU_DETAILS = `Receiver name: Saul
+Receiver phone: +27694362789
+Reference: your order number (shown after you submit)`;
+
 // Flip to true once a real payment gateway (Paystack, Flutterwave, Yoco,
 // etc.) is wired up in payWithGateway() below. Until then the card option
 // is visible but disabled, so nothing breaks in production.
@@ -1086,6 +1091,10 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
         <div className="space-y-3">
           <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
             {SHOP_BANK_DETAILS}
+          </div>
+          <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
+            <div className="not-italic font-body text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Or via Mukuru</div>
+            {SHOP_MUKURU_DETAILS}
           </div>
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery / pickup note (optional)</label>
