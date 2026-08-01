@@ -881,6 +881,17 @@ function waLink(phone, text) {
   return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 }
 
+// Appended only to matchday-1 "let's arrange the match" texts — a brand new
+// opponent may not know the site exists yet, so the very first fixture
+// message points them to it and tells them where to find their matchup
+// (the "Up next" strip right at the top of the homepage). Later matchdays
+// skip this since by then they've already been there.
+const SITE_URL = "https://www.weafrica.co.za/";
+function firstMatchdayNote(round) {
+  if (round !== 1) return "";
+  return ` Also, jump on ${SITE_URL} — you'll find your opponent right at the top of the homepage 👆`;
+}
+
 // Small pill button used anywhere we offer to message a club's registered
 // number. Renders nothing if there's no usable phone number, so callers can
 // place it directly after a phone number without an extra guard. With
@@ -6872,7 +6883,7 @@ function UpNextStrip({ fixtures, onOpen, c }) {
                 // tapping WhatsApp here should only open WhatsApp.
                 <div onClick={(e) => e.stopPropagation()} className="shrink-0">
                   <WhatsAppCallLink phone={f.opponent.phone} iconOnly
-                    text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️`} c={c} />
+                    text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️${firstMatchdayNote(f.round)}`} c={c} />
                 </div>
               )}
             </div>
@@ -9776,7 +9787,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
                       <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️`} c={c} />
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9818,7 +9829,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
                       <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}, let's lock in the time ⚽🕹️`} c={c} />
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.myFixtures[0].round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9848,7 +9859,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
                       <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️`} c={c} />
+                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
@@ -9940,7 +9951,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
             result.opponent.phone ? (
               <div className="mt-1.5">
                 <WhatsAppCallLink phone={result.opponent.phone} iconOnly
-                  text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}, let's lock in the time ⚽🕹️`} c={c} />
+                  text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(Number(matchday))}`} c={c} />
               </div>
             ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
           ) : (
