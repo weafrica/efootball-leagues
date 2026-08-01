@@ -9001,7 +9001,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {tab === "fixtures" && (
         <div className="space-y-6">
-          {(inGroupStage || inKnockoutBracket) && (joined || canManage) && (
+          {(inGroupStage || inKnockoutBracket) && canManage && (
             inGroupStage
               ? <GroupFixturesList league={league} groupStageFixtures={groupStageFixtures} canManage={canManage} joined={joined}
                   getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
@@ -9009,6 +9009,9 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
               : <KnockoutFixturesList league={league} bracketFixtures={stageFixtures} canManage={canManage} joined={joined}
                   getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult} canSeePhones={canSeePhones}
                   onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
+          )}
+          {(inGroupStage || inKnockoutBracket) && joined && !canManage && myTeam && (
+            <NextOpponentCard league={league} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
@@ -9716,6 +9719,53 @@ function TeamContactRow({ team, canManage, onUpdateTeamPhone, c }) {
         </span>
       )}
       <Settings2 size={12} className="shrink-0" style={{ color: c.textFaint }} />
+    </div>
+  );
+}
+
+// What a regular joined player sees on the Fixtures tab instead of the full
+// all-teams list (that stays admin-only, since that's the view used to
+// record scores). Just their own club's next unplayed match, plus a
+// WhatsApp icon to line up the game with the opponent — mirrors the "Up
+// next" card on Home but scoped to this one league.
+function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
+  if (myTeam.eliminated) {
+    return (
+      <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
+        {myTeam.name} has been eliminated from this league.
+      </div>
+    );
+  }
+
+  const fixture = nextFixtureForTeam(league, myTeam.id);
+  if (!fixture) {
+    return (
+      <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
+        No upcoming match scheduled for {myTeam.name} right now.
+      </div>
+    );
+  }
+
+  const isHome = fixture.home_team_id === myTeam.id;
+  const opponentId = isHome ? fixture.away_team_id : fixture.home_team_id;
+  const opponent = league.teams.find((t) => t.id === opponentId);
+
+  return (
+    <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your next match</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {opponent?.name || "TBD"}</div>
+          <div className="font-mono text-xs mt-1" style={{ color: isExpired(fixture) ? c.red : c.textDim }}>
+            {isHome ? "Home" : "Away"} · Matchday {fixture.round}
+            {isExpired(fixture) ? " · Expired" : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
+          </div>
+        </div>
+        {canSeePhones && opponent?.phone && (
+          <WhatsAppCallLink phone={opponent.phone}
+            text={`Hi, it's ${myTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`} c={c} />
+        )}
+      </div>
     </div>
   );
 }
