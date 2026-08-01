@@ -95,6 +95,11 @@ const BANK_DETAILS = {
   accountType: "Transact",
 };
 
+const MUKURU_DETAILS = {
+  receiverName: "Saul",
+  receiverPhone: "+27694362789",
+};
+
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
 
 // Every cash league — however it ends — reserves a flat 5% of the pool for
@@ -1095,6 +1100,13 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <span style={{ color: c.textFaint }}>Account name</span><span>{BANK_DETAILS.accountName}</span>
             <span style={{ color: c.textFaint }}>Account number</span><span className="font-mono">{BANK_DETAILS.accountNumber}</span>
             <span style={{ color: c.textFaint }}>Account type</span><span>{BANK_DETAILS.accountType}</span>
+          </div>
+          <div className="font-mono text-[10px] uppercase tracking-wider mt-3 mb-1.5 flex items-center gap-1.5" style={{ color: c.textFaint }}>
+            <Wallet size={11} /> Or via Mukuru
+          </div>
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
+            <span style={{ color: c.textFaint }}>Receiver phone</span><span className="font-mono">{MUKURU_DETAILS.receiverPhone}</span>
           </div>
         </div>
         <div className="font-body text-[11px] mb-4" style={{ color: c.textFaint }}>
