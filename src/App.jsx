@@ -8078,7 +8078,13 @@ function aggregateFor(legs, teamId) {
 // that opens the photo + score modal — their result lands as pending until an
 // admin approves it, or shows a pending/rejected tag if one's already in flight.
 // Used by both the group-stage and knockout full fixtures lists below.
-function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, c }) {
+//
+// showContact (knockout only, see KnockoutFixturesList) adds a small WhatsApp
+// call icon next to each side of an unplayed fixture, so either club can ring
+// the other directly off the bracket instead of hunting them down through
+// "Find yourself" — each icon calls the OTHER team's number and is signed
+// with the icon-owner's own club name.
+function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
   const [saveState, setSaveState] = useState("idle");
@@ -8097,10 +8103,17 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
     setSaveState("saved");
   };
 
+  const callText = (fromTeam) =>
+    `Hi, it's ${fromTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`;
+  const offerContact = showContact && !fixture.played;
+
   return (
     <div className="flex flex-wrap items-center gap-2 py-2">
       {legLabel && <span className="font-mono text-[10px] uppercase tracking-wide shrink-0 w-12" style={{ color: c.textFaint }}>{legLabel}</span>}
       <span className="flex-1 min-w-0 truncate font-body text-sm text-right">{homeTeam.name}</span>
+      {offerContact && awayTeam.phone && (
+        <WhatsAppCallLink phone={awayTeam.phone} iconOnly text={callText(homeTeam)} c={c} />
+      )}
       {canManage ? (
         <>
           <input type="number" min={0} value={h} onChange={(e) => { setH(Number(e.target.value)); setSaveState("idle"); }}
@@ -8113,6 +8126,9 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         <span className="font-mono text-sm w-14 text-center shrink-0" style={{ color: c.text }}>
           {fixture.played ? `${fixture.home_score} – ${fixture.away_score}` : "– : –"}
         </span>
+      )}
+      {offerContact && homeTeam.phone && (
+        <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
       <span className="flex-1 min-w-0 truncate font-body text-sm">{awayTeam.name}</span>
       <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isExpired(fixture) ? c.red : c.textFaint }}>
@@ -8197,7 +8213,7 @@ function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getS
 
 // Full listing of every knockout-bracket fixture, organized by round. Legs of the
 // same tie (home & away) are grouped together with an aggregate score shown.
-function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
+function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, c }) {
   const rounds = {};
   bracketFixtures.forEach((f) => { (rounds[f.round] ||= []).push(f); });
   const roundNumbers = Object.keys(rounds).map(Number).sort((a, b) => a - b);
@@ -8236,7 +8252,7 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                       const legHome = league.teams.find((t) => t.id === f.home_team_id);
                       const legAway = league.teams.find((t) => t.id === f.away_team_id);
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={legHome} awayTeam={legAway} canManage={canManage}
-                        onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null}
+                        onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} c={c} />;
                     })}
                     {twoLegged && (
@@ -8991,7 +9007,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
                   getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
                   onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
               : <KnockoutFixturesList league={league} bracketFixtures={stageFixtures} canManage={canManage} joined={joined}
-                  getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+                  getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult} canSeePhones={canSeePhones}
                   onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
