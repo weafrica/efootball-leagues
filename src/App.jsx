@@ -504,6 +504,42 @@ function computeStandings(teams, fixtures) {
   return rows;
 }
 
+// Survivor mode carries the points table forward from stage to stage rather
+// than wiping it to 0-0-0 each round — so who gets cut in stage 2 depends on
+// a club's cumulative record going all the way back to stage 1, not just
+// stage 2 in isolation. That means fixtures need to be tallied against every
+// team that ever played (including clubs already eliminated in an earlier
+// stage — a surviving club's win over a since-eliminated opponent still
+// counts), so the table is built from `allTeams`, not just the active ones.
+// Only active clubs are returned in the final ranked list, though — an
+// eliminated club has no business in this stage's standings.
+function computeSurvivorCumulativeStandings(activeTeams, allTeams, fixtures) {
+  const table = {};
+  allTeams.forEach((t) => { table[t.id] = { id: t.id, name: t.name, eliminated: t.eliminated, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
+  fixtures.forEach((f) => {
+    if (f.away_team_id === null) return;
+    const h = table[f.home_team_id];
+    const a = table[f.away_team_id];
+    if (!h || !a) return;
+    if (f.played) {
+      h.p++; a.p++;
+      h.gf += f.home_score; h.ga += f.away_score;
+      a.gf += f.away_score; a.ga += f.home_score;
+      if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
+      else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
+      else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
+    } else if (isExpired(f)) {
+      h.p++; a.p++; h.l++; a.l++;
+      h.ga += 4; a.ga += 4; // no-show penalty: both concede 4, no points either way
+    }
+  });
+  const activeIds = new Set(activeTeams.map((t) => t.id));
+  const rows = Object.values(table).filter((r) => activeIds.has(r.id));
+  rows.forEach((r) => { r.gd = r.gf - r.ga; });
+  rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
+  return rows;
+}
+
 // Points-table standings don't reflect a bracket properly — two teams that
 // both lost in the semifinal are miles apart on points despite going
 // exactly as far. This ranks knockout teams by the round they exited in
@@ -3909,7 +3945,11 @@ export default function App() {
     if (league.final_stage_started) { showToast("This is the final stage — check the table for the champion."); return; }
 
     const activeTeams = league.teams.filter((t) => !t.eliminated);
-    const standings = computeStandings(activeTeams, stageFixtures);
+    // Cumulative, not just this stage — a club's full record from stage 1
+    // onward decides who's cut next, so results against clubs eliminated in
+    // an earlier stage still count.
+    const cumulativeFixtures = league.fixtures.filter((f) => f.stage <= currentStage);
+    const standings = computeSurvivorCumulativeStandings(activeTeams, league.teams, cumulativeFixtures);
     let toEliminate = Math.max(1, Math.round(activeTeams.length * (league.survivor_elimination_percent / 100)));
     if (activeTeams.length - toEliminate < league.survivor_target_count) {
       toEliminate = activeTeams.length - league.survivor_target_count;
@@ -4808,7 +4848,9 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   }
 
   const activeTeams = l.format === "survivor" ? leagueTeams.filter((t) => !t.eliminated) : leagueTeams;
-  const standings = computeStandings(activeTeams, leagueFixtures);
+  const standings = l.format === "survivor"
+    ? computeSurvivorCumulativeStandings(activeTeams, leagueTeams, allLeagueFixtures.filter((f) => f.stage <= l.current_stage))
+    : computeStandings(activeTeams, leagueFixtures);
   if (standings.length === 0) return null;
   const n = standings.length;
   const zoneFor = (idx) => {
@@ -7597,7 +7639,9 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
   const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultEscalationReason(l, s)).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
   const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
-  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
+  const leader = l.format === "survivor"
+    ? computeSurvivorCumulativeStandings(activeTeams, l.teams, l.fixtures.filter((f) => f.stage <= l.current_stage))[0]
+    : computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
   const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
   const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
     : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
@@ -7905,12 +7949,14 @@ function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league,
   const { top: leagueTopScorer, least: leagueLeastScorer } = useMemo(() => leagueGoalExtremes(standings, league), [standings, league]);
 
   // In an active (non-final) survivor stage, work out exactly which clubs
-  // are currently sitting in the cut zone for this stage. Gated on at least
-  // one match actually being played/expired in the stage — with 0 played,
-  // every club is tied 0-0-0 and the "bottom N" would just be an arbitrary
-  // alphabetical slice, wrongly painting untouched clubs red as if they
-  // were already doomed.
-  const stageHasResults = stageFixtures.some((f) => f.played || isExpired(f));
+  // are currently sitting in the cut zone. Gated on the standings actually
+  // reflecting real matches (checked via each row's played count `p`, which
+  // now carries cumulative stage 1+ results) rather than only this stage's
+  // own fixtures — a fresh stage isn't a blank 0-0-0 tie anymore since
+  // points carry forward, so it's meaningful to flag risk from the moment
+  // the stage starts. It still guards against a genuinely empty table
+  // (e.g. a league that hasn't kicked off at all).
+  const stageHasResults = standings.some((r) => r.p > 0);
   const showsCutLine = isSurvivor && !league.final_stage_started && standings.length > 0 && stageHasResults;
   let atRiskCount = 0;
   if (showsCutLine) {
@@ -8634,7 +8680,13 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
   const stageFixtures = (isSurvivor || isGroupsKnockout) ? league.fixtures.filter((f) => f.stage === league.current_stage) : league.fixtures;
   const displayTeams = isSurvivor ? league.teams.filter((t) => !t.eliminated) : league.teams;
-  const standings = useMemo(() => computeStandings(displayTeams, stageFixtures), [displayTeams, stageFixtures]);
+  const standings = useMemo(() => {
+    if (isSurvivor) {
+      const cumulativeFixtures = league.fixtures.filter((f) => f.stage <= league.current_stage);
+      return computeSurvivorCumulativeStandings(displayTeams, league.teams, cumulativeFixtures);
+    }
+    return computeStandings(displayTeams, stageFixtures);
+  }, [displayTeams, stageFixtures, isSurvivor, league.fixtures, league.current_stage, league.teams]);
   const totalRounds = Math.max(...stageFixtures.map((f) => f.round), 0);
   const groupStageFixtures = isGroupsKnockout ? league.fixtures.filter((f) => f.stage === 1) : [];
   const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played || isExpired(f));
@@ -9641,7 +9693,12 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
       return;
     }
 
-    const standings = computeStandings(league.teams, stageFixtures).map((r, i) => ({ ...r, rank: i + 1 }));
+    const isSurvivor = league.format === "survivor";
+    const activeTeams = isSurvivor ? league.teams.filter((t) => !t.eliminated) : league.teams;
+    const standings = (isSurvivor
+      ? computeSurvivorCumulativeStandings(activeTeams, league.teams, league.fixtures.filter((f) => f.stage <= league.current_stage))
+      : computeStandings(activeTeams, stageFixtures)
+    ).map((r, i) => ({ ...r, rank: i + 1 }));
     const myRow = standings.find((r) => r.id === team.id);
     const nextFixture = stageFixtures.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
       .sort((a, b) => a.round - b.round)[0];
