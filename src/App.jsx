@@ -8612,7 +8612,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
   const standings = useMemo(() => computeStandings(displayTeams, stageFixtures), [displayTeams, stageFixtures]);
   const totalRounds = Math.max(...stageFixtures.map((f) => f.round), 0);
   const groupStageFixtures = isGroupsKnockout ? league.fixtures.filter((f) => f.stage === 1) : [];
-  const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played);
+  const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played || isExpired(f));
 
   const n = standings.length;
   const zoneFor = (idx) => {
@@ -8623,8 +8623,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
   };
 
   const currentRoundFixtures = league.fixtures.filter((f) => f.round === totalRounds && (!(isSurvivor || isGroupsKnockout) || f.stage === league.current_stage));
-  const currentRoundDone = currentRoundFixtures.length > 0 && currentRoundFixtures.every((f) => f.played);
-  const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played);
+  const currentRoundDone = currentRoundFixtures.length > 0 && currentRoundFixtures.every((f) => f.played || isExpired(f));
+  const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
 
   const activeTeamsCount = league.teams.filter((t) => !t.eliminated).length;
   const knockoutChampion = inKnockoutBracket && stageDone && activeTeamsCount === 1 ? league.teams.find((t) => !t.eliminated) : null;
@@ -8801,8 +8801,8 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
         <div className="rounded-xl p-4 mb-5 border" style={{ background: c.surface, borderColor: c.border }}>
           <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
             {league.final_stage_started
-              ? `Final stage (${league.survivor_final_format === "double_round_robin" ? "double" : "single"} round robin) · ${activeTeamsCount} clubs · ${stageFixtures.filter((f) => f.played).length}/${stageFixtures.length} played`
-              : `Stage ${league.current_stage} · ${activeTeamsCount} clubs, ${league.survivor_matches_per_stage} matches each · ${stageFixtures.filter((f) => f.played).length}/${stageFixtures.length} played · bottom ${league.survivor_elimination_percent}% cut when complete`}
+              ? `Final stage (${league.survivor_final_format === "double_round_robin" ? "double" : "single"} round robin) · ${activeTeamsCount} clubs · ${stageFixtures.filter((f) => f.played || isExpired(f)).length}/${stageFixtures.length} played`
+              : `Stage ${league.current_stage} · ${activeTeamsCount} clubs, ${league.survivor_matches_per_stage} matches each · ${stageFixtures.filter((f) => f.played || isExpired(f)).length}/${stageFixtures.length} played · bottom ${league.survivor_elimination_percent}% cut when complete`}
           </div>
           {canManage && !league.final_stage_started && (
             <button disabled={!stageDone} onClick={() => onAdvance(league)}
@@ -8817,7 +8817,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {isGroupsKnockout && inGroupStage && (
         <div className="rounded-xl p-4 mb-5 border" style={{ background: c.surface, borderColor: c.border }}>
           <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
-            Group stage · {league.groups_count} groups · {groupStageFixtures.filter((f) => f.played).length}/{groupStageFixtures.length} played · top {league.group_qualifiers} from each group advance
+            Group stage · {league.groups_count} groups · {groupStageFixtures.filter((f) => f.played || isExpired(f)).length}/{groupStageFixtures.length} played · top {league.group_qualifiers} from each group advance
           </div>
           {canManage && (
             <button disabled={!groupStageDone} onClick={() => onAdvance(league)}
@@ -8832,7 +8832,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {canManage && inKnockoutBracket && !knockoutChampion && (
         <div className="rounded-xl p-4 mb-5 border flex items-center justify-between gap-3" style={{ background: c.surface, borderColor: c.border }}>
           <div className="font-body text-xs" style={{ color: c.textDim }}>
-            {currentRoundDone ? `Round ${totalRounds} complete — ready for the next round.` : `Round ${totalRounds} in progress: ${currentRoundFixtures.filter((f) => f.played).length}/${currentRoundFixtures.length} played.`}
+            {currentRoundDone ? `Round ${totalRounds} complete — ready for the next round.` : `Round ${totalRounds} in progress: ${currentRoundFixtures.filter((f) => f.played || isExpired(f)).length}/${currentRoundFixtures.length} played.`}
           </div>
           <button disabled={!currentRoundDone} onClick={() => onAdvance(league)}
             className="font-body text-xs font-semibold px-3 py-2 rounded-full shrink-0"
