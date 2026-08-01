@@ -3441,7 +3441,7 @@ export default function App() {
 
   const advanceGroupsToKnockout = async (league) => {
     const groupFixtures = league.fixtures.filter((f) => f.stage === 1);
-    const unplayed = groupFixtures.filter((f) => !f.played);
+    const unplayed = groupFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} group match(es) still need a result.`); return; }
 
     const groupsCount = league.groups_count;
@@ -3863,7 +3863,7 @@ export default function App() {
     const bracketFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
     const maxRound = Math.max(...bracketFixtures.map((f) => f.round));
     const currentRoundFixtures = bracketFixtures.filter((f) => f.round === maxRound);
-    const unplayed = currentRoundFixtures.filter((f) => !f.played);
+    const unplayed = currentRoundFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} match(es) still need a result.`); return; }
 
     const ties = {};
@@ -3898,7 +3898,7 @@ export default function App() {
   const advanceSurvivor = async (league) => {
     const currentStage = league.current_stage;
     const stageFixtures = league.fixtures.filter((f) => f.stage === currentStage);
-    const unplayed = stageFixtures.filter((f) => !f.played);
+    const unplayed = stageFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} match(es) in this stage still need a result.`); return; }
 
     if (league.final_stage_started) { showToast("This is the final stage — check the table for the champion."); return; }
@@ -8017,7 +8017,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
   };
 
   return (
-    <div className="flex items-center gap-2 py-2">
+    <div className="flex flex-wrap items-center gap-2 py-2">
       {legLabel && <span className="font-mono text-[10px] uppercase tracking-wide shrink-0 w-12" style={{ color: c.textFaint }}>{legLabel}</span>}
       <span className="flex-1 min-w-0 truncate font-body text-sm text-right">{homeTeam.name}</span>
       {canManage ? (
@@ -8038,7 +8038,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         {fixture.played ? "" : isExpired(fixture) ? "Expired" : fmtDate(fixture.due_at)}
       </span>
       {canManage && (
-        <>
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { setPhoto(e.target.files?.[0] || null); setSaveState("idle"); }} />
           <button onClick={() => photoInputRef.current?.click()} title={photo ? photo.name : "Attach photo proof (required)"}
@@ -8051,16 +8051,16 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
             style={{ background: saveState === "saved" ? c.greenSoft : c.accent, color: saveState === "saved" ? c.greenText : c.accentText, opacity: (saveState === "saving" || !photo) ? 0.5 : 1 }}>
             {saveState === "saved" ? <Check size={12} /> : saveState === "saving" ? "…" : "Save"}
           </button>
-        </>
+        </div>
       )}
       {!canManage && joined && !fixture.played && (
         submission?.status === "pending" ? (
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded flex items-center gap-1 w-full sm:w-auto justify-center" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
             <Clock size={11} /> Pending
           </span>
         ) : (
           <button onClick={() => onOpenSubmitResult(fixture, homeTeam, awayTeam, submission?.status === "rejected" ? submission : null)}
-            className="shrink-0 font-body text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1"
+            className="shrink-0 font-body text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 w-full sm:w-auto justify-center"
             style={submission?.status === "rejected" ? { background: c.redSoft, color: c.red } : { background: c.accent, color: c.accentText }}>
             <Camera size={12} /> {submission?.status === "rejected" ? "Resubmit" : "Submit result"}
           </button>
