@@ -1090,10 +1090,11 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
       {method === "manual_proof" && (
         <div className="space-y-3">
           <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
+            <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain mb-2" />
             {SHOP_BANK_DETAILS}
           </div>
           <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
-            <div className="not-italic font-body text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Or via Mukuru</div>
+            <img src="/mukuru-logo.png" alt="Mukuru" className="h-4 w-auto object-contain mb-2" />
             {SHOP_MUKURU_DETAILS}
           </div>
           <div>

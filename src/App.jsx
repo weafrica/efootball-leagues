@@ -1092,8 +1092,9 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{league.name}</div>
 
         <div className="rounded-lg p-3 mb-3 font-body text-xs" style={{ background: c.surface, color: c.textDim }}>
-          <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5 flex items-center gap-1.5" style={{ color: c.textFaint }}>
-            <Wallet size={11} /> Payment details
+          <div className="flex items-center gap-2 mb-2">
+            <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
+            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Payment details</span>
           </div>
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
             <span style={{ color: c.textFaint }}>Bank</span><span>{BANK_DETAILS.bank}</span>
@@ -1101,8 +1102,9 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <span style={{ color: c.textFaint }}>Account number</span><span className="font-mono">{BANK_DETAILS.accountNumber}</span>
             <span style={{ color: c.textFaint }}>Account type</span><span>{BANK_DETAILS.accountType}</span>
           </div>
-          <div className="font-mono text-[10px] uppercase tracking-wider mt-3 mb-1.5 flex items-center gap-1.5" style={{ color: c.textFaint }}>
-            <Wallet size={11} /> Or via Mukuru
+          <div className="flex items-center gap-2 mt-3 mb-2">
+            <img src="/mukuru-logo.png" alt="Mukuru" className="h-4 w-auto object-contain" />
+            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or via Mukuru</span>
           </div>
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
             <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
