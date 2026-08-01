@@ -4733,10 +4733,11 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
     </div>
   );
 
-  const photoAndDescription = (extra?.photo_url || extra?.description) && (
+  const isCash = extra?.league_type === "cash";
+  const photoAndDescription = (extra?.photo_url || (!isCash && extra?.description)) && (
     <div className="mb-3 -mt-1">
       {extra?.photo_url && <img src={extra.photo_url} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />}
-      {extra?.description && <p className="font-body text-xs" style={{ color: c.textDim }}>{extra.description}</p>}
+      {!isCash && extra?.description && <p className="font-body text-xs" style={{ color: c.textDim }}>{extra.description}</p>}
     </div>
   );
 
