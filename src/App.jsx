@@ -8769,7 +8769,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {expiredCount > 0 && (
         <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.redSoft, color: c.red }}>
-          <Clock size={13} /> {expiredCount} fixture{expiredCount === 1 ? "" : "s"} passed the 2-day deadline unplayed — both clubs recorded a loss and conceded 4 goals automatically.
+          <Clock size={13} /> The 2-day deadline unplayed — both clubs recorded a loss and conceded 4 goals automatically.
         </div>
       )}
 
