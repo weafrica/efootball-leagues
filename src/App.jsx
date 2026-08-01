@@ -8482,7 +8482,7 @@ function adminStatusMessage(m, t, league) {
   }
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   if (upcoming) {
-    return `Hey ${name}! ⚡ Your next fixture in ${league.name} is due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent and bring the heat! 🔥⚽`;
+    return `Hey ${name}! ⚡ Your next fixture in ${league.name} is due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent and bring the heat! 🔥⚽${firstMatchdayNote(upcoming.round)}`;
   }
   return `Hey ${name}! 👋 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
