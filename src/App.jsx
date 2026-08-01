@@ -3459,8 +3459,12 @@ export default function App() {
     if (qualifiers.length < 2) { showToast("Not enough qualifying clubs to start a knockout stage."); return; }
 
     if (eliminatedIds.length > 0) {
-      const { error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds);
+      const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds).select("id");
       if (error) { showToast(`Couldn't finalize groups: ${error.message}`); return; }
+      if ((updatedRows?.length || 0) < eliminatedIds.length) {
+        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) — groups NOT finalized. Try again or check with support.`);
+        return;
+      }
     }
 
     const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), league.knockout_legs);
@@ -3691,7 +3695,8 @@ export default function App() {
         const [teamA, teamB] = Object.keys(totals);
         if (totals[teamA] !== totals[teamB]) {
           const loserId = totals[teamA] > totals[teamB] ? teamB : teamA;
-          await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
+          const { data: updatedRows, error: elimErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId).select("id");
+          if (elimErr || !updatedRows?.length) showToast("Result saved, but the losing club couldn't be marked eliminated — check permissions.");
         }
       }
     }
@@ -3912,8 +3917,12 @@ export default function App() {
     const eliminatedIds = standings.slice(standings.length - toEliminate).map((r) => r.id);
 
     if (eliminatedIds.length > 0) {
-      const { error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds);
+      const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds).select("id");
       if (error) { showToast(`Couldn't eliminate teams: ${error.message}`); return; }
+      if ((updatedRows?.length || 0) < eliminatedIds.length) {
+        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) — stage NOT advanced. Try again or check with support.`);
+        return;
+      }
     }
 
     const remainingIds = activeTeams.map((t) => t.id).filter((id) => !eliminatedIds.includes(id));
