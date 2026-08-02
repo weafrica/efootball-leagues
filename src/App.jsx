@@ -6164,22 +6164,22 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
 
   const myUpcomingFixtures = computeMyUpcomingFixtures(leagues, myTeam, 5);
+  const myDisplayName = profileFirstName(session) || session?.user?.email || "";
 
   return (
     <div>
-      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
-
-      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
-
-      <ShopBanner onOpen={onOpenShop} c={c} />
-
-      {/* Compact HUD banner — status strip, not a landing-page hero */}
-      <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
+      {/* Player card — leads the page like a game's home dashboard: who's
+          signed in, what season is live, the numbers that matter at a
+          glance. Everything else below is "what do you want to do now". */}
+      <section className="relative mt-1 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.25 }} />
         </div>
         <div className="relative flex items-center gap-3 px-4 py-3.5">
-          <img src="/hero-emblem.png" alt="" className="w-11 h-11 object-contain shrink-0 drop-shadow-lg" />
+          <div className="relative shrink-0">
+            <MemberAvatar url={myAvatarUrl} username={myDisplayName} size={44} c={c} />
+            <img src="/hero-emblem.png" alt="" className="absolute -bottom-1 -right-1 w-5 h-5 object-contain drop-shadow" />
+          </div>
           <div className="min-w-0 flex-1">
             <div className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: c.accent }}>
               <span className="relative flex h-1.5 w-1.5">
@@ -6187,7 +6187,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
               </span>
               Season 2026 · Live
             </div>
-            <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Welcome back{profileFirstName(session) ? `, ${profileFirstName(session)}` : ""}</div>
+            <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Welcome back{myDisplayName ? `, ${myDisplayName}` : ""}</div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <div className="text-right font-mono leading-tight">
@@ -6208,13 +6208,19 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </div>
       </section>
 
-      {/* Menu tiles — every action gets equal weight, nothing singled out.
-          Shop lives in its own banner up top, not buried in here. */}
-      <section className="grid grid-cols-4 gap-2 mt-4">
+      {/* Continue playing — the two "something's waiting on you" strips,
+          right under the player card so they read as an extension of it. */}
+      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
+      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
+
+      {/* Quick actions — one equal-weight action dock. Shop lives here as a
+          tile like everything else instead of a standing promo banner. */}
+      <section className="grid grid-cols-5 gap-2 mt-4">
         <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
         <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
         <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
         <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
+        <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
       </section>
 
       <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
@@ -6234,10 +6240,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
-
-      <section className="mt-10 pt-8" style={{ borderTop: `1px solid ${c.border}` }}>
-        <Leaderboard leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} embedded c={c} />
-      </section>
     </div>
   );
 }
