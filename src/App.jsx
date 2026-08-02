@@ -193,6 +193,23 @@ const FORMATS = [
   { id: "groups_knockout", label: "Groups + Knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
 ];
 
+// Format "kinds" for the one-active-fun-league-per-kind rule: single/double round
+// robin and survivor all play out as an ongoing round-robin-style league, so a club
+// active in any one of them counts as active for all of them. Knockout and
+// groups_knockout each stand alone. Label used in the blocking toast.
+const FORMAT_KINDS = [
+  { ids: ["single_round_robin", "double_round_robin", "survivor"], label: "round robin / survivor" },
+];
+function formatKindOf(formatId) {
+  const kind = FORMAT_KINDS.find((k) => k.ids.includes(formatId));
+  return kind ? kind.ids : [formatId];
+}
+function formatKindLabel(formatId) {
+  const kind = FORMAT_KINDS.find((k) => k.ids.includes(formatId));
+  if (kind) return kind.label;
+  return FORMATS.find((f) => f.id === formatId)?.label || "this format";
+}
+
 // Letter labels for groups: Group A, Group B, ... Group Z, then AA, AB...
 function groupLabel(n) {
   let s = "";
@@ -2819,8 +2836,9 @@ export default function App() {
     if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
 
     if (league.league_type === "fun") {
+      const sameKindFormats = formatKindOf(league.format);
       const activeFunLeague = (leagues || []).find((l) => {
-        if (l.id === leagueId || l.league_type !== "fun" || l.format !== league.format) return false;
+        if (l.id === leagueId || l.league_type !== "fun" || !sameKindFormats.includes(l.format)) return false;
         const membership = l.members.find((m) => m.user_id === session.user.id);
         if (!membership || !membership.team_id) return false;
         const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
@@ -2829,8 +2847,7 @@ export default function App() {
         return !leagueComplete;
       });
       if (activeFunLeague) {
-        const formatLabel = FORMATS.find((f) => f.id === league.format)?.label || "this format";
-        showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatLabel} league once your club there is eliminated, or that league finishes.`);
+        showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatKindLabel(league.format)} league once your club there is eliminated, or that league finishes.`);
         return;
       }
     }
