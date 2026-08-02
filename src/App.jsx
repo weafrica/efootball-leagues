@@ -539,7 +539,29 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
 // reads straight off the same played fixtures the Leaderboard uses, so it
 // never needs its own backend table and can't drift out of sync with a
 // player's real record.
-const XP_PER_LEVEL = 150;
+const XP_PER_LEVEL = 150; // cost of the very first level-up (1 -> 2)
+const XP_LEVEL_STEP = 20; // each level after that costs this much more than the last
+
+// XP required to climb out of `level` into `level + 1` — a slowly rising
+// curve so early levels come quickly (something to show right away) while
+// later ones take real time, making the top titles (Ace, Elite, Legend)
+// mean more than "played a lot in week one."
+function xpToClimb(level) { return XP_PER_LEVEL + (level - 1) * XP_LEVEL_STEP; }
+
+// Converts total career XP into a level plus progress within that level,
+// walking the rising per-level cost rather than dividing by one flat number.
+function levelForXp(xp) {
+  let level = 1;
+  let remaining = xp;
+  let need = xpToClimb(level);
+  while (remaining >= need) {
+    remaining -= need;
+    level++;
+    need = xpToClimb(level);
+  }
+  return { level, xpIntoLevel: remaining, xpForNextLevel: need };
+}
+
 function computeMyProgress(leagues, myTeam) {
   const matches = [];
   (leagues || []).forEach((l) => {
@@ -568,9 +590,19 @@ function computeMyProgress(leagues, myTeam) {
     streak++;
   }
 
+  // Career-best win streak — the longest run of consecutive wins anywhere
+  // in the player's history, kept even after that run ends, so a big streak
+  // from weeks ago still shows up instead of disappearing the moment it's
+  // broken.
+  let bestStreak = 0, run = 0;
+  matches.forEach((m) => {
+    if (m.outcome === "w") { run++; bestStreak = Math.max(bestStreak, run); }
+    else run = 0;
+  });
+
   const xp = w * 25 + d * 10 + l * 5;
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
-  return { played: matches.length, w, d, l, streak, xp, level, xpIntoLevel: xp % XP_PER_LEVEL, levelTitle: levelTitleFor(level) };
+  const { level, xpIntoLevel, xpForNextLevel } = levelForXp(xp);
+  return { played: matches.length, w, d, l, streak, bestStreak, xp, level, xpIntoLevel, xpForNextLevel, levelTitle: levelTitleFor(level) };
 }
 
 // Purely cosmetic rank names for the level badge — a light "there's more to
@@ -596,19 +628,33 @@ function nextTitleFor(level) {
   return null;
 }
 
+// A distinct color per title tier — fixed hex, independent of the active
+// theme, the same way the ladder's top-3 medal colors work — so climbing
+// from Rookie to Legend is visually obvious at a glance, not just a text
+// change against the same accent color every time.
+function tierColorFor(level) {
+  if (level >= 21) return "#FFD700"; // Legend — gold
+  if (level >= 16) return "#F97316"; // Elite — orange
+  if (level >= 11) return "#A855F7"; // Ace — purple
+  if (level >= 6) return "#3B82F6"; // Veteran — blue
+  if (level >= 3) return "#22C55E"; // Contender — green
+  return "#9CA3AF"; // Rookie — neutral gray
+}
+
 // The tap target for the Home player card's level/XP row — spells out the
 // math behind the bar (XP to go, full W/D/L record, current streak) instead
 // of leaving a player to guess what moves it.
 function ProgressBreakdownModal({ progress, onClose, c }) {
-  const xpToGo = XP_PER_LEVEL - progress.xpIntoLevel;
+  const xpToGo = progress.xpForNextLevel - progress.xpIntoLevel;
   const next = nextTitleFor(progress.level);
   const winRate = progress.played ? Math.round((progress.w / progress.played) * 100) : 0;
+  const tier = tierColorFor(progress.level);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
       <div className="w-full max-w-sm rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
-            <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
+            <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: tier }}>
               <Star size={13} /> Level {progress.level} · {progress.levelTitle}
             </div>
             <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>
@@ -618,7 +664,7 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
         <div className="h-2 rounded-full overflow-hidden mb-5" style={{ background: c.surfaceHover }}>
-          <div className="h-full rounded-full" style={{ width: `${(progress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
+          <div className="h-full rounded-full" style={{ width: `${(progress.xpIntoLevel / progress.xpForNextLevel) * 100}%`, background: tier }} />
         </div>
         <div className="grid grid-cols-4 gap-2 mb-4">
           <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
@@ -638,9 +684,18 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
             <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Win rate</div>
           </div>
         </div>
-        {progress.streak >= 2 && (
-          <div className="flex items-center gap-1.5 font-mono text-xs font-bold rounded-xl px-3 py-2 mb-4" style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
-            <Flame size={13} /> {progress.streak}-match win streak
+        {(progress.streak >= 2 || progress.bestStreak >= 2) && (
+          <div className="flex items-center gap-2 mb-4">
+            {progress.streak >= 2 && (
+              <div className="flex items-center gap-1.5 font-mono text-xs font-bold rounded-xl px-3 py-2" style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
+                <Flame size={13} /> {progress.streak} current
+              </div>
+            )}
+            {progress.bestStreak >= 2 && (
+              <div className="flex items-center gap-1.5 font-mono text-xs font-bold rounded-xl px-3 py-2" style={{ background: c.surfaceHover, color: c.textDim }}>
+                <Trophy size={13} /> {progress.bestStreak} best
+              </div>
+            )}
           </div>
         )}
         <div className="font-body text-[11px] leading-relaxed" style={{ color: c.textFaint }}>
@@ -6352,13 +6407,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           <div role="button" tabIndex={0} onClick={() => setProgressOpen(true)} onKeyDown={(e) => { if (e.key === "Enter") setProgressOpen(true); }}
             className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2 cursor-pointer">
             <div className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5"
-              style={{ background: `${c.accent}1F`, color: c.accent, border: `1px solid ${c.accent}55` }}>
+              style={{ background: `${tierColorFor(myProgress.level)}1F`, color: tierColorFor(myProgress.level), border: `1px solid ${tierColorFor(myProgress.level)}55` }}>
               <Star size={10} /> Lvl {myProgress.level} · {myProgress.levelTitle}
             </div>
             <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${(myProgress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
+              <div className="h-full rounded-full transition-all" style={{ width: `${(myProgress.xpIntoLevel / myProgress.xpForNextLevel) * 100}%`, background: tierColorFor(myProgress.level) }} />
             </div>
-            <div className="font-mono text-[9px] shrink-0" style={{ color: c.textFaint }}>{myProgress.xpIntoLevel}/{XP_PER_LEVEL} XP</div>
+            <div className="font-mono text-[9px] shrink-0" style={{ color: c.textFaint }}>{myProgress.xpIntoLevel}/{myProgress.xpForNextLevel} XP</div>
             {myProgress.streak >= 2 && (
               <div className="flex items-center gap-1 font-mono text-[10px] font-bold shrink-0 rounded-full px-2 py-0.5"
                 style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
