@@ -22,7 +22,7 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
-  ShoppingBag, ExternalLink, Shirt, Package, Menu,
+  ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -529,6 +529,59 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
     return ad - bd;
   });
   return rows.slice(0, limit);
+}
+
+// Turns the signed-in player's full match history (every played fixture,
+// across every league they've fielded a club in) into a lightweight game
+// layer for the homepage: a level with an XP bar, and a current win streak.
+// XP is deliberately generous to losses too (5 each) so playing regularly
+// always moves the bar — wins (25) and draws (10) just move it faster. This
+// reads straight off the same played fixtures the Leaderboard uses, so it
+// never needs its own backend table and can't drift out of sync with a
+// player's real record.
+const XP_PER_LEVEL = 150;
+function computeMyProgress(leagues, myTeam) {
+  const matches = [];
+  (leagues || []).forEach((l) => {
+    const team = myTeam ? myTeam(l) : null;
+    if (!team) return;
+    (l.fixtures || []).forEach((f) => {
+      if (!f.played || f.away_team_id === null) return;
+      if (f.home_team_id !== team.id && f.away_team_id !== team.id) return;
+      const isHome = f.home_team_id === team.id;
+      const gf = isHome ? f.home_score : f.away_score;
+      const ga = isHome ? f.away_score : f.home_score;
+      matches.push({ time: new Date(fixturePlayedDate(f)).getTime(), outcome: gf > ga ? "w" : gf < ga ? "l" : "d" });
+    });
+  });
+  matches.sort((a, b) => a.time - b.time);
+
+  const w = matches.filter((m) => m.outcome === "w").length;
+  const d = matches.filter((m) => m.outcome === "d").length;
+  const l = matches.filter((m) => m.outcome === "l").length;
+
+  // Current win streak — consecutive wins counting back from the most
+  // recent match, stopping at the first draw or loss.
+  let streak = 0;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    if (matches[i].outcome !== "w") break;
+    streak++;
+  }
+
+  const xp = w * 25 + d * 10 + l * 5;
+  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
+  return { played: matches.length, w, d, l, streak, xp, level, xpIntoLevel: xp % XP_PER_LEVEL, levelTitle: levelTitleFor(level) };
+}
+
+// Purely cosmetic rank names for the level badge — a light "there's more to
+// reach for" hook, not tied to anything mechanical elsewhere in the app.
+function levelTitleFor(level) {
+  if (level >= 21) return "Legend";
+  if (level >= 16) return "Elite";
+  if (level >= 11) return "Ace";
+  if (level >= 6) return "Veteran";
+  if (level >= 3) return "Contender";
+  return "Rookie";
 }
 
 // Expired, unplayed fixtures count as a loss for both sides once past their
@@ -3948,10 +4001,9 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             here just needs an account behind it, except Ladder, which is
             public and simply scrolls down. Shop lives in its own banner up
             top, not buried in here. */}
-        <section className="grid grid-cols-4 gap-2 mt-4">
+        <section className="grid grid-cols-3 gap-2 mt-4">
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
-          <GuestMenuTile icon={Swords} label="Challenges" locked onClick={() => onRequireAuth("Sign in to send and receive challenges.")} c={c} />
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
         </section>
 
@@ -6164,6 +6216,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
 
   const myUpcomingFixtures = computeMyUpcomingFixtures(leagues, myTeam, 5);
+  const myProgress = computeMyProgress(leagues, myTeam);
   const myDisplayName = profileFirstName(session) || session?.user?.email || "";
 
   return (
@@ -6206,12 +6259,27 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
             </div>
           </div>
         </div>
-      </section>
 
-      {/* Featured mode banner — the ladder's black/gold "ranked mode" look is
-          the most game-like element on the page, so it gets top billing
-          right under the player card, like a lobby's featured event. */}
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
+        {/* Level + XP bar, with a streak chip when the player is on a run —
+            the "there's a game underneath the leagues" layer of the page. */}
+        {myProgress.played > 0 && (
+          <div className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2">
+            <div className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5"
+              style={{ background: `${c.accent}1F`, color: c.accent, border: `1px solid ${c.accent}55` }}>
+              <Star size={10} /> Lvl {myProgress.level} · {myProgress.levelTitle}
+            </div>
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${(myProgress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
+            </div>
+            {myProgress.streak >= 2 && (
+              <div className="flex items-center gap-1 font-mono text-[10px] font-bold shrink-0 rounded-full px-2 py-0.5"
+                style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
+                <Flame size={10} /> {myProgress.streak}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Continue playing — the two "something's waiting on you" strips,
           grouped right after the featured banner so the page reads
@@ -6223,14 +6291,22 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           tile like everything else instead of a standing promo banner. */}
       <section className="mt-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Quick actions</div>
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
           <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
-          <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
           <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
           <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
         </div>
       </section>
+
+      {/* Where you stand — Leaderboard preview then the Ladder banner,
+          grouped together right after quick actions so this competitive
+          "how am I doing" content is easy to reach before the league lists
+          (which are the bulk of the page) take over. */}
+      <div className="mt-8">
+        <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
+      </div>
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
 
       {leagues.length === 0 && (
         <section className="mt-6 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.accent}22, ${c.surface})`, border: `1px solid ${c.border}` }}>
@@ -6258,12 +6334,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
 
-      {/* Platform-wide Leaderboard preview — sits right under the cash
-          leagues, the highest-stakes content on the page, so "where do I
-          rank against everyone" reads as the natural next question. */}
-      <div className="mt-8">
-        <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
-      </div>
     </div>
   );
 }
