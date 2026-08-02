@@ -199,34 +199,43 @@ const FORMATS = [
 ];
 const FORMAT_KIND_LABELS = { round_robin: "round robin / survivor" };
 
-// All format ids that share a format's `kind` — the set a league of `formatId`
-// is restricted against under the one-active-fun-league-per-kind rule.
-function formatKindOf(formatId) {
-  const kind = FORMATS.find((f) => f.id === formatId)?.kind;
-  return kind ? FORMATS.filter((f) => f.kind === kind).map((f) => f.id) : [formatId];
-}
 function formatKindLabel(formatId) {
   const kind = FORMATS.find((f) => f.id === formatId)?.kind;
   return FORMAT_KIND_LABELS[kind] || FORMATS.find((f) => f.id === formatId)?.label || "this format";
 }
 
-// Shared by the click-time guard in joinLeague and by the card/detail UI so a
-// club's "locked" state is computed the same way everywhere. Returns the other
-// fun league the signed-in user is still active in (same format kind as
-// `league`), or null if they're free to join. Only fun leagues are restricted —
-// cash leagues never lock each other out.
-function findBlockingFunLeague(leagues, session, league) {
-  if (!league || league.league_type !== "fun" || !session?.user?.id) return null;
-  const sameKindFormats = formatKindOf(league.format);
-  return (leagues || []).find((l) => {
-    if (l.id === league.id || l.league_type !== "fun" || !sameKindFormats.includes(l.format)) return false;
+// Builds a map of format-kind -> the signed-in user's currently active fun
+// league of that kind (at most one, by construction of the join rule below).
+// Computing this once per render and doing O(1) lookups per card is cheap;
+// re-scanning the whole league list inside every card's render is what we're
+// avoiding, since a leagues screen can have many cards re-evaluating this on
+// every render.
+function activeFunLeaguesByKind(leagues, session) {
+  const map = new Map();
+  if (!session?.user?.id) return map;
+  for (const l of leagues || []) {
+    if (l.league_type !== "fun") continue;
     const membership = l.members.find((m) => m.user_id === session.user.id);
-    if (!membership || !membership.team_id) return false;
+    if (!membership || !membership.team_id) continue;
     const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
-    if (!myTeamInL || myTeamInL.eliminated) return false;
+    if (!myTeamInL || myTeamInL.eliminated) continue;
     const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
-    return !leagueComplete;
-  }) || null;
+    if (leagueComplete) continue;
+    const kind = FORMATS.find((f) => f.id === l.format)?.kind || l.format;
+    if (!map.has(kind)) map.set(kind, l);
+  }
+  return map;
+}
+
+// Given the map from activeFunLeaguesByKind, returns the other fun league
+// blocking `league` from being joined (same format kind), or null if it's
+// free to join. Only fun leagues are restricted — cash leagues never lock
+// each other out.
+function blockingLeagueFor(activeByKind, league) {
+  if (!league || league.league_type !== "fun") return null;
+  const kind = FORMATS.find((f) => f.id === league.format)?.kind || league.format;
+  const active = activeByKind.get(kind);
+  return active && active.id !== league.id ? active : null;
 }
 
 // Letter labels for groups: Group A, Group B, ... Group Z, then AA, AB...
@@ -2647,6 +2656,7 @@ export default function App() {
   };
 
   const activeLeague = useMemo(() => (leagues || []).find((l) => l.id === activeLeagueId) || null, [leagues, activeLeagueId]);
+  const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
 
   // Picks up the intent set by tapping an "Up next" card on Home (see
   // pendingLogFixtureId above) once activeLeague's fixtures/teams are
@@ -2855,7 +2865,7 @@ export default function App() {
     if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
 
     if (league.league_type === "fun") {
-      const activeFunLeague = findBlockingFunLeague(leagues, session, league);
+      const activeFunLeague = blockingLeagueFor(activeFunLeaguesByKind(leagues, session), league);
       if (activeFunLeague) {
         showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatKindLabel(league.format)} league once your club there is eliminated, or that league finishes.`);
         return;
@@ -3644,7 +3654,7 @@ export default function App() {
                 myUsername={profile?.efootball_username || session.user.email}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
                 myPaymentStatus={myPaymentStatus(activeLeague)}
-                blockedByLeague={isMemberOf(activeLeague) ? null : findBlockingFunLeague(leagues, session, activeLeague)}
+                blockedByLeague={isMemberOf(activeLeague) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, activeLeague)}
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
@@ -6950,6 +6960,7 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
 function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
   const pendingReviewCount = leagues.filter(canManageLeague).reduce((sum, l) =>
     sum + (l.members || []).filter((m) => m.payment_status === "pending").length, 0);
+  const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
   if (leagues.length === 0 && !onCreate) return null;
   return (
     <section className="mt-8 first:mt-0">
@@ -6970,7 +6981,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
       <div className="no-scrollbar flex items-stretch gap-3 overflow-x-auto -mx-4 px-4 pb-1">
         {leagues.map((l) => (
           <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
-            blockedByLeague={isMemberOf(l) ? null : findBlockingFunLeague(leagues, session, l)}
+            blockedByLeague={isMemberOf(l) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, l)}
             myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
