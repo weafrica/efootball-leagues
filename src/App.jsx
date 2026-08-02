@@ -2820,7 +2820,7 @@ export default function App() {
 
     if (league.league_type === "fun") {
       const activeFunLeague = (leagues || []).find((l) => {
-        if (l.id === leagueId || l.league_type !== "fun") return false;
+        if (l.id === leagueId || l.league_type !== "fun" || l.format !== league.format) return false;
         const membership = l.members.find((m) => m.user_id === session.user.id);
         if (!membership || !membership.team_id) return false;
         const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
@@ -2829,7 +2829,8 @@ export default function App() {
         return !leagueComplete;
       });
       if (activeFunLeague) {
-        showToast(`You're still active in "${activeFunLeague.name}" — join another fun league once your club there is eliminated, or that league finishes.`);
+        const formatLabel = FORMATS.find((f) => f.id === league.format)?.label || "this format";
+        showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatLabel} league once your club there is eliminated, or that league finishes.`);
         return;
       }
     }
