@@ -3652,7 +3652,7 @@ export default function App() {
                 challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
-                ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen}
+                ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} c={c} />
             )}
@@ -4744,7 +4744,7 @@ function Leaderboard({ leagues, session, memberAvatars, myAvatarUrl, onBack, emb
 
       <div className="flex items-center gap-2 mb-1">
         <Trophy size={20} style={{ color: c.accent }} />
-        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard (build check v2)</h1>
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard</h1>
       </div>
       <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
         {season === "all" ? "Ranked by results across every league, all-time" : "Ranked by results across every league this season"}
@@ -6094,7 +6094,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenShop, memberAvatars, myAvatarUrl, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, myAvatarUrl, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
@@ -6257,6 +6257,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
+
+      {/* Platform-wide Leaderboard preview — sits right under the cash
+          leagues, the highest-stakes content on the page, so "where do I
+          rank against everyone" reads as the natural next question. */}
+      <div className="mt-8">
+        <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
+      </div>
     </div>
   );
 }
@@ -6374,11 +6381,15 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : c.accent;
   return (
     <section className="pt-5">
       <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
-        className="w-full rounded-2xl p-3.5 text-left cursor-pointer transition-transform active:scale-[0.99]" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-        <div className="flex items-center justify-between mb-3">
+        className="relative w-full rounded-2xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16 }} />
+        </div>
+        <div className="relative flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${c.borderStrong}` }} />
             <div className="leading-tight">
@@ -6389,20 +6400,26 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
             <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
             {myLadderRank && (
-              <button onClick={onOpenLadder} className="font-mono text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
-                You're #{myLadderRank.rank_position} <ChevronRight size={12} />
+              <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
+                style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
+                {myLadderRank.rank_position <= 3 && <Crown size={10} />} You're #{myLadderRank.rank_position} <ChevronRight size={12} />
               </button>
             )}
           </div>
         </div>
         {rulesOpen && <div onClick={(e) => e.stopPropagation()}><Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} /></Suspense></div>}
-        <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
+        <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
           {top5.map((row, i) => (
-            <div key={row.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+            <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
               style={{
                 background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
                 border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
               }}>
+              {i === 0 && (
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${c.accent}3D, transparent)` }} />
+                </div>
+              )}
               {i < 3 ? (
                 <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
                   {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
@@ -6421,6 +6438,91 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
           <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
             style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
             <Swords size={13} /> {myLadderRank && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Compact homepage preview of the platform-wide Leaderboard (the full
+// screen lives behind the header menu) — top 5 by wins for the current
+// season, styled like a podium rather than a plain list, with the same
+// press-and-glow language as the rest of the dashboard. Renders nothing
+// until at least one match has been played anywhere, same as the ladder.
+function LeaderboardStrip({ leagues, session, memberAvatars, myAvatarUrl, onOpenLeaderboard, c }) {
+  const avatarByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, m.avatar_url || null); });
+    if (session && myAvatarUrl) map.set(session.user.id, myAvatarUrl);
+    return map;
+  }, [memberAvatars, session, myAvatarUrl]);
+  const anchor = useMemo(() => seasonAnchor(leagues), [leagues]);
+  const cur = currentSeason(anchor);
+  const bounds = anchor ? seasonBounds(cur, anchor) : null;
+  const scopedRows = useMemo(() => computeGlobalLeaderboard(leagues, bounds), [leagues, bounds]);
+  const ranked = useMemo(() => rankLeaderboard(scopedRows, "wins"), [scopedRows]);
+  if (ranked.length === 0) return null;
+  const top5 = ranked.slice(0, 5);
+  const myRow = session ? ranked.find((r) => r.userId === session.user.id) : null;
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  const myRankColor = myRow && myRow.rank <= 3 ? rankColors[myRow.rank - 1] : c.accent;
+  return (
+    <section className="pt-1">
+      <div role="button" tabIndex={0} onClick={onOpenLeaderboard} onKeyDown={(e) => { if (e.key === "Enter") onOpenLeaderboard(); }}
+        className="relative w-full rounded-2xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
+        style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="animate-glow-drift absolute -top-14 -right-10 w-36 h-36 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.18 }} />
+        </div>
+        <div className="relative flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+              <Trophy size={15} style={{ color: c.accent }} />
+            </span>
+            <div className="leading-tight">
+              <div className="font-extrabold uppercase tracking-tight text-sm leading-none">Leaderboard</div>
+              <div className="font-mono text-[9px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>This season · every league</div>
+            </div>
+          </div>
+          {myRow && (
+            <span className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
+              style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
+              {myRow.rank <= 3 && <Crown size={10} />} You're #{myRow.rank}
+            </span>
+          )}
+        </div>
+        <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1">
+          {top5.map((r, i) => (
+            <div key={r.userId} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
+              style={{
+                background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.bg})` : c.bg,
+                border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
+              }}>
+              {i === 0 && (
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${c.accent}3D, transparent)` }} />
+                </div>
+              )}
+              {i < 3 ? (
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                  {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
+                </span>
+              ) : (
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                  {i + 1}
+                </span>
+              )}
+              <MemberAvatar url={r.userId ? avatarByUserId.get(r.userId) : null} username={r.name} size={26} c={c} />
+              <div className="flex flex-col leading-tight">
+                <span className="font-body font-semibold text-sm truncate max-w-[90px]" style={{ color: c.text }}>{r.name}</span>
+                <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{r.w}W {r.d}D {r.l}L</span>
+              </div>
+            </div>
+          ))}
+          <button onClick={onOpenLeaderboard} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+            style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
+            <Trophy size={13} /> {myRow && myRow.rank > 5 ? "See your rank" : "Full leaderboard"}
           </button>
         </div>
       </div>
