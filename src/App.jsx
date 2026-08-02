@@ -15,7 +15,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Zap, Flame, Gamepad2, Medal,
+  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
   ShoppingBag, ExternalLink, Shirt, Package, Menu,
 } from "lucide-react";
 
@@ -1124,7 +1124,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <Wallet size={18} style={{ color: c.accent }} />
             <h2 className="text-xl font-extrabold uppercase tracking-tight">{isResubmit ? "Resubmit payment" : "Join cash league"}</h2>
           </div>
-          <button onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+          <button aria-label="Cancel" onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{league.name}</div>
 
@@ -1224,7 +1224,7 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
             <Trophy size={18} style={{ color: c.accent }} />
             <h2 className="text-xl font-extrabold uppercase tracking-tight">{existing ? "Resubmit result" : "Submit result"}</h2>
           </div>
-          <button onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+          <button aria-label="Cancel" onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{league.name}</div>
 
@@ -1293,7 +1293,7 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
             <Trophy size={18} style={{ color: c.accent }} />
             <h2 className="text-xl font-extrabold uppercase tracking-tight">Log result</h2>
           </div>
-          <button onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+          <button aria-label="Cancel" onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>vs {opponentUsername}</div>
 
@@ -2153,7 +2153,7 @@ function RulesModal({ type, onClose, c }) {
             <Icon size={18} style={{ color: c.accent }} />
             <h2 className="text-xl font-extrabold uppercase tracking-tight">{data.title}</h2>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+          <button aria-label="Close" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
 
         <div className="relative mb-2 shrink-0">
@@ -2372,7 +2372,9 @@ export default function App() {
   const [activeLeagueId, setActiveLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLeagueId : null) ?? null);
   const [refereeQueue, setRefereeQueue] = useState([]); // [{ id, msg }] — messages waiting to be shown
   const [activeReferee, setActiveReferee] = useState(null); // { id, msg, variant, phase: "in" | "hold" | "out" } — currently on screen
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; }
+  });
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
   const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
@@ -2502,7 +2504,7 @@ export default function App() {
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    localStorage.setItem(THEME_KEY, next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore — storage unavailable */ }
   };
 
   // `stay` is set right before the redirect fires, not baked into the
@@ -4739,7 +4741,7 @@ function AuthPromptModal({ reason, c, onCancel, onSignIn }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onCancel}>
       <div className="w-full max-w-sm rounded-2xl p-6 border flex flex-col items-center text-center" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
-        <button onClick={onCancel} className="self-end -mt-2 -mr-2 mb-1" style={{ color: c.textFaint }}><X size={16} /></button>
+        <button aria-label="Close" onClick={onCancel} className="self-end -mt-2 -mr-2 mb-1" style={{ color: c.textFaint }}><X size={16} /></button>
         <div className="w-11 h-11 rounded-full flex items-center justify-center mb-3" style={{ background: c.surfaceHover }}>
           <Lock size={16} style={{ color: c.accent }} />
         </div>
@@ -5163,7 +5165,7 @@ function EditProfileModal({ profile, onCancel, onSubmit, onUpdatePhoto, c }) {
       <div className="w-full max-w-sm rounded-xl p-6" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-extrabold uppercase tracking-tight">Edit your details</h2>
-          <button onClick={onCancel} className="p-1" style={{ color: c.textFaint }}><X size={18} /></button>
+          <button aria-label="Close" onClick={onCancel} className="p-1" style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
         <div className="flex flex-col items-center mb-5">
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
@@ -5680,7 +5682,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
   return (
     <div className="pt-6">
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={16} /></button>
+        <button aria-label="Back" onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={16} /></button>
         <h1 className="text-2xl font-extrabold uppercase tracking-tight flex-1">Challenges</h1>
         <RulesButton label="Challenge Rules" onClick={() => setRulesOpen(true)} c={c} />
       </div>
@@ -6268,7 +6270,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
             {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
-            <button onClick={submitReply} disabled={(!replyText.trim() && replyVoiceRecorder.state !== "recorded") || replying}
+            <button aria-label="Send reply" onClick={submitReply} disabled={(!replyText.trim() && replyVoiceRecorder.state !== "recorded") || replying}
               className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
               style={(replyText.trim() || replyVoiceRecorder.state === "recorded") && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={13} />
@@ -6646,7 +6648,7 @@ function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onCl
             <MessageCircle size={18} style={{ color: c.accent }} />
             <h2 className="text-lg font-extrabold uppercase tracking-tight truncate">{counterpartUsername || "Chat"}</h2>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+          <button aria-label="Close chat" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
@@ -6777,7 +6779,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
       <div className="w-full max-w-sm rounded-xl p-5 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <div className="font-body font-bold text-base">Suggest something</div>
-          <button onClick={onCancel} style={{ color: c.textFaint }}><X size={16} /></button>
+          <button aria-label="Close" onClick={onCancel} style={{ color: c.textFaint }}><X size={16} /></button>
         </div>
         <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
           Got an idea for a feature, or found something broken? Tell us here.
@@ -7099,7 +7101,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
       <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <div className="font-extrabold uppercase tracking-tight text-lg flex items-center gap-2"><Swords size={18} /> Climb the ladder</div>
-          <button onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
+          <button aria-label="Close" onClick={onCancel} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
         </div>
         <p className="font-body text-xs mb-4" style={{ color: c.textDim }}>
           {myRank ? `You're #${myRank.rank_position}. Beat one of these and their spot is yours.` : "You'll get a ladder spot once your profile is set up."}
@@ -7354,7 +7356,7 @@ function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, d
             <Download size={16} style={{ color: c.accent }} />
             <h3 className="font-body text-sm font-bold uppercase tracking-wide">Download image</h3>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
+          <button aria-label="Close" onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
         </div>
 
         {pageCount > 1 && (
@@ -9448,7 +9450,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
             </button>
             {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
             <div className="flex flex-col items-end gap-1 shrink-0">
-              <button onClick={submit} disabled={(!text.trim() && !photo && voiceRecorder.state !== "recorded") || posting}
+              <button aria-label="Send" onClick={submit} disabled={(!text.trim() && !photo && voiceRecorder.state !== "recorded") || posting}
                 className="w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
                 style={(text.trim() || photo || voiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
                 <Send size={15} />
@@ -9586,7 +9588,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
               <Camera size={13} />
             </button>
             {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
-            <button onClick={submitReply} disabled={(!replyText.trim() && !replyPhoto && replyVoiceRecorder.state !== "recorded") || posting}
+            <button aria-label="Send reply" onClick={submitReply} disabled={(!replyText.trim() && !replyPhoto && replyVoiceRecorder.state !== "recorded") || posting}
               className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
               style={(replyText.trim() || replyPhoto || replyVoiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
               <Send size={13} />
