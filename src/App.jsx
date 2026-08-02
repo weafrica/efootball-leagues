@@ -584,6 +584,53 @@ function levelTitleFor(level) {
   return "Rookie";
 }
 
+// The tap target for the Home player card's level/XP row — spells out the
+// math behind the bar (XP to go, full W/D/L record, current streak) instead
+// of leaving a player to guess what moves it.
+function ProgressBreakdownModal({ progress, onClose, c }) {
+  const xpToGo = XP_PER_LEVEL - progress.xpIntoLevel;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
+              <Star size={13} /> Level {progress.level} · {progress.levelTitle}
+            </div>
+            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{xpToGo} XP to Level {progress.level + 1}</div>
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
+        <div className="h-2 rounded-full overflow-hidden mb-5" style={{ background: c.surfaceHover }}>
+          <div className="h-full rounded-full" style={{ width: `${(progress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
+        </div>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
+            <div className="font-bold text-base" style={{ color: c.text }}>{progress.w}</div>
+            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Wins</div>
+          </div>
+          <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
+            <div className="font-bold text-base" style={{ color: c.text }}>{progress.d}</div>
+            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Draws</div>
+          </div>
+          <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
+            <div className="font-bold text-base" style={{ color: c.text }}>{progress.l}</div>
+            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Losses</div>
+          </div>
+        </div>
+        {progress.streak >= 2 && (
+          <div className="flex items-center gap-1.5 font-mono text-xs font-bold rounded-xl px-3 py-2 mb-4" style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
+            <Flame size={13} /> {progress.streak}-match win streak
+          </div>
+        )}
+        <div className="font-body text-[11px] leading-relaxed" style={{ color: c.textFaint }}>
+          Wins are worth 25 XP, draws 10 XP, losses 5 XP — every match you play moves the bar.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Expired, unplayed fixtures count as a loss for both sides once past their
 // deadline — and, per the no-show rule, both sides also concede 4 goals
 // (scoring 0 themselves), so each ends up with a -4 goal difference for
@@ -3707,7 +3754,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} showToast={showToast} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -6146,7 +6193,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, myAvatarUrl, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, myAvatarUrl, showToast, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
@@ -6219,6 +6266,23 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const myProgress = computeMyProgress(leagues, myTeam);
   const myDisplayName = profileFirstName(session) || session?.user?.email || "";
 
+  // Fires a one-time celebration the moment a player's level actually goes
+  // up, instead of leaving it as a silent bar reset. The last-seen level is
+  // stashed in localStorage per user so a level reached in a previous
+  // session never re-fires here on a later visit — only a level crossed
+  // since the last time this ran on this device.
+  const [progressOpen, setProgressOpen] = useState(false);
+  useEffect(() => {
+    if (!myId || myProgress.played === 0) return;
+    const key = `efootball-level-seen-${myId}`;
+    let lastSeen = 0;
+    try { lastSeen = Number(localStorage.getItem(key)) || 0; } catch (e) { /* ignore — storage unavailable */ }
+    if (myProgress.level > lastSeen) {
+      if (lastSeen > 0 && showToast) showToast(`Level up! You're now Lvl ${myProgress.level} · ${myProgress.levelTitle} 🎉`);
+      try { localStorage.setItem(key, String(myProgress.level)); } catch (e) { /* ignore — storage unavailable */ }
+    }
+  }, [myId, myProgress.level, myProgress.played, myProgress.levelTitle, showToast]);
+
   return (
     <div>
       {/* Player card — leads the page like a game's home dashboard: who's
@@ -6261,9 +6325,11 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </div>
 
         {/* Level + XP bar, with a streak chip when the player is on a run —
-            the "there's a game underneath the leagues" layer of the page. */}
+            the "there's a game underneath the leagues" layer of the page.
+            Tapping it opens the full breakdown (level, XP-to-go, record). */}
         {myProgress.played > 0 && (
-          <div className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2">
+          <div role="button" tabIndex={0} onClick={() => setProgressOpen(true)} onKeyDown={(e) => { if (e.key === "Enter") setProgressOpen(true); }}
+            className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2 cursor-pointer">
             <div className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5"
               style={{ background: `${c.accent}1F`, color: c.accent, border: `1px solid ${c.accent}55` }}>
               <Star size={10} /> Lvl {myProgress.level} · {myProgress.levelTitle}
@@ -6271,6 +6337,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
             <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
               <div className="h-full rounded-full transition-all" style={{ width: `${(myProgress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
             </div>
+            <div className="font-mono text-[9px] shrink-0" style={{ color: c.textFaint }}>{myProgress.xpIntoLevel}/{XP_PER_LEVEL} XP</div>
             {myProgress.streak >= 2 && (
               <div className="flex items-center gap-1 font-mono text-[10px] font-bold shrink-0 rounded-full px-2 py-0.5"
                 style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
@@ -6280,6 +6347,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           </div>
         )}
       </section>
+
+      {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
       {/* Continue playing — the two "something's waiting on you" strips,
           grouped right after the featured banner so the page reads
