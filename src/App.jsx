@@ -6221,17 +6221,30 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       {/* Quick actions — one equal-weight action dock. Shop lives here as a
           tile like everything else instead of a standing promo banner. */}
-      <section className="grid grid-cols-5 gap-2 mt-4">
-        <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
-        <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
-        <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
-        <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
-        <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
+      <section className="mt-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Quick actions</div>
+        <div className="grid grid-cols-5 gap-2">
+          <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
+          <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
+          <MenuTile icon={Swords} label="Challenges" onClick={onOpenChallenges} c={c} />
+          <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
+          <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
+        </div>
       </section>
 
       {leagues.length === 0 && (
-        <section className="mt-8">
-          <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>Start the first one — it takes about a minute.</div>
+        <section className="mt-6 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.accent}22, ${c.surface})`, border: `1px solid ${c.border}` }}>
+          <div className="flex flex-col items-center text-center gap-3 px-6 py-10">
+            <span className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+              <Gamepad2 size={22} style={{ color: c.accent }} />
+            </span>
+            <div className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>No leagues yet</div>
+            <div className="font-body text-sm max-w-[220px]" style={{ color: c.textDim }}>Start the first one — it takes about a minute.</div>
+            <button onClick={onCreate} className="mt-1 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-lg px-4 py-2"
+              style={{ background: c.accent, color: c.accentText }}>
+              <Plus size={13} /> Create a league
+            </button>
+          </div>
         </section>
       )}
 
