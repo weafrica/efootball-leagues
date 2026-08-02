@@ -22,7 +22,7 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
-  ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame,
+  ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -703,6 +703,130 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
         <div className="font-body text-[11px] leading-relaxed" style={{ color: c.textFaint }}>
           {progress.played} career {progress.played === 1 ? "match" : "matches"} ·{" "}
           Wins are worth 25 XP, draws 10 XP, losses 5 XP — every match you play moves the bar.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Milestone badges layered on top of the level/XP system — a second, more
+// permanent "collection" hook next to the streak-and-level bar (which can go
+// up or down in feel from match to match). Every def is derived purely from
+// data Home already has (match record, league membership, ladder rank), so
+// like the XP system this needs no backend table of its own and can't drift
+// out of sync. `value(ctx)` returns the player's raw progress toward
+// `target`; reaching or passing target earns the badge.
+const ACHIEVEMENTS_DEF = [
+  { id: "first_match", icon: Gamepad2, color: "#3B82F6", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
+  { id: "matches_10", icon: Calendar, color: "#3B82F6", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
+  { id: "matches_50", icon: History, color: "#3B82F6", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
+  { id: "first_win", icon: Trophy, color: "#22C55E", label: "First Blood", desc: "Win your first match", target: 1, value: (ctx) => ctx.p.w },
+  { id: "wins_10", icon: Medal, color: "#22C55E", label: "Winning Machine", desc: "Win 10 matches", target: 10, value: (ctx) => ctx.p.w },
+  { id: "wins_25", icon: Award, color: "#22C55E", label: "Champion Mentality", desc: "Win 25 matches", target: 25, value: (ctx) => ctx.p.w },
+  { id: "streak_3", icon: Flame, color: "#F97316", label: "Hot Streak", desc: "Win 3 matches in a row", target: 3, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_5", icon: Flame, color: "#EF4444", label: "On Fire", desc: "Win 5 matches in a row", target: 5, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_10", icon: Sparkles, color: "#EF4444", label: "Unstoppable", desc: "Win 10 matches in a row", target: 10, value: (ctx) => ctx.p.bestStreak },
+  { id: "level_6", icon: Shield, color: "#3B82F6", label: "Veteran Status", desc: "Reach Level 6", target: 6, value: (ctx) => ctx.p.level },
+  { id: "level_11", icon: Swords, color: "#A855F7", label: "Ace Status", desc: "Reach Level 11", target: 11, value: (ctx) => ctx.p.level },
+  { id: "level_21", icon: Crown, color: "#FFD700", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
+  { id: "join_league", icon: Users, color: "#14B8A6", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
+  { id: "join_3", icon: Layers, color: "#14B8A6", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
+  { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
+  { id: "ladder_top10", icon: Star, color: "#FFD700", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
+  { id: "ladder_no1", icon: Crown, color: "#FFD700", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
+];
+
+// Earned badges sort first (most nearly-complete locked badge next), so the
+// strip's leading tiles are always either something to be proud of or
+// something worth chasing next — never a random pick from the middle.
+function computeAchievements(ctx) {
+  return ACHIEVEMENTS_DEF.map((def) => {
+    const raw = def.value(ctx) || 0;
+    const value = Math.min(raw, def.target);
+    return { ...def, value, earned: raw >= def.target };
+  }).sort((a, b) => {
+    if (a.earned !== b.earned) return a.earned ? -1 : 1;
+    return b.value / b.target - a.value / a.target;
+  });
+}
+
+// A single badge tile — a filled, colored ring around the icon once earned;
+// a dim outline with a thin progress ring (how close) while locked. Used
+// both in the homepage strip (small) and the full achievements modal
+// (larger), so size is a prop rather than fixed.
+function AchievementBadge({ ach, size = 44, c }) {
+  const pct = Math.round((ach.value / ach.target) * 100);
+  const iconSize = Math.round(size * 0.42);
+  return (
+    <div className="flex flex-col items-center gap-1 shrink-0" style={{ width: size + 14 }}>
+      <div className="relative flex items-center justify-center rounded-full" style={{ width: size, height: size }}>
+        {!ach.earned && (
+          <svg className="absolute inset-0 -rotate-90" width={size} height={size} viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="16" fill="none" stroke={c.border} strokeWidth="2" />
+            <circle cx="18" cy="18" r="16" fill="none" stroke={ach.color} strokeWidth="2" strokeLinecap="round" pathLength="100" strokeDasharray={`${pct} 100`} />
+          </svg>
+        )}
+        <div className="flex items-center justify-center rounded-full" style={{
+          width: size - 6, height: size - 6,
+          background: ach.earned ? `linear-gradient(135deg, ${ach.color}, ${ach.color}99)` : c.surfaceHover,
+          border: `1px solid ${ach.earned ? ach.color : c.border}`,
+        }}>
+          <ach.icon size={iconSize} style={{ color: ach.earned ? "#fff" : c.textFaint }} />
+        </div>
+      </div>
+      <div className="font-mono text-[8px] uppercase tracking-wide text-center leading-tight w-full truncate" style={{ color: ach.earned ? c.text : c.textFaint }}>
+        {ach.label}
+      </div>
+    </div>
+  );
+}
+
+// Homepage teaser — a horizontally-scrolling row of badges (earned first,
+// then the nearest-to-unlocking locked ones), with an "X/Y" counter that
+// doubles as the tap target for the full list.
+function AchievementsStrip({ achievements, earnedCount, onOpen, c }) {
+  if (achievements.length === 0) return null;
+  return (
+    <section className="mt-8">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Achievements</div>
+        <button onClick={onOpen} className="flex items-center gap-0.5 font-mono text-[10px] font-bold uppercase tracking-wide" style={{ color: c.accent }}>
+          {earnedCount}/{achievements.length} <ChevronRight size={12} />
+        </button>
+      </div>
+      <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
+        className="flex gap-3 overflow-x-auto pb-1 cursor-pointer" style={{ scrollbarWidth: "none" }}>
+        {achievements.slice(0, 10).map((a) => <AchievementBadge key={a.id} ach={a} c={c} />)}
+      </div>
+    </section>
+  );
+}
+
+// The full achievements list — every badge, earned and locked, with the
+// locked ones showing exactly how close the player is (matches the ring on
+// each tile). Same modal shell as ProgressBreakdownModal for consistency.
+function AchievementsModal({ achievements, earnedCount, onClose, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
+              <Trophy size={13} /> Achievements
+            </div>
+            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{earnedCount} of {achievements.length} unlocked</div>
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-3 gap-x-2 gap-y-4">
+          {achievements.map((a) => (
+            <div key={a.id} className="flex flex-col items-center gap-1" title={a.desc}>
+              <AchievementBadge ach={a} size={54} c={c} />
+              <div className="font-body text-[9px] text-center leading-tight px-0.5" style={{ color: c.textFaint }}>
+                {a.earned ? a.desc : `${a.value}/${a.target}`}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -6344,6 +6468,51 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const myProgress = computeMyProgress(leagues, myTeam);
   const myDisplayName = profileFirstName(session) || session?.user?.email || "";
 
+  // Achievement badges — a second, more permanent collection layer next to
+  // the level/XP bar. Recomputed from the same data Home already has, so it
+  // can't drift out of sync with a player's real record.
+  const joinedLeagueCount = leagues.filter((l) => isMemberOf(l)).length;
+  const achievements = useMemo(
+    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank }),
+    [myProgress.played, myProgress.w, myProgress.bestStreak, myProgress.level, joinedLeagueCount, myLadderRank]
+  );
+  const earnedAchievementCount = achievements.filter((a) => a.earned).length;
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
+
+  // Fires a one-time toast the moment a badge is newly earned, the same
+  // localStorage-per-user pattern the level-up toast above uses — so a
+  // badge already earned in a previous session never re-fires here, only
+  // one crossed since the last time this ran on this device.
+  useEffect(() => {
+    if (!myId || achievements.length === 0) return;
+    const key = `efootball-badges-seen-${myId}`;
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { /* ignore — storage unavailable */ }
+    const earnedIds = achievements.filter((a) => a.earned).map((a) => a.id);
+    const newOnes = earnedIds.filter((id) => !seen.includes(id));
+    if (newOnes.length > 0) {
+      if (seen.length > 0 && showToast) {
+        const first = achievements.find((a) => a.id === newOnes[0]);
+        showToast(newOnes.length === 1 ? `Achievement unlocked: ${first.label} 🏆` : `${newOnes.length} new achievements unlocked 🏆`);
+      }
+      try { localStorage.setItem(key, JSON.stringify(earnedIds)); } catch (e) { /* ignore — storage unavailable */ }
+    }
+  }, [myId, achievements, showToast]);
+
+  // Mirrors every earned badge to Supabase (upsert is idempotent, so this is
+  // safe to re-run on every achievements recompute) — this is what lets a
+  // badge earned on one device show up on another, and what a future
+  // "wall of fame" of other players' badges would read from. Requires the
+  // `achievements` table from supabase/achievements-migration.sql.
+  useEffect(() => {
+    if (!myId) return;
+    const earned = achievements.filter((a) => a.earned);
+    if (earned.length === 0) return;
+    supabase.from("achievements")
+      .upsert(earned.map((a) => ({ user_id: myId, achievement_id: a.id })), { onConflict: "user_id,achievement_id", ignoreDuplicates: true })
+      .then(({ error }) => { if (error) console.error("achievements upsert failed", error); });
+  }, [myId, achievements]);
+
   // Fires a one-time celebration the moment a player's level actually goes
   // up, instead of leaving it as a silent bar reset. The last-seen level is
   // stashed in localStorage per user so a level reached in a previous
@@ -6453,6 +6622,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
         </div>
       </section>
+
+      {/* Achievements — the badge collection layer, right after quick
+          actions and before the competitive "where you stand" strips, so a
+          player sees what they've earned before what they're chasing next. */}
+      <AchievementsStrip achievements={achievements} earnedCount={earnedAchievementCount} onOpen={() => setAchievementsOpen(true)} c={c} />
+      {achievementsOpen && <AchievementsModal achievements={achievements} earnedCount={earnedAchievementCount} onClose={() => setAchievementsOpen(false)} c={c} />}
 
       {/* Where you stand — Leaderboard preview then the Ladder banner,
           grouped together right after quick actions so this competitive
