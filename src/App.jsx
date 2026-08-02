@@ -7067,7 +7067,8 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
     : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
   const progressPct = l.fixtures.length > 0 ? Math.round((played / l.fixtures.length) * 100) : 0;
   const initial = (l.name || "?").trim().charAt(0).toUpperCase();
-  const needsAttention = (isAdmin && pendingCount > 0) || (canManageLeague(l) && pendingResultsCount > 0);
+  const attentionCount = (isAdmin ? pendingCount : 0) + (canManageLeague(l) ? pendingResultsCount : 0);
+  const needsAttention = attentionCount > 0;
   return (
     <div onClick={() => onOpen(l.id)} className="group relative shrink-0 w-[168px] rounded-2xl cursor-pointer border overflow-hidden transition-transform active:scale-[0.97]"
       style={{
@@ -7088,7 +7089,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
             <span className="font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: "#B8860B", color: "#fff" }}>Cash</span>
           )}
           {needsAttention && (
-            <span className="font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.red, color: "#fff" }}>!</span>
+            <span className="min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{attentionCount}</span>
           )}
         </div>
         <div className="absolute top-1.5 right-1.5">
