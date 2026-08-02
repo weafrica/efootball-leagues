@@ -204,6 +204,21 @@ function formatKindLabel(formatId) {
   return FORMAT_KIND_LABELS[kind] || FORMATS.find((f) => f.id === formatId)?.label || "this format";
 }
 
+// True if the signed-in user has a club actively playing in `l` right now —
+// they've claimed a team, it hasn't been eliminated, and the league isn't
+// finished. Used both to build the active-fun-league-by-kind map below and,
+// more generally, to prioritize "leagues I'm currently active in" in list
+// ordering (see Home's sortLeagues).
+function isActiveMember(l, session) {
+  if (!session?.user?.id) return false;
+  const membership = l.members.find((m) => m.user_id === session.user.id);
+  if (!membership || !membership.team_id) return false;
+  const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
+  if (!myTeamInL || myTeamInL.eliminated) return false;
+  const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
+  return !leagueComplete;
+}
+
 // Builds a map of format-kind -> the signed-in user's currently active fun
 // league of that kind (at most one, by construction of the join rule below).
 // Computing this once per render and doing O(1) lookups per card is cheap;
@@ -212,15 +227,8 @@ function formatKindLabel(formatId) {
 // every render.
 function activeFunLeaguesByKind(leagues, session) {
   const map = new Map();
-  if (!session?.user?.id) return map;
   for (const l of leagues || []) {
-    if (l.league_type !== "fun") continue;
-    const membership = l.members.find((m) => m.user_id === session.user.id);
-    if (!membership || !membership.team_id) continue;
-    const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
-    if (!myTeamInL || myTeamInL.eliminated) continue;
-    const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
-    if (leagueComplete) continue;
+    if (l.league_type !== "fun" || !isActiveMember(l, session)) continue;
     const kind = FORMATS.find((f) => f.id === l.format)?.kind || l.format;
     if (!map.has(kind)) map.set(kind, l);
   }
@@ -6126,7 +6134,31 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
     if (myStatus === "rejected" || myStatus === "pending") score += 1;
     return score;
   };
-  const sortLeagues = (list) => [...list].sort((a, b) => attentionScore(b) - attentionScore(a) || new Date(b.created_at) - new Date(a.created_at));
+
+  // Same fun-league "active in this format-kind" map the join guard uses —
+  // needed here to know whether a fun league is actually joinable (not just
+  // not-yet-joined) before deciding whether to lead with it.
+  const activeByKindForSort = activeFunLeaguesByKind(leagues, session);
+  const isJoinable = (l) => {
+    if (isMemberOf(l) || entryClosed(l)) return false;
+    return l.league_type !== "fun" || !blockingLeagueFor(activeByKindForSort, l);
+  };
+
+  // Ordering priority: a league the player can actually join goes first —
+  // that's the one action worth surfacing. If nothing in this list is
+  // joinable right now, lead with the league they're currently active in
+  // instead, so they can jump back into their live match. Attention score
+  // and recency remain the tiebreaker within whichever bucket wins.
+  const sortLeagues = (list) => {
+    const anyJoinable = list.some(isJoinable);
+    return [...list].sort((a, b) => {
+      const priorityDiff = anyJoinable
+        ? (isJoinable(b) ? 1 : 0) - (isJoinable(a) ? 1 : 0)
+        : (isActiveMember(b, session) ? 1 : 0) - (isActiveMember(a, session) ? 1 : 0);
+      if (priorityDiff !== 0) return priorityDiff;
+      return attentionScore(b) - attentionScore(a) || new Date(b.created_at) - new Date(a.created_at);
+    });
+  };
 
   const totalClubs = leagues.reduce((sum, l) => sum + l.teams.length, 0);
   const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
