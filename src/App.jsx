@@ -584,11 +584,25 @@ function levelTitleFor(level) {
   return "Rookie";
 }
 
+// The next title tier up from the given level — what the "next: X" hint in
+// the breakdown modal points at. Returns null once a player is already at
+// the top tier (Legend), since there's nothing further to name.
+function nextTitleFor(level) {
+  if (level < 3) return "Contender";
+  if (level < 6) return "Veteran";
+  if (level < 11) return "Ace";
+  if (level < 16) return "Elite";
+  if (level < 21) return "Legend";
+  return null;
+}
+
 // The tap target for the Home player card's level/XP row — spells out the
 // math behind the bar (XP to go, full W/D/L record, current streak) instead
 // of leaving a player to guess what moves it.
 function ProgressBreakdownModal({ progress, onClose, c }) {
   const xpToGo = XP_PER_LEVEL - progress.xpIntoLevel;
+  const next = nextTitleFor(progress.level);
+  const winRate = progress.played ? Math.round((progress.w / progress.played) * 100) : 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
       <div className="w-full max-w-sm rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
@@ -597,14 +611,16 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
             <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
               <Star size={13} /> Level {progress.level} · {progress.levelTitle}
             </div>
-            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{xpToGo} XP to Level {progress.level + 1}</div>
+            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>
+              {xpToGo} XP to Level {progress.level + 1}{next && next !== progress.levelTitle ? ` · next: ${next}` : ""}
+            </div>
           </div>
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
         <div className="h-2 rounded-full overflow-hidden mb-5" style={{ background: c.surfaceHover }}>
           <div className="h-full rounded-full" style={{ width: `${(progress.xpIntoLevel / XP_PER_LEVEL) * 100}%`, background: c.accent }} />
         </div>
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-4 gap-2 mb-4">
           <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
             <div className="font-bold text-base" style={{ color: c.text }}>{progress.w}</div>
             <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Wins</div>
@@ -617,6 +633,10 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
             <div className="font-bold text-base" style={{ color: c.text }}>{progress.l}</div>
             <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Losses</div>
           </div>
+          <div className="text-center rounded-xl py-2.5" style={{ background: c.surfaceHover }}>
+            <div className="font-bold text-base" style={{ color: c.text }}>{winRate}%</div>
+            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Win rate</div>
+          </div>
         </div>
         {progress.streak >= 2 && (
           <div className="flex items-center gap-1.5 font-mono text-xs font-bold rounded-xl px-3 py-2 mb-4" style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
@@ -624,6 +644,7 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
           </div>
         )}
         <div className="font-body text-[11px] leading-relaxed" style={{ color: c.textFaint }}>
+          {progress.played} career {progress.played === 1 ? "match" : "matches"} ·{" "}
           Wins are worth 25 XP, draws 10 XP, losses 5 XP — every match you play moves the bar.
         </div>
       </div>
