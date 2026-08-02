@@ -6208,8 +6208,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </div>
       </section>
 
+      {/* Featured mode banner — the ladder's black/gold "ranked mode" look is
+          the most game-like element on the page, so it gets top billing
+          right under the player card, like a lobby's featured event. */}
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
+
       {/* Continue playing — the two "something's waiting on you" strips,
-          right under the player card so they read as an extension of it. */}
+          grouped right after the featured banner so the page reads
+          top-to-bottom as: who you are, what's live, what needs you now. */}
       <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
       <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
 
@@ -6222,8 +6228,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
         <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
       </section>
-
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
 
       {leagues.length === 0 && (
         <section className="mt-8">
