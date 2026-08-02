@@ -663,7 +663,9 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
           </div>
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
-        <div className="h-2 rounded-full overflow-hidden mb-5" style={{ background: c.surfaceHover }}>
+        <div className="h-2 rounded-full overflow-hidden mb-5" style={{ background: c.surfaceHover }}
+          role="progressbar" aria-valuenow={progress.xpIntoLevel} aria-valuemin={0} aria-valuemax={progress.xpForNextLevel}
+          aria-label={`Level ${progress.level} XP progress: ${progress.xpIntoLevel} of ${progress.xpForNextLevel}`}>
           <div className="h-full rounded-full" style={{ width: `${(progress.xpIntoLevel / progress.xpForNextLevel) * 100}%`, background: tier }} />
         </div>
         <div className="grid grid-cols-4 gap-2 mb-4">
@@ -6402,24 +6404,32 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
         {/* Level + XP bar, with a streak chip when the player is on a run —
             the "there's a game underneath the leagues" layer of the page.
-            Tapping it opens the full breakdown (level, XP-to-go, record). */}
-        {myProgress.played > 0 && (
+            Tapping it opens the full breakdown (level, XP-to-go, record).
+            Before a player's first match, a quiet teaser line stands in for
+            it instead of the row just not existing. */}
+        {myProgress.played > 0 ? (
           <div role="button" tabIndex={0} onClick={() => setProgressOpen(true)} onKeyDown={(e) => { if (e.key === "Enter") setProgressOpen(true); }}
             className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2 cursor-pointer">
             <div className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5"
               style={{ background: `${tierColorFor(myProgress.level)}1F`, color: tierColorFor(myProgress.level), border: `1px solid ${tierColorFor(myProgress.level)}55` }}>
               <Star size={10} /> Lvl {myProgress.level} · {myProgress.levelTitle}
             </div>
-            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}
+              role="progressbar" aria-valuenow={myProgress.xpIntoLevel} aria-valuemin={0} aria-valuemax={myProgress.xpForNextLevel}
+              aria-label={`Level ${myProgress.level} XP progress: ${myProgress.xpIntoLevel} of ${myProgress.xpForNextLevel}`}>
               <div className="h-full rounded-full transition-all" style={{ width: `${(myProgress.xpIntoLevel / myProgress.xpForNextLevel) * 100}%`, background: tierColorFor(myProgress.level) }} />
             </div>
             <div className="font-mono text-[9px] shrink-0" style={{ color: c.textFaint }}>{myProgress.xpIntoLevel}/{myProgress.xpForNextLevel} XP</div>
             {myProgress.streak >= 2 && (
-              <div className="flex items-center gap-1 font-mono text-[10px] font-bold shrink-0 rounded-full px-2 py-0.5"
+              <div className="flex items-center gap-1 font-mono text-[10px] font-bold shrink-0 rounded-full px-2 py-0.5" title={`${myProgress.streak}-match win streak`}
                 style={{ background: `${c.red}1F`, color: c.red, border: `1px solid ${c.red}55` }}>
                 <Flame size={10} /> {myProgress.streak}
               </div>
             )}
+          </div>
+        ) : (
+          <div className="relative px-4 pb-3.5 -mt-1 flex items-center gap-1.5 font-mono text-[10px]" style={{ color: c.textFaint }}>
+            <Star size={10} /> Play your first match to start earning XP and levelling up
           </div>
         )}
       </section>
