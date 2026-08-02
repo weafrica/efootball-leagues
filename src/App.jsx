@@ -9799,7 +9799,16 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
       return;
     }
 
-    const standings = computeStandings(league.teams, stageFixtures).map((r, i) => ({ ...r, rank: i + 1 }));
+    // Survivor-format table lookup. Rank must be computed against the same
+    // pool advanceSurvivor actually cuts from — active teams only — or an
+    // already-eliminated club (which has zero fixtures in the current stage)
+    // can tie its way to a deceptively "safe" looking rank near the top.
+    if (team.eliminated) {
+      setResult({ kind: "table", team, eliminated: true, standings: [], myRow: null, nextFixture: null, allTeams: league.teams });
+      return;
+    }
+    const activeTeams = league.teams.filter((t) => !t.eliminated);
+    const standings = computeStandings(activeTeams, stageFixtures).map((r, i) => ({ ...r, rank: i + 1 }));
     const myRow = standings.find((r) => r.id === team.id);
     const nextFixture = stageFixtures.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
       .sort((a, b) => a.round - b.round)[0];
@@ -9901,7 +9910,13 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
         </div>
       ) : (
         <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-          <div className="font-semibold mb-1">{result.team.name}</div>
+          <div className="font-semibold mb-1">
+            {result.team.name}
+            {result.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : ""}
+          </div>
+          {result.eliminated ? (
+            <div className="font-mono text-xs" style={{ color: c.textFaint }}>{result.team.name} has been eliminated from this league.</div>
+          ) : (<>
           {result.myRow && (
             <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>
               {result.myRow.rank}{result.myRow.rank === 1 ? "st" : result.myRow.rank === 2 ? "nd" : result.myRow.rank === 3 ? "rd" : "th"} in the table ·
@@ -9928,6 +9943,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
               </div>
             );
           })()}
+          </>)}
         </div>
       ))}
     </div>
