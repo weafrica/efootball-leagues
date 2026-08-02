@@ -2545,7 +2545,7 @@ export default function App() {
   // looked up live from the account. Leagues the account created keep
   // running too; the function just hands them off to platform admins to
   // manage instead of deleting them.
-  const deleteAccount = async (account, leagueCounts) => {
+  const deleteAccount = (account, leagueCounts) => {
     const label = account.efootball_username || account.email || "this account";
     const createdWarning = leagueCounts.created > 0
       ? ` They created ${leagueCounts.created} league${leagueCounts.created === 1 ? "" : "s"} — ${leagueCounts.created === 1 ? "it" : "those"} will keep running exactly as-is, just manageable only by platform admins from now on.`
@@ -2553,12 +2553,19 @@ export default function App() {
     const joinedWarning = leagueCounts.joined > 0
       ? ` They're a member of ${leagueCounts.joined} league${leagueCounts.joined === 1 ? "" : "s"} — their club name and results stay in those leagues, just no longer linked to a live account.`
       : "";
-    if (!window.confirm(`Permanently delete ${label}'s account? This removes their login, phone number and profile for good and can't be undone.${createdWarning}${joinedWarning}`)) return;
-    const { error } = await supabase.rpc("admin_delete_account", { target_user_id: account.user_id });
-    if (error) { showToast(`Couldn't delete account: ${error.message}`); return; }
-    setAccounts((prev) => (prev || []).filter((a) => a.user_id !== account.user_id));
-    await loadLeagues();
-    showToast(`${label} deleted.`);
+    requestConfirm([
+      `Permanently delete ${label}'s account? This removes their login, phone number and profile for good and can't be undone.${createdWarning}${joinedWarning}`,
+      `Are you sure? ${label}'s login will stop working immediately.`,
+      `Really sure you want ${label} gone for good?`,
+      `Last check before deleting ${label} — still want to continue?`,
+      `Final confirmation — click to permanently delete ${label}'s account.`,
+    ], async () => {
+      const { error } = await supabase.rpc("admin_delete_account", { target_user_id: account.user_id });
+      if (error) { showToast(`Couldn't delete account: ${error.message}`); return; }
+      setAccounts((prev) => (prev || []).filter((a) => a.user_id !== account.user_id));
+      await loadLeagues();
+      showToast(`${label} deleted.`);
+    });
   };
 
   // Admin-only — marks an account approved via a security-definer function
@@ -3467,6 +3474,10 @@ export default function App() {
   };
 
   const generateFixtures = async (league) => {
+    const key = `gen-${league.id}`;
+    if (stageActionInFlight.current.has(key)) return;
+    stageActionInFlight.current.add(key);
+    try {
     // Same class of fix as the advance-stage functions: read the current
     // roster fresh from the database right before generating fixtures. A
     // club that joined moments ago but hasn't shown up in this browser's
@@ -3489,6 +3500,9 @@ export default function App() {
     if (startsInFinal) await supabase.from("leagues").update({ final_stage_started: true }).eq("id", league.id);
     await loadLeagues();
     showToast(`League started — ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
+    } finally {
+      stageActionInFlight.current.delete(key);
+    }
   };
 
   const advanceGroupsToKnockout = async (league) => {
@@ -3540,6 +3554,11 @@ export default function App() {
   };
 
   const joinInFlight = useRef(new Set());
+  // Same idea as joinInFlight, for the admin-side actions that generate or
+  // advance fixtures — a double-tap here (easy to do on mobile) would fire
+  // the insert twice before the button's derived `disabled` state catches
+  // up, which can duplicate a whole round of fixtures.
+  const stageActionInFlight = useRef(new Set());
   const joinLeague = async (leagueId) => {
     if (joinInFlight.current.has(leagueId)) return;
     joinInFlight.current.add(leagueId);
@@ -4040,10 +4059,17 @@ export default function App() {
   };
 
   const advanceStage = async (league) => {
-    if (league.format === "knockout") return advanceKnockout(league);
-    if (league.format === "survivor") return advanceSurvivor(league);
-    if (league.format === "groups_knockout") {
-      return league.final_stage_started ? advanceKnockout(league) : advanceGroupsToKnockout(league);
+    const key = `adv-${league.id}`;
+    if (stageActionInFlight.current.has(key)) return;
+    stageActionInFlight.current.add(key);
+    try {
+      if (league.format === "knockout") return await advanceKnockout(league);
+      if (league.format === "survivor") return await advanceSurvivor(league);
+      if (league.format === "groups_knockout") {
+        return league.final_stage_started ? await advanceKnockout(league) : await advanceGroupsToKnockout(league);
+      }
+    } finally {
+      stageActionInFlight.current.delete(key);
     }
   };
 
