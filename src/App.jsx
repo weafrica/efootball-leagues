@@ -3467,11 +3467,18 @@ export default function App() {
   };
 
   const generateFixtures = async (league) => {
-    if (league.teams.length < 2) { showToast("Need at least 2 registered clubs to start the league."); return; }
-    if (league.format === "groups_knockout" && league.teams.length < 4) {
+    // Same class of fix as the advance-stage functions: read the current
+    // roster fresh from the database right before generating fixtures. A
+    // club that joined moments ago but hasn't shown up in this browser's
+    // state yet would otherwise be silently left out of the whole schedule.
+    const { data: freshTeams, error: teamsErr } = await supabase.from("teams").select("*").eq("league_id", league.id);
+    if (teamsErr) { showToast("Couldn't confirm the current club list — try again."); return; }
+
+    if (freshTeams.length < 2) { showToast("Need at least 2 registered clubs to start the league."); return; }
+    if (league.format === "groups_knockout" && freshTeams.length < 4) {
       showToast("Need at least 4 clubs to form groups."); return;
     }
-    const { fixtureRows, startsInFinal, groups: groupAssignments, groupsCount } = generateOpeningFixtures(league, league.teams.map((t) => t.id), generationDueBase(league));
+    const { fixtureRows, startsInFinal, groups: groupAssignments, groupsCount } = generateOpeningFixtures(league, freshTeams.map((t) => t.id), generationDueBase(league));
     if (groupAssignments) {
       const ok = await persistGroupAssignments(groupAssignments);
       if (!ok) return;
@@ -3481,7 +3488,7 @@ export default function App() {
     if (!ok) return;
     if (startsInFinal) await supabase.from("leagues").update({ final_stage_started: true }).eq("id", league.id);
     await loadLeagues();
-    showToast(`League started — ${fixtureRows.length} fixtures generated for ${league.teams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
+    showToast(`League started — ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
   };
 
   const advanceGroupsToKnockout = async (league) => {
