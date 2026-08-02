@@ -23,6 +23,7 @@ import {
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles,
+  Zap, Repeat, Rocket,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -573,7 +574,7 @@ function computeMyProgress(leagues, myTeam) {
       const isHome = f.home_team_id === team.id;
       const gf = isHome ? f.home_score : f.away_score;
       const ga = isHome ? f.away_score : f.home_score;
-      matches.push({ time: new Date(fixturePlayedDate(f)).getTime(), outcome: gf > ga ? "w" : gf < ga ? "l" : "d" });
+      matches.push({ time: new Date(fixturePlayedDate(f)).getTime(), outcome: gf > ga ? "w" : gf < ga ? "l" : "d", gf, ga });
     });
   });
   matches.sort((a, b) => a.time - b.time);
@@ -600,9 +601,23 @@ function computeMyProgress(leagues, myTeam) {
     else run = 0;
   });
 
+  // Career-best unbeaten run (wins + draws) — a looser cousin of the win
+  // streak for the "hard to beat" achievement, since a string of draws
+  // against tough opponents deserves credit too, not just outright wins.
+  let bestNoLossStreak = 0, noLossRun = 0;
+  matches.forEach((m) => {
+    if (m.outcome !== "l") { noLossRun++; bestNoLossStreak = Math.max(bestNoLossStreak, noLossRun); }
+    else noLossRun = 0;
+  });
+
+  // Wins with a shutout at the back, and the biggest winning margin — feed
+  // the "clean sheet" and "demolition job" achievements respectively.
+  const cleanSheets = matches.filter((m) => m.outcome === "w" && m.ga === 0).length;
+  const biggestWinMargin = matches.reduce((max, m) => (m.outcome === "w" ? Math.max(max, m.gf - m.ga) : max), 0);
+
   const xp = w * 25 + d * 10 + l * 5;
   const { level, xpIntoLevel, xpForNextLevel } = levelForXp(xp);
-  return { played: matches.length, w, d, l, streak, bestStreak, xp, level, xpIntoLevel, xpForNextLevel, levelTitle: levelTitleFor(level) };
+  return { played: matches.length, w, d, l, streak, bestStreak, bestNoLossStreak, cleanSheets, biggestWinMargin, xp, level, xpIntoLevel, xpForNextLevel, levelTitle: levelTitleFor(level) };
 }
 
 // Purely cosmetic rank names for the level badge — a light "there's more to
@@ -717,23 +732,31 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
 // out of sync. `value(ctx)` returns the player's raw progress toward
 // `target`; reaching or passing target earns the badge.
 const ACHIEVEMENTS_DEF = [
-  { id: "first_match", icon: Gamepad2, color: "#3B82F6", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
-  { id: "matches_10", icon: Calendar, color: "#3B82F6", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
-  { id: "matches_50", icon: History, color: "#3B82F6", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
-  { id: "first_win", icon: Trophy, color: "#22C55E", label: "First Blood", desc: "Win your first match", target: 1, value: (ctx) => ctx.p.w },
-  { id: "wins_10", icon: Medal, color: "#22C55E", label: "Winning Machine", desc: "Win 10 matches", target: 10, value: (ctx) => ctx.p.w },
-  { id: "wins_25", icon: Award, color: "#22C55E", label: "Champion Mentality", desc: "Win 25 matches", target: 25, value: (ctx) => ctx.p.w },
-  { id: "streak_3", icon: Flame, color: "#F97316", label: "Hot Streak", desc: "Win 3 matches in a row", target: 3, value: (ctx) => ctx.p.bestStreak },
-  { id: "streak_5", icon: Flame, color: "#EF4444", label: "On Fire", desc: "Win 5 matches in a row", target: 5, value: (ctx) => ctx.p.bestStreak },
-  { id: "streak_10", icon: Sparkles, color: "#EF4444", label: "Unstoppable", desc: "Win 10 matches in a row", target: 10, value: (ctx) => ctx.p.bestStreak },
-  { id: "level_6", icon: Shield, color: "#3B82F6", label: "Veteran Status", desc: "Reach Level 6", target: 6, value: (ctx) => ctx.p.level },
-  { id: "level_11", icon: Swords, color: "#A855F7", label: "Ace Status", desc: "Reach Level 11", target: 11, value: (ctx) => ctx.p.level },
-  { id: "level_21", icon: Crown, color: "#FFD700", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
-  { id: "join_league", icon: Users, color: "#14B8A6", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
-  { id: "join_3", icon: Layers, color: "#14B8A6", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
-  { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
-  { id: "ladder_top10", icon: Star, color: "#FFD700", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
-  { id: "ladder_no1", icon: Crown, color: "#FFD700", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
+  { id: "first_match", icon: Gamepad2, color: "#3B82F6", tier: "bronze", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
+  { id: "matches_10", icon: Calendar, color: "#3B82F6", tier: "silver", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
+  { id: "matches_50", icon: History, color: "#3B82F6", tier: "gold", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
+  { id: "century", icon: Package, color: "#6366F1", tier: "platinum", label: "Centurion", desc: "Play 100 matches", target: 100, value: (ctx) => ctx.p.played },
+  { id: "first_win", icon: Trophy, color: "#22C55E", tier: "bronze", label: "First Blood", desc: "Win your first match", target: 1, value: (ctx) => ctx.p.w },
+  { id: "wins_10", icon: Medal, color: "#22C55E", tier: "silver", label: "Winning Machine", desc: "Win 10 matches", target: 10, value: (ctx) => ctx.p.w },
+  { id: "wins_25", icon: Award, color: "#22C55E", tier: "gold", label: "Champion Mentality", desc: "Win 25 matches", target: 25, value: (ctx) => ctx.p.w },
+  { id: "wins_50", icon: Target, color: "#22C55E", tier: "platinum", label: "Serial Winner", desc: "Win 50 matches", target: 50, value: (ctx) => ctx.p.w },
+  { id: "draws_10", icon: Repeat, color: "#F59E0B", tier: "silver", label: "Stalemate Specialist", desc: "Draw 10 matches", target: 10, value: (ctx) => ctx.p.d },
+  { id: "clean_sheets_5", icon: CheckCircle2, color: "#06B6D4", tier: "silver", label: "Clean Sheet Starter", desc: "Win 5 matches without conceding", target: 5, value: (ctx) => ctx.p.cleanSheets },
+  { id: "clean_sheets_15", icon: CheckCircle2, color: "#0891B2", tier: "gold", label: "Defensive Wall", desc: "Win 15 matches without conceding", target: 15, value: (ctx) => ctx.p.cleanSheets },
+  { id: "big_win", icon: Zap, color: "#EF4444", tier: "gold", label: "Demolition Job", desc: "Win a match by 4 or more goals", target: 1, value: (ctx) => (ctx.p.biggestWinMargin >= 4 ? 1 : 0) },
+  { id: "unbeaten_10", icon: Shield, color: "#84CC16", tier: "gold", label: "Iron Wall", desc: "Go 10 matches without a loss", target: 10, value: (ctx) => ctx.p.bestNoLossStreak },
+  { id: "streak_3", icon: Flame, color: "#F97316", tier: "silver", label: "Hot Streak", desc: "Win 3 matches in a row", target: 3, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_5", icon: Flame, color: "#EF4444", tier: "gold", label: "On Fire", desc: "Win 5 matches in a row", target: 5, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_10", icon: Sparkles, color: "#EF4444", tier: "platinum", label: "Unstoppable", desc: "Win 10 matches in a row", target: 10, value: (ctx) => ctx.p.bestStreak },
+  { id: "level_6", icon: Shield, color: "#3B82F6", tier: "silver", label: "Veteran Status", desc: "Reach Level 6", target: 6, value: (ctx) => ctx.p.level },
+  { id: "level_11", icon: Swords, color: "#A855F7", tier: "gold", label: "Ace Status", desc: "Reach Level 11", target: 11, value: (ctx) => ctx.p.level },
+  { id: "level_16", icon: Rocket, color: "#F97316", tier: "platinum", label: "Elite Status", desc: "Reach Level 16", target: 16, value: (ctx) => ctx.p.level },
+  { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
+  { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
+  { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
+  { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
+  { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
+  { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
 ];
 
 // Earned badges sort first (most nearly-complete locked badge next), so the
