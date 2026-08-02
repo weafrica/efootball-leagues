@@ -3745,7 +3745,13 @@ export default function App() {
 
     const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
     if (inKnockoutBracket && fixture.away_team_id) {
-      const tieFixtures = league.fixtures
+      // Fetch this tie's leg(s) fresh — not from local `league.fixtures` —
+      // so a leg completed earlier (but not yet reflected in this browser's
+      // state) doesn't make an already-finished tie look incomplete and
+      // silently skip elimination.
+      const { data: freshLegs, error: legsErr } = await supabase.from("fixtures")
+        .select("*").eq("league_id", league.id).eq("stage", fixture.stage).eq("round", fixture.round);
+      const tieFixtures = (legsErr ? league.fixtures : freshLegs)
         .filter((f) => f.stage === fixture.stage && f.round === fixture.round &&
           ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id) ||
            (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id)))
