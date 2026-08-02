@@ -732,32 +732,62 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
 // out of sync. `value(ctx)` returns the player's raw progress toward
 // `target`; reaching or passing target earns the badge.
 const ACHIEVEMENTS_DEF = [
-  { id: "first_match", icon: Gamepad2, color: "#3B82F6", tier: "bronze", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
-  { id: "matches_10", icon: Calendar, color: "#3B82F6", tier: "silver", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
-  { id: "matches_50", icon: History, color: "#3B82F6", tier: "gold", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
-  { id: "century", icon: Package, color: "#6366F1", tier: "platinum", label: "Centurion", desc: "Play 100 matches", target: 100, value: (ctx) => ctx.p.played },
-  { id: "first_win", icon: Trophy, color: "#22C55E", tier: "bronze", label: "First Blood", desc: "Win your first match", target: 1, value: (ctx) => ctx.p.w },
-  { id: "wins_10", icon: Medal, color: "#22C55E", tier: "silver", label: "Winning Machine", desc: "Win 10 matches", target: 10, value: (ctx) => ctx.p.w },
-  { id: "wins_25", icon: Award, color: "#22C55E", tier: "gold", label: "Champion Mentality", desc: "Win 25 matches", target: 25, value: (ctx) => ctx.p.w },
-  { id: "wins_50", icon: Target, color: "#22C55E", tier: "platinum", label: "Serial Winner", desc: "Win 50 matches", target: 50, value: (ctx) => ctx.p.w },
-  { id: "draws_10", icon: Repeat, color: "#F59E0B", tier: "silver", label: "Stalemate Specialist", desc: "Draw 10 matches", target: 10, value: (ctx) => ctx.p.d },
-  { id: "clean_sheets_5", icon: CheckCircle2, color: "#06B6D4", tier: "silver", label: "Clean Sheet Starter", desc: "Win 5 matches without conceding", target: 5, value: (ctx) => ctx.p.cleanSheets },
-  { id: "clean_sheets_15", icon: CheckCircle2, color: "#0891B2", tier: "gold", label: "Defensive Wall", desc: "Win 15 matches without conceding", target: 15, value: (ctx) => ctx.p.cleanSheets },
-  { id: "big_win", icon: Zap, color: "#EF4444", tier: "gold", label: "Demolition Job", desc: "Win a match by 4 or more goals", target: 1, value: (ctx) => (ctx.p.biggestWinMargin >= 4 ? 1 : 0) },
-  { id: "unbeaten_10", icon: Shield, color: "#84CC16", tier: "gold", label: "Iron Wall", desc: "Go 10 matches without a loss", target: 10, value: (ctx) => ctx.p.bestNoLossStreak },
-  { id: "streak_3", icon: Flame, color: "#F97316", tier: "silver", label: "Hot Streak", desc: "Win 3 matches in a row", target: 3, value: (ctx) => ctx.p.bestStreak },
-  { id: "streak_5", icon: Flame, color: "#EF4444", tier: "gold", label: "On Fire", desc: "Win 5 matches in a row", target: 5, value: (ctx) => ctx.p.bestStreak },
-  { id: "streak_10", icon: Sparkles, color: "#EF4444", tier: "platinum", label: "Unstoppable", desc: "Win 10 matches in a row", target: 10, value: (ctx) => ctx.p.bestStreak },
-  { id: "level_6", icon: Shield, color: "#3B82F6", tier: "silver", label: "Veteran Status", desc: "Reach Level 6", target: 6, value: (ctx) => ctx.p.level },
-  { id: "level_11", icon: Swords, color: "#A855F7", tier: "gold", label: "Ace Status", desc: "Reach Level 11", target: 11, value: (ctx) => ctx.p.level },
-  { id: "level_16", icon: Rocket, color: "#F97316", tier: "platinum", label: "Elite Status", desc: "Reach Level 16", target: 16, value: (ctx) => ctx.p.level },
-  { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
-  { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
-  { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
-  { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
-  { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
-  { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
+  { id: "first_match", icon: Gamepad2, color: "#3B82F6", tier: "bronze", category: "matches", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
+  { id: "matches_10", icon: Calendar, color: "#3B82F6", tier: "silver", category: "matches", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
+  { id: "matches_50", icon: History, color: "#3B82F6", tier: "gold", category: "matches", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
+  { id: "century", icon: Package, color: "#6366F1", tier: "platinum", category: "matches", label: "Centurion", desc: "Play 100 matches", target: 100, value: (ctx) => ctx.p.played },
+  { id: "first_win", icon: Trophy, color: "#22C55E", tier: "bronze", category: "wins", label: "First Blood", desc: "Win your first match", target: 1, value: (ctx) => ctx.p.w },
+  { id: "wins_10", icon: Medal, color: "#22C55E", tier: "silver", category: "wins", label: "Winning Machine", desc: "Win 10 matches", target: 10, value: (ctx) => ctx.p.w },
+  { id: "wins_25", icon: Award, color: "#22C55E", tier: "gold", category: "wins", label: "Champion Mentality", desc: "Win 25 matches", target: 25, value: (ctx) => ctx.p.w },
+  { id: "wins_50", icon: Target, color: "#22C55E", tier: "platinum", category: "wins", label: "Serial Winner", desc: "Win 50 matches", target: 50, value: (ctx) => ctx.p.w },
+  { id: "draws_10", icon: Repeat, color: "#F59E0B", tier: "silver", category: "form", label: "Stalemate Specialist", desc: "Draw 10 matches", target: 10, value: (ctx) => ctx.p.d },
+  { id: "clean_sheets_5", icon: CheckCircle2, color: "#06B6D4", tier: "silver", category: "form", label: "Clean Sheet Starter", desc: "Win 5 matches without conceding", target: 5, value: (ctx) => ctx.p.cleanSheets },
+  { id: "clean_sheets_15", icon: CheckCircle2, color: "#0891B2", tier: "gold", category: "form", label: "Defensive Wall", desc: "Win 15 matches without conceding", target: 15, value: (ctx) => ctx.p.cleanSheets },
+  { id: "big_win", icon: Zap, color: "#EF4444", tier: "gold", category: "form", label: "Demolition Job", desc: "Win a match by 4 or more goals", target: 1, value: (ctx) => (ctx.p.biggestWinMargin >= 4 ? 1 : 0) },
+  { id: "unbeaten_10", icon: Shield, color: "#84CC16", tier: "gold", category: "form", label: "Iron Wall", desc: "Go 10 matches without a loss", target: 10, value: (ctx) => ctx.p.bestNoLossStreak },
+  { id: "streak_3", icon: Flame, color: "#F97316", tier: "silver", category: "form", label: "Hot Streak", desc: "Win 3 matches in a row", target: 3, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_5", icon: Flame, color: "#EF4444", tier: "gold", category: "form", label: "On Fire", desc: "Win 5 matches in a row", target: 5, value: (ctx) => ctx.p.bestStreak },
+  { id: "streak_10", icon: Sparkles, color: "#EF4444", tier: "platinum", category: "form", label: "Unstoppable", desc: "Win 10 matches in a row", target: 10, value: (ctx) => ctx.p.bestStreak },
+  { id: "level_6", icon: Shield, color: "#3B82F6", tier: "silver", category: "level", label: "Veteran Status", desc: "Reach Level 6", target: 6, value: (ctx) => ctx.p.level },
+  { id: "level_11", icon: Swords, color: "#A855F7", tier: "gold", category: "level", label: "Ace Status", desc: "Reach Level 11", target: 11, value: (ctx) => ctx.p.level },
+  { id: "level_16", icon: Rocket, color: "#F97316", tier: "platinum", category: "level", label: "Elite Status", desc: "Reach Level 16", target: 16, value: (ctx) => ctx.p.level },
+  { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", category: "level", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
+  { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", category: "leagues", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
+  { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", category: "leagues", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
+  { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", category: "ladder", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
+  { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", category: "ladder", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
+  { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
 ];
+
+// Fixed display order + label for each achievement category — used to group
+// the full list in the modal so browsing reads as "here's everything in
+// Wins, here's everything in Form", not a flat wall of 25 tiles.
+const ACHIEVEMENT_CATEGORIES = [
+  { id: "matches", label: "Matches Played" },
+  { id: "wins", label: "Wins" },
+  { id: "form", label: "Form & Style" },
+  { id: "level", label: "Level" },
+  { id: "leagues", label: "Leagues" },
+  { id: "ladder", label: "Ladder" },
+];
+
+// Groups an already-computed achievements list by category, in the fixed
+// order above, preserving each item's relative order (earned, then closest
+// to earning) within its group.
+function groupAchievementsByCategory(achievements) {
+  const byCategory = {};
+  achievements.forEach((a) => {
+    if (!byCategory[a.category]) byCategory[a.category] = [];
+    byCategory[a.category].push(a);
+  });
+  return ACHIEVEMENT_CATEGORIES.filter((cat) => byCategory[cat.id]).map((cat) => ({ ...cat, items: byCategory[cat.id] }));
+}
+
+// Visual weight per rarity tier — how thick the ring is. Gold and platinum
+// (the harder badges) also get a soft pulsing glow once earned (see the
+// animate-achievement-glow keyframes in index.css), so the rarest badges
+// are unmistakably the shiniest tiles in the strip.
+const TIER_RING = { bronze: 1.5, silver: 2, gold: 2.5, platinum: 3 };
 
 // Earned badges sort first (most nearly-complete locked badge next), so the
 // strip's leading tiles are always either something to be proud of or
@@ -773,13 +803,16 @@ function computeAchievements(ctx) {
   });
 }
 
-// A single badge tile — a filled, colored ring around the icon once earned;
-// a dim outline with a thin progress ring (how close) while locked. Used
-// both in the homepage strip (small) and the full achievements modal
+// A single badge tile — a filled, colored ring around the icon once earned
+// (ring thickness and, for gold/platinum, a soft glow scale with rarity
+// tier); a dim outline with a thin progress ring (how close) while locked.
+// Used both in the homepage strip (small) and the full achievements modal
 // (larger), so size is a prop rather than fixed.
 function AchievementBadge({ ach, size = 44, c }) {
   const pct = Math.round((ach.value / ach.target) * 100);
   const iconSize = Math.round(size * 0.42);
+  const ringWidth = TIER_RING[ach.tier] || 1.5;
+  const glows = ach.earned && (ach.tier === "gold" || ach.tier === "platinum");
   return (
     <div className="flex flex-col items-center gap-1 shrink-0" style={{ width: size + 14 }}>
       <div className="relative flex items-center justify-center rounded-full" style={{ width: size, height: size }}>
@@ -789,13 +822,20 @@ function AchievementBadge({ ach, size = 44, c }) {
             <circle cx="18" cy="18" r="16" fill="none" stroke={ach.color} strokeWidth="2" strokeLinecap="round" pathLength="100" strokeDasharray={`${pct} 100`} />
           </svg>
         )}
-        <div className="flex items-center justify-center rounded-full" style={{
+        <div className={glows ? "animate-achievement-glow rounded-full" : "rounded-full"} style={{
           width: size - 6, height: size - 6,
           background: ach.earned ? `linear-gradient(135deg, ${ach.color}, ${ach.color}99)` : c.surfaceHover,
-          border: `1px solid ${ach.earned ? ach.color : c.border}`,
+          border: `${ringWidth}px solid ${ach.earned ? ach.color : c.border}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          "--badge-glow": ach.color,
         }}>
           <ach.icon size={iconSize} style={{ color: ach.earned ? "#fff" : c.textFaint }} />
         </div>
+        {ach.earned && ach.tier === "platinum" && (
+          <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full" style={{ width: size * 0.32, height: size * 0.32, background: "#FFD700", border: `1.5px solid ${c.bg}` }}>
+            <Sparkles size={size * 0.18} style={{ color: "#1a1a1a" }} />
+          </span>
+        )}
       </div>
       <div className="font-mono text-[8px] uppercase tracking-wide text-center leading-tight w-full truncate" style={{ color: ach.earned ? c.text : c.textFaint }}>
         {ach.label}
@@ -806,9 +846,13 @@ function AchievementBadge({ ach, size = 44, c }) {
 
 // Homepage teaser — a horizontally-scrolling row of badges (earned first,
 // then the nearest-to-unlocking locked ones), with an "X/Y" counter that
-// doubles as the tap target for the full list.
+// doubles as the tap target for the full list, and a small progress bar
+// underneath so overall collection progress reads at a glance without
+// having to count tiles. The row fades out at each edge (mask-image)
+// instead of hard-cutting mid-badge, hinting that it scrolls.
 function AchievementsStrip({ achievements, earnedCount, onOpen, c }) {
   if (achievements.length === 0) return null;
+  const pct = Math.round((earnedCount / achievements.length) * 100);
   return (
     <section className="mt-8">
       <div className="flex items-center justify-between mb-2">
@@ -817,22 +861,29 @@ function AchievementsStrip({ achievements, earnedCount, onOpen, c }) {
           {earnedCount}/{achievements.length} <ChevronRight size={12} />
         </button>
       </div>
+      <div className="h-1 rounded-full overflow-hidden mb-3" style={{ background: c.surfaceHover }}>
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: c.accent }} />
+      </div>
       <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
-        className="flex gap-3 overflow-x-auto pb-1 cursor-pointer" style={{ scrollbarWidth: "none" }}>
+        className="flex gap-3 overflow-x-auto pb-1 cursor-pointer" style={{ scrollbarWidth: "none", WebkitMaskImage: "linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent)", maskImage: "linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent)" }}>
         {achievements.slice(0, 10).map((a) => <AchievementBadge key={a.id} ach={a} c={c} />)}
       </div>
     </section>
   );
 }
 
-// The full achievements list — every badge, earned and locked, with the
-// locked ones showing exactly how close the player is (matches the ring on
-// each tile). Same modal shell as ProgressBreakdownModal for consistency.
+// The full achievements list — every badge, earned and locked, grouped by
+// category (Matches, Wins, Form & Style, Level, Leagues, Ladder) so
+// browsing reads as sections rather than one flat wall of tiles. An overall
+// progress bar up top mirrors the strip's, and each locked tile shows
+// exactly how close the player is via its progress ring + the X/Y caption.
 function AchievementsModal({ achievements, earnedCount, onClose, c }) {
+  const pct = Math.round((earnedCount / achievements.length) * 100);
+  const groups = groupAchievementsByCategory(achievements);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
       <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-5">
+        <div className="flex items-start justify-between mb-2">
           <div>
             <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
               <Trophy size={13} /> Achievements
@@ -841,16 +892,24 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
           </div>
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
-        <div className="grid grid-cols-3 gap-x-2 gap-y-4">
-          {achievements.map((a) => (
-            <div key={a.id} className="flex flex-col items-center gap-1" title={a.desc}>
-              <AchievementBadge ach={a} size={54} c={c} />
-              <div className="font-body text-[9px] text-center leading-tight px-0.5" style={{ color: c.textFaint }}>
-                {a.earned ? a.desc : `${a.value}/${a.target}`}
-              </div>
-            </div>
-          ))}
+        <div className="h-1.5 rounded-full overflow-hidden mb-6" style={{ background: c.surfaceHover }}>
+          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: c.accent }} />
         </div>
+        {groups.map((group, i) => (
+          <div key={group.id} className={i > 0 ? "mt-6" : ""}>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>{group.label}</div>
+            <div className="grid grid-cols-3 gap-x-2 gap-y-4">
+              {group.items.map((a) => (
+                <div key={a.id} className="flex flex-col items-center gap-1" title={a.desc}>
+                  <AchievementBadge ach={a} size={54} c={c} />
+                  <div className="font-body text-[9px] text-center leading-tight px-0.5" style={{ color: c.textFaint }}>
+                    {a.earned ? a.desc : `${a.value}/${a.target}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

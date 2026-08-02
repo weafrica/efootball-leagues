@@ -55,6 +55,16 @@ html, body {
 .animate-pick-bob { animation: pick-bob 3.2s ease-in-out infinite; }
 .animate-pick-ring { animation: pick-ring-glow 3.2s ease-in-out infinite; }
 
+/* Soft pulsing ring glow for earned gold/platinum achievement badges — same
+   reasoning as the ladder pick ring glow above: a little "alive" flourish
+   in the badge's own color that reads as rarity without needing a second
+   image asset per tier. */
+@keyframes achievement-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)55, 0 0 8px 0 var(--badge-glow, #FFD700)33; }
+  50% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)aa, 0 0 16px 3px var(--badge-glow, #FFD700)66; }
+}
+.animate-achievement-glow { animation: achievement-glow 2.6s ease-in-out infinite; }
+
 /* Hexagon crop for the floating product photos — an "exciting" shape vs. a
    plain square/circle, still just CSS so no extra image assets needed. */
 .hex-clip { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%); }
