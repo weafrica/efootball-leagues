@@ -6240,7 +6240,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
             </span>
             <div className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>No leagues yet</div>
             <div className="font-body text-sm max-w-[220px]" style={{ color: c.textDim }}>Start the first one — it takes about a minute.</div>
-            <button onClick={onCreate} className="mt-1 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-lg px-4 py-2"
+            <button onClick={onCreate} className="mt-1 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-lg px-4 py-2 transition-transform active:scale-95"
               style={{ background: c.accent, color: c.accentText }}>
               <Plus size={13} /> Create a league
             </button>
@@ -6275,7 +6275,7 @@ function UpNextStrip({ fixtures, onOpen, c }) {
         {fixtures.map((f) => (
           <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId, f.fixtureId)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId); }}
-            className="shrink-0 w-40 text-left rounded-xl p-3 font-body cursor-pointer"
+            className="shrink-0 w-40 text-left rounded-xl p-3 font-body cursor-pointer transition-transform active:scale-[0.97]"
             style={{ background: c.surface, border: `1px solid ${c.border}` }}>
             <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
             <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>{f.opponent.name}</div>
@@ -6315,7 +6315,7 @@ function PendingResultsStrip({ items, onOpenLogResult, onOpenLogResultOpen, c })
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
         {items.map((item) => (
           <button key={item.id} onClick={() => (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge))}
-            className="shrink-0 w-44 text-left rounded-xl p-3 font-body"
+            className="shrink-0 w-44 text-left rounded-xl p-3 font-body transition-transform active:scale-[0.97]"
             style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
             <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
               {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
@@ -6345,7 +6345,7 @@ function profileFirstName(session) {
 // the app rather than opening a screen inside it.
 function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
   return (
-    <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
+    <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body transition-transform active:scale-[0.97]"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {badge > 0 && (
         <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff" }}>{badge}</span>
@@ -6377,7 +6377,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
   return (
     <section className="pt-5">
       <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
-        className="w-full rounded-2xl p-3.5 text-left cursor-pointer" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        className="w-full rounded-2xl p-3.5 text-left cursor-pointer transition-transform active:scale-[0.99]" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${c.borderStrong}` }} />
@@ -7037,7 +7037,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
         {onCreate && (
-          <button onClick={onCreate} className="shrink-0 w-[132px] flex flex-col items-center justify-center gap-2 border border-dashed rounded-2xl font-body text-xs font-semibold"
+          <button onClick={onCreate} className="shrink-0 w-[132px] flex flex-col items-center justify-center gap-2 border border-dashed rounded-2xl font-body text-xs font-semibold transition-transform active:scale-[0.97]"
             style={{ borderColor: c.borderStrong, color: c.textFaint }}>
             <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
               <Plus size={16} strokeWidth={2.5} style={{ color: c.textDim }} />
