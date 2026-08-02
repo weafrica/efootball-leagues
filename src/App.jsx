@@ -185,29 +185,29 @@ const LADDER_THEME = {
   red: "#C81E3A", redSoft: "rgba(200,30,58,0.25)", toastBg: "#F5EEDC", toastText: "#0A0806",
 };
 
+// `kind` groups formats for the one-active-fun-league-per-kind join rule: single
+// round robin, double round robin, and survivor all play out as an ongoing
+// round-robin-style league, so a club active in any one of them counts as
+// active for all of them (kind: "round_robin"). Knockout and groups_knockout
+// each get their own kind, so they only block against themselves.
 const FORMATS = [
-  { id: "single_round_robin", label: "Single Round Robin", desc: "Every club plays every other club once.", available: true },
-  { id: "double_round_robin", label: "Double Round Robin", desc: "Home and away — every club plays every other club twice.", available: true },
-  { id: "knockout", label: "Knockout", desc: "Single elimination. Lose and you're out.", available: true },
-  { id: "survivor", label: "Survivor", desc: "Play a set number of matches, cut the bottom %, repeat until a target number remain, then finish with a round robin.", available: true },
-  { id: "groups_knockout", label: "Groups + Knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
+  { id: "single_round_robin", label: "Single Round Robin", kind: "round_robin", desc: "Every club plays every other club once.", available: true },
+  { id: "double_round_robin", label: "Double Round Robin", kind: "round_robin", desc: "Home and away — every club plays every other club twice.", available: true },
+  { id: "knockout", label: "Knockout", kind: "knockout", desc: "Single elimination. Lose and you're out.", available: true },
+  { id: "survivor", label: "Survivor", kind: "round_robin", desc: "Play a set number of matches, cut the bottom %, repeat until a target number remain, then finish with a round robin.", available: true },
+  { id: "groups_knockout", label: "Groups + Knockout", kind: "groups_knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
 ];
+const FORMAT_KIND_LABELS = { round_robin: "round robin / survivor" };
 
-// Format "kinds" for the one-active-fun-league-per-kind rule: single/double round
-// robin and survivor all play out as an ongoing round-robin-style league, so a club
-// active in any one of them counts as active for all of them. Knockout and
-// groups_knockout each stand alone. Label used in the blocking toast.
-const FORMAT_KINDS = [
-  { ids: ["single_round_robin", "double_round_robin", "survivor"], label: "round robin / survivor" },
-];
+// All format ids that share a format's `kind` — the set a league of `formatId`
+// is restricted against under the one-active-fun-league-per-kind rule.
 function formatKindOf(formatId) {
-  const kind = FORMAT_KINDS.find((k) => k.ids.includes(formatId));
-  return kind ? kind.ids : [formatId];
+  const kind = FORMATS.find((f) => f.id === formatId)?.kind;
+  return kind ? FORMATS.filter((f) => f.kind === kind).map((f) => f.id) : [formatId];
 }
 function formatKindLabel(formatId) {
-  const kind = FORMAT_KINDS.find((k) => k.ids.includes(formatId));
-  if (kind) return kind.label;
-  return FORMATS.find((f) => f.id === formatId)?.label || "this format";
+  const kind = FORMATS.find((f) => f.id === formatId)?.kind;
+  return FORMAT_KIND_LABELS[kind] || FORMATS.find((f) => f.id === formatId)?.label || "this format";
 }
 
 // Shared by the click-time guard in joinLeague and by the card/detail UI so a
