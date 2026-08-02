@@ -3485,15 +3485,23 @@ export default function App() {
   };
 
   const advanceGroupsToKnockout = async (league) => {
-    const groupFixtures = league.fixtures.filter((f) => f.stage === 1);
+    // Same fix as advanceSurvivor: read this league's teams/fixtures fresh
+    // right before deciding qualifiers, rather than trusting whatever the
+    // admin's browser already had — a stale copy here can both cut the
+    // wrong clubs from the group stage and seed the knockout bracket wrong.
+    const { data: fresh, error: freshErr } = await supabase
+      .from("leagues").select("groups_count, teams(*), fixtures(*)").eq("id", league.id).single();
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+
+    const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
     const unplayed = groupFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} group match(es) still need a result.`); return; }
 
-    const groupsCount = league.groups_count;
+    const groupsCount = fresh.groups_count;
     const qualifiers = [];
     const eliminatedIds = [];
     for (let g = 0; g < groupsCount; g++) {
-      const groupTeams = league.teams.filter((t) => t.group_number === g);
+      const groupTeams = fresh.teams.filter((t) => t.group_number === g);
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
       const standings = computeStandings(groupTeams, groupFx);
@@ -3917,11 +3925,19 @@ export default function App() {
   };
 
   const advanceKnockout = async (league) => {
+    // Same fix as advanceSurvivor/advanceGroupsToKnockout: read this
+    // league's fixtures fresh right before deciding round winners. Working
+    // off stale local data here is the worst version of this bug — it can
+    // advance the wrong team to the next round entirely.
+    const { data: fresh, error: freshErr } = await supabase
+      .from("leagues").select("fixtures(*)").eq("id", league.id).single();
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+
     // Pure knockout leagues run their whole bracket in stage 1; groups_knockout
     // leagues only enter the bracket once the group stage (stage 1) is done,
     // and the bracket itself lives in stage 2.
     const bracketStage = league.format === "groups_knockout" ? 2 : 1;
-    const bracketFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
+    const bracketFixtures = fresh.fixtures.filter((f) => f.stage === bracketStage);
     const maxRound = Math.max(...bracketFixtures.map((f) => f.round));
     const currentRoundFixtures = bracketFixtures.filter((f) => f.round === maxRound);
     const unplayed = currentRoundFixtures.filter((f) => !f.played && !isExpired(f));
@@ -3957,14 +3973,24 @@ export default function App() {
   };
 
   const advanceSurvivor = async (league) => {
-    const currentStage = league.current_stage;
-    const stageFixtures = league.fixtures.filter((f) => f.stage === currentStage);
+    // Pull this league's teams/fixtures fresh right before deciding who's
+    // cut — not the `league` object already sitting in the browser's state.
+    // If a result was recorded (by anyone, in any tab) since this admin's
+    // page last loaded, the local copy is stale, and computing the cut
+    // against it can eliminate a club that had actually won its match —
+    // it just hadn't shown up on this screen yet.
+    const { data: fresh, error: freshErr } = await supabase
+      .from("leagues").select("current_stage, final_stage_started, teams(*), fixtures(*)").eq("id", league.id).single();
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+
+    const currentStage = fresh.current_stage;
+    const stageFixtures = fresh.fixtures.filter((f) => f.stage === currentStage);
     const unplayed = stageFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} match(es) in this stage still need a result.`); return; }
 
-    if (league.final_stage_started) { showToast("This is the final stage — check the table for the champion."); return; }
+    if (fresh.final_stage_started) { showToast("This is the final stage — check the table for the champion."); return; }
 
-    const activeTeams = league.teams.filter((t) => !t.eliminated);
+    const activeTeams = fresh.teams.filter((t) => !t.eliminated);
     const standings = computeStandings(activeTeams, stageFixtures);
     let toEliminate = Math.max(1, Math.round(activeTeams.length * (league.survivor_elimination_percent / 100)));
     if (activeTeams.length - toEliminate < league.survivor_target_count) {
@@ -8993,7 +9019,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
             ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} avatarByTeamId={avatarByTeamId} c={c} />
             : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} avatarByTeamId={avatarByTeamId} c={c} />}
           <CommentsSection league={league} session={session} canComment={joined || canManage}
-            comments={resultComments} heading="Results" icon={Trophy} allowCompose={false}
+            comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as matches are played."
             onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
@@ -9176,7 +9202,7 @@ function LeagueReactionBar({ league, session, onToggle, c, compact = false }) {
   );
 }
 
-function CommentsSection({ league, session, canComment, onPost, onDelete, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something." }) {
+function CommentsSection({ league, session, canComment, onPost, onDelete, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count
@@ -9184,6 +9210,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
   const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
   const [photo, setPhoto] = useState(null); // optional photo attached to the comment being composed
   const voiceRecorder = useVoiceRecorder(); // optional voice note attached to the comment being composed
+  const [myResultsQuery, setMyResultsQuery] = useState("");
   const textareaRef = useRef(null);
   const photoInputRef = useRef(null);
   const sourceComments = comments || league.comments || [];
@@ -9229,8 +9256,14 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
     return { roots: sortedRoots, totalCount: all.length };
   }, [sourceComments, pending, sortBy]);
 
-  const visibleRoots = roots.slice(0, visibleCount);
-  const hiddenCount = roots.length - visibleRoots.length;
+  // A result post's body is the plain-text result line itself (e.g. "Matchday
+  // 1 — asiyetha 1 – 0 culerGMC"), so matching a club name just means
+  // checking whether that text mentions it — no separate team lookup needed.
+  const filteredRoots = showFindMyResults && myResultsQuery.trim()
+    ? roots.filter((r) => r.body?.toLowerCase().includes(myResultsQuery.trim().toLowerCase()))
+    : roots;
+  const visibleRoots = filteredRoots.slice(0, visibleCount);
+  const hiddenCount = filteredRoots.length - visibleRoots.length;
 
   const submit = async () => {
     const trimmed = text.trim();
@@ -9300,10 +9333,19 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
         )}
       </div>
 
-      {roots.length === 0 ? (
+      {showFindMyResults && (
+        <div className="mb-3">
+          <input value={myResultsQuery} onChange={(e) => { setMyResultsQuery(e.target.value); setVisibleCount(COMMENT_PAGE_SIZE); }}
+            placeholder="Find my results — enter your club name…"
+            className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none"
+            style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+        </div>
+      )}
+
+      {filteredRoots.length === 0 ? (
         <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
           <HeadingIcon size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
-          <div className="font-body text-sm">{emptyText}</div>
+          <div className="font-body text-sm">{myResultsQuery.trim() ? `No results found for "${myResultsQuery.trim()}".` : emptyText}</div>
         </div>
       ) : (
         <div className="space-y-3 mb-3">
