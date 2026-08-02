@@ -210,6 +210,25 @@ function formatKindLabel(formatId) {
   return FORMATS.find((f) => f.id === formatId)?.label || "this format";
 }
 
+// Shared by the click-time guard in joinLeague and by the card/detail UI so a
+// club's "locked" state is computed the same way everywhere. Returns the other
+// fun league the signed-in user is still active in (same format kind as
+// `league`), or null if they're free to join. Only fun leagues are restricted —
+// cash leagues never lock each other out.
+function findBlockingFunLeague(leagues, session, league) {
+  if (!league || league.league_type !== "fun" || !session?.user?.id) return null;
+  const sameKindFormats = formatKindOf(league.format);
+  return (leagues || []).find((l) => {
+    if (l.id === league.id || l.league_type !== "fun" || !sameKindFormats.includes(l.format)) return false;
+    const membership = l.members.find((m) => m.user_id === session.user.id);
+    if (!membership || !membership.team_id) return false;
+    const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
+    if (!myTeamInL || myTeamInL.eliminated) return false;
+    const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
+    return !leagueComplete;
+  }) || null;
+}
+
 // Letter labels for groups: Group A, Group B, ... Group Z, then AA, AB...
 function groupLabel(n) {
   let s = "";
@@ -2836,16 +2855,7 @@ export default function App() {
     if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
 
     if (league.league_type === "fun") {
-      const sameKindFormats = formatKindOf(league.format);
-      const activeFunLeague = (leagues || []).find((l) => {
-        if (l.id === leagueId || l.league_type !== "fun" || !sameKindFormats.includes(l.format)) return false;
-        const membership = l.members.find((m) => m.user_id === session.user.id);
-        if (!membership || !membership.team_id) return false;
-        const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
-        if (!myTeamInL || myTeamInL.eliminated) return false;
-        const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
-        return !leagueComplete;
-      });
+      const activeFunLeague = findBlockingFunLeague(leagues, session, league);
       if (activeFunLeague) {
         showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatKindLabel(league.format)} league once your club there is eliminated, or that league finishes.`);
         return;
@@ -3634,6 +3644,7 @@ export default function App() {
                 myUsername={profile?.efootball_username || session.user.email}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
                 myPaymentStatus={myPaymentStatus(activeLeague)}
+                blockedByLeague={isMemberOf(activeLeague) ? null : findBlockingFunLeague(leagues, session, activeLeague)}
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
@@ -6959,6 +6970,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
       <div className="no-scrollbar flex items-stretch gap-3 overflow-x-auto -mx-4 px-4 pb-1">
         {leagues.map((l) => (
           <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
+            blockedByLeague={isMemberOf(l) ? null : findBlockingFunLeague(leagues, session, l)}
             myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
@@ -6976,7 +6988,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
   );
 }
 
-function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
+function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
   const played = l.fixtures.filter((f) => f.played).length;
   const paymentStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
   const isCash = l.league_type === "cash";
@@ -7060,6 +7072,9 @@ function LeagueCard({ league: l, isAdmin, joined, closed, myPaymentStatus, canMa
             )
           ) : closed ? (
             <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Closed</span>
+          ) : blockedByLeague ? (
+            <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
+              className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>Locked</span>
           ) : (
             <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-bold px-2 py-1.5 rounded-full"
               style={{ background: c.accent, color: c.accentText }}>Join</button>
@@ -8036,7 +8051,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -8140,7 +8155,13 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
             <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
           </div>
         </div>
-        {!joined && !entryClosed && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
+        {!joined && !entryClosed && !blockedByLeague && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
+        {!joined && !entryClosed && blockedByLeague && (
+          <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
+            className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>
+            Locked · active in "{blockedByLeague.name}"
+          </span>
+        )}
         {!joined && entryClosed && <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded shrink-0" style={{ background: c.redSoft, color: c.red }}>Entry closed</span>}
         {joined && myPaymentStatus === "pending" && (
           <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}><Clock size={11} /> Payment pending</span>
