@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
+const ACCENT_KEY = "efootball-accent-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
 // Used by every "refresh this every few seconds while a screen is open"
@@ -169,6 +170,27 @@ const THEMES = {
     red: "#C4293A", redSoft: "rgba(196,41,58,0.12)", toastBg: "#0E2A20", toastText: "#F6F5F0",
   },
 };
+
+// Optional accent-color choices layered on top of THEMES.dark/light above —
+// swaps just `accent`/`accentText` (the color used for primary buttons and
+// highlights) while leaving backgrounds, surfaces, and text alone, so every
+// choice stays readable without re-deriving a whole palette per color. Each
+// has its own dark/light variant since a color that reads fine as a button
+// on the near-black dark background often needs to go a shade darker to
+// stay readable as a button on the light background, and vice-versa.
+const ACCENTS = {
+  gold:   { label: "Gold",   dark: { value: "#E9C46A", text: "#0B1F17" }, light: { value: "#B4802E", text: "#F6F5F0" } },
+  ocean:  { label: "Ocean",  dark: { value: "#5DA9E9", text: "#0B1F17" }, light: { value: "#1F6FB2", text: "#F6F5F0" } },
+  violet: { label: "Violet", dark: { value: "#A78BFA", text: "#0B1F17" }, light: { value: "#6D4FC7", text: "#F6F5F0" } },
+  coral:  { label: "Coral",  dark: { value: "#F2765C", text: "#0B1F17" }, light: { value: "#C74A30", text: "#F6F5F0" } },
+  mint:   { label: "Mint",   dark: { value: "#4FD1A5", text: "#0B1F17" }, light: { value: "#1F8F68", text: "#F6F5F0" } },
+};
+
+// Merges a chosen accent color into a base THEMES.dark/light object.
+function withAccent(baseTheme, themeKey, accentKey) {
+  const a = ACCENTS[accentKey]?.[themeKey] || ACCENTS.gold[themeKey];
+  return { ...baseTheme, accent: a.value, accentText: a.text };
+}
 
 // The Ladder gets its own look — black, gold and red, matching the "Ladder
 // Battles / No Mercy" badge — instead of following the app's normal
@@ -4301,7 +4323,22 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
+function PublicHome({ c: baseC, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
+  // The accent color (used for primary buttons/highlights throughout this
+  // page and everything it renders) is a guest-facing preference of its
+  // own, separate from the app-wide dark/light toggle above it — picked
+  // from ACCENTS, persisted locally, and layered onto whichever base
+  // theme (dark/light) is already active. Every `c` reference below this
+  // point is this locally-themed version, not the raw prop.
+  const [accentKey, setAccentKey] = useState(() => {
+    try { return localStorage.getItem(ACCENT_KEY) || "gold"; } catch (e) { return "gold"; }
+  });
+  const setAccent = (key) => {
+    setAccentKey(key);
+    try { localStorage.setItem(ACCENT_KEY, key); } catch (e) { /* ignore — storage unavailable */ }
+  };
+  const c = useMemo(() => withAccent(baseC, theme, accentKey), [baseC, theme, accentKey]);
+  const [accentPickerOpen, setAccentPickerOpen] = useState(false);
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -4416,10 +4453,30 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
               <div className="text-lg font-extrabold tracking-tight uppercase">Matchday</div>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <button onClick={toggleTheme} aria-label="Toggle dark mode" className="w-8 h-8 flex items-center justify-center rounded-full"
+          <div className="flex items-center gap-2 relative">
+            <button onClick={() => setAccentPickerOpen((v) => !v)} aria-label="Choose accent color" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform duration-150 hover:scale-110 active:scale-90"
+              style={{ background: c.surface, border: `2px solid ${c.accent}` }}>
+              <span className="w-3.5 h-3.5 rounded-full" style={{ background: c.accent }} />
+            </button>
+            {accentPickerOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setAccentPickerOpen(false)} />
+                <div className="absolute top-10 right-0 z-50 flex items-center gap-1.5 p-2 rounded-full border shadow-lg" style={{ background: c.bg, borderColor: c.border }}>
+                  {Object.entries(ACCENTS).map(([key, opt]) => (
+                    <button key={key} aria-label={opt.label} onClick={() => { setAccent(key); setAccentPickerOpen(false); }}
+                      className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-110"
+                      style={{ background: opt[theme].value, border: key === accentKey ? `2px solid ${c.text}` : "2px solid transparent" }}>
+                      {key === accentKey && <Check size={11} color={opt[theme].text} strokeWidth={3} />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <button onClick={toggleTheme} aria-label="Toggle dark mode" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform duration-150 hover:scale-110 active:scale-90"
               style={{ background: theme === "dark" ? "#F59E0B22" : "#6366F122" }}>
-              {theme === "dark" ? <Sun size={14} color="#F59E0B" /> : <Moon size={14} color="#6366F1" />}
+              {theme === "dark"
+                ? <Sun key="sun" size={14} color="#F59E0B" className="animate-theme-icon" />
+                : <Moon key="moon" size={14} color="#6366F1" className="animate-theme-icon" />}
             </button>
             <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
               <GoogleIcon small /> Sign in
