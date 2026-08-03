@@ -2216,6 +2216,20 @@ export default function App() {
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; }
   });
+  // Accent color: originally a guest-only preference (picked on PublicHome,
+  // before signing in) that never made it past that screen — a guest who
+  // picked "Ocean" would land back on gold the moment they signed in, since
+  // the signed-in app read straight from THEMES[theme] with no accent
+  // layered on. Lifting the state up here means the same choice (same
+  // ACCENT_KEY in localStorage) now colors every screen, guest or signed
+  // in, instead of resetting at the login boundary.
+  const [accentKey, setAccentKey] = useState(() => {
+    try { return localStorage.getItem(ACCENT_KEY) || "gold"; } catch (e) { return "gold"; }
+  });
+  const setAccent = (key) => {
+    setAccentKey(key);
+    try { localStorage.setItem(ACCENT_KEY, key); } catch (e) { /* ignore — storage unavailable */ }
+  };
   const [handledDeepLink, setHandledDeepLink] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
   const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
@@ -2245,7 +2259,7 @@ export default function App() {
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
   const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
-  const c = THEMES[theme];
+  const c = useMemo(() => withAccent(THEMES[theme], theme, accentKey), [theme, accentKey]);
 
   // The app's own content div paints its themed background, but the real
   // <html>/<body> behind it never did — on mobile, an edge swipe triggers
@@ -4153,7 +4167,7 @@ export default function App() {
   if (!session) {
     return (
       <>
-        <PublicHome c={c} theme={theme} toggleTheme={toggleTheme}
+        <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
           onSignIn={(stay) => signInWithGoogle(stay)}
           onRequireAuth={(reason) => setAuthPrompt(reason)}
           initialShopProductId={shopDeepLinkProductId} />
@@ -4323,21 +4337,11 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c: baseC, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
-  // The accent color (used for primary buttons/highlights throughout this
-  // page and everything it renders) is a guest-facing preference of its
-  // own, separate from the app-wide dark/light toggle above it — picked
-  // from ACCENTS, persisted locally, and layered onto whichever base
-  // theme (dark/light) is already active. Every `c` reference below this
-  // point is this locally-themed version, not the raw prop.
-  const [accentKey, setAccentKey] = useState(() => {
-    try { return localStorage.getItem(ACCENT_KEY) || "gold"; } catch (e) { return "gold"; }
-  });
-  const setAccent = (key) => {
-    setAccentKey(key);
-    try { localStorage.setItem(ACCENT_KEY, key); } catch (e) { /* ignore — storage unavailable */ }
-  };
-  const c = useMemo(() => withAccent(baseC, theme, accentKey), [baseC, theme, accentKey]);
+function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId }) {
+  // Accent color (used for primary buttons/highlights throughout this page)
+  // is picked from ACCENTS and lives in the app root now — see the comment
+  // by accentKey's useState in App() — so whatever a guest picks here is
+  // still in effect the moment they sign in, instead of resetting to gold.
   const [accentPickerOpen, setAccentPickerOpen] = useState(false);
   useEffect(() => {
     if (!accentPickerOpen) return;
