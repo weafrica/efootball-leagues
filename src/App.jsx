@@ -789,6 +789,39 @@ function groupAchievementsByCategory(achievements) {
 // are unmistakably the shiniest tiles in the strip.
 const TIER_RING = { bronze: 1.5, silver: 2, gold: 2.5, platinum: 3 };
 
+// Trophy-score weighting per tier for the Wall of Fame ranking — a platinum
+// badge is worth more than five bronzes, so the board rewards chasing hard
+// badges rather than just racking up easy ones. TIER_ORDER is the same
+// ranking used to pick a player's single "best" badge to show off.
+const TIER_WEIGHT = { bronze: 1, silver: 2, gold: 3, platinum: 5 };
+const TIER_ORDER = { bronze: 0, silver: 1, gold: 2, platinum: 3 };
+const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", platinum: "#B9F2FF" };
+
+// Aggregates every row from the shared `achievements` table (every badge,
+// every member) into one ranked row per member — count earned, a weighted
+// trophy score, and their single best (highest-tier) badge to show off next
+// to their name. Members with no earned badges yet, or with rows we can't
+// match to a profile (memberAvatars only lists other members — the
+// signed-in player's own name/photo is merged in by the caller), are left
+// out rather than shown as a zero.
+function computeWallOfFame(allAchievements, profileByUserId) {
+  const byUser = {};
+  (allAchievements || []).forEach((row) => {
+    const def = ACHIEVEMENTS_DEF.find((d) => d.id === row.achievement_id);
+    if (!def) return; // ignore rows for a badge id that no longer exists
+    if (!byUser[row.user_id]) byUser[row.user_id] = { userId: row.user_id, count: 0, score: 0, bestBadge: null };
+    const entry = byUser[row.user_id];
+    entry.count += 1;
+    entry.score += TIER_WEIGHT[def.tier] || 1;
+    if (!entry.bestBadge || TIER_ORDER[def.tier] > TIER_ORDER[entry.bestBadge.tier]) entry.bestBadge = def;
+  });
+  return Object.values(byUser)
+    .map((e) => ({ ...e, profile: profileByUserId.get(e.userId) }))
+    .filter((e) => e.profile)
+    .sort((a, b) => b.score - a.score || b.count - a.count)
+    .map((e, i) => ({ ...e, rank: i + 1 }));
+}
+
 // Earned badges sort first (most nearly-complete locked badge next), so the
 // strip's leading tiles are always either something to be proud of or
 // something worth chasing next — never a random pick from the middle.
@@ -910,6 +943,93 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact homepage preview of the platform-wide Wall of Fame — top 3 by
+// trophy score, podium-styled like the Leaderboard/Ladder strips it sits
+// next to. Renders nothing until at least one badge has been earned by
+// anyone, same "don't show an empty shelf" reasoning as those strips.
+function WallOfFameStrip({ standings, onOpen, c }) {
+  if (!standings || standings.length === 0) return null;
+  const top3 = standings.slice(0, 3);
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  return (
+    <section className="mt-8">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Wall of Fame</div>
+        <button onClick={onOpen} className="flex items-center gap-0.5 font-mono text-[10px] font-bold uppercase tracking-wide" style={{ color: c.accent }}>
+          See all <ChevronRight size={12} />
+        </button>
+      </div>
+      <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
+        className="flex items-stretch gap-2.5 overflow-x-auto pb-1 cursor-pointer" style={{ scrollbarWidth: "none" }}>
+        {top3.map((row) => (
+          <div key={row.userId} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2" style={{
+            background: row.rank === 1 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
+            border: `1px solid ${row.rank === 1 ? c.accent + "55" : c.border}`,
+          }}>
+            <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[row.rank - 1]}22`, border: `1px solid ${rankColors[row.rank - 1]}66` }}>
+              {row.rank === 1 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[row.rank - 1] }} />}
+            </span>
+            <MemberAvatar url={row.profile.avatar_url} username={row.profile.username} size={26} c={c} />
+            <div className="flex flex-col leading-tight">
+              <span className="font-body font-semibold text-sm truncate max-w-[100px]" style={{ color: c.text }}>{row.profile.username}</span>
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.count} badges</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// The full Wall of Fame — every member who's earned at least one badge,
+// ranked by trophy score (rarer badges count for more, so it rewards
+// chasing hard badges rather than just racking up easy ones), each row
+// showing their badge count and single best badge as a preview.
+function WallOfFameModal({ standings, myUserId, onClose, c }) {
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
+              <Crown size={13} /> Wall of Fame
+            </div>
+            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>Ranked by trophy score — rarer badges count for more</div>
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-2">
+          {standings.map((row) => {
+            const isMe = row.userId === myUserId;
+            const rankColor = row.rank <= 3 ? rankColors[row.rank - 1] : c.textFaint;
+            return (
+              <div key={row.userId} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2" style={{
+                background: isMe ? `${c.accent}14` : "transparent",
+                border: `1px solid ${isMe ? c.accent + "55" : "transparent"}`,
+              }}>
+                <span className="w-6 text-center font-mono text-xs font-bold shrink-0" style={{ color: rankColor }}>
+                  {row.rank <= 3 ? <Crown size={13} style={{ color: rankColor, display: "inline" }} /> : row.rank}
+                </span>
+                <MemberAvatar url={row.profile.avatar_url} username={row.profile.username} size={30} c={c} />
+                <div className="flex-1 min-w-0 leading-tight">
+                  <div className="font-body font-semibold text-sm truncate" style={{ color: c.text }}>{row.profile.username}{isMe ? " (you)" : ""}</div>
+                  <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.count} badges · {row.score} pts</div>
+                </div>
+                {row.bestBadge && (
+                  <span className="flex items-center justify-center rounded-full shrink-0" style={{ width: 26, height: 26, background: `linear-gradient(135deg, ${row.bestBadge.color}, ${row.bestBadge.color}99)`, border: `1.5px solid ${row.bestBadge.color}` }} title={row.bestBadge.label}>
+                    <row.bestBadge.icon size={13} style={{ color: "#fff" }} />
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -2076,6 +2196,7 @@ export default function App() {
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
+  const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member — feeds the Wall of Fame
   const [teamAvatars, setTeamAvatars] = useState({}); // team_id -> avatar_url, for club photos on the Table (mirrors the guest view's version)
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
   const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
@@ -2285,6 +2406,17 @@ export default function App() {
     const map = {};
     (data || []).forEach((row) => { if (row.avatar_url) map[row.team_id] = row.avatar_url; });
     setTeamAvatars(map);
+  }, []);
+
+  // Every earned badge from every member — the Wall of Fame's raw material.
+  // The achievements table is readable by anyone (see
+  // supabase/achievements-migration.sql), and only ever contains a user_id
+  // + achievement_id + when, nothing sensitive, so a plain select is safe
+  // here (no SECURITY DEFINER function needed, unlike list_challengeable_members).
+  const loadAllAchievements = useCallback(async () => {
+    const { data, error } = await supabase.from("achievements").select("user_id, achievement_id, earned_at");
+    if (error) { setAllAchievements([]); return; }
+    setAllAchievements(data || []);
   }, []);
 
   // Every challenge the signed-in member is involved in, either as the one who
@@ -2874,7 +3006,8 @@ export default function App() {
     loadLadder();
     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
     loadTeamAvatars(); // also feeds the Table's club photos
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars]);
+    loadAllAchievements(); // feeds the Wall of Fame
+  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars, loadAllAchievements]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
@@ -4038,7 +4171,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} showToast={showToast} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url} showToast={showToast} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -6477,7 +6610,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, myAvatarUrl, showToast, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, showToast, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
@@ -6552,11 +6685,17 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
   // Achievement badges — a second, more permanent collection layer next to
   // the level/XP bar. Recomputed from the same data Home already has, so it
-  // can't drift out of sync with a player's real record.
+  // can't drift out of sync with a player's real record. Every stat any
+  // badge's value() function reads must be listed below — miss one and that
+  // badge can silently fail to unlock the moment it's earned, only catching
+  // up whenever some other listed stat happens to change too. Ladder rank
+  // depends on rank_position only (a primitive), not the whole myLadderRank
+  // object, since that object gets a new identity on every background
+  // ladder poll even when the rank itself hasn't moved.
   const joinedLeagueCount = leagues.filter((l) => isMemberOf(l)).length;
   const achievements = useMemo(
     () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank }),
-    [myProgress.played, myProgress.w, myProgress.bestStreak, myProgress.level, joinedLeagueCount, myLadderRank]
+    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position]
   );
   const earnedAchievementCount = achievements.filter((a) => a.earned).length;
   const [achievementsOpen, setAchievementsOpen] = useState(false);
@@ -6581,19 +6720,44 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
     }
   }, [myId, achievements, showToast]);
 
-  // Mirrors every earned badge to Supabase (upsert is idempotent, so this is
-  // safe to re-run on every achievements recompute) — this is what lets a
-  // badge earned on one device show up on another, and what a future
-  // "wall of fame" of other players' badges would read from. Requires the
-  // `achievements` table from supabase/achievements-migration.sql.
+  // Wall of Fame — every member's badge count/score, ranked. memberAvatars
+  // only lists *other* members (see list_challengeable_members), so the
+  // signed-in player's own name/photo is merged in here from session data
+  // before aggregating, otherwise their own row would be silently dropped.
+  const profileByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, { username: m.username, avatar_url: m.avatar_url }); });
+    if (myId) map.set(myId, { username: myDisplayName, avatar_url: myAvatarUrl });
+    return map;
+  }, [memberAvatars, myId, myDisplayName, myAvatarUrl]);
+  const wallOfFame = useMemo(() => computeWallOfFame(allAchievements, profileByUserId), [allAchievements, profileByUserId]);
+  const [wallOfFameOpen, setWallOfFameOpen] = useState(false);
+
+  // Mirrors every earned badge to Supabase — this is what lets a badge
+  // earned on one device show up on another, and what the Wall of Fame
+  // reads from. Requires the `achievements` table from
+  // supabase/achievements-migration.sql. Skips the round trip when the
+  // earned set is identical to the last one actually synced (tracked in a
+  // ref, not state, so comparing it doesn't itself trigger a re-render) —
+  // without this, every background poll that touches myProgress/ladder
+  // would re-upsert the same rows for no reason. Refreshes the Wall of
+  // Fame's data on success so a badge earned just now shows up there
+  // immediately, instead of waiting for the next full page load.
+  const syncedBadgeIdsRef = useRef("");
   useEffect(() => {
     if (!myId) return;
     const earned = achievements.filter((a) => a.earned);
     if (earned.length === 0) return;
+    const idsKey = earned.map((a) => a.id).sort().join(",");
+    if (idsKey === syncedBadgeIdsRef.current) return;
     supabase.from("achievements")
       .upsert(earned.map((a) => ({ user_id: myId, achievement_id: a.id })), { onConflict: "user_id,achievement_id", ignoreDuplicates: true })
-      .then(({ error }) => { if (error) console.error("achievements upsert failed", error); });
-  }, [myId, achievements]);
+      .then(({ error }) => {
+        if (error) { console.error("achievements upsert failed", error); return; }
+        syncedBadgeIdsRef.current = idsKey;
+        onAchievementsSynced?.();
+      });
+  }, [myId, achievements, onAchievementsSynced]);
 
   // Fires a one-time celebration the moment a player's level actually goes
   // up, instead of leaving it as a silent bar reset. The last-seen level is
@@ -6710,6 +6874,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           player sees what they've earned before what they're chasing next. */}
       <AchievementsStrip achievements={achievements} earnedCount={earnedAchievementCount} onOpen={() => setAchievementsOpen(true)} c={c} />
       {achievementsOpen && <AchievementsModal achievements={achievements} earnedCount={earnedAchievementCount} onClose={() => setAchievementsOpen(false)} c={c} />}
+
+      {/* Wall of Fame — the shared, cross-player view of the same badges,
+          right under the personal Achievements strip so "what I've earned"
+          and "how I stack up against everyone else" sit side by side. */}
+      <WallOfFameStrip standings={wallOfFame} onOpen={() => setWallOfFameOpen(true)} c={c} />
+      {wallOfFameOpen && <WallOfFameModal standings={wallOfFame} myUserId={myId} onClose={() => setWallOfFameOpen(false)} c={c} />}
 
       {/* Where you stand — Leaderboard preview then the Ladder banner,
           grouped together right after quick actions so this competitive
