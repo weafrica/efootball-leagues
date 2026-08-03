@@ -4439,8 +4439,10 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
         <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
 
         {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
-            live-season pulse, stat strip), plus the one thing Home doesn't
-            need: a way in. This is the page's entire "hero" now. */}
+            live-season pulse, stat strip). No CTA button here on purpose:
+            this is the "look, it's real and it's live" beat, not the sign-in
+            beat — the header covers anyone in a hurry, and the single strong
+            CTA lives at the bottom, after there's something to be convinced by. */}
         <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.25 }} />
@@ -4473,21 +4475,10 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
               </div>
             </div>
           </div>
-          <div className="relative flex items-center justify-between gap-3 px-4 pb-3.5">
-            <p className="font-body text-xs" style={{ color: c.textDim }}>Have a look around — everything below is live. Sign in when you're ready to play.</p>
-            <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-2 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-              <GoogleIcon small /> Continue with Google
-            </button>
+          <div className="relative px-4 pb-3.5">
+            <p className="font-body text-xs" style={{ color: c.textDim }}>Have a look around — everything below is live.</p>
           </div>
         </section>
-
-        <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
-          <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
-            <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
-            {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
-          </span>
-          <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
-        </label>
 
         {/* Menu tiles — identical grid to the signed-in Home; every tile
             here just needs an account behind it, except Ladder, which is
@@ -4526,11 +4517,21 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           )}
         </section>
 
-        <div className="mt-10 pt-8 border-t text-center" style={{ borderColor: c.border }}>
+        {/* The one strong CTA on the page — everything above was proof, this
+            is the ask. "Stay signed in" lives here too, right next to the
+            button it actually affects, instead of floating on its own. */}
+        <div className="mt-10 pt-8 border-t flex flex-col items-center text-center" style={{ borderColor: c.border }}>
           <div className="font-body font-semibold text-sm mb-3" style={{ color: c.textDim }}>Ready to get in the game?</div>
           <button onClick={() => onSignIn(staySignedIn)} className="inline-flex items-center gap-3 font-body font-semibold px-6 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
             <GoogleIcon /> Continue with Google
           </button>
+          <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+            <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
+              <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
+              {staySignedIn && <Check size={11} color={c.accentText} strokeWidth={3} />}
+            </span>
+            <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
+          </label>
         </div>
           </>
         )}
