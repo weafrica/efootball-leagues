@@ -4417,8 +4417,9 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button onClick={toggleTheme} aria-label="Toggle dark mode" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
-              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            <button onClick={toggleTheme} aria-label="Toggle dark mode" className="w-8 h-8 flex items-center justify-center rounded-full"
+              style={{ background: theme === "dark" ? "#F59E0B22" : "#6366F122" }}>
+              {theme === "dark" ? <Sun size={14} color="#F59E0B" /> : <Moon size={14} color="#6366F1" />}
             </button>
             <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
               <GoogleIcon small /> Sign in
