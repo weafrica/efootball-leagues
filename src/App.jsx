@@ -933,9 +933,10 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>{group.label}</div>
             <div className="grid grid-cols-3 gap-x-2 gap-y-4">
               {group.items.map((a) => (
-                <div key={a.id} className="flex flex-col items-center gap-1" title={a.desc}>
+                <div key={a.id} className="flex flex-col items-center gap-1" title={`${a.desc} · ${a.tier}`}>
                   <AchievementBadge ach={a} size={54} c={c} />
-                  <div className="font-body text-[9px] text-center leading-tight px-0.5" style={{ color: c.textFaint }}>
+                  <div className="font-body text-[9px] text-center leading-tight px-0.5 flex items-center justify-center gap-1" style={{ color: c.textFaint }}>
+                    <span className="inline-block rounded-full shrink-0" style={{ width: 5, height: 5, background: TIER_COLOR[a.tier] }} />
                     {a.earned ? a.desc : `${a.value}/${a.target}`}
                   </div>
                 </div>
