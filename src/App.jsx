@@ -4307,16 +4307,19 @@ export default function App() {
 // Returns 0 until target is a real number; callers still show "–" for the
 // still-loading state themselves.
 function useCountUp(target, duration = 800) {
-  const [value, setValue] = useState(0);
+  const [value, setValue] = useState(target ?? 0);
+  const fromRef = useRef(target ?? 0);
   useEffect(() => {
-    if (target == null) return;
+    if (target == null || target === fromRef.current) return;
+    const from = fromRef.current;
     let raf;
     const start = performance.now();
     const tick = (now) => {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
-      setValue(Math.round(target * eased));
+      setValue(Math.round(from + (target - from) * eased));
       if (t < 1) raf = requestAnimationFrame(tick);
+      else fromRef.current = target;
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -4378,8 +4381,10 @@ function GuestExplorerBar({ steps, onSignIn, c }) {
   }, [allDone]);
   return (
     <section className="mt-3 rounded-xl border px-3.5 py-2.5 flex items-center gap-3 transition-colors"
-      style={{ borderColor: allDone ? `${c.accent}66` : c.border, background: allDone ? `${c.accent}14` : c.surface }}>
-      <div className="flex items-center gap-1.5 shrink-0">
+      style={{ borderColor: allDone ? `${c.accent}66` : c.border, background: allDone ? `${c.accent}14` : c.surface }}
+      role="progressbar" aria-valuenow={doneCount} aria-valuemin={0} aria-valuemax={steps.length}
+      aria-label={`Guest scouting progress: ${doneCount} of ${steps.length} sections viewed`}>
+      <div className="flex items-center gap-1.5 shrink-0" aria-hidden="true">
         {steps.map((s) => (
           <span key={s.key} className={`w-6 h-6 rounded-full flex items-center justify-center ${s.done ? "animate-pip-pop" : ""}`}
             style={{ background: s.done ? c.accent : c.surfaceHover, color: s.done ? c.accentText : c.textFaint }}>
@@ -4387,7 +4392,7 @@ function GuestExplorerBar({ steps, onSignIn, c }) {
           </span>
         ))}
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1" aria-live="polite">
         <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: allDone ? c.accent : c.textFaint }}>
           {allDone ? "Fully scouted" : `Scouting Matchday — ${doneCount}/${steps.length}`}
         </div>
@@ -4398,7 +4403,7 @@ function GuestExplorerBar({ steps, onSignIn, c }) {
       {allDone && (
         <span className="relative shrink-0">
           {justCompleted && [0, 1, 2, 3].map((i) => (
-            <Sparkles key={i} size={10} className="animate-spark-burst absolute top-1/2 left-1/2 pointer-events-none"
+            <Sparkles key={i} size={10} aria-hidden="true" className="animate-spark-burst absolute top-1/2 left-1/2 pointer-events-none"
               style={{ color: c.accent, "--dx": `${[-22, 22, -16, 16][i]}px`, "--dy": `${[-16, -16, 14, 14][i]}px` }} />
           ))}
           <button onClick={onSignIn} className="animate-cta-pulse flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
@@ -4416,9 +4421,16 @@ function GuestExplorerBar({ steps, onSignIn, c }) {
 // permanently pinned at zero since a guest has no matches yet. Reuses the
 // exact functions the real progress bar uses rather than hardcoding a fake
 // number, so this can never drift out of sync if the XP curve changes.
-function GuestLevelTeaser({ onSignIn, c }) {
+// previewXp comes from GuestExplorerBar's checkpoints (see PublicHome) —
+// 10 "scout XP" per section explored, capped well below a level-up. Reuses
+// the real xpToClimb/levelTitleFor/tierColorFor math so the bar's fill
+// percentage is honest, not just decorative, and animates via useCountUp
+// so it visibly ticks up the moment a new checkpoint is scouted.
+function GuestLevelTeaser({ previewXp, onSignIn, c }) {
   const need = xpToClimb(1);
   const tier = tierColorFor(1);
+  const xpShown = useCountUp(previewXp, 500);
+  const pct = Math.max(3, Math.min(100, (previewXp / need) * 100));
   return (
     <button onClick={onSignIn} className="w-full text-left mt-4 rounded-xl border p-3.5" style={{ borderColor: c.border, background: c.surface }}>
       <div className="flex items-center justify-between mb-2 gap-2">
@@ -4426,14 +4438,18 @@ function GuestLevelTeaser({ onSignIn, c }) {
           <Star size={13} /> Level 1 · {levelTitleFor(1)}
         </div>
         <span className="font-mono text-[10px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
-          <Lock size={9} /> 0 / {need} XP
+          <Lock size={9} /> {xpShown} / {need} XP
         </span>
       </div>
-      <div className="h-2 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
-        <div className="h-full rounded-full" style={{ width: "3%", background: tier }} />
+      <div className="h-2 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}
+        role="progressbar" aria-valuenow={previewXp} aria-valuemin={0} aria-valuemax={need}
+        aria-label={`Level 1 XP progress: ${previewXp} of ${need}`}>
+        <div className="h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: `${pct}%`, background: tier }} />
       </div>
       <div className="font-body text-[11px] mt-2" style={{ color: c.textFaint }}>
-        Wins earn 25 XP, draws 10, losses 5 — sign in and your first match starts the climb.
+        {previewXp > 0
+          ? `${previewXp} XP just from scouting the page — wins are worth 25, draws 10, losses 5 once you're actually playing.`
+          : "Wins earn 25 XP, draws 10, losses 5 — sign in and your first match starts the climb."}
       </div>
     </button>
   );
@@ -4521,6 +4537,10 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
     { key: "leagues", icon: Gamepad2, done: leaguesSeen },
     { key: "activity", icon: History, done: activitySeen },
   ];
+  // Feeds GuestLevelTeaser's XP bar — 10 "scout XP" per section explored,
+  // so the two widgets read as one connected system instead of two
+  // separate static teasers.
+  const previewXp = explorerSteps.filter((s) => s.done).length * 10;
 
   // Everything a guest can see lives behind public_* views (granted SELECT
   // to anon in Supabase) — loaded once here and handed down as props so the
@@ -4691,7 +4711,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
         </section>
 
-        <GuestLevelTeaser onSignIn={() => onSignIn(staySignedIn)} c={c} />
+        <GuestLevelTeaser previewXp={previewXp} onSignIn={() => onSignIn(staySignedIn)} c={c} />
 
         <div ref={ladderRef}>
           {guestData ? (

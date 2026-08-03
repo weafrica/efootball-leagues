@@ -75,6 +75,16 @@ html, body {
 }
 .animate-cta-pulse { animation: cta-pulse 1.8s ease-in-out infinite; }
 
+/* The explorer bar's one-shot "just completed" celebration — a few
+   sparkles flung outward from the Sign In button and fading as they go,
+   driven by --dx/--dy set per-icon so they scatter instead of all moving
+   the same direction. */
+@keyframes spark-burst {
+  0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px))) scale(1); opacity: 0; }
+}
+.animate-spark-burst { animation: spark-burst 0.7s ease-out forwards; }
+
 /* A checkpoint pip popping to life the instant its section scrolls into
    view — quick overshoot-and-settle so it reads as "just unlocked" rather
    than a static state swap. */
