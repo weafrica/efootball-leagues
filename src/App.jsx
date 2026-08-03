@@ -4394,13 +4394,15 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
     return () => { cancelled = true; };
   }, []);
 
-  const totalClubs = guestData ? guestData.teams.length : 0;
-  const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
   // Guests only ever see non-cash leagues (see the "Leagues" section below) —
-  // cash leagues require signing in first, so there's no guest-facing cash
-  // list to filter for here.
+  // cash leagues require signing in first. Every guest-facing number (hero
+  // stats, empty states) is derived from funLeagues/funLeagueIds so nothing
+  // on this page hints that cash leagues exist before sign-in.
   const isCashLeague = (l) => guestData?.extras.find((e) => e.league_id === l.id)?.league_type === "cash";
   const funLeagues = guestData ? guestData.leagues.filter((l) => !isCashLeague(l)) : [];
+  const funLeagueIds = new Set(funLeagues.map((l) => l.id));
+  const totalClubs = guestData ? guestData.teams.filter((t) => funLeagueIds.has(t.league_id)).length : 0;
+  const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played && funLeagueIds.has(f.league_id)).length : 0;
 
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -4415,7 +4417,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
+            <button onClick={toggleTheme} aria-label="Toggle dark mode" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
               {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </button>
             <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
@@ -4460,7 +4462,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? guestData.leagues.length : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? funLeagues.length : "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
@@ -4499,7 +4501,7 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
         </div>
 
         <div ref={tablesRef}>
-          {guestData && guestData.leagues.length === 0 && (
+          {guestData && funLeagues.length === 0 && (
             <section className="mt-8">
               <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
                 No leagues running yet — sign in and start the first one.
