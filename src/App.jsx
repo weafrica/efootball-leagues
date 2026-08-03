@@ -1386,6 +1386,18 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
+// <input type="datetime-local"> expects, in the browser's local time — the
+// exact inverse of how CreateLeague turns that same input's value back into
+// an ISO string (`new Date(value).toISOString()`), so editing round-trips
+// without drifting by a timezone offset.
+function toDatetimeLocalValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Short relative timestamp for comments/replies — falls back to the full
 // date once something's more than a week old, where "how many days ago"
 // stops being useful and the actual date is what you want.
@@ -3955,6 +3967,19 @@ export default function App() {
     showToast("Description updated.");
   };
 
+  // Lets whoever can manage the league (its creator, or an admin) push the
+  // entry-close and kickoff dates back — plans change, a WhatsApp group is
+  // slow to fill, whatever. Both are required, same as at creation, so a
+  // league can never end up with one set and the other blank.
+  const updateLeagueSchedule = async (league, { entryClosesAt, startsAt }) => {
+    const { error } = await supabase.from("leagues")
+      .update({ entry_closes_at: new Date(entryClosesAt).toISOString(), starts_at: new Date(startsAt).toISOString() })
+      .eq("id", league.id);
+    if (error) { showToast(`Couldn't save dates: ${error.message}`); return; }
+    await loadLeagues();
+    showToast("League dates updated.");
+  };
+
   // Comments live on every league regardless of stage — still filling up (pending)
   // or already generated fixtures (created/active) — so members can talk trash,
   // coordinate, or ask questions in one place. Anyone who can see the league can
@@ -4184,7 +4209,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -7932,7 +7957,8 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const survivorValid = format !== "survivor" || (matchesPerStage >= 1 && eliminationPercent >= 1 && eliminationPercent <= 99 && targetCount >= 2);
   const groupsValid = format !== "groups_knockout" || (groupSize >= 2 && qualifiersPerGroup >= 1 && qualifiersPerGroup <= groupSize && (teamNames.length === 0 || teamNames.length >= 4));
   const groupsTooFewTeams = format === "groups_knockout" && teamNames.length > 0 && teamNames.length < 4;
-  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt;
+  const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
+  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt && !datesOutOfOrder;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
   const submit = () => {
@@ -7981,7 +8007,7 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Description <span style={{ color: c.textFaint }}>(optional — rules, prize, payment details, WhatsApp group link, etc.)</span></label>
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={leagueType === "cash" ? "e.g. Pay to EFT: Acc 12345678, Bank ABC. Winner takes the pot." : "e.g. Winner takes the pot. Join the WhatsApp group: ..."} className="w-full border rounded-lg px-4 py-2.5 font-body outline-none resize-none mb-5" style={inputStyle} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1.5">
         <div>
           <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Entry closes</label>
           <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
@@ -7991,6 +8017,10 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
           <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
         </div>
       </div>
+      {datesOutOfOrder && (
+        <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Start date must be on or after entry closes — otherwise the league would kick off before anyone's finished joining.</div>
+      )}
+      {!datesOutOfOrder && <div className="mb-5" />}
 
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Format</label>
       <div className="space-y-2 mb-2">
@@ -8507,6 +8537,72 @@ function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
   );
 }
 
+// The entry-close and kickoff dates, shown as plain text to everyone; for
+// whoever can manage the league, a pencil next to it expands into two
+// datetime-local inputs (same control CreateLeague uses) so plans can
+// change after the league already exists, without needing to delete and
+// recreate it. Mirrors LeagueDescriptionBlock's edit-in-place pattern.
+function LeagueScheduleLine({ league, canManage, onUpdateSchedule, c }) {
+  const [editing, setEditing] = useState(false);
+  const [entryClosesAt, setEntryClosesAt] = useState(toDatetimeLocalValue(league.entry_closes_at));
+  const [startsAt, setStartsAt] = useState(toDatetimeLocalValue(league.starts_at));
+  const [saving, setSaving] = useState(false);
+  const inputStyle = { background: c.surfaceHover, borderColor: c.border, color: c.text };
+
+  useEffect(() => {
+    setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at));
+    setStartsAt(toDatetimeLocalValue(league.starts_at));
+  }, [league.entry_closes_at, league.starts_at]);
+
+  const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
+
+  const save = async () => {
+    if (!entryClosesAt || !startsAt || datesOutOfOrder) return;
+    setSaving(true);
+    await onUpdateSchedule(league, { entryClosesAt, startsAt });
+    setSaving(false);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-2 rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1.5">
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>Entry closes</label>
+            <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
+          </div>
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>League starts</label>
+            <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
+          </div>
+        </div>
+        {datesOutOfOrder && (
+          <div className="font-mono text-[11px] mb-2" style={{ color: c.red }}>Start date must be on or after entry closes.</div>
+        )}
+        <div className="flex items-center gap-2 justify-end">
+          <button onClick={() => { setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at)); setStartsAt(toDatetimeLocalValue(league.starts_at)); setEditing(false); }}
+            className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
+          <button onClick={save} disabled={saving || !entryClosesAt || !startsAt || datesOutOfOrder} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !entryClosesAt || !startsAt || datesOutOfOrder ? 0.6 : 1 }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="font-mono text-[11px] mt-1 flex items-center gap-1.5" style={{ color: c.textFaint }}>
+      <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
+      {canManage && (
+        <button onClick={() => setEditing(true)} aria-label="Edit league dates" style={{ color: c.accent }}>
+          <Settings2 size={11} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription, descOpen, setDescOpen, c }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(league.description || "");
@@ -8869,7 +8965,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -8969,9 +9065,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           <div className="font-mono text-xs mt-2" style={{ color: c.textFaint }}>
             {formatLabel} · {league.teams.length} clubs · {league.members.length} member{league.members.length === 1 ? "" : "s"}
           </div>
-          <div className="font-mono text-[11px] mt-1 flex items-center gap-1" style={{ color: c.textFaint }}>
-            <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
-          </div>
+          <LeagueScheduleLine league={league} canManage={canManage} onUpdateSchedule={onUpdateSchedule} c={c} />
         </div>
         {!joined && !entryClosed && !blockedByLeague && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
         {!joined && !entryClosed && blockedByLeague && (
