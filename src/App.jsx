@@ -4339,6 +4339,12 @@ function PublicHome({ c: baseC, theme, toggleTheme, onSignIn, onRequireAuth, ini
   };
   const c = useMemo(() => withAccent(baseC, theme, accentKey), [baseC, theme, accentKey]);
   const [accentPickerOpen, setAccentPickerOpen] = useState(false);
+  useEffect(() => {
+    if (!accentPickerOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setAccentPickerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -4454,16 +4460,16 @@ function PublicHome({ c: baseC, theme, toggleTheme, onSignIn, onRequireAuth, ini
             </div>
           )}
           <div className="flex items-center gap-2 relative">
-            <button onClick={() => setAccentPickerOpen((v) => !v)} aria-label="Choose accent color" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform duration-150 hover:scale-110 active:scale-90"
+            <button onClick={() => setAccentPickerOpen((v) => !v)} aria-label="Choose accent color" aria-haspopup="true" aria-expanded={accentPickerOpen} className="w-8 h-8 flex items-center justify-center rounded-full transition-transform duration-150 hover:scale-110 active:scale-90"
               style={{ background: c.surface, border: `2px solid ${c.accent}` }}>
               <span className="w-3.5 h-3.5 rounded-full" style={{ background: c.accent }} />
             </button>
             {accentPickerOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setAccentPickerOpen(false)} />
-                <div className="absolute top-10 right-0 z-50 flex items-center gap-1.5 p-2 rounded-full border shadow-lg" style={{ background: c.bg, borderColor: c.border }}>
+                <div role="menu" aria-label="Accent color" className="absolute top-10 right-0 z-50 flex items-center gap-1.5 p-2 rounded-full border shadow-lg animate-popover-in" style={{ background: c.bg, borderColor: c.border }}>
                   {Object.entries(ACCENTS).map(([key, opt]) => (
-                    <button key={key} aria-label={opt.label} onClick={() => { setAccent(key); setAccentPickerOpen(false); }}
+                    <button key={key} role="menuitemradio" aria-checked={key === accentKey} aria-label={opt.label} title={opt.label} onClick={() => { setAccent(key); setAccentPickerOpen(false); }}
                       className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-110"
                       style={{ background: opt[theme].value, border: key === accentKey ? `2px solid ${c.text}` : "2px solid transparent" }}>
                       {key === accentKey && <Check size={11} color={opt[theme].text} strokeWidth={3} />}
