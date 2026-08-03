@@ -4518,7 +4518,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.25 }} />
           </div>
           <div className="relative flex items-center gap-3 px-4 py-3.5">
-            <img src="/hero-emblem.png" alt="" className="w-11 h-11 object-contain shrink-0 drop-shadow-lg" />
+            <img src="/hero-emblem.png" alt="" width="176" height="176" fetchPriority="high" className="w-11 h-11 object-contain shrink-0 drop-shadow-lg" />
             <div className="min-w-0 flex-1">
               <div className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: c.accent }}>
                 <span className="relative flex h-1.5 w-1.5">
