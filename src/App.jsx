@@ -4480,14 +4480,16 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           </div>
         </section>
 
-        {/* Menu tiles — identical grid to the signed-in Home; every tile
-            here just needs an account behind it, except Ladder, which is
-            public and simply scrolls down. Shop lives in its own banner up
-            top, not buried in here. */}
-        <section className="grid grid-cols-3 gap-2 mt-4">
+        {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
+            scroll down to real content), so a guest doesn't hit a wall of
+            "locked" tiles as the very first thing after the hero. The two
+            account-gated tiles (New league, Random) still show, just after,
+            as a preview of what unlocks on sign-in rather than the headline. */}
+        <section className="grid grid-cols-4 gap-2 mt-4">
+          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
+          <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => scrollTo(tablesRef)} c={c} />
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
-          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
         </section>
 
         <div ref={ladderRef}>
