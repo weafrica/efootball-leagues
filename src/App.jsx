@@ -4301,194 +4301,6 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-// Animates a number counting up from 0 to target whenever target changes —
-// used for the hero stat numbers (leagues/clubs/played) so they land with
-// a bit of momentum instead of just popping in once guestData resolves.
-// Returns 0 until target is a real number; callers still show "–" for the
-// still-loading state themselves.
-function useCountUp(target, duration = 800) {
-  const [value, setValue] = useState(target ?? 0);
-  const fromRef = useRef(target ?? 0);
-  useEffect(() => {
-    if (target == null || target === fromRef.current) return;
-    const from = fromRef.current;
-    let raf;
-    const start = performance.now();
-    const tick = (now) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setValue(Math.round(from + (target - from) * eased));
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else fromRef.current = target;
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, duration]);
-  return value;
-}
-
-// Fires once a ref's element scrolls into the viewport — powers the guest
-// "scouting" checkpoints below as each section of the public page comes
-// into view. Deliberately one-way (stays true once tripped, observer stops
-// caring) so scrolling back past a section doesn't flicker progress
-// backward — this is meant to read as "seen it", not "currently looking".
-// When given a storageKey, the tripped state is mirrored to sessionStorage
-// so a guest who pops into the shop or refreshes the tab doesn't lose
-// progress they already earned this visit (a fresh tab/session still
-// starts clean, which fits "you're new here" better than a permanent cookie).
-function useInView(ref, threshold = 0.35, storageKey = null) {
-  const [inView, setInView] = useState(() => {
-    if (!storageKey) return false;
-    try { return sessionStorage.getItem(storageKey) === "1"; } catch { return false; }
-  });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || inView) return;
-    const obs = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setInView(true);
-        if (storageKey) { try { sessionStorage.setItem(storageKey, "1"); } catch {} }
-      }
-    }, { threshold });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [ref, threshold, inView, storageKey]);
-  return inView;
-}
-
-// A light "how much have you scouted" tracker for guests — three
-// checkpoints tied to sections already on the page (Ladder, Leagues,
-// Activity), lit up as each scrolls into view via useInView above. Purely
-// a guest-session nudge that resets on refresh (no backend, no account
-// needed) — the point is to turn idle scrolling into a small sense of
-// progress that pays off with a highlighted CTA once it's complete.
-function GuestExplorerBar({ steps, onSignIn, c }) {
-  const doneCount = steps.filter((s) => s.done).length;
-  const allDone = doneCount === steps.length;
-  // One-shot celebration the instant all three checkpoints are lit — the
-  // ongoing animate-cta-pulse keeps inviting a tap after that, but this
-  // burst is what marks the actual moment of completion.
-  const [justCompleted, setJustCompleted] = useState(false);
-  const wasAllDone = useRef(allDone);
-  useEffect(() => {
-    if (allDone && !wasAllDone.current) {
-      wasAllDone.current = true;
-      setJustCompleted(true);
-      const t = setTimeout(() => setJustCompleted(false), 700);
-      return () => clearTimeout(t);
-    }
-    wasAllDone.current = allDone;
-  }, [allDone]);
-  return (
-    <section className="mt-3 rounded-xl border px-3.5 py-2.5 flex items-center gap-3 transition-colors"
-      style={{ borderColor: allDone ? `${c.accent}66` : c.border, background: allDone ? `${c.accent}14` : c.surface }}
-      role="progressbar" aria-valuenow={doneCount} aria-valuemin={0} aria-valuemax={steps.length}
-      aria-label={`Guest scouting progress: ${doneCount} of ${steps.length} sections viewed`}>
-      <div className="flex items-center gap-1.5 shrink-0" aria-hidden="true">
-        {steps.map((s) => (
-          <span key={s.key} className={`w-6 h-6 rounded-full flex items-center justify-center ${s.done ? "animate-pip-pop" : ""}`}
-            style={{ background: s.done ? c.accent : c.surfaceHover, color: s.done ? c.accentText : c.textFaint }}>
-            {s.done ? <Check size={12} strokeWidth={3} /> : <s.icon size={11} />}
-          </span>
-        ))}
-      </div>
-      <div className="min-w-0 flex-1" aria-live="polite">
-        <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: allDone ? c.accent : c.textFaint }}>
-          {allDone ? "Fully scouted" : `Scouting Matchday — ${doneCount}/${steps.length}`}
-        </div>
-        <div className="font-body text-xs truncate" style={{ color: c.textDim }}>
-          {allDone ? "You've seen it all — sign in to actually play." : "Scroll down for the ladder, leagues and activity feed."}
-        </div>
-      </div>
-      {allDone && (
-        <span className="relative shrink-0">
-          {justCompleted && [0, 1, 2, 3].map((i) => (
-            <Sparkles key={i} size={10} aria-hidden="true" className="animate-spark-burst absolute top-1/2 left-1/2 pointer-events-none"
-              style={{ color: c.accent, "--dx": `${[-22, 22, -16, 16][i]}px`, "--dy": `${[-16, -16, 14, 14][i]}px` }} />
-          ))}
-          <button onClick={onSignIn} className="animate-cta-pulse flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
-            style={{ background: c.accent, color: c.accentText, "--cta-glow": c.accent }}>
-            <Sparkles size={12} /> Sign in
-          </button>
-        </span>
-      )}
-    </section>
-  );
-}
-
-// A teaser for the real level/XP system signed-in members see on Home (see
-// xpToClimb/levelTitleFor/tierColorFor above) — same Level 1 · Rookie math,
-// permanently pinned at zero since a guest has no matches yet. Reuses the
-// exact functions the real progress bar uses rather than hardcoding a fake
-// number, so this can never drift out of sync if the XP curve changes.
-// previewXp comes from GuestExplorerBar's checkpoints (see PublicHome) —
-// 10 "scout XP" per section explored, capped well below a level-up. Reuses
-// the real xpToClimb/levelTitleFor/tierColorFor math so the bar's fill
-// percentage is honest, not just decorative, and animates via useCountUp
-// so it visibly ticks up the moment a new checkpoint is scouted.
-function GuestLevelTeaser({ previewXp, onSignIn, c }) {
-  const need = xpToClimb(1);
-  const tier = tierColorFor(1);
-  const xpShown = useCountUp(previewXp, 500);
-  const pct = Math.max(3, Math.min(100, (previewXp / need) * 100));
-  return (
-    <button onClick={onSignIn} className="w-full text-left mt-4 rounded-xl border p-3.5" style={{ borderColor: c.border, background: c.surface }}>
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: tier }}>
-          <Star size={13} /> Level 1 · {levelTitleFor(1)}
-        </div>
-        <span className="font-mono text-[10px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
-          <Lock size={9} /> {xpShown} / {need} XP
-        </span>
-      </div>
-      <div className="h-2 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}
-        role="progressbar" aria-valuenow={previewXp} aria-valuemin={0} aria-valuemax={need}
-        aria-label={`Level 1 XP progress: ${previewXp} of ${need}`}>
-        <div className="h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: `${pct}%`, background: tier }} />
-      </div>
-      <div className="font-body text-[11px] mt-2" style={{ color: c.textFaint }}>
-        {previewXp > 0
-          ? `${previewXp} XP just from scouting the page — wins are worth 25, draws 10, losses 5 once you're actually playing.`
-          : "Wins earn 25 XP, draws 10, losses 5 — sign in and your first match starts the climb."}
-      </div>
-    </button>
-  );
-}
-
-// A locked preview of the real achievement system (ACHIEVEMENTS_DEF above)
-// — the exact badges signed-in members earn, shown here in silhouette with
-// a lock overlay so a guest sees what they'd actually be working toward
-// rather than a made-up teaser list. Picks a small spread across tiers so
-// the strip reads as "there's a whole ladder of these", not just easy ones.
-const GUEST_ACHIEVEMENT_PREVIEW_IDS = ["first_match", "first_win", "streak_5", "level_11", "ladder_top10", "ladder_no1"];
-
-function GuestAchievementShowcase({ onSignIn, c }) {
-  const picks = GUEST_ACHIEVEMENT_PREVIEW_IDS.map((id) => ACHIEVEMENTS_DEF.find((a) => a.id === id)).filter(Boolean);
-  if (picks.length === 0) return null;
-  return (
-    <section className="mt-8">
-      <div className="flex items-center gap-2.5 mb-3">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}><Award size={15} style={{ color: c.accent }} /></span>
-        <div className="font-extrabold uppercase tracking-tight text-lg leading-none">Achievements to chase</div>
-      </div>
-      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
-        {picks.map((a) => (
-          <button key={a.id} onClick={onSignIn} className="flex flex-col items-center gap-1.5 shrink-0 w-20 rounded-xl py-3 px-1.5" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            <span className={`relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${a.tier === "platinum" ? "animate-achievement-glow" : ""}`}
-              style={{ background: `${a.color}1F`, "--badge-glow": a.color }}>
-              <a.icon size={16} style={{ color: a.color, opacity: 0.5 }} />
-              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint, border: `1px solid ${c.border}` }}>
-                <Lock size={8} />
-              </span>
-            </span>
-            <span className="font-body text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{a.label}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
@@ -4525,22 +4337,6 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   const tablesRef = useRef(null);
   const activityRef = useRef(null);
   const scrollTo = (ref) => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
-  // Checkpoints for the GuestExplorerBar below — reuses the same three
-  // section refs the menu tiles already scroll to, so "scouted" just means
-  // "scrolled far enough to see it", no separate tracking needed.
-  const ladderSeen = useInView(ladderRef, 0.35, "guest_scout_ladder_v1");
-  const leaguesSeen = useInView(tablesRef, 0.35, "guest_scout_leagues_v1");
-  const activitySeen = useInView(activityRef, 0.35, "guest_scout_activity_v1");
-  const explorerSteps = [
-    { key: "ladder", icon: TrendingUp, done: ladderSeen },
-    { key: "leagues", icon: Gamepad2, done: leaguesSeen },
-    { key: "activity", icon: History, done: activitySeen },
-  ];
-  // Feeds GuestLevelTeaser's XP bar — 10 "scout XP" per section explored,
-  // so the two widgets read as one connected system instead of two
-  // separate static teasers.
-  const previewXp = explorerSteps.filter((s) => s.done).length * 10;
 
   // Everything a guest can see lives behind public_* views (granted SELECT
   // to anon in Supabase) — loaded once here and handed down as props so the
@@ -4600,12 +4396,6 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
 
   const totalClubs = guestData ? guestData.teams.length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
-  // Counting-up display values for the hero stat row — animate once
-  // guestData resolves (target flips from null to a real number), stay at
-  // 0 until then so the "–" placeholders below don't briefly show 0.
-  const leaguesCountUp = useCountUp(guestData ? guestData.leagues.length : null);
-  const clubsCountUp = useCountUp(guestData ? totalClubs : null);
-  const matchesCountUp = useCountUp(guestData ? totalMatches : null);
   // Guests only ever see non-cash leagues (see the "Leagues" section below) —
   // cash leagues require signing in first, so there's no guest-facing cash
   // list to filter for here.
@@ -4668,17 +4458,17 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? leaguesCountUp : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? guestData.leagues.length : "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? clubsCountUp : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs || "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? matchesCountUp : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches || "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
               </div>
             </div>
@@ -4690,8 +4480,6 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </button>
           </div>
         </section>
-
-        <GuestExplorerBar steps={explorerSteps} onSignIn={() => onSignIn(staySignedIn)} c={c} />
 
         <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
           <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
@@ -4711,15 +4499,11 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
         </section>
 
-        <GuestLevelTeaser previewXp={previewXp} onSignIn={() => onSignIn(staySignedIn)} c={c} />
-
         <div ref={ladderRef}>
           {guestData ? (
             <GuestLadderStrip ladder={guestData.ladder} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} c={c} />
           ) : <div className="pt-8 flex justify-center"><Loader c={c} /></div>}
         </div>
-
-        <GuestAchievementShowcase onSignIn={() => onRequireAuth("Sign in to start earning achievements.")} c={c} />
 
         <div ref={tablesRef}>
           {guestData && guestData.leagues.length === 0 && (
