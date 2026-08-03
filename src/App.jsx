@@ -4301,20 +4301,55 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
+// Animates a number counting up from 0 to target whenever target changes —
+// used for the hero stat numbers (leagues/clubs/played) so they land with
+// a bit of momentum instead of just popping in once guestData resolves.
+// Returns 0 until target is a real number; callers still show "–" for the
+// still-loading state themselves.
+function useCountUp(target, duration = 800) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target == null) return;
+    let raf;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(Math.round(target * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return value;
+}
+
 // Fires once a ref's element scrolls into the viewport — powers the guest
 // "scouting" checkpoints below as each section of the public page comes
 // into view. Deliberately one-way (stays true once tripped, observer stops
 // caring) so scrolling back past a section doesn't flicker progress
 // backward — this is meant to read as "seen it", not "currently looking".
-function useInView(ref, threshold = 0.35) {
-  const [inView, setInView] = useState(false);
+// When given a storageKey, the tripped state is mirrored to sessionStorage
+// so a guest who pops into the shop or refreshes the tab doesn't lose
+// progress they already earned this visit (a fresh tab/session still
+// starts clean, which fits "you're new here" better than a permanent cookie).
+function useInView(ref, threshold = 0.35, storageKey = null) {
+  const [inView, setInView] = useState(() => {
+    if (!storageKey) return false;
+    try { return sessionStorage.getItem(storageKey) === "1"; } catch { return false; }
+  });
   useEffect(() => {
     const el = ref.current;
     if (!el || inView) return;
-    const obs = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) setInView(true); }, { threshold });
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setInView(true);
+        if (storageKey) { try { sessionStorage.setItem(storageKey, "1"); } catch {} }
+      }
+    }, { threshold });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [ref, threshold, inView]);
+  }, [ref, threshold, inView, storageKey]);
   return inView;
 }
 
@@ -4327,6 +4362,20 @@ function useInView(ref, threshold = 0.35) {
 function GuestExplorerBar({ steps, onSignIn, c }) {
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = doneCount === steps.length;
+  // One-shot celebration the instant all three checkpoints are lit — the
+  // ongoing animate-cta-pulse keeps inviting a tap after that, but this
+  // burst is what marks the actual moment of completion.
+  const [justCompleted, setJustCompleted] = useState(false);
+  const wasAllDone = useRef(allDone);
+  useEffect(() => {
+    if (allDone && !wasAllDone.current) {
+      wasAllDone.current = true;
+      setJustCompleted(true);
+      const t = setTimeout(() => setJustCompleted(false), 700);
+      return () => clearTimeout(t);
+    }
+    wasAllDone.current = allDone;
+  }, [allDone]);
   return (
     <section className="mt-3 rounded-xl border px-3.5 py-2.5 flex items-center gap-3 transition-colors"
       style={{ borderColor: allDone ? `${c.accent}66` : c.border, background: allDone ? `${c.accent}14` : c.surface }}>
@@ -4347,10 +4396,16 @@ function GuestExplorerBar({ steps, onSignIn, c }) {
         </div>
       </div>
       {allDone && (
-        <button onClick={onSignIn} className="animate-cta-pulse shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
-          style={{ background: c.accent, color: c.accentText, "--cta-glow": c.accent }}>
-          <Sparkles size={12} /> Sign in
-        </button>
+        <span className="relative shrink-0">
+          {justCompleted && [0, 1, 2, 3].map((i) => (
+            <Sparkles key={i} size={10} className="animate-spark-burst absolute top-1/2 left-1/2 pointer-events-none"
+              style={{ color: c.accent, "--dx": `${[-22, 22, -16, 16][i]}px`, "--dy": `${[-16, -16, 14, 14][i]}px` }} />
+          ))}
+          <button onClick={onSignIn} className="animate-cta-pulse flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+            style={{ background: c.accent, color: c.accentText, "--cta-glow": c.accent }}>
+            <Sparkles size={12} /> Sign in
+          </button>
+        </span>
       )}
     </section>
   );
@@ -4403,7 +4458,8 @@ function GuestAchievementShowcase({ onSignIn, c }) {
       <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
         {picks.map((a) => (
           <button key={a.id} onClick={onSignIn} className="flex flex-col items-center gap-1.5 shrink-0 w-20 rounded-xl py-3 px-1.5" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${a.color}1F` }}>
+            <span className={`relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${a.tier === "platinum" ? "animate-achievement-glow" : ""}`}
+              style={{ background: `${a.color}1F`, "--badge-glow": a.color }}>
               <a.icon size={16} style={{ color: a.color, opacity: 0.5 }} />
               <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint, border: `1px solid ${c.border}` }}>
                 <Lock size={8} />
@@ -4457,9 +4513,9 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   // Checkpoints for the GuestExplorerBar below — reuses the same three
   // section refs the menu tiles already scroll to, so "scouted" just means
   // "scrolled far enough to see it", no separate tracking needed.
-  const ladderSeen = useInView(ladderRef);
-  const leaguesSeen = useInView(tablesRef);
-  const activitySeen = useInView(activityRef);
+  const ladderSeen = useInView(ladderRef, 0.35, "guest_scout_ladder_v1");
+  const leaguesSeen = useInView(tablesRef, 0.35, "guest_scout_leagues_v1");
+  const activitySeen = useInView(activityRef, 0.35, "guest_scout_activity_v1");
   const explorerSteps = [
     { key: "ladder", icon: TrendingUp, done: ladderSeen },
     { key: "leagues", icon: Gamepad2, done: leaguesSeen },
@@ -4524,6 +4580,12 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
 
   const totalClubs = guestData ? guestData.teams.length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
+  // Counting-up display values for the hero stat row — animate once
+  // guestData resolves (target flips from null to a real number), stay at
+  // 0 until then so the "–" placeholders below don't briefly show 0.
+  const leaguesCountUp = useCountUp(guestData ? guestData.leagues.length : null);
+  const clubsCountUp = useCountUp(guestData ? totalClubs : null);
+  const matchesCountUp = useCountUp(guestData ? totalMatches : null);
   // Guests only ever see non-cash leagues (see the "Leagues" section below) —
   // cash leagues require signing in first, so there's no guest-facing cash
   // list to filter for here.
@@ -4586,17 +4648,17 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? guestData.leagues.length : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? leaguesCountUp : "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs || "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? clubsCountUp : "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches || "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? matchesCountUp : "–"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
               </div>
             </div>
