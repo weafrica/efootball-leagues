@@ -65,6 +65,26 @@ html, body {
 }
 .animate-achievement-glow { animation: achievement-glow 2.6s ease-in-out infinite; }
 
+/* The guest "scouting" progress bar's Sign In button, once all three
+   checkpoints are lit — a gentle scale+glow pulse so the completed state
+   visibly invites a tap instead of just sitting there looking the same as
+   before. */
+@keyframes cta-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 var(--cta-glow, #E9C46A)55; }
+  50% { transform: scale(1.045); box-shadow: 0 0 0 5px var(--cta-glow, #E9C46A)00; }
+}
+.animate-cta-pulse { animation: cta-pulse 1.8s ease-in-out infinite; }
+
+/* A checkpoint pip popping to life the instant its section scrolls into
+   view — quick overshoot-and-settle so it reads as "just unlocked" rather
+   than a static state swap. */
+@keyframes pip-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.animate-pip-pop { animation: pip-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
 /* Hexagon crop for the floating product photos — an "exciting" shape vs. a
    plain square/circle, still just CSS so no extra image assets needed. */
 .hex-clip { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%); }

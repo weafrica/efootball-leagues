@@ -4301,6 +4301,122 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
+// Fires once a ref's element scrolls into the viewport — powers the guest
+// "scouting" checkpoints below as each section of the public page comes
+// into view. Deliberately one-way (stays true once tripped, observer stops
+// caring) so scrolling back past a section doesn't flicker progress
+// backward — this is meant to read as "seen it", not "currently looking".
+function useInView(ref, threshold = 0.35) {
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || inView) return;
+    const obs = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) setInView(true); }, { threshold });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [ref, threshold, inView]);
+  return inView;
+}
+
+// A light "how much have you scouted" tracker for guests — three
+// checkpoints tied to sections already on the page (Ladder, Leagues,
+// Activity), lit up as each scrolls into view via useInView above. Purely
+// a guest-session nudge that resets on refresh (no backend, no account
+// needed) — the point is to turn idle scrolling into a small sense of
+// progress that pays off with a highlighted CTA once it's complete.
+function GuestExplorerBar({ steps, onSignIn, c }) {
+  const doneCount = steps.filter((s) => s.done).length;
+  const allDone = doneCount === steps.length;
+  return (
+    <section className="mt-3 rounded-xl border px-3.5 py-2.5 flex items-center gap-3 transition-colors"
+      style={{ borderColor: allDone ? `${c.accent}66` : c.border, background: allDone ? `${c.accent}14` : c.surface }}>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {steps.map((s) => (
+          <span key={s.key} className={`w-6 h-6 rounded-full flex items-center justify-center ${s.done ? "animate-pip-pop" : ""}`}
+            style={{ background: s.done ? c.accent : c.surfaceHover, color: s.done ? c.accentText : c.textFaint }}>
+            {s.done ? <Check size={12} strokeWidth={3} /> : <s.icon size={11} />}
+          </span>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: allDone ? c.accent : c.textFaint }}>
+          {allDone ? "Fully scouted" : `Scouting Matchday — ${doneCount}/${steps.length}`}
+        </div>
+        <div className="font-body text-xs truncate" style={{ color: c.textDim }}>
+          {allDone ? "You've seen it all — sign in to actually play." : "Scroll down for the ladder, leagues and activity feed."}
+        </div>
+      </div>
+      {allDone && (
+        <button onClick={onSignIn} className="animate-cta-pulse shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+          style={{ background: c.accent, color: c.accentText, "--cta-glow": c.accent }}>
+          <Sparkles size={12} /> Sign in
+        </button>
+      )}
+    </section>
+  );
+}
+
+// A teaser for the real level/XP system signed-in members see on Home (see
+// xpToClimb/levelTitleFor/tierColorFor above) — same Level 1 · Rookie math,
+// permanently pinned at zero since a guest has no matches yet. Reuses the
+// exact functions the real progress bar uses rather than hardcoding a fake
+// number, so this can never drift out of sync if the XP curve changes.
+function GuestLevelTeaser({ onSignIn, c }) {
+  const need = xpToClimb(1);
+  const tier = tierColorFor(1);
+  return (
+    <button onClick={onSignIn} className="w-full text-left mt-4 rounded-xl border p-3.5" style={{ borderColor: c.border, background: c.surface }}>
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: tier }}>
+          <Star size={13} /> Level 1 · {levelTitleFor(1)}
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wider flex items-center gap-1 shrink-0" style={{ color: c.accent }}>
+          <Lock size={9} /> 0 / {need} XP
+        </span>
+      </div>
+      <div className="h-2 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
+        <div className="h-full rounded-full" style={{ width: "3%", background: tier }} />
+      </div>
+      <div className="font-body text-[11px] mt-2" style={{ color: c.textFaint }}>
+        Wins earn 25 XP, draws 10, losses 5 — sign in and your first match starts the climb.
+      </div>
+    </button>
+  );
+}
+
+// A locked preview of the real achievement system (ACHIEVEMENTS_DEF above)
+// — the exact badges signed-in members earn, shown here in silhouette with
+// a lock overlay so a guest sees what they'd actually be working toward
+// rather than a made-up teaser list. Picks a small spread across tiers so
+// the strip reads as "there's a whole ladder of these", not just easy ones.
+const GUEST_ACHIEVEMENT_PREVIEW_IDS = ["first_match", "first_win", "streak_5", "level_11", "ladder_top10", "ladder_no1"];
+
+function GuestAchievementShowcase({ onSignIn, c }) {
+  const picks = GUEST_ACHIEVEMENT_PREVIEW_IDS.map((id) => ACHIEVEMENTS_DEF.find((a) => a.id === id)).filter(Boolean);
+  if (picks.length === 0) return null;
+  return (
+    <section className="mt-8">
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}><Award size={15} style={{ color: c.accent }} /></span>
+        <div className="font-extrabold uppercase tracking-tight text-lg leading-none">Achievements to chase</div>
+      </div>
+      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto -mx-4 px-4 pb-1">
+        {picks.map((a) => (
+          <button key={a.id} onClick={onSignIn} className="flex flex-col items-center gap-1.5 shrink-0 w-20 rounded-xl py-3 px-1.5" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+            <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${a.color}1F` }}>
+              <a.icon size={16} style={{ color: a.color, opacity: 0.5 }} />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint, border: `1px solid ${c.border}` }}>
+                <Lock size={8} />
+              </span>
+            </span>
+            <span className="font-body text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{a.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialShopProductId }) {
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
@@ -4337,6 +4453,18 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
   const tablesRef = useRef(null);
   const activityRef = useRef(null);
   const scrollTo = (ref) => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // Checkpoints for the GuestExplorerBar below — reuses the same three
+  // section refs the menu tiles already scroll to, so "scouted" just means
+  // "scrolled far enough to see it", no separate tracking needed.
+  const ladderSeen = useInView(ladderRef);
+  const leaguesSeen = useInView(tablesRef);
+  const activitySeen = useInView(activityRef);
+  const explorerSteps = [
+    { key: "ladder", icon: TrendingUp, done: ladderSeen },
+    { key: "leagues", icon: Gamepad2, done: leaguesSeen },
+    { key: "activity", icon: History, done: activitySeen },
+  ];
 
   // Everything a guest can see lives behind public_* views (granted SELECT
   // to anon in Supabase) — loaded once here and handed down as props so the
@@ -4481,6 +4609,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           </div>
         </section>
 
+        <GuestExplorerBar steps={explorerSteps} onSignIn={() => onSignIn(staySignedIn)} c={c} />
+
         <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
           <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: staySignedIn ? c.accent : "transparent", border: `1px solid ${staySignedIn ? c.accent : c.borderStrong}` }}>
             <input type="checkbox" checked={staySignedIn} onChange={(e) => setStaySignedIn(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
@@ -4499,11 +4629,15 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => scrollTo(ladderRef)} c={c} />
         </section>
 
+        <GuestLevelTeaser onSignIn={() => onSignIn(staySignedIn)} c={c} />
+
         <div ref={ladderRef}>
           {guestData ? (
             <GuestLadderStrip ladder={guestData.ladder} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} c={c} />
           ) : <div className="pt-8 flex justify-center"><Loader c={c} /></div>}
         </div>
+
+        <GuestAchievementShowcase onSignIn={() => onRequireAuth("Sign in to start earning achievements.")} c={c} />
 
         <div ref={tablesRef}>
           {guestData && guestData.leagues.length === 0 && (
@@ -4733,11 +4867,9 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   // often contain banking/EFT details for cash leagues specifically, so
   // this still refuses to render one even if that filtering were ever
   // bypassed upstream.
-  const isCash = extra?.league_type === "cash";
-  const photoAndDescription = (extra?.photo_url || (!isCash && extra?.description)) && (
+  const photoAndDescription = extra?.photo_url && (
     <div className="mb-3 -mt-1">
-      {extra?.photo_url && <img src={extra.photo_url} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />}
-      {!isCash && extra?.description && <p className="font-body text-xs" style={{ color: c.textDim }}>{extra.description}</p>}
+      <img src={extra.photo_url} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />
     </div>
   );
 
