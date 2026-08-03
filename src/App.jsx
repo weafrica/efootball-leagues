@@ -4396,9 +4396,11 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
 
   const totalClubs = guestData ? guestData.teams.length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played).length : 0;
+  // Guests only ever see non-cash leagues (see the "Leagues" section below) —
+  // cash leagues require signing in first, so there's no guest-facing cash
+  // list to filter for here.
   const isCashLeague = (l) => guestData?.extras.find((e) => e.league_id === l.id)?.league_type === "cash";
   const funLeagues = guestData ? guestData.leagues.filter((l) => !isCashLeague(l)) : [];
-  const cashLeagues = guestData ? guestData.leagues.filter((l) => isCashLeague(l)) : [];
 
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -4513,12 +4515,8 @@ function PublicHome({ c, theme, toggleTheme, onSignIn, onRequireAuth, initialSho
           )}
 
           {guestData && (
-            <>
-              <GuestLeagueSection title="Fun leagues" icon={Gamepad2} leagues={funLeagues} data={guestData}
-                onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
-              <GuestLeagueSection title="Cash leagues" icon={Wallet} leagues={cashLeagues} data={guestData}
-                onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
-            </>
+            <GuestLeagueSection title="Leagues" icon={Gamepad2} leagues={funLeagues} data={guestData}
+              onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
           )}
         </div>
 
@@ -4713,13 +4711,13 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   const inGroupStage = l.format === "groups_knockout" && !l.final_stage_started;
   const teamName = (id) => leagueTeams.find((t) => t.id === id)?.name || "TBD";
 
+  // Guests should never receive a cash league here at all (see funLeagues
+  // in PublicHome), so no cash badge on the header — the description guard
+  // below is a defensive backstop, not something guests normally hit.
   const header = (
     <div className="flex items-center justify-between mb-3 gap-2">
       <div className="min-w-0">
         <div className="font-semibold text-sm truncate">{l.name}</div>
-        {extra?.league_type === "cash" && (
-          <div className="font-mono text-[9px] uppercase tracking-wide mt-0.5" style={{ color: c.accent }}>Cash league</div>
-        )}
       </div>
       {onJoin && (
         <button onClick={onJoin} className="flex items-center gap-1 font-body text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}>
@@ -4729,6 +4727,12 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
     </div>
   );
 
+  // Belt-and-suspenders, matching how this codebase double-checks
+  // cash-league restrictions elsewhere: guests should never receive a cash
+  // league here at all (see funLeagues in PublicHome), but descriptions
+  // often contain banking/EFT details for cash leagues specifically, so
+  // this still refuses to render one even if that filtering were ever
+  // bypassed upstream.
   const isCash = extra?.league_type === "cash";
   const photoAndDescription = (extra?.photo_url || (!isCash && extra?.description)) && (
     <div className="mb-3 -mt-1">
@@ -6932,7 +6936,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </section>
       )}
 
-      <LeagueSection title="Fun leagues" icon={Gamepad2} leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+      <LeagueSection title="Leagues" icon={Gamepad2} leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
         entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
 
@@ -8592,11 +8596,14 @@ function LeagueScheduleLine({ league, canManage, onUpdateSchedule, c }) {
   }
 
   return (
-    <div className="font-mono text-[11px] mt-1 flex items-center gap-1.5" style={{ color: c.textFaint }}>
-      <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
+    <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 mt-1">
+      <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: c.textFaint }}>
+        <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
+      </div>
       {canManage && (
-        <button onClick={() => setEditing(true)} aria-label="Edit league dates" style={{ color: c.accent }}>
-          <Settings2 size={11} />
+        <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
+          style={{ color: c.accent }}>
+          <Settings2 size={11} /> Edit
         </button>
       )}
     </div>
