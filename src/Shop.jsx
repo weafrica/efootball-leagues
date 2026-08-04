@@ -1186,7 +1186,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("shop-photos").upload(path, file, { upsert: true });
+      const { error: uploadErr } = await supabase.storage.from("shop-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload image: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("shop-photos").getPublicUrl(path);
       image_url = pub.publicUrl;

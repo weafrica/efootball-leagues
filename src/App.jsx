@@ -3197,7 +3197,7 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 512, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
     const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
     const { data, error } = await supabase.from("profiles")
@@ -3987,7 +3987,7 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
     const ext = file.name.split(".").pop();
     const path = `${league.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true });
+    const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
     const { data: pub } = supabase.storage.from("league-photos").getPublicUrl(path);
     const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
@@ -4036,7 +4036,7 @@ export default function App() {
       const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
       const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed);
+      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed, { cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("comment-photos").getPublicUrl(path);
       photo_url = pub.publicUrl;
