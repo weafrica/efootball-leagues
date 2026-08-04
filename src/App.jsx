@@ -2599,7 +2599,7 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/challenge-${challenge.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
 
     const iAmChallenger = challenge.challenger_id === session.user.id;
@@ -2979,7 +2979,7 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/open-challenge-${challenge.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
 
     const iAmCreator = challenge.creator_id === session.user.id;
@@ -3536,7 +3536,7 @@ export default function App() {
     const feeNum = clampFee(fee);
     const ext = (file.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session.user.id}/${league.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file);
+    const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload proof of payment: ${uploadErr.message}`); return false; }
 
     const { error } = await supabase.from("members").insert({
@@ -3559,7 +3559,7 @@ export default function App() {
     const feeNum = clampFee(fee);
     const ext = (file.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session.user.id}/${league.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file);
+    const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload proof of payment: ${uploadErr.message}`); return false; }
 
     const { error } = await supabase.from("members").update({
@@ -3677,7 +3677,7 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/${fixture.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file);
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
 
     const { error } = await supabase.from("result_submissions").insert({
@@ -4033,7 +4033,7 @@ export default function App() {
     const username = profile?.efootball_username || session.user.email;
     let photo_url = photoUrl || null;
     if (!photo_url && file) {
-      const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
+      const compressed = await compressImage(file, { maxDimension: 900, quality: 0.85 });
       const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed, { cacheControl: "31536000" });

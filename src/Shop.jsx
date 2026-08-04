@@ -1003,7 +1003,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
     const compressedProof = await compressImage(proofFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (compressedProof.name.split(".").pop() || "dat").toLowerCase();
     const path = `${session?.user?.id || `guest-${guestFolderId.current}`}/order-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, compressedProof);
+    const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, compressedProof, { cacheControl: "31536000" });
     if (uploadErr) { setSubmitting(false); showToast(`Couldn't upload proof: ${uploadErr.message}`); return; }
 
     const { data: order, error: orderErr } = await supabase.from("shop_orders").insert({
