@@ -2767,7 +2767,7 @@ export default function App() {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
       voice_url = pub.publicUrl;
@@ -2877,7 +2877,7 @@ export default function App() {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
       voice_url = pub.publicUrl;
@@ -4047,7 +4047,7 @@ export default function App() {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm" });
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       const { data: pub } = supabase.storage.from("comment-voice-notes").getPublicUrl(path);
       voice_url = pub.publicUrl;
