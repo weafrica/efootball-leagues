@@ -2,6 +2,26 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { proxiedMediaUrl, proxiedSignedUrl } from "./utils/mediaUrl";
+
+// Signs a result-proofs photo ONCE, with a long (5yr) expiry, and stores it
+// on the row via `urlColumn` — instead of the old pattern of re-signing on
+// every single ladder-screen open. A stored long-lived signed URL can be
+// wrapped in proxiedSignedUrl() and actually cached at Vercel's edge, since
+// unlike a fresh-every-load URL it never changes. Silently no-ops if there's
+// no photo or the sign/update call fails — this is a caching optimization,
+// never something that should block a result confirmation.
+async function cacheResultPhotoUrl(table, row, id, urlColumn = "result_photo_url") {
+  if (!row?.result_photo_path) return;
+  try {
+    const { data, error } = await supabase.storage
+      .from("result-proofs")
+      .createSignedUrl(row.result_photo_path, 60 * 60 * 24 * 365 * 5);
+    if (error || !data?.signedUrl) return;
+    await supabase.from(table).update({ [urlColumn]: data.signedUrl }).eq("id", id);
+  } catch {
+    // best-effort only
+  }
+}
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -2628,6 +2648,7 @@ export default function App() {
       .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
+    await cacheResultPhotoUrl("challenges", challenge, challenge.id);
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
@@ -2663,6 +2684,7 @@ export default function App() {
       .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
+    await cacheResultPhotoUrl("challenges", challenge, challenge.id);
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
@@ -2848,23 +2870,33 @@ export default function App() {
     if (error) { console.error("Couldn't load ladder results:", error.message); setLadderResults([]); return; }
     const rows = data || [];
 
-    // The screenshots live in a private storage bucket, so the raw path
-    // alone isn't viewable — each one needs a signed URL. Fetch them all
-    // in a single batched call (createSignedUrls) rather than one request
-    // per row, and attach the result as `photo_url` on each match.
-    const paths = rows.map((r) => r.result_photo_path).filter(Boolean);
-    if (paths.length === 0) { setLadderResults(rows); return; }
-    const { data: signed, error: signErr } = await supabase.storage
-      .from("result-proofs")
-      .createSignedUrls(paths, 3600);
-    if (signErr) {
-      console.error("Couldn't sign ladder result photos:", signErr.message);
-      setLadderResults(rows);
-      return;
+    // result_photo_url is signed ONCE, at confirm time (see
+    // cacheResultPhotoUrl), with a 5yr expiry — so unlike the old
+    // create-a-fresh-signed-url-on-every-open approach, this same URL is
+    // stable across every load and can actually be cached at Vercel's edge
+    // via proxiedSignedUrl, instead of re-hitting Supabase storage on every
+    // single ladder-screen open.
+    //
+    // Fallback: a few older rows may predate this column (confirmed before
+    // this fix shipped) and only have result_photo_path — sign those the
+    // old way, one-off, so they still display; they'll get backfilled into
+    // result_photo_url next time cacheResultPhotoUrl runs on them (it only
+    // runs on confirm, so truly old rows stay on this fallback path
+    // permanently unless manually backfilled).
+    const legacyRows = rows.filter((r) => r.result_photo_path && !r.result_photo_url);
+    let legacyUrlByPath = {};
+    if (legacyRows.length > 0) {
+      const { data: signed } = await supabase.storage
+        .from("result-proofs")
+        .createSignedUrls(legacyRows.map((r) => r.result_photo_path), 3600);
+      (signed || []).forEach((s) => { if (s.signedUrl) legacyUrlByPath[s.path] = s.signedUrl; });
     }
-    const urlByPath = {};
-    (signed || []).forEach((s) => { if (s.signedUrl) urlByPath[s.path] = s.signedUrl; });
-    setLadderResults(rows.map((r) => ({ ...r, photo_url: r.result_photo_path ? urlByPath[r.result_photo_path] : null })));
+
+    setLadderResults(rows.map((r) => {
+      if (r.result_photo_url) return { ...r, photo_url: proxiedSignedUrl(r.result_photo_url) };
+      const legacy = r.result_photo_path ? legacyUrlByPath[r.result_photo_path] : null;
+      return { ...r, photo_url: legacy || null };
+    }));
   }, [session]);
 
 
