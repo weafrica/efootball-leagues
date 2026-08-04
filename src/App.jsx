@@ -1421,6 +1421,18 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// Returns [start, end] Date objects spanning the nearest Friday 00:00 through
+// Sunday 23:59:59 — "this weekend" if today already falls in that window,
+// otherwise the upcoming one. Used by the guest homepage's Weekend League
+// spotlight to surface whatever's kicking off or already in play over it.
+function weekendWindow(now = new Date()) {
+  const day = now.getDay(); // 0 Sun .. 6 Sat
+  const toFriday = day === 5 ? 0 : day === 6 ? -1 : day === 0 ? -2 : 5 - day;
+  const start = new Date(now); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() + toFriday);
+  const end = new Date(start); end.setDate(start.getDate() + 2); end.setHours(23, 59, 59, 999);
+  return [start, end];
+}
+
 // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> expects, in the browser's local time — the
 // exact inverse of how CreateLeague turns that same input's value back into
@@ -4474,6 +4486,21 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const totalClubs = guestData ? guestData.teams.filter((t) => funLeagueIds.has(t.league_id)).length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played && funLeagueIds.has(f.league_id)).length : 0;
 
+  // Weekend League spotlight: whichever fun leagues either kick off fresh
+  // over the coming Fri–Sun, or already have unplayed matches due in that
+  // window — sorted so whatever's happening soonest leads. Recomputed from
+  // the same guestData already loaded above, no extra round trip.
+  const [weekendStart, weekendEnd] = weekendWindow();
+  const weekendLeagues = guestData ? funLeagues.reduce((items, l) => {
+    const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
+    const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
+    const dueFixtures = guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
+    if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
+    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
+    items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
+    return items;
+  }, []).sort((a, b) => a.earliest - b.earliest) : [];
+
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       {/* Sticky guest header — same shell language as the signed-in Header,
@@ -4573,6 +4600,14 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </div>
         </section>
 
+        {/* Weekend League spotlight — the most time-sensitive thing on the
+            page, so it leads right after the hero rather than waiting down
+            with the general Leagues list. Hidden entirely outside a
+            qualifying window rather than showing an empty promo. */}
+        {weekendLeagues.length > 0 && (
+          <WeekendLeagueSpotlight items={weekendLeagues} onJoin={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
+        )}
+
         {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
             scroll down to real content), so a guest doesn't hit a wall of
             "locked" tiles as the very first thing after the hero. The two
@@ -4637,13 +4672,52 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   );
 }
 
+// Time-boxed highlight of whatever's happening over the coming Fri–Sun —
+// leagues kicking off fresh, or leagues with matches already due — surfaced
+// right after the hero so the "play this weekend" moment doesn't get buried
+// scrolled down with the general Leagues list. items come pre-filtered and
+// sorted (soonest first) from PublicHome's weekendLeagues.
+function WeekendLeagueSpotlight({ items, onJoin, c }) {
+  const totalMatches = items.reduce((sum, it) => sum + it.matchCount, 0);
+  return (
+    <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.accent}22, ${c.surface})`, border: `1px solid ${c.accent}55` }}>
+      <div className="px-4 pt-3.5 pb-1 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase shrink-0" style={{ color: c.accent }}>
+          <Calendar size={12} /> Weekend League
+        </div>
+        {totalMatches > 0 && (
+          <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
+            <Zap size={10} style={{ color: c.accent }} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
+          </span>
+        )}
+      </div>
+      <div className="px-4 pb-1.5 font-body text-xs" style={{ color: c.textDim }}>
+        {items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday.
+      </div>
+      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1">
+        {items.slice(0, 6).map(({ league: l, kicksOffThisWeekend, matchCount }) => (
+          <button key={l.id} onClick={onJoin} className="flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
+            style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+            <span className="font-body font-semibold text-sm truncate w-full">{l.name}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>
+              {kicksOffThisWeekend ? "Kicks off this weekend" : `${matchCount} match${matchCount === 1 ? "" : "es"} due`}
+            </span>
+            <span className="flex items-center gap-1 font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
+              <Lock size={9} /> Join
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // One equal-weight tile in the guest quick-action grid — same visual as the
 // signed-in Home's MenuTile, plus a small lock badge on anything that needs
 // an account. Ladder just scrolls down to content that's already public;
 // Shop carries an "external" badge instead of a lock since it needs no
 // account, it just leaves the app.
-function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {
-  return (
+function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {  return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {locked && (
