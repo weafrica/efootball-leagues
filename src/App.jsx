@@ -2,26 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { proxiedMediaUrl, proxiedSignedUrl } from "./utils/mediaUrl";
-
-// Signs a result-proofs photo ONCE, with a long (5yr) expiry, and stores it
-// on the row via `urlColumn` — instead of the old pattern of re-signing on
-// every single ladder-screen open. A stored long-lived signed URL can be
-// wrapped in proxiedSignedUrl() and actually cached at Vercel's edge, since
-// unlike a fresh-every-load URL it never changes. Silently no-ops if there's
-// no photo or the sign/update call fails — this is a caching optimization,
-// never something that should block a result confirmation.
-async function cacheResultPhotoUrl(table, row, id, urlColumn = "result_photo_url") {
-  if (!row?.result_photo_path) return;
-  try {
-    const { data, error } = await supabase.storage
-      .from("result-proofs")
-      .createSignedUrl(row.result_photo_path, 60 * 60 * 24 * 365 * 5);
-    if (error || !data?.signedUrl) return;
-    await supabase.from(table).update({ [urlColumn]: data.signedUrl }).eq("id", id);
-  } catch {
-    // best-effort only
-  }
-}
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -2648,7 +2628,6 @@ export default function App() {
       .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't confirm result: ${error.message}`); return; }
-    await cacheResultPhotoUrl("challenges", challenge, challenge.id);
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
@@ -2684,7 +2663,6 @@ export default function App() {
       .update({ result_status: "confirmed", result_confirmed_at: new Date().toISOString() })
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
-    await cacheResultPhotoUrl("challenges", challenge, challenge.id);
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
@@ -2868,35 +2846,13 @@ export default function App() {
       .order("result_confirmed_at", { ascending: false })
       .limit(100);
     if (error) { console.error("Couldn't load ladder results:", error.message); setLadderResults([]); return; }
-    const rows = data || [];
-
-    // result_photo_url is signed ONCE, at confirm time (see
-    // cacheResultPhotoUrl), with a 5yr expiry — so unlike the old
-    // create-a-fresh-signed-url-on-every-open approach, this same URL is
-    // stable across every load and can actually be cached at Vercel's edge
-    // via proxiedSignedUrl, instead of re-hitting Supabase storage on every
-    // single ladder-screen open.
-    //
-    // Fallback: a few older rows may predate this column (confirmed before
-    // this fix shipped) and only have result_photo_path — sign those the
-    // old way, one-off, so they still display; they'll get backfilled into
-    // result_photo_url next time cacheResultPhotoUrl runs on them (it only
-    // runs on confirm, so truly old rows stay on this fallback path
-    // permanently unless manually backfilled).
-    const legacyRows = rows.filter((r) => r.result_photo_path && !r.result_photo_url);
-    let legacyUrlByPath = {};
-    if (legacyRows.length > 0) {
-      const { data: signed } = await supabase.storage
-        .from("result-proofs")
-        .createSignedUrls(legacyRows.map((r) => r.result_photo_path), 3600);
-      (signed || []).forEach((s) => { if (s.signedUrl) legacyUrlByPath[s.path] = s.signedUrl; });
-    }
-
-    setLadderResults(rows.map((r) => {
-      if (r.result_photo_url) return { ...r, photo_url: proxiedSignedUrl(r.result_photo_url) };
-      const legacy = r.result_photo_path ? legacyUrlByPath[r.result_photo_path] : null;
-      return { ...r, photo_url: legacy || null };
-    }));
+    setLadderResults(data || []);
+    // Deliberately not fetching/signing result photos here: once a ladder
+    // result is confirmed, the screenshot should only ever be visible to
+    // the opponent during their confirm step and to an admin during the
+    // approval-queue step (both handled separately via onViewResultProof,
+    // a 120s single-click signed link) — never in this public recent-
+    // matches feed that every ladder viewer sees.
   }, [session]);
 
 
@@ -7863,16 +7819,14 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
               const opponentWins = m.opponent_score > m.challenger_score;
               return (
                 <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
-                  {m.photo_url ? (
-                    <a href={m.photo_url} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full screenshot">
-                      <img src={m.photo_url} alt="Match result proof" loading="lazy" className="w-10 h-10 rounded-md object-cover"
-                        style={{ border: `1px solid ${c.border}` }} />
-                    </a>
-                  ) : (
-                    <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
-                      <Camera size={14} style={{ color: c.textFaint }} />
-                    </div>
-                  )}
+                  {/* Screenshot deliberately not shown here — once a ladder result is
+                      confirmed, the proof photo should only ever be visible to the
+                      opponent during their confirm step and to an admin during the
+                      approval queue (both via onViewResultProof), never in this
+                      public recent-matches feed that every ladder viewer sees. */}
+                  <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+                    <Camera size={14} style={{ color: c.textFaint }} />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-body text-sm truncate flex items-center gap-1.5">
                       <span style={{ fontWeight: challengerWins ? 700 : 500, color: challengerWins ? c.text : c.textFaint }}>{m.challenger_username}</span>
