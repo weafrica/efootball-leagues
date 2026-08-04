@@ -8222,6 +8222,27 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt && !datesOutOfOrder && roundPeriodValid;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
+  // Weekend League is a shortcut, not a separate field: whether a league
+  // shows up in the homepage's Weekend League spotlight is (and stays)
+  // fully derived from its starts_at falling on the coming Fri–Sun, plus
+  // created_by_admin. This just fills the date pickers with a sensible
+  // Saturday-noon kickoff so admins don't have to work the date out by
+  // hand, and confirms the result live under the fields — so the state
+  // driving eligibility and the state telling the admin about it can never
+  // drift apart.
+  const [wkStart, wkEnd] = weekendWindow();
+  const setWeekendLeagueDates = () => {
+    const saturdayNoon = new Date(wkStart.getTime() + ONE_DAY_MS);
+    saturdayNoon.setHours(12, 0, 0, 0);
+    setStartsAt(toDatetimeLocalValue(saturdayNoon));
+    if (!entryClosesAt) {
+      const fridayEvening = new Date(wkStart);
+      fridayEvening.setHours(18, 0, 0, 0);
+      setEntryClosesAt(toDatetimeLocalValue(fridayEvening));
+    }
+  };
+  const willBeWeekendLeague = isAdmin && startsAt && new Date(startsAt) >= wkStart && new Date(startsAt) <= wkEnd;
+
   const submit = () => {
     onCreate({
       name: name.trim(), teamNames, format,
@@ -8279,6 +8300,19 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
           <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
         </div>
       </div>
+      {isAdmin && (
+        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+          <button onClick={setWeekendLeagueDates} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full transition-transform active:scale-95"
+            style={{ background: `${c.accent}1A`, color: c.accent, border: `1px dashed ${c.accent}66` }}>
+            <Calendar size={11} /> Set as Weekend League
+          </button>
+          {willBeWeekendLeague && (
+            <span className="flex items-center gap-1 font-mono text-[11px] font-semibold" style={{ color: c.accent }}>
+              <Zap size={11} /> Will be featured in Weekend Leagues
+            </span>
+          )}
+        </div>
+      )}
       {datesOutOfOrder && (
         <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Start date must be on or after entry closes — otherwise the league would kick off before anyone's finished joining.</div>
       )}
