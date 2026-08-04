@@ -4605,7 +4605,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             with the general Leagues list. Hidden entirely outside a
             qualifying window rather than showing an empty promo. */}
         {weekendLeagues.length > 0 && (
-          <WeekendLeagueSpotlight items={weekendLeagues} onJoin={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
+          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} onJoin={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
         )}
 
         {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
@@ -4677,36 +4677,99 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 // right after the hero so the "play this weekend" moment doesn't get buried
 // scrolled down with the general Leagues list. items come pre-filtered and
 // sorted (soonest first) from PublicHome's weekendLeagues.
-function WeekendLeagueSpotlight({ items, onJoin, c }) {
+//
+// Gamified with: a live ticking countdown to kickoff/close, medal ranks for
+// the top 3 most-active leagues (same gold/silver/bronze language as the
+// Ladder), a "Hottest" flame badge on whichever league has the most matches
+// due, and a per-card heat bar so activity is visible at a glance, not just
+// a number.
+function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onJoin, c }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isLiveNow = now >= weekendStart && now <= weekendEnd;
+  const targetTime = isLiveNow ? weekendEnd : weekendStart;
+  const diffMs = Math.max(0, targetTime.getTime() - now.getTime());
+  const diffDays = Math.floor(diffMs / 86400000);
+  const diffHours = Math.floor((diffMs % 86400000) / 3600000);
+  const diffMins = Math.floor((diffMs % 3600000) / 60000);
+  const countdownLabel = diffDays > 0 ? `${diffDays}d ${diffHours}h` : diffHours > 0 ? `${diffHours}h ${diffMins}m` : `${diffMins}m`;
+
   const totalMatches = items.reduce((sum, it) => sum + it.matchCount, 0);
+  const maxMatches = Math.max(1, ...items.map((it) => it.matchCount));
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+
   return (
     <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.accent}22, ${c.surface})`, border: `1px solid ${c.accent}55` }}>
-      <div className="px-4 pt-3.5 pb-1 flex items-center justify-between gap-2">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="animate-glow-drift absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: c.accent, opacity: 0.22 }} />
+      </div>
+      <div className="relative px-4 pt-3.5 pb-1 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.2em] uppercase shrink-0" style={{ color: c.accent }}>
           <Calendar size={12} /> Weekend League
         </div>
+        <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
+          {isLiveNow ? (
+            <>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
+              </span>
+              Live · ends in {countdownLabel}
+            </>
+          ) : (
+            <><Clock size={10} /> Starts in {countdownLabel}</>
+          )}
+        </div>
+      </div>
+      <div className="relative px-4 pb-1.5 flex items-center gap-1.5 font-body text-xs" style={{ color: c.textDim }}>
+        {items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday
         {totalMatches > 0 && (
-          <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
-            <Zap size={10} style={{ color: c.accent }} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
+          <span className="flex items-center gap-0.5 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${c.accent}22`, color: c.accent }}>
+            <Zap size={9} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
           </span>
         )}
       </div>
-      <div className="px-4 pb-1.5 font-body text-xs" style={{ color: c.textDim }}>
-        {items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday.
-      </div>
-      <div className="no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1">
-        {items.slice(0, 6).map(({ league: l, kicksOffThisWeekend, matchCount }) => (
-          <button key={l.id} onClick={onJoin} className="flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
-            style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            <span className="font-body font-semibold text-sm truncate w-full">{l.name}</span>
-            <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>
-              {kicksOffThisWeekend ? "Kicks off this weekend" : `${matchCount} match${matchCount === 1 ? "" : "es"} due`}
-            </span>
-            <span className="flex items-center gap-1 font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
-              <Lock size={9} /> Join
-            </span>
-          </button>
-        ))}
+      <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1.5">
+        {items.slice(0, 6).map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
+          const isHottest = matchCount > 0 && matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
+          const heatPct = Math.round((matchCount / maxMatches) * 100);
+          return (
+            <button key={l.id} onClick={onJoin} className="relative flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
+              style={{ background: c.surface, border: `1px solid ${i < 3 ? rankColors[i] + "66" : c.border}` }}>
+              {isHottest && (
+                <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
+                  <Flame size={9} /> Hottest
+                </span>
+              )}
+              <div className="flex items-center gap-1.5 w-full">
+                {i < 3 ? (
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                    {i === 0 ? <Crown size={10} style={{ color: rankColors[0] }} /> : <Medal size={10} style={{ color: rankColors[i] }} />}
+                  </span>
+                ) : (
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 font-mono text-[9px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                    {i + 1}
+                  </span>
+                )}
+                <span className="font-body font-semibold text-sm truncate flex-1">{l.name}</span>
+              </div>
+              <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>
+                {kicksOffThisWeekend ? "Kicks off this weekend" : `${matchCount} match${matchCount === 1 ? "" : "es"} due`}
+              </span>
+              {matchCount > 0 && (
+                <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
+                  <div className="h-full rounded-full" style={{ width: `${heatPct}%`, background: c.accent }} />
+                </div>
+              )}
+              <span className="flex items-center gap-1 font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
+                <Lock size={9} /> Join the action
+              </span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
