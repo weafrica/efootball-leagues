@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
+import { proxiedMediaUrl } from "./utils/mediaUrl";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
@@ -1188,7 +1189,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       const path = `${Date.now()}.${ext}`;
       const { error: uploadErr } = await supabase.storage.from("shop-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
       if (uploadErr) { showToast(`Couldn't upload image: ${uploadErr.message}`); return false; }
-      const { data: pub } = supabase.storage.from("shop-photos").getPublicUrl(path);
+      const pub = { publicUrl: proxiedMediaUrl("shop-photos", path) };
       image_url = pub.publicUrl;
     }
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null };
