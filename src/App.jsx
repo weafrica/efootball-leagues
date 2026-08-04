@@ -7819,14 +7819,20 @@ function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, o
               const opponentWins = m.opponent_score > m.challenger_score;
               return (
                 <div key={m.id} className="flex items-center justify-between gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
-                  {/* Screenshot deliberately not shown here — once a ladder result is
-                      confirmed, the proof photo should only ever be visible to the
-                      opponent during their confirm step and to an admin during the
-                      approval queue (both via onViewResultProof), never in this
-                      public recent-matches feed that every ladder viewer sees. */}
-                  <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
-                    <Camera size={14} style={{ color: c.textFaint }} />
-                  </div>
+                  {/* Screenshot itself is never eagerly loaded/shown here — only the two
+                      players involved and admins get a "view proof" action, which pulls
+                      a fresh short-lived signed link on click. Everyone else (and even
+                      the two players, for every OTHER match) sees just the plain icon. */}
+                  {(session?.user?.id === m.challenger_id || session?.user?.id === m.opponent_id || isAdmin) ? (
+                    <button type="button" onClick={() => onViewResultProof(m)} title="View screenshot"
+                      className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+                      <Camera size={14} style={{ color: c.accent }} />
+                    </button>
+                  ) : (
+                    <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+                      <Camera size={14} style={{ color: c.textFaint }} />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="font-body text-sm truncate flex items-center gap-1.5">
                       <span style={{ fontWeight: challengerWins ? 700 : 500, color: challengerWins ? c.text : c.textFaint }}>{m.challenger_username}</span>
