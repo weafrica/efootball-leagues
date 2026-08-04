@@ -30,6 +30,16 @@ import {
 const THEME_KEY = "efootball-theme-v1";
 const ACCENT_KEY = "efootball-accent-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const DEFAULT_ROUND_PERIOD_HOURS = 48;
+// Older leagues created before this setting existed have no round_period_hours
+// column value — fall back to the original fixed 48-hour (2-day) gap so their
+// schedules don't shift.
+function roundPeriodMs(league) {
+  const hours = league?.round_period_hours;
+  return (typeof hours === "number" && hours > 0 ? hours : DEFAULT_ROUND_PERIOD_HOURS) * ONE_HOUR_MS;
+}
 
 // Used by every "refresh this every few seconds while a screen is open"
 // effect below. A background tab (phone screen off, switched app,
@@ -338,12 +348,13 @@ function finalStageSchedule(teamIds, finalFormat) {
   return finalFormat === "double_round_robin" ? doubleRoundRobin(teamIds) : roundRobin(teamIds);
 }
 
-// dueBase: Date the clock starts counting from. Each round gets +2 days on top of the previous.
-function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0) {
+// dueBase: Date the clock starts counting from. Each round gets +periodMs on top of the previous
+// (periodMs defaults to the original fixed 2-day gap when not given).
+function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, periodMs = TWO_DAYS_MS) {
   const rows = [];
   rounds.forEach((round, ri) => {
     const roundNumber = ri + 1 + roundOffset;
-    const dueAt = new Date(dueBase.getTime() + roundNumber * TWO_DAYS_MS).toISOString();
+    const dueAt = new Date(dueBase.getTime() + roundNumber * periodMs).toISOString();
     round.forEach(({ home, away }) => {
       const bye = away === null;
       rows.push({
@@ -359,10 +370,10 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0) {
 
 // Builds fixture rows for one knockout round. legs=1 is a single decisive match;
 // legs=2 plays it home and away, aggregate score deciding the winner (byes are always single-leg).
-function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs) {
+function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS) {
   const pairs = knockoutRound1(teamIds);
-  const leg1Due = new Date(dueBase.getTime() + roundNumber * TWO_DAYS_MS);
-  const leg2Due = new Date(leg1Due.getTime() + TWO_DAYS_MS);
+  const leg1Due = new Date(dueBase.getTime() + roundNumber * periodMs);
+  const leg2Due = new Date(leg1Due.getTime() + periodMs);
   const rows = [];
   pairs.forEach(({ home, away }) => {
     const bye = away === null;
@@ -393,14 +404,15 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
 
 function generateOpeningFixtures(league, teamIds, dueBase) {
   const { id: leagueId, format, survivor_matches_per_stage, survivor_target_count, survivor_final_format, group_size, knockout_legs } = league;
-  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase), startsInFinal: false, groups: null };
-  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase), startsInFinal: false, groups: null };
-  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1), startsInFinal: false, groups: null };
+  const periodMs = roundPeriodMs(league);
+  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
+  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
+  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1, periodMs), startsInFinal: false, groups: null };
   if (format === "survivor") {
     if (teamIds.length <= survivor_target_count) {
-      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase), startsInFinal: true, groups: null };
+      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase, 0, periodMs), startsInFinal: true, groups: null };
     }
-    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase), startsInFinal: false, groups: null };
+    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
   }
   if (format === "groups_knockout") {
     // Groups are sized to the admin's chosen "players per group" — the number of
@@ -409,7 +421,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
     const desiredSize = Math.max(2, group_size || 4);
     const groupsCount = Math.max(2, Math.round(teamIds.length / desiredSize));
     const groups = assignGroups(teamIds, groupsCount);
-    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase));
+    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase, 0, periodMs));
     return { fixtureRows, startsInFinal: false, groups, groupsCount };
   }
   return { fixtureRows: [], startsInFinal: false, groups: null };
@@ -417,8 +429,8 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
 
 // Builds the knockout bracket fixtures from a set of already-qualified team ids.
 // Knockout fixtures always live in stage 2, separate from the stage-1 group fixtures.
-function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs) {
-  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1);
+function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, league) {
+  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league));
 }
 
 function generationDueBase(league) {
@@ -3284,11 +3296,12 @@ export default function App() {
   };
 
   const createLeague = async (input) => {
-    const { name, teamNames, format, survivor, groups, knockoutLegs, entryClosesAt, startsAt, description, leagueType } = input;
+    const { name, teamNames, format, survivor, groups, knockoutLegs, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
     const insertPayload = {
       name, created_by: session.user.id, format,
       entry_closes_at: entryClosesAt, starts_at: startsAt,
       description: description || null,
+      round_period_hours: roundPeriodHours || DEFAULT_ROUND_PERIOD_HOURS,
       // Only an admin can actually create a cash league — enforced again here
       // (not just in the CreateLeague UI) since input is client-supplied.
       // The database's own check constraint / RLS policy is the real backstop.
@@ -3401,7 +3414,7 @@ export default function App() {
       }
     }
 
-    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), league.knockout_legs);
+    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), league.knockout_legs, league);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -3907,7 +3920,7 @@ export default function App() {
     const rounds = goingFinal
       ? finalStageSchedule(remainingIds, league.survivor_final_format)
       : stageSchedule(remainingIds, league.survivor_matches_per_stage);
-    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date());
+    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date(), 0, roundPeriodMs(league));
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -4012,6 +4025,18 @@ export default function App() {
     if (error) { showToast(`Couldn't save dates: ${error.message}`); return; }
     await loadLeagues();
     showToast("League dates updated.");
+  };
+
+  // Lets whoever can manage the league change how many days each round gets
+  // once fixtures open, but only while the league hasn't started yet — once
+  // generateFixtures has run, every fixture's due_at is already baked in from
+  // whatever the period was at that moment, so changing it after the fact
+  // wouldn't touch existing fixtures and would just be confusing.
+  const updateLeagueRoundPeriod = async (league, hours) => {
+    const { error } = await supabase.from("leagues").update({ round_period_hours: hours }).eq("id", league.id);
+    if (error) { showToast(`Couldn't save match period: ${error.message}`); return; }
+    await loadLeagues();
+    showToast("Match due-date period updated.");
   };
 
   // Comments live on every league regardless of stage — still filling up (pending)
@@ -4243,7 +4268,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -8019,6 +8044,7 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const [knockoutLegs, setKnockoutLegs] = useState(1);
   const [entryClosesAt, setEntryClosesAt] = useState("");
   const [startsAt, setStartsAt] = useState("");
+  const [roundPeriodHours, setRoundPeriodHours] = useState(DEFAULT_ROUND_PERIOD_HOURS);
   const [description, setDescription] = useState("");
 
   const teamNames = teamsText.split("\n").map((t) => t.trim()).filter(Boolean);
@@ -8035,7 +8061,8 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const groupsValid = format !== "groups_knockout" || (groupSize >= 2 && qualifiersPerGroup >= 1 && qualifiersPerGroup <= groupSize && (teamNames.length === 0 || teamNames.length >= 4));
   const groupsTooFewTeams = format === "groups_knockout" && teamNames.length > 0 && teamNames.length < 4;
   const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
-  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt && !datesOutOfOrder;
+  const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
+  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt && !datesOutOfOrder && roundPeriodValid;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
   const submit = () => {
@@ -8046,6 +8073,7 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       knockoutLegs: (format === "knockout" || format === "groups_knockout") ? Number(knockoutLegs) : 1,
       entryClosesAt: new Date(entryClosesAt).toISOString(),
       startsAt: new Date(startsAt).toISOString(),
+      roundPeriodHours: Number(roundPeriodHours),
       description: description.trim(),
       leagueType: isAdmin ? leagueType : "fun",
     });
@@ -8055,7 +8083,7 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
     <div className="pt-10">
       <button onClick={onCancel} className="flex items-center gap-1.5 font-body text-sm mb-6" style={{ color: c.textDim }}><ArrowLeft size={15} /> Back</button>
       <h1 className="text-3xl font-extrabold uppercase tracking-tight mb-1">New league</h1>
-      <p className="font-body mb-6 text-sm" style={{ color: c.textDim }}>Fixtures are generated automatically based on the format you pick. Each match gets 2 days to be played once it opens.</p>
+      <p className="font-body mb-6 text-sm" style={{ color: c.textDim }}>Fixtures are generated automatically based on the format you pick. Each match gets a set number of hours to be played once it opens — configurable below.</p>
 
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>League name</label>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Friday Night eFootball Cup" className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-5" style={inputStyle} />
@@ -8097,7 +8125,14 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       {datesOutOfOrder && (
         <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Start date must be on or after entry closes — otherwise the league would kick off before anyone's finished joining.</div>
       )}
-      {!datesOutOfOrder && <div className="mb-5" />}
+      {!datesOutOfOrder && <div className="mb-1.5" />}
+
+      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Hours per round (match due-date period)</label>
+      <input type="number" min={1} max={720} value={roundPeriodHours} onChange={(e) => setRoundPeriodHours(e.target.value)} className="w-full sm:w-40 border rounded-lg px-3 py-2.5 font-mono text-sm outline-none mb-1.5" style={inputStyle} />
+      {!roundPeriodValid && (
+        <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Enter a number of days between 1 and 30.</div>
+      )}
+      {roundPeriodValid && <div className="mb-5" />}
 
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Format</label>
       <div className="space-y-2 mb-2">
@@ -8619,24 +8654,35 @@ function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
 // datetime-local inputs (same control CreateLeague uses) so plans can
 // change after the league already exists, without needing to delete and
 // recreate it. Mirrors LeagueDescriptionBlock's edit-in-place pattern.
-function LeagueScheduleLine({ league, canManage, onUpdateSchedule, c }) {
+function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRoundPeriod, c }) {
   const [editing, setEditing] = useState(false);
   const [entryClosesAt, setEntryClosesAt] = useState(toDatetimeLocalValue(league.entry_closes_at));
   const [startsAt, setStartsAt] = useState(toDatetimeLocalValue(league.starts_at));
+  const [roundPeriodHours, setRoundPeriodHours] = useState(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS);
   const [saving, setSaving] = useState(false);
   const inputStyle = { background: c.surfaceHover, borderColor: c.border, color: c.text };
+  // Fixtures only exist once the admin has started the league — the due-date
+  // period is baked into each fixture's due_at at that point, so it can only
+  // still be changed for a league that hasn't started yet.
+  const notStartedYet = (league.fixtures || []).length === 0;
 
   useEffect(() => {
     setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at));
     setStartsAt(toDatetimeLocalValue(league.starts_at));
-  }, [league.entry_closes_at, league.starts_at]);
+    setRoundPeriodHours(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS);
+  }, [league.entry_closes_at, league.starts_at, league.round_period_hours]);
 
   const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
+  const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
 
   const save = async () => {
-    if (!entryClosesAt || !startsAt || datesOutOfOrder) return;
+    if (!entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)) return;
     setSaving(true);
     await onUpdateSchedule(league, { entryClosesAt, startsAt });
+    const newPeriod = Number(roundPeriodHours);
+    if (notStartedYet && newPeriod !== (league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS)) {
+      await onUpdateRoundPeriod(league, newPeriod);
+    }
     setSaving(false);
     setEditing(false);
   };
@@ -8657,10 +8703,23 @@ function LeagueScheduleLine({ league, canManage, onUpdateSchedule, c }) {
         {datesOutOfOrder && (
           <div className="font-mono text-[11px] mb-2" style={{ color: c.red }}>Start date must be on or after entry closes.</div>
         )}
+        {notStartedYet ? (
+          <div className="mb-1.5">
+            <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>Hours per round (match due-date period)</label>
+            <input type="number" min={1} max={720} value={roundPeriodHours} onChange={(e) => setRoundPeriodHours(e.target.value)} className="w-full sm:w-32 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
+            {!roundPeriodValid && (
+              <div className="font-mono text-[11px] mt-1.5" style={{ color: c.red }}>Enter a number of days between 1 and 30.</div>
+            )}
+          </div>
+        ) : (
+          <div className="font-mono text-[11px] mb-1.5" style={{ color: c.textFaint }}>
+            Match due-date period ({league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS} hour{(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS) === 1 ? "" : "s"}) is locked in — the league has already started.
+          </div>
+        )}
         <div className="flex items-center gap-2 justify-end">
-          <button onClick={() => { setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at)); setStartsAt(toDatetimeLocalValue(league.starts_at)); setEditing(false); }}
+          <button onClick={() => { setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at)); setStartsAt(toDatetimeLocalValue(league.starts_at)); setRoundPeriodHours(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS); setEditing(false); }}
             className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
-          <button onClick={save} disabled={saving || !entryClosesAt || !startsAt || datesOutOfOrder} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !entryClosesAt || !startsAt || datesOutOfOrder ? 0.6 : 1 }}>
+          <button onClick={save} disabled={saving || !entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid) ? 0.6 : 1 }}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -9045,7 +9104,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -9145,7 +9204,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           <div className="font-mono text-xs mt-2" style={{ color: c.textFaint }}>
             {formatLabel} · {league.teams.length} clubs · {league.members.length} member{league.members.length === 1 ? "" : "s"}
           </div>
-          <LeagueScheduleLine league={league} canManage={canManage} onUpdateSchedule={onUpdateSchedule} c={c} />
+          <LeagueScheduleLine league={league} canManage={canManage} onUpdateSchedule={onUpdateSchedule} onUpdateRoundPeriod={onUpdateRoundPeriod} c={c} />
         </div>
         {!joined && !entryClosed && !blockedByLeague && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
         {!joined && !entryClosed && blockedByLeague && (
