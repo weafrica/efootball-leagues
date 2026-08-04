@@ -455,6 +455,29 @@ function isExpired(fixture) {
   return !fixture.played && !!fixture.due_at && new Date(fixture.due_at) < new Date();
 }
 
+// Whether a fixture is part of the group stage (stage 1) of a Groups +
+// Knockout league. That stage plays out across several groups at once, so a
+// single match's due_at isn't a fair cutoff on its own.
+function isGroupStageFixture(fixture, league) {
+  return league?.format === "groups_knockout" && fixture.stage === 1;
+}
+
+// The real "can this still be submitted / does this count as a no-show
+// loss" check. For every format except a Groups + Knockout group stage this
+// is just isExpired (the fixture's own due_at). For a group-stage fixture,
+// due_at is advisory only — still shown to nudge players on when they're
+// expected to play — but it no longer blocks submission or auto-scores a
+// loss. The real cutoff is the whole group's shared due date the admin sets
+// on the league (league.group_stage_due_at), since group results all need
+// to be in before the group as a whole can be finalized.
+function isFixtureLocked(fixture, league) {
+  if (fixture.played) return false;
+  if (isGroupStageFixture(fixture, league)) {
+    return !!league.group_stage_due_at && new Date(league.group_stage_due_at) < new Date();
+  }
+  return isExpired(fixture);
+}
+
 // Earliest not-yet-played, fully-paired fixture for a given team (used for
 // the "next fixture" status message). Sorted by due date first so a fixture
 // with no due date yet falls back to round order.
@@ -555,7 +578,7 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
       if (!opponent) return;
       rows.push({
         fixtureId: f.id, leagueId: l.id, leagueName: l.name, team, opponent,
-        isHome: f.home_team_id === team.id, round: f.round, due_at: f.due_at, expired: isExpired(f),
+        isHome: f.home_team_id === team.id, round: f.round, due_at: f.due_at, expired: isFixtureLocked(f, l),
       });
     });
   });
@@ -1077,7 +1100,7 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
 // this fixture. This is a standings-table penalty only, not a real
 // scoreline — the fixture itself stays unplayed/scoreless in the database;
 // isExpired just tells computeStandings to treat it this way live.
-function computeStandings(teams, fixtures) {
+function computeStandings(teams, fixtures, league) {
   const table = {};
   teams.forEach((t) => { table[t.id] = { id: t.id, name: t.name, eliminated: t.eliminated, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
   fixtures.forEach((f) => {
@@ -1092,7 +1115,7 @@ function computeStandings(teams, fixtures) {
       if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
       else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
       else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
-    } else if (isExpired(f)) {
+    } else if (isFixtureLocked(f, league)) {
       h.p++; a.p++; h.l++; a.l++;
       h.ga += 4; a.ga += 4; // no-show penalty: both concede 4, no points either way
     }
@@ -1114,7 +1137,7 @@ function computeStandings(teams, fixtures) {
 function computeKnockoutRanking(league) {
   const isGroupsKnockout = league.format === "groups_knockout";
   const isKnockout = league.format === "knockout" || isGroupsKnockout;
-  if (!isKnockout) return computeStandings(league.teams, league.fixtures).map((r) => r.id);
+  if (!isKnockout) return computeStandings(league.teams, league.fixtures, league).map((r) => r.id);
 
   const bracketStage = isGroupsKnockout ? 2 : 1;
   const bracketFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
@@ -1139,7 +1162,7 @@ function computeKnockoutRanking(league) {
   if (isGroupsKnockout) {
     const groupOnlyTeams = league.teams.filter((t) => !bracketTeamIds.has(t.id));
     const groupFixtures = league.fixtures.filter((f) => f.stage === 1);
-    rankedIds.push(...computeStandings(groupOnlyTeams, groupFixtures).map((r) => r.id));
+    rankedIds.push(...computeStandings(groupOnlyTeams, groupFixtures, league).map((r) => r.id));
   }
   return rankedIds;
 }
@@ -3257,7 +3280,7 @@ export default function App() {
     if (!fixture) return; // not loaded into this league's data yet — wait for the next update
     setPendingLogFixtureId(null);
     if (fixture.played) return; // already logged elsewhere in the meantime — just land on the league
-    if (isExpired(fixture)) {
+    if (isFixtureLocked(fixture, activeLeague)) {
       showToast("That match passed its 2-day deadline without a result — both clubs received a loss. It's no longer loggable.");
       return;
     }
@@ -3403,11 +3426,11 @@ export default function App() {
     // admin's browser already had — a stale copy here can both cut the
     // wrong clubs from the group stage and seed the knockout bracket wrong.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("groups_count, teams(*), fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("format, groups_count, group_stage_due_at, teams(*), fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
-    const unplayed = groupFixtures.filter((f) => !f.played && !isExpired(f));
+    const unplayed = groupFixtures.filter((f) => !f.played && !isFixtureLocked(f, fresh));
     if (unplayed.length > 0) { showToast(`${unplayed.length} group match(es) still need a result.`); return; }
 
     const groupsCount = fresh.groups_count;
@@ -3417,7 +3440,7 @@ export default function App() {
       const groupTeams = fresh.teams.filter((t) => t.group_number === g);
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
-      const standings = computeStandings(groupTeams, groupFx);
+      const standings = computeStandings(groupTeams, groupFx, fresh);
       const n = Math.min(league.group_qualifiers, standings.length);
       standings.slice(0, n).forEach((r) => qualifiers.push(r.id));
       standings.slice(n).forEach((r) => eliminatedIds.push(r.id));
@@ -4058,6 +4081,18 @@ export default function App() {
     showToast("Match due-date period updated.");
   };
 
+  // Groups + Knockout only: the shared deadline for the whole group stage.
+  // Individual matchday due_at values stay advisory (they still show as
+  // "Due X" and never block a submission or auto-score a loss) — this date
+  // is the real cutoff. Pass null to clear it.
+  const updateLeagueGroupStageDueAt = async (league, dueAt) => {
+    const { error } = await supabase.from("leagues")
+      .update({ group_stage_due_at: dueAt ? new Date(dueAt).toISOString() : null }).eq("id", league.id);
+    if (error) { showToast(`Couldn't save the group stage due date: ${error.message}`); return; }
+    await loadLeagues();
+    showToast(dueAt ? "Group stage due date updated." : "Group stage due date cleared.");
+  };
+
   // Comments live on every league regardless of stage — still filling up (pending)
   // or already generated fixtures (created/active) — so members can talk trash,
   // coordinate, or ask questions in one place. Anyone who can see the league can
@@ -4287,7 +4322,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -5024,7 +5059,7 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   }
 
   const activeTeams = l.format === "survivor" ? leagueTeams.filter((t) => !t.eliminated) : leagueTeams;
-  const standings = computeStandings(activeTeams, leagueFixtures);
+  const standings = computeStandings(activeTeams, leagueFixtures, l);
   if (standings.length === 0) return null;
   const n = standings.length;
   const zoneFor = (idx) => {
@@ -8100,7 +8135,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
   const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultEscalationReason(l, s)).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
   const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
-  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage))[0];
+  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
   const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
   const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
     : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
@@ -8584,7 +8619,7 @@ function aggregateFor(legs, teamId) {
 // the other directly off the bracket instead of hunting them down through
 // "Find yourself" — each icon calls the OTHER team's number and is signed
 // with the icon-owner's own club name.
-function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, c }) {
+function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, league, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
   const [saveState, setSaveState] = useState("idle");
@@ -8631,8 +8666,8 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
       <span className="flex-1 min-w-0 truncate font-body text-sm">{awayTeam.name}</span>
-      <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isExpired(fixture) ? c.red : c.textFaint }}>
-        {fixture.played ? "" : isExpired(fixture) ? "Expired" : fmtDate(fixture.due_at)}
+      <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
+        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : fmtDate(fixture.due_at)}
       </span>
       {canManage && (
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -8698,7 +8733,7 @@ function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getS
                         return <div key={f.id} className="py-2 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} — bye this round</div>;
                       }
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={home} awayTeam={away} canManage={canManage} onSave={onRecordResult}
-                        joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} c={c} />;
+                        joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
                   </div>
                 </div>
@@ -8753,7 +8788,7 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                       const legAway = league.teams.find((t) => t.id === f.away_team_id);
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={legHome} awayTeam={legAway} canManage={canManage}
                         onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
-                        joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} c={c} />;
+                        joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
                     {twoLegged && (
                       <div className="font-mono text-[10px] mt-1" style={{ color: c.textDim }}>
@@ -8784,7 +8819,7 @@ function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
         const groupTeams = league.teams.filter((t) => t.group_number === g);
         if (groupTeams.length === 0) return null;
         const groupFx = groupStageFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
-        const standings = computeStandings(groupTeams, groupFx);
+        const standings = computeStandings(groupTeams, groupFx, league);
         const qualifiers = league.group_qualifiers || 0;
         const n = standings.length;
         const zoneFor = (idx) => (idx < qualifiers ? c.greenText : "transparent");
@@ -8927,6 +8962,69 @@ function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRound
         <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
           style={{ color: c.accent }}>
           <Settings2 size={11} /> Edit
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Groups + Knockout only: lets whoever manages the league set (or clear) the
+// shared deadline for submitting every result in the group stage. Each
+// matchday's own due_at stays purely advisory once this exists — it's still
+// shown on every fixture as a nudge, but this date is what actually decides
+// when unplayed matches get locked out and auto-scored as a no-show loss.
+function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, c }) {
+  const [editing, setEditing] = useState(false);
+  const [dueAt, setDueAt] = useState(toDatetimeLocalValue(league.group_stage_due_at));
+  const [saving, setSaving] = useState(false);
+  const passed = league.group_stage_due_at && new Date(league.group_stage_due_at) < new Date();
+
+  useEffect(() => { setDueAt(toDatetimeLocalValue(league.group_stage_due_at)); }, [league.group_stage_due_at]);
+
+  const save = async () => {
+    setSaving(true);
+    await onUpdateGroupStageDueAt(league, dueAt || null);
+    setSaving(false);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-2 rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+        <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>
+          Group stage due date (all groups)
+        </label>
+        <input type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)}
+          className="w-full sm:w-64 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+        <div className="font-mono text-[11px] mt-1.5 mb-2" style={{ color: c.textFaint }}>
+          Individual matchday due dates stay advisory — this is the real cutoff for the whole group stage.
+        </div>
+        <div className="flex items-center gap-2 justify-end">
+          <button onClick={() => { setDueAt(toDatetimeLocalValue(league.group_stage_due_at)); setEditing(false); }}
+            className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
+          {league.group_stage_due_at && (
+            <button onClick={async () => { setSaving(true); await onUpdateGroupStageDueAt(league, null); setSaving(false); setEditing(false); }} disabled={saving}
+              className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.redSoft, color: c.red, opacity: saving ? 0.6 : 1 }}>Clear</button>
+          )}
+          <button onClick={save} disabled={saving || !dueAt} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+            style={{ background: c.accent, color: c.accentText, opacity: saving || !dueAt ? 0.6 : 1 }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 mt-1">
+      <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: passed ? c.red : c.textFaint }}>
+        <Clock size={11} />
+        {league.group_stage_due_at ? `Group stage due ${fmtDate(league.group_stage_due_at)}${passed ? " · expired" : ""}` : "Group stage due date not set"}
+      </div>
+      {canManage && (
+        <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
+          style={{ color: c.accent }}>
+          <Settings2 size={11} /> {league.group_stage_due_at ? "Edit" : "Set"}
         </button>
       )}
     </div>
@@ -9295,7 +9393,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -9339,10 +9437,10 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
   const stageFixtures = (isSurvivor || isGroupsKnockout) ? league.fixtures.filter((f) => f.stage === league.current_stage) : league.fixtures;
   const displayTeams = isSurvivor ? league.teams.filter((t) => !t.eliminated) : league.teams;
-  const standings = useMemo(() => computeStandings(displayTeams, stageFixtures), [displayTeams, stageFixtures]);
+  const standings = useMemo(() => computeStandings(displayTeams, stageFixtures, league), [displayTeams, stageFixtures, league]);
   const totalRounds = Math.max(...stageFixtures.map((f) => f.round), 0);
   const groupStageFixtures = isGroupsKnockout ? league.fixtures.filter((f) => f.stage === 1) : [];
-  const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played || isExpired(f));
+  const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played || isFixtureLocked(f, league));
 
   const n = standings.length;
   const zoneFor = (idx) => {
@@ -9363,7 +9461,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
   const formatLabel = FORMATS.find((f) => f.id === league.format)?.label;
   const notStarted = league.fixtures.length === 0;
-  const expiredCount = league.fixtures.filter((f) => isExpired(f)).length;
+  const expiredCount = league.fixtures.filter((f) => isFixtureLocked(f, league)).length;
 
   return (
     <div className="pt-8">
@@ -9551,8 +9649,9 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {isGroupsKnockout && inGroupStage && (
         <div className="rounded-xl p-4 mb-5 border" style={{ background: c.surface, borderColor: c.border }}>
           <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
-            Group stage · {league.groups_count} groups · {groupStageFixtures.filter((f) => f.played || isExpired(f)).length}/{groupStageFixtures.length} played · top {league.group_qualifiers} from each group advance
+            Group stage · {league.groups_count} groups · {groupStageFixtures.filter((f) => f.played || isFixtureLocked(f, league)).length}/{groupStageFixtures.length} played · top {league.group_qualifiers} from each group advance
           </div>
+          <GroupStageDueLine league={league} canManage={canManage} onUpdateGroupStageDueAt={onUpdateGroupStageDueAt} c={c} />
           {canManage && (
             <button disabled={!groupStageDone} onClick={() => onAdvance(league)}
               className="font-body text-xs font-semibold px-3 py-2 rounded-full"
@@ -9611,7 +9710,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           {(joined || canManage) && (
             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
               getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
+              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} c={c} />
           )}
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {joined && !canSeePhones && (
@@ -10365,9 +10464,9 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {opponent?.name || "TBD"}</div>
-          <div className="font-mono text-xs mt-1" style={{ color: isExpired(fixture) ? c.red : c.textDim }}>
+          <div className="font-mono text-xs mt-1" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textDim }}>
             {isHome ? "Home" : "Away"} · Matchday {fixture.round}
-            {isExpired(fixture) ? " · Expired" : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
+            {isFixtureLocked(fixture, league) ? " · Expired" : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
           </div>
         </div>
         {canSeePhones && opponent?.phone && (
@@ -10395,7 +10494,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
     if (inGroupStage) {
       const groupTeams = league.teams.filter((t) => t.group_number === team.group_number);
       const groupFx = groupStageFixtures.filter((f) => groupTeams.some((gt) => gt.id === f.home_team_id));
-      const standings = computeStandings(groupTeams, groupFx).map((r, i) => ({ ...r, rank: i + 1 }));
+      const standings = computeStandings(groupTeams, groupFx, league).map((r, i) => ({ ...r, rank: i + 1 }));
       const myRow = standings.find((r) => r.id === team.id);
       const nextFixture = groupFx.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
         .sort((a, b) => a.round - b.round)[0];
@@ -10421,7 +10520,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
       return;
     }
     const activeTeams = league.teams.filter((t) => !t.eliminated);
-    const standings = computeStandings(activeTeams, stageFixtures).map((r, i) => ({ ...r, rank: i + 1 }));
+    const standings = computeStandings(activeTeams, stageFixtures, league).map((r, i) => ({ ...r, rank: i + 1 }));
     const myRow = standings.find((r) => r.id === team.id);
     const nextFixture = stageFixtures.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
       .sort((a, b) => a.round - b.round)[0];
@@ -10506,7 +10605,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {result.myFixtures.map((f) => (
                   <div key={f.id} className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     {twoLegged ? `Leg ${f.leg} (${f.home_team_id === result.team.id ? "Home" : "Away"}): ` : ""}
-                    {f.played ? `${f.home_score} – ${f.away_score}` : isExpired(f) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span> : `Due by ${fmtDate(f.due_at)}`}
+                    {f.played ? `${f.home_score} – ${f.away_score}` : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span> : `Due by ${fmtDate(f.due_at)}`}
                   </div>
                 ))}
                 {canSeePhones && (
@@ -10563,7 +10662,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
   );
 }
 
-function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, c }) {
+function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, c }) {
   const [matchday, setMatchday] = useState("");
   const [teamQuery, setTeamQuery] = useState("");
   const [result, setResult] = useState(null);
@@ -10582,7 +10681,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
       .sort((x, y) => x.leg - y.leg);
     if (legs.length === 0) { setResult({ notFound: true, reason: `${team.name} has no fixture on matchday ${md} in the current stage.` }); return; }
 
-    const anyExpired = legs.some((f) => isExpired(f));
+    const anyExpired = legs.some((f) => isFixtureLocked(f, league));
     if (anyExpired && !canManage) {
       setResult({ notFound: true, reason: "This match passed its 2-day deadline without a result — both clubs received a loss. It's no longer viewable." });
       return;
@@ -10659,7 +10758,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
               <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
                 <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
                   {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}` : isExpired(fixture) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
+                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}` : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
                 </div>
                 {canManage && (
                   <div className="flex items-center gap-2">
@@ -10686,7 +10785,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
                     </button>
                   </div>
                 )}
-                {!canManage && joined && !fixture.played && !isExpired(fixture) && (() => {
+                {!canManage && joined && !fixture.played && !isFixtureLocked(fixture, league) && (() => {
                   const submission = getSubmission?.(fixture.id);
                   return submission?.status === "pending" ? (
                     <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
