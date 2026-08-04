@@ -3642,9 +3642,18 @@ export default function App() {
         });
         const [teamA, teamB] = Object.keys(totals);
         if (totals[teamA] !== totals[teamB]) {
-          const loserId = totals[teamA] > totals[teamB] ? teamB : teamA;
-          const { data: updatedRows, error: elimErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId).select("id");
-          if (elimErr || !updatedRows?.length) showToast("Result saved, but the losing club couldn't be marked eliminated — check permissions.");
+          // Explicitly set BOTH sides' elimination status from this tie's
+          // outcome — not just marking the loser eliminated. This matters
+          // when a result gets corrected after the fact (admin re-logs a
+          // new score on an already-decided tie, like here): without also
+          // resetting the winner back to not-eliminated, a team that was
+          // wrongly eliminated by the earlier incorrect result stays stuck
+          // eliminated forever, even once the correction says they won.
+          const winnerId = totals[teamA] > totals[teamB] ? teamA : teamB;
+          const loserId = winnerId === teamA ? teamB : teamA;
+          const { error: elimLoserErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
+          const { error: elimWinnerErr } = await supabase.from("teams").update({ eliminated: false }).eq("id", winnerId);
+          if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated — check permissions.");
         }
       }
     }
