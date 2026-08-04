@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedMediaUrl } from "./utils/mediaUrl";
+import { proxiedMediaUrl, proxiedSignedUrl } from "./utils/mediaUrl";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -3731,7 +3731,7 @@ export default function App() {
         await postComment(
           league,
           `Photo proof for ${submission.submitted_by_username}'s approved result — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
-          null, null, data.signedUrl, true,
+          null, null, proxiedSignedUrl(data.signedUrl), true,
         );
       }
     }
@@ -3762,7 +3762,7 @@ export default function App() {
       if (submission.photo_path) {
         const { data } = await supabase.storage.from("result-proofs")
           .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
-        photoUrl = data?.signedUrl || null;
+        photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
       }
       await postComment(
         league,
@@ -3798,7 +3798,7 @@ export default function App() {
       if (submission.photo_path) {
         const { data } = await supabase.storage.from("result-proofs")
           .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
-        photoUrl = data?.signedUrl || null;
+        photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
       }
       await postComment(
         league,
