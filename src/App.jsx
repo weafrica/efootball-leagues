@@ -3314,6 +3314,13 @@ export default function App() {
       entry_closes_at: entryClosesAt, starts_at: startsAt,
       description: description || null,
       round_period_hours: roundPeriodHours || DEFAULT_ROUND_PERIOD_HOURS,
+      // Drives the guest homepage's Weekend League spotlight — only leagues
+      // an admin actually created should ever show up there, so this is
+      // captured once at creation time rather than re-derived later (a
+      // league's creator obviously doesn't change, but who counts as an
+      // admin could, and we don't want that retroactively flipping which
+      // past leagues appear).
+      created_by_admin: isAdmin,
       // Only an admin can actually create a cash league — enforced again here
       // (not just in the CreateLeague UI) since input is client-supplied.
       // The database's own check constraint / RLS policy is the real backstop.
@@ -4486,12 +4493,15 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const totalClubs = guestData ? guestData.teams.filter((t) => funLeagueIds.has(t.league_id)).length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played && funLeagueIds.has(f.league_id)).length : 0;
 
-  // Weekend League spotlight: whichever fun leagues either kick off fresh
-  // over the coming Fri–Sun, or already have unplayed matches due in that
-  // window — sorted so whatever's happening soonest leads. Recomputed from
-  // the same guestData already loaded above, no extra round trip.
+  // Weekend League spotlight: whichever fun leagues an admin created either
+  // kick off fresh over the coming Fri–Sun, or already have unplayed matches
+  // due in that window — sorted so whatever's happening soonest leads.
+  // Restricted to admin-created leagues (created_by_admin) so this stays a
+  // curated, "official" highlight rather than surfacing whatever any member
+  // happened to schedule for the weekend. Recomputed from the same
+  // guestData already loaded above, no extra round trip.
   const [weekendStart, weekendEnd] = weekendWindow();
-  const weekendLeagues = guestData ? funLeagues.reduce((items, l) => {
+  const weekendLeagues = guestData ? funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
     const dueFixtures = guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
@@ -4500,6 +4510,11 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest) : [];
+  const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
+  // The general Leagues list below excludes anything already shown in the
+  // Weekend League spotlight above — so a weekend league gets one true home
+  // on the page instead of appearing twice.
+  const otherFunLeagues = funLeagues.filter((l) => !weekendLeagueIds.has(l.id));
 
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
@@ -4627,7 +4642,12 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         </div>
 
         <div ref={tablesRef}>
-          {guestData && funLeagues.length === 0 && (
+          {guestData && weekendLeagues.length > 0 && (
+            <GuestLeagueSection title="Weekend Leagues" icon={Calendar} leagues={weekendLeagues.map((it) => it.league)} data={guestData}
+              onJoin={() => onRequireAuth("Sign in to join this weekend's action.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
+          )}
+
+          {guestData && otherFunLeagues.length === 0 && (
             <section className="mt-8">
               <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
                 No leagues running yet — sign in and start the first one.
@@ -4636,7 +4656,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           )}
 
           {guestData && (
-            <GuestLeagueSection title="Leagues" icon={Gamepad2} leagues={funLeagues} data={guestData}
+            <GuestLeagueSection title="Leagues" icon={Gamepad2} leagues={otherFunLeagues} data={guestData}
               onJoin={() => onRequireAuth("Sign in to join this league.")} avatarByTeamId={guestData.avatarByTeamId} c={c} />
           )}
         </div>
