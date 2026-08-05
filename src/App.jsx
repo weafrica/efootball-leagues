@@ -370,8 +370,14 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 
 // Builds fixture rows for one knockout round. legs=1 is a single decisive match;
 // legs=2 plays it home and away, aggregate score deciding the winner (byes are always single-leg).
+// A round that pairs down to exactly one real matchup IS the final — it's
+// always played as a single decisive match, regardless of the league's
+// home/away legs setting, since a drawn final goes to penalties instead of
+// a second leg (see isFinalRoundFixtures / advanceKnockout).
 function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS) {
   const pairs = knockoutRound1(teamIds);
+  const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
+  if (isFinalRound) legs = 1;
   const leg1Due = new Date(dueBase.getTime() + roundNumber * periodMs);
   const leg2Due = new Date(leg1Due.getTime() + periodMs);
   const rows = [];
@@ -431,6 +437,44 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
 // Knockout fixtures always live in stage 2, separate from the stage-1 group fixtures.
 function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, league) {
   return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league));
+}
+
+// A knockout round is "the final" when it comes down to exactly one real
+// tie — no other simultaneous tie, and not a bye — because whoever wins
+// that tie becomes champion. Only the final ever needs penalties: every
+// earlier round instead lets both sides through when level on aggregate,
+// since there's always a next round to sort it out further either way.
+function isFinalRoundFixtures(roundFixtures) {
+  const ties = new Set();
+  let hasBye = false;
+  roundFixtures.forEach((f) => {
+    if (f.away_team_id === null) { hasBye = true; return; }
+    ties.add([f.home_team_id, f.away_team_id].sort().join("~"));
+  });
+  return !hasBye && ties.size === 1;
+}
+
+// Same check, scoped down to whichever tie a single fixture belongs to —
+// used by result-entry UI to decide whether to offer a penalty score field.
+function isFinalFixture(fixture, league) {
+  if (!fixture || fixture.away_team_id === null) return false;
+  const roundFixtures = (league.fixtures || []).filter((f) => f.stage === fixture.stage && f.round === fixture.round);
+  return isFinalRoundFixtures(roundFixtures);
+}
+
+// Sums a penalty-shootout score the same way aggregateFor sums regulation
+// goals, but returns null (rather than 0) the moment either leg is missing
+// a penalty entry for that side — unlike a goal, "no penalties recorded
+// yet" and "lost the shootout 0-0" are different things, and callers need
+// to tell them apart.
+function pensAggregateFor(legs, teamId) {
+  let total = 0, any = false;
+  for (const f of legs) {
+    const val = f.home_team_id === teamId ? f.pens_home : f.away_team_id === teamId ? f.pens_away : null;
+    if (val === null || val === undefined) return null;
+    total += val; any = true;
+  }
+  return any ? total : null;
 }
 
 function generationDueBase(league) {
@@ -1891,13 +1935,22 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
 function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCancel, onSubmit, c }) {
   const [h, setH] = useState(existing ? existing.home_score : 0);
   const [a, setA] = useState(existing ? existing.away_score : 0);
+  const [ph, setPh] = useState(existing?.pens_home ?? "");
+  const [pa, setPa] = useState(existing?.pens_away ?? "");
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  // The final is always a single decisive match — if it's tied, penalties
+  // are the only way through, so this modal asks for them right here
+  // instead of sending the admin off to a separate screen.
+  const isFinal = isFinalFixture(fixture, league);
+  const needsPens = isFinal && Number(h) === Number(a);
+  const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
+
   const submit = async () => {
-    if (!file || saving) return;
+    if (!file || saving || !pensReady) return;
     setSaving(true);
-    await onSubmit(h, a, file);
+    await onSubmit(h, a, file, needsPens ? Number(ph) : null, needsPens ? Number(pa) : null);
     setSaving(false);
   };
 
@@ -1934,6 +1987,28 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
           </div>
         </div>
 
+        {needsPens && (
+          <div className="mb-5">
+            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>This is the final — level after regulation goes to penalties.</div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (pens)</div>
+                <input type="number" min={0} value={ph} onChange={(e) => setPh(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (pens)</div>
+                <input type="number" min={0} value={pa} onChange={(e) => setPa(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+            </div>
+            {ph !== "" && pa !== "" && Number(ph) === Number(pa) && (
+              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too — someone has to win.</div>
+            )}
+          </div>
+        )}
+
         <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Photo proof (required)</label>
         <label className="flex items-center gap-2 border border-dashed rounded-lg px-4 py-3 mb-1 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
           <Camera size={15} style={{ color: c.textFaint }} />
@@ -1944,8 +2019,8 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
           The admin reviews this before it counts — once approved it's posted to the comments under your name automatically.
         </div>
 
-        <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
-          style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
+        <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
+          style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
           {saving ? "Submitting…" : "Submit for admin approval"}
         </button>
       </div>
@@ -3774,10 +3849,10 @@ export default function App() {
   // too, same as submitMatchResult's rule for regular players. Once saved,
   // it's posted to the comments as scoreline + photo, same as an approved
   // player submission, so the evidence is visible to the whole league either way.
-  const recordResult = async (league, fixture, homeScore, awayScore, file = null) => {
+  const recordResult = async (league, fixture, homeScore, awayScore, file = null, pensHome = null, pensAway = null) => {
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return; }
     const { error } = await supabase.from("fixtures")
-      .update({ played: true, home_score: homeScore, away_score: awayScore, played_at: new Date().toISOString() }).eq("id", fixture.id);
+      .update({ played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, played_at: new Date().toISOString() }).eq("id", fixture.id);
     if (error) { showToast("Couldn't save result."); return; }
 
     const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
@@ -3792,7 +3867,7 @@ export default function App() {
         .filter((f) => f.stage === fixture.stage && f.round === fixture.round &&
           ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id) ||
            (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id)))
-        .map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: homeScore, away_score: awayScore } : f));
+        .map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway } : f));
       if (tieFixtures.every((f) => f.played)) {
         const totals = {};
         tieFixtures.forEach((f) => {
@@ -3800,7 +3875,23 @@ export default function App() {
           totals[f.away_team_id] = (totals[f.away_team_id] || 0) + f.away_score;
         });
         const [teamA, teamB] = Object.keys(totals);
+        // Level on aggregate outside the final just leaves both sides as they
+        // are (advanceKnockout lets both through when the round advances). In
+        // the final, a penalty score — if one's been entered — decides it now.
+        const isFinal = isFinalRoundFixtures(tieFixtures);
+        let winnerId = null, loserId = null;
         if (totals[teamA] !== totals[teamB]) {
+          winnerId = totals[teamA] > totals[teamB] ? teamA : teamB;
+          loserId = winnerId === teamA ? teamB : teamA;
+        } else if (isFinal) {
+          const pensA = pensAggregateFor(tieFixtures, teamA);
+          const pensB = pensAggregateFor(tieFixtures, teamB);
+          if (pensA !== null && pensB !== null && pensA !== pensB) {
+            winnerId = pensA > pensB ? teamA : teamB;
+            loserId = winnerId === teamA ? teamB : teamA;
+          }
+        }
+        if (winnerId) {
           // Explicitly set BOTH sides' elimination status from this tie's
           // outcome — not just marking the loser eliminated. This matters
           // when a result gets corrected after the fact (admin re-logs a
@@ -3808,8 +3899,6 @@ export default function App() {
           // resetting the winner back to not-eliminated, a team that was
           // wrongly eliminated by the earlier incorrect result stays stuck
           // eliminated forever, even once the correction says they won.
-          const winnerId = totals[teamA] > totals[teamB] ? teamA : teamB;
-          const loserId = winnerId === teamA ? teamB : teamA;
           const { error: elimLoserErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
           const { error: elimWinnerErr } = await supabase.from("teams").update({ eliminated: false }).eq("id", winnerId);
           if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated — check permissions.");
@@ -3829,7 +3918,7 @@ export default function App() {
   // entry, but it lands as a pending row instead of writing the fixture
   // directly, and a photo of the scoreboard is mandatory. The fixture itself
   // is only updated once an admin/creator approves it (see approveResult).
-  const submitMatchResult = async (league, fixture, homeScore, awayScore, rawFile) => {
+  const submitMatchResult = async (league, fixture, homeScore, awayScore, rawFile, pensHome = null, pensAway = null) => {
     if (!rawFile) { showToast("Attach a photo of the final scoreboard before submitting."); return false; }
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
@@ -3840,7 +3929,7 @@ export default function App() {
     const { error } = await supabase.from("result_submissions").insert({
       league_id: league.id, fixture_id: fixture.id, submitted_by: session.user.id,
       submitted_by_username: profile?.efootball_username || session.user.email,
-      home_score: homeScore, away_score: awayScore, photo_path: path,
+      home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, photo_path: path,
     });
     if (error) {
       if (error.code === "23505") showToast("Someone already submitted a result for this match — it's waiting on their opponent (or an admin) to review.");
@@ -3852,9 +3941,9 @@ export default function App() {
     return true;
   };
 
-  const handleResultModalSubmit = async (homeScore, awayScore, file) => {
+  const handleResultModalSubmit = async (homeScore, awayScore, file, pensHome, pensAway) => {
     if (!resultModal) return;
-    const ok = await submitMatchResult(resultModal.league, resultModal.fixture, homeScore, awayScore, file);
+    const ok = await submitMatchResult(resultModal.league, resultModal.fixture, homeScore, awayScore, file, pensHome, pensAway);
     if (ok) setResultModal(null);
   };
 
@@ -4001,16 +4090,18 @@ export default function App() {
       (ties[key] = ties[key] || []).push(f);
     });
 
+    // Whether this round IS the final — see isFinalRoundFixtures. Only the
+    // final ever needs a single decisive winner (via penalties); every
+    // earlier round just advances both sides on a level tie, so points
+    // earned by drawing at home and away aren't wasted on a coin-flip edit.
+    const isFinal = isFinalRoundFixtures(currentRoundFixtures);
+
     const winners = [];
     // A tie where every leg went unplayed past its deadline is level on
     // aggregate for the same reason both sides no-showed — nobody actually
-    // played to earn advancement. Rather than making an admin arbitrarily
-    // pick a "winner" via a manual score edit, both clubs are knocked out.
-    // A tie that's level because of an actual played (or partially played)
-    // scoreline still needs the manual edit, since that's a real result
-    // dispute the away-goals rule can't resolve on its own.
+    // played to earn advancement, so both clubs are knocked out instead.
     const bothEliminatedIds = [];
-    let undecided = 0;
+    let finalNeedsPens = false;
     Object.values(ties).forEach((legs) => {
       if (legs[0].away_team_id === null) { winners.push(legs[0].home_team_id); return; }
       const totals = {};
@@ -4022,12 +4113,26 @@ export default function App() {
       if (totals[teamA] === totals[teamB]) {
         const allLegsNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
         if (allLegsNoShow) { bothEliminatedIds.push(teamA, teamB); return; }
-        undecided++;
+        if (!isFinal) {
+          // Level on aggregate outside the final: both clubs earned it home
+          // and away, so both go through rather than forcing an admin to
+          // arbitrarily break the tie with a manual score edit.
+          winners.push(teamA, teamB);
+          return;
+        }
+        // The final always needs exactly one winner — fall back to penalties.
+        const pensA = pensAggregateFor(legs, teamA);
+        const pensB = pensAggregateFor(legs, teamB);
+        if (pensA !== null && pensB !== null && pensA !== pensB) {
+          winners.push(pensA > pensB ? teamA : teamB);
+          return;
+        }
+        finalNeedsPens = true;
         return;
       }
       winners.push(totals[teamA] > totals[teamB] ? teamA : teamB);
     });
-    if (undecided > 0) { showToast(`${undecided} tie${undecided === 1 ? " is" : "s are"} level on aggregate — edit a leg's score to break it (no away-goals rule).`); return; }
+    if (finalNeedsPens) { showToast("The final is level after regulation — enter the penalty shootout score to decide a winner."); return; }
 
     if (bothEliminatedIds.length > 0) {
       const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", bothEliminatedIds).select("id");
@@ -8698,8 +8803,8 @@ function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
           </div>
           <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>
             {knockoutLegs === 2
-              ? "Each tie is played twice — once at each club's home. Aggregate score decides the winner; a level aggregate needs a manual edit to break it (no away-goals rule)."
-              : "Each tie is a single, decisive match."}
+              ? "Each tie is played twice — once at each club's home. Aggregate score decides the winner; a level aggregate sends both clubs through to the next round. The final is always a single decisive match, with penalties if it's level."
+              : "Each tie is a single, decisive match. A draw goes to penalties — but only in the final; earlier rounds send both clubs through instead."}
           </div>
         </div>
       )}
@@ -8894,18 +8999,31 @@ function aggregateFor(legs, teamId) {
 function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, league, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
+  const [ph, setPh] = useState(fixture.pens_home ?? "");
+  const [pa, setPa] = useState(fixture.pens_away ?? "");
   const [saveState, setSaveState] = useState("idle");
   const [photo, setPhoto] = useState(null); // photo proof, required before saving — same rule as regular players
   const photoInputRef = useRef(null);
 
-  useEffect(() => { setH(fixture.home_score); setA(fixture.away_score); setSaveState("idle"); setPhoto(null); }, [fixture.id, fixture.played, fixture.home_score, fixture.away_score]);
+  useEffect(() => {
+    setH(fixture.home_score); setA(fixture.away_score);
+    setPh(fixture.pens_home ?? ""); setPa(fixture.pens_away ?? "");
+    setSaveState("idle"); setPhoto(null);
+  }, [fixture.id, fixture.played, fixture.home_score, fixture.away_score, fixture.pens_home, fixture.pens_away]);
 
   if (!homeTeam || !awayTeam) return null;
 
+  // The final is always a single decisive match — a level scoreline here
+  // needs a penalty score before it can be saved, since there's no second
+  // leg to fall back on.
+  const isFinal = isFinalFixture(fixture, league);
+  const needsPens = isFinal && Number(h) === Number(a);
+  const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
+
   const save = async () => {
-    if (!photo) return;
+    if (!photo || !pensReady) return;
     setSaveState("saving");
-    await onSave(fixture, h, a, photo);
+    await onSave(fixture, h, a, photo, needsPens ? Number(ph) : null, needsPens ? Number(pa) : null);
     setPhoto(null);
     setSaveState("saved");
   };
@@ -8928,10 +9046,23 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
           <span className="shrink-0" style={{ color: c.textFaint }}>–</span>
           <input type="number" min={0} value={a} onChange={(e) => { setA(Number(e.target.value)); setSaveState("idle"); }}
             className="w-11 text-center rounded font-mono text-sm px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
+          {needsPens && (
+            <>
+              <span className="shrink-0 font-mono text-[10px]" style={{ color: c.red }}>pens</span>
+              <input type="number" min={0} value={ph} onChange={(e) => { setPh(e.target.value === "" ? "" : Number(e.target.value)); setSaveState("idle"); }}
+                className="w-9 text-center rounded font-mono text-xs px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
+              <span className="shrink-0" style={{ color: c.textFaint }}>–</span>
+              <input type="number" min={0} value={pa} onChange={(e) => { setPa(e.target.value === "" ? "" : Number(e.target.value)); setSaveState("idle"); }}
+                className="w-9 text-center rounded font-mono text-xs px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
+            </>
+          )}
         </>
       ) : (
         <span className="font-mono text-sm w-14 text-center shrink-0" style={{ color: c.text }}>
           {fixture.played ? `${fixture.home_score} – ${fixture.away_score}` : "– : –"}
+          {fixture.played && fixture.pens_home != null && fixture.pens_away != null && (
+            <span className="block font-mono text-[9px]" style={{ color: c.textFaint }}>pens {fixture.pens_home}-{fixture.pens_away}</span>
+          )}
         </span>
       )}
       {offerContact && homeTeam.phone && (
@@ -8950,9 +9081,9 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
             style={photo ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
             <Camera size={12} />
           </button>
-          <button onClick={save} disabled={saveState === "saving" || !photo} title={!photo ? "Attach a photo proof to save" : undefined}
+          <button onClick={save} disabled={saveState === "saving" || !photo || !pensReady} title={!photo ? "Attach a photo proof to save" : !pensReady ? "Enter a decisive penalty score" : undefined}
             className="shrink-0 font-body text-xs font-semibold px-2.5 py-1 rounded-full"
-            style={{ background: saveState === "saved" ? c.greenSoft : c.accent, color: saveState === "saved" ? c.greenText : c.accentText, opacity: (saveState === "saving" || !photo) ? 0.5 : 1 }}>
+            style={{ background: saveState === "saved" ? c.greenSoft : c.accent, color: saveState === "saved" ? c.greenText : c.accentText, opacity: (saveState === "saving" || !photo || !pensReady) ? 0.5 : 1 }}>
             {saveState === "saved" ? <Check size={12} /> : saveState === "saving" ? "…" : "Save"}
           </button>
         </div>
@@ -9053,6 +9184,13 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                 }
                 const away = league.teams.find((t) => t.id === f0.away_team_id);
                 const twoLegged = legs.length > 1;
+                const isFinalTie = isFinalRoundFixtures(fx);
+                const allPlayed = legs.every((f) => f.played);
+                const hAgg = aggregateFor(legs, f0.home_team_id);
+                const aAgg = aggregateFor(legs, f0.away_team_id);
+                const level = allPlayed && hAgg === aAgg;
+                const pensH = pensAggregateFor(legs, f0.home_team_id);
+                const pensA = pensAggregateFor(legs, f0.away_team_id);
                 return (
                   <div key={f0.id} className="px-4 py-2.5">
                     {legs.map((f) => {
@@ -9062,11 +9200,17 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                         onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
-                    {twoLegged && (
+                    {(twoLegged || level) && (
                       <div className="font-mono text-[10px] mt-1" style={{ color: c.textDim }}>
-                        Aggregate: {home?.name} {aggregateFor(legs, f0.home_team_id)} – {aggregateFor(legs, f0.away_team_id)} {away?.name}
-                        {legs.every((f) => f.played) && aggregateFor(legs, f0.home_team_id) === aggregateFor(legs, f0.away_team_id) && (
-                          <span style={{ color: c.red }}> · level on aggregate, needs a decisive edit</span>
+                        {twoLegged && <>Aggregate: {home?.name} {hAgg} – {aAgg} {away?.name}</>}
+                        {level && isFinalTie && pensH !== null && pensA !== null && pensH !== pensA && (
+                          <span style={{ color: c.textDim }}> · pens {pensH}-{pensA}</span>
+                        )}
+                        {level && isFinalTie && !(pensH !== null && pensA !== null && pensH !== pensA) && (
+                          <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
+                        )}
+                        {level && !isFinalTie && (
+                          <span style={{ color: c.greenText }}> · level on aggregate — both clubs advance</span>
                         )}
                       </div>
                     )}
@@ -11051,6 +11195,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
   const [teamQuery, setTeamQuery] = useState("");
   const [result, setResult] = useState(null);
   const [scores, setScores] = useState({}); // fixture id -> { h, a }
+  const [pensScores, setPensScores] = useState({}); // fixture id -> { ph, pa } — only used for a level final
   const [saveState, setSaveState] = useState({}); // fixture id -> "idle" | "saving" | "saved"
   const [photos, setPhotos] = useState({}); // fixture id -> File, admin's optional photo proof
   const photoInputRef = useRef(null);
@@ -11074,6 +11219,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
     const opponentId = legs[0].home_team_id === team.id ? legs[0].away_team_id : legs[0].home_team_id;
     const opponent = opponentId ? teams.find((t) => t.id === opponentId) : null;
     setScores(Object.fromEntries(legs.map((f) => [f.id, { h: f.home_score, a: f.away_score }])));
+    setPensScores(Object.fromEntries(legs.map((f) => [f.id, { ph: f.pens_home ?? "", pa: f.pens_away ?? "" }])));
     setSaveState({});
     setResult({ legs, team, opponent, bye: opponentId === null, expired: anyExpired, twoLegged: legs.length > 1 });
   };
@@ -11081,11 +11227,14 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
   const save = async (fixture) => {
     if (!photos[fixture.id]) return;
     const { h, a } = scores[fixture.id] || { h: 0, a: 0 };
+    const needsPens = isFinalFixture(fixture, league) && Number(h) === Number(a);
+    const { ph, pa } = pensScores[fixture.id] || { ph: "", pa: "" };
+    if (needsPens && (ph === "" || pa === "" || Number(ph) === Number(pa))) return;
     setSaveState((s) => ({ ...s, [fixture.id]: "saving" }));
-    await onRecordResult(fixture, h, a, photos[fixture.id] || null);
+    await onRecordResult(fixture, h, a, photos[fixture.id] || null, needsPens ? Number(ph) : null, needsPens ? Number(pa) : null);
     setPhotos((p) => ({ ...p, [fixture.id]: null }));
     setSaveState((s) => ({ ...s, [fixture.id]: "saved" }));
-    setResult((r) => r && ({ ...r, legs: r.legs.map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: h, away_score: a } : f)) }));
+    setResult((r) => r && ({ ...r, legs: r.legs.map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: h, away_score: a, pens_home: needsPens ? Number(ph) : null, pens_away: needsPens ? Number(pa) : null } : f)) }));
   };
 
   const aggregate = (legs, teamId) => legs.reduce((sum, f) => sum + (f.home_team_id === teamId ? f.home_score : f.away_score), 0);
@@ -11112,14 +11261,20 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
         <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
           <div className="font-semibold">{result.opponent.name} <span className="font-mono text-xs font-normal" style={{ color: c.textFaint }}>({result.twoLegged ? "Home & away" : (result.legs[0].home_team_id === result.team.id ? "Home" : "Away")})</span></div>
 
-          {result.twoLegged && (
-            <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
-              Aggregate: {result.team.name} {aggregate(result.legs, result.team.id)} – {aggregate(result.legs, result.opponent.id)} {result.opponent.name}
-              {result.legs.every((f) => f.played) && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id) && (
-                <span style={{ color: c.red }}> · level on aggregate, needs a decisive edit</span>
-              )}
-            </div>
-          )}
+          {(() => {
+            const allPlayed = result.legs.every((f) => f.played);
+            const level = allPlayed && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id);
+            const isFinalTie = level && isFinalRoundFixtures(fixtures.filter((f) => f.round === result.legs[0].round));
+            if (!result.twoLegged && !level) return null;
+            return (
+              <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
+                {result.twoLegged && <>Aggregate: {result.team.name} {aggregate(result.legs, result.team.id)} – {aggregate(result.legs, result.opponent.id)} {result.opponent.name}</>}
+                {level && (isFinalTie
+                  ? <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
+                  : <span style={{ color: c.greenText }}> · level on aggregate — both clubs advance</span>)}
+              </div>
+            );
+          })()}
 
           {canSeePhones ? (
             result.opponent.phone ? (
@@ -11138,14 +11293,17 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
             const awayTeam = isHome ? result.opponent : result.team;
             const sc = scores[fixture.id] || { h: 0, a: 0 };
             const st = saveState[fixture.id] || "idle";
+            const pensSc = pensScores[fixture.id] || { ph: "", pa: "" };
+            const needsPens = isFinalFixture(fixture, league) && Number(sc.h) === Number(sc.a);
+            const pensReady = !needsPens || (pensSc.ph !== "" && pensSc.pa !== "" && Number(pensSc.ph) !== Number(pensSc.pa));
             return (
               <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
                 <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
                   {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}` : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
+                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}` : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
                 </div>
                 {canManage && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex-1 min-w-0">
                       <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam.name} <span style={{ color: c.textFaint }}>(Home)</span></div>
                       <input type="number" min={0} value={sc.h} onChange={(e) => setScores((s) => ({ ...s, [fixture.id]: { ...sc, h: Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
@@ -11155,16 +11313,29 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
                       <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam.name} <span style={{ color: c.textFaint }}>(Away)</span></div>
                       <input type="number" min={0} value={sc.a} onChange={(e) => setScores((s) => ({ ...s, [fixture.id]: { ...sc, a: Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
                     </div>
+                    {needsPens && (
+                      <>
+                        <div className="w-16 min-w-0">
+                          <div className="font-body text-[10px] truncate mb-1" style={{ color: c.red }}>Pens (H)</div>
+                          <input type="number" min={0} value={pensSc.ph} onChange={(e) => setPensScores((s) => ({ ...s, [fixture.id]: { ...pensSc, ph: e.target.value === "" ? "" : Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
+                        </div>
+                        <span className="self-end pb-1.5" style={{ color: c.textFaint }}>–</span>
+                        <div className="w-16 min-w-0">
+                          <div className="font-body text-[10px] truncate mb-1" style={{ color: c.red }}>Pens (A)</div>
+                          <input type="number" min={0} value={pensSc.pa} onChange={(e) => setPensScores((s) => ({ ...s, [fixture.id]: { ...pensSc, pa: e.target.value === "" ? "" : Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
+                        </div>
+                      </>
+                    )}
                     <button onClick={() => { setPhotoTargetId(fixture.id); photoInputRef.current?.click(); }}
                       title={photos[fixture.id] ? photos[fixture.id].name : "Attach photo proof (required)"}
                       className="self-end shrink-0 w-9 h-9 flex items-center justify-center rounded-full"
                       style={photos[fixture.id] ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
                       <Camera size={14} />
                     </button>
-                    <button onClick={() => save(fixture)} disabled={st === "saving" || !photos[fixture.id]}
-                      title={!photos[fixture.id] ? "Attach a photo proof to save" : undefined}
+                    <button onClick={() => save(fixture)} disabled={st === "saving" || !photos[fixture.id] || !pensReady}
+                      title={!photos[fixture.id] ? "Attach a photo proof to save" : !pensReady ? "Enter a decisive penalty score" : undefined}
                       className="self-end font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0 flex items-center gap-1"
-                      style={{ background: st === "saved" ? c.greenSoft : c.accent, color: st === "saved" ? c.greenText : c.accentText, opacity: (st === "saving" || !photos[fixture.id]) ? 0.5 : 1 }}>
+                      style={{ background: st === "saved" ? c.greenSoft : c.accent, color: st === "saved" ? c.greenText : c.accentText, opacity: (st === "saving" || !photos[fixture.id] || !pensReady) ? 0.5 : 1 }}>
                       {st === "saved" ? (<><Check size={13} /> Saved</>) : st === "saving" ? "Saving…" : "Save"}
                     </button>
                   </div>
