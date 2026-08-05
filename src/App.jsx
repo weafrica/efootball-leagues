@@ -3849,12 +3849,19 @@ export default function App() {
   // moment later. Scoped to just this call (not the shared supabase client)
   // since keepalive requests cap out at 64KB — fine for this tiny patch, but
   // wrong to apply blanket to calls elsewhere that upload scoreboard photos.
+  //
+  // IMPORTANT: the token comes straight from the `session` state already
+  // held by this component — never `await supabase.auth.getSession()` here.
+  // That call can itself trigger a real (non-keepalive) network request to
+  // refresh a near-expired token, and if THAT gets cut off by the same
+  // navigation race, the actual write never even starts. Reading `session`
+  // synchronously keeps this to exactly one network call — the keepalive
+  // one — instead of stacking a second, unprotected one in front of it.
   const markWaReminder = async (member, dueAt) => {
     if (!dueAt) return;
+    const token = session?.access_token;
+    if (!token) return;
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const token = currentSession?.access_token;
-      if (!token) return;
       await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
         method: "PATCH",
         keepalive: true,
