@@ -5188,9 +5188,25 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const fileInputRef = useRef(null);
   const usernameTrimmed = username.trim();
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
+  const usernameValid = usernameTrimmed.length >= 2 && usernameIsOneWord;
   const ageNum = parseInt(age, 10);
   const ageValid = Number.isInteger(ageNum) && ageNum >= 18 && ageNum <= 99;
-  const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord && ageValid && agreedToTerms;
+  const phoneTrimmed = phone.trim();
+  const phoneValid = phoneTrimmed.startsWith("+") && phoneTrimmed.length >= 8;
+  const valid = usernameValid && ageValid && phoneValid && agreedToTerms;
+
+  // Surfaces the single most relevant reason the button is disabled, in the
+  // same top-to-bottom order as the fields, so people aren't left guessing
+  // which of several issues to fix first.
+  const disabledReason = !usernameValid
+    ? "Enter your eFootball username"
+    : !ageValid
+    ? "Enter your age (18+) to continue"
+    : !phoneValid
+    ? "Enter a valid phone number with country code"
+    : !agreedToTerms
+    ? "Agree to the Terms & Conditions to continue"
+    : undefined;
 
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
@@ -5201,25 +5217,33 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   };
 
   const submit = async () => {
+    if (!valid || submitting) return;
     setSubmitting(true);
-    await onSubmit(phone.trim(), usernameTrimmed, ageNum, photoFile);
+    await onSubmit(phoneTrimmed, usernameTrimmed, ageNum, photoFile);
     setSubmitting(false);
+  };
+
+  // Lets people finish onboarding by pressing Enter in any field instead of
+  // having to reach for the button — there's no <form> here (this component
+  // is embedded, not a standalone page), so Enter wouldn't submit otherwise.
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") submit();
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
-      <button onClick={toggleTheme} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
+      <button onClick={toggleTheme} aria-label="Toggle dark mode" className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
         {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
       </button>
       <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-5" style={{ background: c.green }}><Lock size={24} color={c.accent} /></div>
       <h1 className="text-3xl font-extrabold uppercase tracking-tight text-center leading-none mb-2">One more step</h1>
       <p className="font-body text-center max-w-sm mb-6" style={{ color: c.textDim }}>
-        Confirm your phone number and eFootball username before you can access leagues. Other players use these to reach you for matches.
+        Confirm your age, phone number and eFootball username before you can access leagues. Other players use these to reach you for matches.
       </p>
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-5">
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()}
+          <button onClick={() => fileInputRef.current?.click()} aria-label={photoPreview ? "Change profile photo" : "Add profile photo"}
             className="relative w-20 h-20 rounded-full overflow-hidden flex items-center justify-center mb-2"
             style={{ background: c.surface, border: `1px solid ${c.border}` }}>
             {photoPreview ? <img src={photoPreview} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
@@ -5228,24 +5252,31 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
             {photoPreview ? "Change photo" : "Add profile photo (optional)"}
           </span>
         </div>
-        <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Ndosi_123"
+        <label htmlFor="pg-username" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
+        <input id="pg-username" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={handleKeyDown}
+          placeholder="e.g. Ndosi_123" autoFocus autoComplete="username" aria-invalid={usernameTrimmed.length > 0 && !usernameIsOneWord}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {usernameTrimmed.length > 0 && !usernameIsOneWord && (
           <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
         )}
         <div className="mb-4" />
-        <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Age</label>
-        <input value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="e.g. 24" type="text" inputMode="numeric"
+        <label htmlFor="pg-age" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Age</label>
+        <input id="pg-age" value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, "").slice(0, 2))} onKeyDown={handleKeyDown}
+          placeholder="e.g. 24" type="text" inputMode="numeric" autoComplete="off" aria-invalid={age.length > 0 && !ageValid}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {age.length > 0 && !ageValid && (
           <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>Must be 18 or older to join.</p>
         )}
         <div className="mb-4" />
-        <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Phone number <span style={{ color: c.textFaint }}>(with country code)</span></label>
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+27 82 123 4567" type="tel"
+        <label htmlFor="pg-phone" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Phone number <span style={{ color: c.textFaint }}>(with country code)</span></label>
+        <input id="pg-phone" value={phone} onChange={(e) => setPhone(e.target.value)} onKeyDown={handleKeyDown}
+          placeholder="+27 82 123 4567" type="tel" autoComplete="tel" aria-invalid={phoneTrimmed.length > 0 && !phoneValid}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
-        <p className="font-body text-xs mb-5" style={{ color: c.textFaint }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
+        {phoneTrimmed.length > 0 && !phoneValid ? (
+          <p className="font-body text-xs mb-5" style={{ color: c.red }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
+        ) : (
+          <p className="font-body text-xs mb-5" style={{ color: c.textFaint }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
+        )}
         <label className="flex items-start gap-2.5 mb-5 cursor-pointer">
           <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
             className="mt-0.5 w-4 h-4 shrink-0 rounded" style={{ accentColor: c.accent }} />
@@ -5257,7 +5288,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
           </span>
         </label>
         <button disabled={!valid || submitting} onClick={submit}
-          title={!agreedToTerms ? "Agree to the Terms & Conditions to continue" : undefined}
+          title={disabledReason}
           className="w-full font-body font-semibold px-4 py-3 rounded-full"
           style={valid ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
           {submitting ? "Saving..." : "Continue to Matchday"}
