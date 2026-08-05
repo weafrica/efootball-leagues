@@ -4387,7 +4387,18 @@ export default function App() {
     requestConfirm([
       `Notify all ${memberCount} member${memberCount === 1 ? "" : "s"} of "${league.name}" right now? Posts your saved message to the league's comment feed for everyone to see.`,
     ], async () => {
-      const body = league.wa_message_template.replace(/\{name\}/g, "everyone").replace(/\{league\}/g, league.name);
+      // No single member to derive {round}/{due} from for a broadcast — use
+      // the league's own next unplayed fixture (same source as the editor's
+      // preview) so a template written with those placeholders still reads
+      // sensibly when posted to the whole feed at once.
+      const broadcastFixture = nextFixtureForLeague(league);
+      const broadcastRound = broadcastFixture ? String(broadcastFixture.round) : "";
+      const broadcastDue = broadcastFixture ? fmtDate(broadcastFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "";
+      const body = league.wa_message_template
+        .replace(/\{name\}/g, "everyone")
+        .replace(/\{league\}/g, league.name)
+        .replace(/\{round\}/g, broadcastRound)
+        .replace(/\{due\}/g, broadcastDue);
       const posted = await postComment(league, body, null, null, null, true);
       if (posted) showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
     });
@@ -9582,15 +9593,21 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers
   // reads like an actual message rather than a placeholder — falls back to
   // a generic name for a brand-new league with no members yet.
   const sampleName = (league.members || []).find((m) => m.display_name)?.display_name || "Alex";
-  const preview = text.trim() ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name) : "";
+  const sampleFixture = nextFixtureForLeague(league);
+  const sampleRound = sampleFixture ? String(sampleFixture.round) : "1";
+  const sampleDue = sampleFixture ? fmtDate(sampleFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "Fri";
+  const preview = text.trim()
+    ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name).replace(/\{round\}/g, sampleRound).replace(/\{due\}/g, sampleDue)
+    : "";
 
   return (
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
-        Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name and <strong>{"{league}"}</strong> for the league name.
+        Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name, <strong>{"{league}"}</strong> for the league name,
+        <strong> {"{round}"}</strong> for their next round number, and <strong>{"{due}"}</strong> for its due date. Round and due date update automatically each round.
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
-        placeholder="Hey {name}! Just a reminder to get your match in for {league} 🔥⚽"
+        placeholder="Hey {name}! Round {round} of {league} is due {due} — lock it in! 🔥⚽"
         className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
       <div className="font-mono text-[10px] text-right mb-2" style={{ color: text.length >= MAX_LEN ? c.red : c.textFaint }}>
         {text.length}/{MAX_LEN}
@@ -9716,9 +9733,33 @@ function adminStatusMessage(m, t, league) {
   // An admin-edited template on the league overrides the status-based
   // message entirely, for every member, until it's edited or cleared again
   // — see updateLeagueMemberMessage. {name} and {league} get swapped in per
-  // member so a single saved template still reads as personal.
+  // member so a single saved template still reads as personal. {round} and
+  // {due} are also live — sourced from this member's own next unplayed
+  // fixture (same lookup the default message uses), so a custom template
+  // still tracks the bracket forward each round instead of freezing on
+  // whatever round it was written during.
+  //
+  // A template that actually uses {round}/{due} needs real fixture data to
+  // fill them — for a member with none (eliminated, or nothing left to
+  // play), sending it would read as a broken half-blank line like "Round
+  // is due ". Rather than inventing filler text for that gap, fall through
+  // to the default status message below, which already handles eliminated/
+  // not-started members cleanly. Templates that don't reference {round} or
+  // {due} at all are unaffected — those keep overriding unconditionally,
+  // same as before.
+  const usesRoundOrDue = /\{round\}|\{due\}/.test(league.wa_message_template || "");
   if (league.wa_message_template) {
-    return league.wa_message_template.replace(/\{name\}/g, name).replace(/\{league\}/g, league.name);
+    const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
+    const notStarted = league.fixtures.length === 0;
+    const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
+    const hasRoundDueData = !!(upcoming || due);
+    if (!usesRoundOrDue || hasRoundDueData) {
+      return league.wa_message_template
+        .replace(/\{name\}/g, name)
+        .replace(/\{league\}/g, league.name)
+        .replace(/\{round\}/g, upcoming ? String(upcoming.round) : "")
+        .replace(/\{due\}/g, due ? fmtDate(due) : "");
+    }
   }
   if (t?.eliminated) {
     return `Hey ${name}! 🔴 Tough one — you've been eliminated from ${league.name}. But the fun doesn't stop here, jump into one of our other available leagues and get straight back in the fight! 🔥`;
