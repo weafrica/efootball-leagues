@@ -3884,62 +3884,71 @@ export default function App() {
   // too, same as submitMatchResult's rule for regular players. Once saved,
   // it's posted to the comments as scoreline + photo, same as an approved
   // player submission, so the evidence is visible to the whole league either way.
+  // Shared by every path that can finish a knockout-bracket fixture —
+  // admin direct entry (recordResult), player-submit-then-admin-approve
+  // (approveResult), and opponent-confirms (respondToResultSubmission's
+  // accept branch). All three end with the fixture row holding a final
+  // score; this is the one place that turns that into eliminated/still-in
+  // status on the teams table, so a club can't slip through "out" just
+  // because its result came in via a different path than another club's.
+  const applyKnockoutElimination = async (league, fixture, homeScore, awayScore, pensHome = null, pensAway = null) => {
+    const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
+    if (!inKnockoutBracket || !fixture.away_team_id) return;
+    // Fetch this tie's leg(s) fresh — not from local `league.fixtures` —
+    // so a leg completed earlier (but not yet reflected in this browser's
+    // state) doesn't make an already-finished tie look incomplete and
+    // silently skip elimination.
+    const { data: freshLegs, error: legsErr } = await supabase.from("fixtures")
+      .select("*").eq("league_id", league.id).eq("stage", fixture.stage).eq("round", fixture.round);
+    const tieFixtures = (legsErr ? league.fixtures : freshLegs)
+      .filter((f) => f.stage === fixture.stage && f.round === fixture.round &&
+        ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id) ||
+         (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id)))
+      .map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway } : f));
+    if (!tieFixtures.every((f) => f.played)) return;
+    const totals = {};
+    tieFixtures.forEach((f) => {
+      totals[f.home_team_id] = (totals[f.home_team_id] || 0) + f.home_score;
+      totals[f.away_team_id] = (totals[f.away_team_id] || 0) + f.away_score;
+    });
+    const [teamA, teamB] = Object.keys(totals);
+    // Level on aggregate outside the final just leaves both sides as they
+    // are (advanceKnockout lets both through when the round advances). In
+    // the final, a penalty score — if one's been entered — decides it now.
+    const isFinal = isFinalRoundFixtures(tieFixtures);
+    let winnerId = null, loserId = null;
+    if (totals[teamA] !== totals[teamB]) {
+      winnerId = totals[teamA] > totals[teamB] ? teamA : teamB;
+      loserId = winnerId === teamA ? teamB : teamA;
+    } else if (isFinal) {
+      const pensA = pensAggregateFor(tieFixtures, teamA);
+      const pensB = pensAggregateFor(tieFixtures, teamB);
+      if (pensA !== null && pensB !== null && pensA !== pensB) {
+        winnerId = pensA > pensB ? teamA : teamB;
+        loserId = winnerId === teamA ? teamB : teamA;
+      }
+    }
+    if (winnerId) {
+      // Explicitly set BOTH sides' elimination status from this tie's
+      // outcome — not just marking the loser eliminated. This matters
+      // when a result gets corrected after the fact (admin re-logs a
+      // new score on an already-decided tie, like here): without also
+      // resetting the winner back to not-eliminated, a team that was
+      // wrongly eliminated by the earlier incorrect result stays stuck
+      // eliminated forever, even once the correction says they won.
+      const { error: elimLoserErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
+      const { error: elimWinnerErr } = await supabase.from("teams").update({ eliminated: false }).eq("id", winnerId);
+      if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated — check permissions.");
+    }
+  };
+
   const recordResult = async (league, fixture, homeScore, awayScore, file = null, pensHome = null, pensAway = null) => {
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return; }
     const { error } = await supabase.from("fixtures")
       .update({ played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, played_at: new Date().toISOString() }).eq("id", fixture.id);
     if (error) { showToast("Couldn't save result."); return; }
 
-    const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
-    if (inKnockoutBracket && fixture.away_team_id) {
-      // Fetch this tie's leg(s) fresh — not from local `league.fixtures` —
-      // so a leg completed earlier (but not yet reflected in this browser's
-      // state) doesn't make an already-finished tie look incomplete and
-      // silently skip elimination.
-      const { data: freshLegs, error: legsErr } = await supabase.from("fixtures")
-        .select("*").eq("league_id", league.id).eq("stage", fixture.stage).eq("round", fixture.round);
-      const tieFixtures = (legsErr ? league.fixtures : freshLegs)
-        .filter((f) => f.stage === fixture.stage && f.round === fixture.round &&
-          ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id) ||
-           (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id)))
-        .map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway } : f));
-      if (tieFixtures.every((f) => f.played)) {
-        const totals = {};
-        tieFixtures.forEach((f) => {
-          totals[f.home_team_id] = (totals[f.home_team_id] || 0) + f.home_score;
-          totals[f.away_team_id] = (totals[f.away_team_id] || 0) + f.away_score;
-        });
-        const [teamA, teamB] = Object.keys(totals);
-        // Level on aggregate outside the final just leaves both sides as they
-        // are (advanceKnockout lets both through when the round advances). In
-        // the final, a penalty score — if one's been entered — decides it now.
-        const isFinal = isFinalRoundFixtures(tieFixtures);
-        let winnerId = null, loserId = null;
-        if (totals[teamA] !== totals[teamB]) {
-          winnerId = totals[teamA] > totals[teamB] ? teamA : teamB;
-          loserId = winnerId === teamA ? teamB : teamA;
-        } else if (isFinal) {
-          const pensA = pensAggregateFor(tieFixtures, teamA);
-          const pensB = pensAggregateFor(tieFixtures, teamB);
-          if (pensA !== null && pensB !== null && pensA !== pensB) {
-            winnerId = pensA > pensB ? teamA : teamB;
-            loserId = winnerId === teamA ? teamB : teamA;
-          }
-        }
-        if (winnerId) {
-          // Explicitly set BOTH sides' elimination status from this tie's
-          // outcome — not just marking the loser eliminated. This matters
-          // when a result gets corrected after the fact (admin re-logs a
-          // new score on an already-decided tie, like here): without also
-          // resetting the winner back to not-eliminated, a team that was
-          // wrongly eliminated by the earlier incorrect result stays stuck
-          // eliminated forever, even once the correction says they won.
-          const { error: elimLoserErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
-          const { error: elimWinnerErr } = await supabase.from("teams").update({ eliminated: false }).eq("id", winnerId);
-          if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated — check permissions.");
-        }
-      }
-    }
+    await applyKnockoutElimination(league, fixture, homeScore, awayScore, pensHome, pensAway);
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
     await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
@@ -4001,8 +4010,16 @@ export default function App() {
     const { error } = await supabase.rpc("approve_result_submission", { p_submission_id: submission.id });
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
 
+    // approve_result_submission is a DB-side RPC (not in this repo) that
+    // only copies the score into the fixtures row — it doesn't know about
+    // knockout elimination, so that has to happen here too, same as
+    // recordResult. Without this, a club eliminated via the player-submit
+    // -then-admin-approve path never gets its `eliminated` flag flipped and
+    // keeps showing as still in the bracket.
+    const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
+    if (fixture) await applyKnockoutElimination(league, fixture, submission.home_score, submission.away_score, submission.pens_home, submission.pens_away);
+
     if (submission.photo_path) {
-      const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
       const homeName = league.teams.find((t) => t.id === fixture?.home_team_id)?.name || "Home";
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       const { data } = await supabase.storage.from("result-proofs")
@@ -4072,6 +4089,11 @@ export default function App() {
       if (error) { showToast(`Couldn't ${accept ? "confirm" : "dispute"} result: ${error.message}`); return; }
 
       const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
+      // Same reasoning as approveResult: respond_to_result_submission is a
+      // DB-side RPC that only writes the score to fixtures, so an opponent
+      // confirming (not disputing) a knockout result needs this club run
+      // through the elimination check too, or it never gets marked out.
+      if (accept && fixture) await applyKnockoutElimination(league, fixture, submission.home_score, submission.away_score, submission.pens_home, submission.pens_away);
       const homeName = league.teams.find((t) => t.id === fixture?.home_team_id)?.name || "Home";
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       let photoUrl = null;
