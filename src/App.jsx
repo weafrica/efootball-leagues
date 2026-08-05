@@ -4536,12 +4536,23 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // happened to schedule for the weekend. Recomputed from the same
   // guestData already loaded above, no extra round trip.
   const [weekendStart, weekendEnd] = weekendWindow();
-  const weekendLeagues = guestData ? funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
+  // public_leagues' WHERE clause (is_platform_admin(created_by)) already
+  // restricts every row this view returns to admin-created leagues — it
+  // doesn't select a created_by_admin column at all, so filtering on one
+  // here (like Home does against the raw leagues table) would silently
+  // zero out every league instead of narrowing anything.
+  const weekendLeagues = guestData ? funLeagues.reduce((items, l) => {
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
-    const dueFixtures = guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
+    // Mirrors Home's logic: a groups_knockout league's real cutoff is its
+    // shared group_stage_due_at, not each match's own advisory due_at.
+    const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
+    const groupStageDueThisWeekend = l.format === "groups_knockout" && groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
+    const dueFixtures = groupStageDueThisWeekend
+      ? guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.stage === 1)
+      : guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
     if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
-    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
+    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : groupStageDueThisWeekend ? groupStageDueDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest) : [];
@@ -6940,9 +6951,17 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const weekendLeagues = funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
-    const dueFixtures = l.fixtures.filter((f) => !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
+    // A groups_knockout league's real cutoff is its shared group_stage_due_at,
+    // not each match's own (now-advisory) due_at — so if that shared deadline
+    // falls this weekend, every unplayed group-stage fixture counts as due,
+    // even ones whose individual due_at happens to fall on a different day.
+    const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
+    const groupStageDueThisWeekend = l.format === "groups_knockout" && groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
+    const dueFixtures = groupStageDueThisWeekend
+      ? l.fixtures.filter((f) => !f.played && f.stage === 1)
+      : l.fixtures.filter((f) => !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
     if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
-    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
+    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : groupStageDueThisWeekend ? groupStageDueDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest);
