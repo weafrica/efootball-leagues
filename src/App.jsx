@@ -3210,9 +3210,9 @@ export default function App() {
     else setView("home");
   }, []);
 
-  const completeProfile = async (phone, username, photoFile) => {
+  const completeProfile = async (phone, username, age, photoFile) => {
     const { data, error } = await supabase.from("profiles")
-      .insert({ user_id: session.user.id, phone, efootball_username: username })
+      .insert({ user_id: session.user.id, phone, efootball_username: username, age })
       .select().single();
     if (error) {
       if (error.code === "23505" && error.message.toLowerCase().includes("phone")) {
@@ -5179,6 +5179,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
 function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const [phone, setPhone] = useState("");
   const [username, setUsername] = useState("");
+  const [age, setAge] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -5187,7 +5188,9 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const fileInputRef = useRef(null);
   const usernameTrimmed = username.trim();
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
-  const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord && agreedToTerms;
+  const ageNum = parseInt(age, 10);
+  const ageValid = Number.isInteger(ageNum) && ageNum >= 18 && ageNum <= 99;
+  const valid = phone.trim().startsWith("+") && phone.trim().length >= 8 && usernameTrimmed.length >= 2 && usernameIsOneWord && ageValid && agreedToTerms;
 
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
@@ -5199,7 +5202,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
 
   const submit = async () => {
     setSubmitting(true);
-    await onSubmit(phone.trim(), usernameTrimmed, photoFile);
+    await onSubmit(phone.trim(), usernameTrimmed, ageNum, photoFile);
     setSubmitting(false);
   };
 
@@ -5232,6 +5235,13 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
           <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
         )}
         <div className="mb-4" />
+        <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Age</label>
+        <input value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="e.g. 24" type="text" inputMode="numeric"
+          className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        {age.length > 0 && !ageValid && (
+          <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>Must be 18 or older to join.</p>
+        )}
+        <div className="mb-4" />
         <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Phone number <span style={{ color: c.textFaint }}>(with country code)</span></label>
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+27 82 123 4567" type="tel"
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
@@ -5240,7 +5250,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
           <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
             className="mt-0.5 w-4 h-4 shrink-0 rounded" style={{ accentColor: c.accent }} />
           <span className="font-body text-xs" style={{ color: c.textDim }}>
-            I'm 18 or older and I agree to the{" "}
+            I agree to the{" "}
             <button type="button" onClick={() => setTermsOpen(true)} className="underline font-semibold" style={{ color: c.text }}>
               Terms &amp; Conditions
             </button>, including how cash league entry fees, prize pools, and results work.
