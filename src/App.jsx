@@ -10340,14 +10340,15 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
         {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
         {cm.photo_url && (
           isResultComment(cm.body, cm.is_result) && !photoRevealed ? (
-            <button onClick={() => setPhotoRevealed(true)}
+            <button onClick={() => setPhotoRevealed(true)} title="Tap to view the scoreboard photo"
+              aria-label="View proof photo"
               className="flex items-center gap-1.5 mt-2 font-mono text-[11px] font-semibold px-2.5 py-1.5 rounded-lg"
               style={{ background: c.surfaceHover, color: c.textDim, border: `1px solid ${c.border}` }}>
               <Camera size={12} /> View proof photo
             </button>
           ) : (
             <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
-              <img src={cm.photo_url} alt="" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
+              <img src={cm.photo_url} alt="Scoreboard proof photo" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
             </button>
           )
         )}
