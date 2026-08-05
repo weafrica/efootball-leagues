@@ -10250,6 +10250,7 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
   const [pendingReaction, setPendingReaction] = useState(undefined); // undefined = no optimistic override
   const [pickerOpen, setPickerOpen] = useState(false);
   const [popKey, setPopKey] = useState(0);
+  const [photoRevealed, setPhotoRevealed] = useState(false);
   const pickerRef = useRef(null);
 
   const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
@@ -10338,9 +10339,17 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
         </div>
         {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
         {cm.photo_url && (
-          <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
-            <img src={cm.photo_url} alt="" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
-          </button>
+          isResultComment(cm.body, cm.is_result) && !photoRevealed ? (
+            <button onClick={() => setPhotoRevealed(true)}
+              className="flex items-center gap-1.5 mt-2 font-mono text-[11px] font-semibold px-2.5 py-1.5 rounded-lg"
+              style={{ background: c.surfaceHover, color: c.textDim, border: `1px solid ${c.border}` }}>
+              <Camera size={12} /> View proof photo
+            </button>
+          ) : (
+            <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
+              <img src={cm.photo_url} alt="" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
+            </button>
+          )
         )}
         {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}
         {!cm.pending && (
