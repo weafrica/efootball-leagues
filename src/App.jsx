@@ -478,6 +478,32 @@ function isFixtureLocked(fixture, league) {
   return isExpired(fixture);
 }
 
+// A "ghost" club: it has never actually played a single fixture in this
+// league — not one, in any stage or round — yet it's already carrying the
+// no-show penalty (both sides concede 4, per fixture, once a fixture locks
+// past its deadline unplayed — see computeStandings) on at least one
+// fixture. One no-show is already enough to put them at a -4 goal
+// difference with nothing else on the board, so there's no reason to wait
+// for a real match, a full round, or an admin's manual advance before
+// cutting them — this fires the moment the condition is true. A club that
+// has played at least one real fixture anywhere in the league (even if it
+// no-shows later on) is left alone; this only targets clubs that never
+// showed up at all. Works the same way regardless of format (round robin,
+// knockout, survivor, groups + knockout) since it only looks at raw
+// fixtures/teams, not any format-specific stage logic.
+function findGhostTeamIds(league) {
+  const fixtures = league.fixtures || [];
+  return (league.teams || [])
+    .filter((t) => !t.eliminated)
+    .filter((t) => {
+      const myFixtures = fixtures.filter((f) => f.away_team_id !== null && (f.home_team_id === t.id || f.away_team_id === t.id));
+      if (myFixtures.length === 0) return false;
+      if (myFixtures.some((f) => f.played)) return false;
+      return myFixtures.some((f) => isFixtureLocked(f, league));
+    })
+    .map((t) => t.id);
+}
+
 // Earliest not-yet-played, fully-paired fixture for a given team (used for
 // the "next fixture" status message). Sorted by due date first so a fixture
 // with no due date yet falls back to round order.
@@ -3319,6 +3345,71 @@ export default function App() {
   // but doesn't by itself count as having joined — the creator/admin can
   // still choose to register a club and join like any other player.
   const canManageLeague = (league) => !!session && (isAdmin || league.created_by === session.user.id);
+
+  // Sweeps every league the signed-in member can manage, the moment league
+  // data loads (or reloads), and auto-eliminates any "ghost" club — see
+  // findGhostTeamIds above. This is what makes the cut automatic: it
+  // doesn't wait for a round/stage to fully finish or for an admin to hit
+  // an "advance" button, and it runs across every league and every format,
+  // not just knockout/survivor/groups where a manual elimination path
+  // already existed. Re-runs whenever `leagues` changes; once a league's
+  // ghosts are eliminated they no longer match findGhostTeamIds (they're
+  // marked eliminated), so the follow-up loadLeagues() this triggers
+  // doesn't loop.
+  useEffect(() => {
+    if (!leagues || !session) return;
+    const targets = leagues
+      .map((l) => ({ league: l, ids: canManageLeague(l) ? findGhostTeamIds(l) : [] }))
+      .filter(({ ids }) => ids.length > 0);
+    if (targets.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const allIds = targets.flatMap(({ ids }) => ids);
+      // Same permission-check pattern as advanceKnockout/advanceSurvivor/
+      // finalizeGroups: don't just trust the update call succeeded — count
+      // what actually came back and say so if RLS quietly blocked some rows,
+      // instead of the admin only finding out because a club is still
+      // showing as active days later.
+      const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", allIds).select("id");
+      if (cancelled) return;
+      if (error) { showToast(`Couldn't auto-eliminate no-show clubs: ${error.message}`); return; }
+      const updatedIds = new Set((updatedRows || []).map((r) => r.id));
+      if (updatedIds.size === 0) return; // every row blocked — nothing changed, nothing to reload or announce
+
+      // Drop an auto-posted comment in each affected league's feed — the
+      // same "isResult" system-comment mechanism already used for
+      // auto-posted matchday results — so the eliminated club sees it
+      // directly next time they open that league, instead of only finding
+      // out passively via their own "you've been eliminated" status line.
+      const announcedLeagueNames = [];
+      for (const { league, ids } of targets) {
+        const eliminatedHere = ids.filter((id) => updatedIds.has(id));
+        if (eliminatedHere.length === 0) continue;
+        announcedLeagueNames.push(league.name);
+        const names = eliminatedHere.map((id) => {
+          const team = league.teams.find((t) => t.id === id);
+          const owner = (league.members || []).find((m) => m.team_id === id);
+          return owner?.display_name ? `${team?.name || "A club"} (${owner.display_name})` : (team?.name || "A club");
+        });
+        const body = names.length === 1
+          ? `${names[0]} was automatically eliminated — no games played, and the no-show penalty already put them at -4.`
+          : `${names.join(", ")} were automatically eliminated — no games played, and the no-show penalty already put them at -4.`;
+        await postComment(league, body, null, null, null, true);
+      }
+
+      await loadLeagues();
+      const updatedCount = updatedIds.size;
+      const where = announcedLeagueNames.length === 1 ? ` in "${announcedLeagueNames[0]}"` : ` across ${announcedLeagueNames.length} leagues`;
+      if (updatedCount < allIds.length) {
+        showToast(`${updatedCount} of ${allIds.length} no-show clubs${where} were auto-eliminated — the rest hit a permissions issue and will retry next reload.`);
+        return;
+      }
+      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show with no games played.`);
+    })();
+    return () => { cancelled = true; };
+  }, [leagues, session, isAdmin, loadLeagues, showToast]);
+
+
   const myTeam = (league) => {
     const m = myMembership(league);
     if (!m || !m.team_id) return null;
@@ -4131,6 +4222,20 @@ export default function App() {
     showToast(dueAt ? "Group stage due date updated." : "Group stage due date cleared.");
   };
 
+  // Overrides the auto-generated WhatsApp nudge text (see adminStatusMessage)
+  // for every member's WA icon in this league. Persists on the league row —
+  // once set, every member gets this exact wording (with {name} swapped in
+  // per member) instead of the default status-based message, and it stays
+  // that way until whoever manages the league edits or clears it again; it
+  // doesn't expire or revert on its own. Pass null/empty to go back to the
+  // default auto-generated message.
+  const updateLeagueMemberMessage = async (league, text) => {
+    const { error } = await supabase.from("leagues").update({ wa_message_template: text || null }).eq("id", league.id);
+    if (error) { showToast(`Couldn't save the member message: ${error.message}`); return; }
+    await loadLeagues();
+    showToast(text ? "Member message updated — used for every WhatsApp nudge in this league from now on." : "Member message cleared — back to the default auto message.");
+  };
+
   // Comments live on every league regardless of stage — still filling up (pending)
   // or already generated fixtures (created/active) — so members can talk trash,
   // coordinate, or ask questions in one place. Anyone who can see the league can
@@ -4360,7 +4465,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -9226,6 +9331,72 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
   );
 }
 
+// Lets whoever manages the league (creator or admin) override the
+// auto-generated WhatsApp nudge text — see adminStatusMessage — with their
+// own wording for every member in this league. Mirrors
+// LeagueDescriptionBlock's edit-in-place pattern. {name} and {league} are
+// swapped in per member when the message is actually sent, so the saved
+// template can still read as personal even though it's the same text for
+// everyone. Admin-only — this is an internal tool for whoever's sending
+// the nudges, not something the rest of the league needs to see.
+function MemberMessageEditor({ league, onUpdateMemberMessage, c }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(league.wa_message_template || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setText(league.wa_message_template || ""); }, [league.wa_message_template]);
+
+  const save = async () => {
+    setSaving(true);
+    await onUpdateMemberMessage(league, text.trim());
+    setSaving(false);
+    setEditing(false);
+  };
+
+  const clear = async () => {
+    setSaving(true);
+    await onUpdateMemberMessage(league, "");
+    setText("");
+    setSaving(false);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <div className="rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-2" style={{ background: c.surface }}>
+        <div className="min-w-0 font-mono text-[11px] uppercase tracking-wide" style={{ color: c.textFaint }}>
+          {league.wa_message_template ? "Custom WhatsApp message active for this league" : "Using the default auto WhatsApp message"}
+        </div>
+        <button onClick={() => setEditing(true)} className="shrink-0 font-mono text-[11px] uppercase tracking-wide" style={{ color: c.accent }}>
+          {league.wa_message_template ? "Edit" : "Customize"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
+        Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name and <strong>{"{league}"}</strong> for the league name.
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
+        placeholder="Hey {name}! Just a reminder to get your match in for {league} 🔥⚽"
+        className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none mb-2" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+      <div className="flex items-center gap-2 justify-end">
+        {league.wa_message_template && (
+          <button onClick={clear} disabled={saving} className="mr-auto font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.red, opacity: saving ? 0.6 : 1 }}>
+            Reset to default
+          </button>
+        )}
+        <button onClick={() => { setText(league.wa_message_template || ""); setEditing(false); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
+        <button onClick={save} disabled={saving || !text.trim()} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !text.trim() ? 0.6 : 1 }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // One row for a joined member — team, and (for cash leagues) payment status with
 // admin download/approve/reject controls. Shared between the pre-start registration
 // list and the Members tab so payments can be reviewed at any stage of the league.
@@ -9321,6 +9492,13 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 // that lands in a player's WhatsApp, not a formal notice.
 function adminStatusMessage(m, t, league) {
   const name = m.display_name || "there";
+  // An admin-edited template on the league overrides the status-based
+  // message entirely, for every member, until it's edited or cleared again
+  // — see updateLeagueMemberMessage. {name} and {league} get swapped in per
+  // member so a single saved template still reads as personal.
+  if (league.wa_message_template) {
+    return league.wa_message_template.replace(/\{name\}/g, name).replace(/\{league\}/g, league.name);
+  }
   if (t?.eliminated) {
     return `Hey ${name}! 🔴 Tough one — you've been eliminated from ${league.name}. But the fun doesn't stop here, jump into one of our other available leagues and get straight back in the fight! 🔥`;
   }
@@ -9536,7 +9714,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onUpdateMemberMessage, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -9872,6 +10050,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {tab === "members" && (
         <div>
+          {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} c={c} />}
           {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
             <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
               <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
