@@ -504,54 +504,56 @@ function nextFixtureForLeague(league) {
     })[0] || null;
 }
 
-// A submitted result gives the opponent 24 hours to confirm or dispute it
+// A submitted result gives the opponent 30 minutes to confirm or dispute it
 // (see respondToResultSubmission) before it escalates to the admin override
 // queue. These three helpers are the single source of truth for that window
 // so the opponent panel's countdown and the admin panel's visibility can't
 // drift out of sync.
-const RESULT_CONFIRM_WINDOW_HOURS = 24;
+const RESULT_CONFIRM_WINDOW_MINUTES = 30;
 function resultConfirmDeadline(submission) {
-  return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_HOURS * 60 * 60 * 1000);
+  return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
 }
 function resultConfirmExpired(submission) {
   return Date.now() >= resultConfirmDeadline(submission).getTime();
 }
-function resultConfirmHoursLeft(submission) {
+function resultConfirmMinutesLeft(submission) {
   const ms = resultConfirmDeadline(submission).getTime() - Date.now();
-  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
+  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
 }
 
-// Direct/ladder challenges and open (random) challenges get the same 24h
-// window as league fixtures above — both tables store the report time in
-// result_reported_at, so one set of helpers covers both. Once expired, the
-// result is no longer the opponent's to confirm/dispute; it moves into the
-// admin review queue instead (see adminApproveChallengeResult and friends).
+// Direct/ladder challenges and open (random) challenges get the same
+// 30-minute window as league fixtures above — both tables store the report
+// time in result_reported_at, so one set of helpers covers both. Once
+// expired, the result is no longer the opponent's to confirm/dispute; it
+// moves into the admin review queue instead (see adminApproveChallengeResult
+// and friends).
 function challengeResultConfirmDeadline(ch) {
-  return new Date(new Date(ch.result_reported_at).getTime() + RESULT_CONFIRM_WINDOW_HOURS * 60 * 60 * 1000);
+  return new Date(new Date(ch.result_reported_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
 }
 function challengeResultConfirmExpired(ch) {
   if (!ch.result_reported_at) return false;
   return Date.now() >= challengeResultConfirmDeadline(ch).getTime();
 }
-function challengeResultHoursLeft(ch) {
+function challengeResultMinutesLeft(ch) {
   if (!ch.result_reported_at) return null;
   const ms = challengeResultConfirmDeadline(ch).getTime() - Date.now();
-  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 60 * 1000));
+  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
 }
 
 // If the same fixture has already had this many submissions disputed by the
-// opponent, the next one skips the 24h window entirely and goes straight to
-// the admin queue — two honest mistakes is a reasonable benefit of the
-// doubt, a third attempt at the same fixture is a real disagreement that
-// needs a referee, not another round of opponent back-and-forth.
+// opponent, the next one skips the 30-minute window entirely and goes
+// straight to the admin queue — two honest mistakes is a reasonable benefit
+// of the doubt, a third attempt at the same fixture is a real disagreement
+// that needs a referee, not another round of opponent back-and-forth.
 const DISPUTE_ESCALATION_THRESHOLD = 2;
 function priorRejectedCount(league, submission) {
   return (league.result_submissions || []).filter(
     (s) => s.fixture_id === submission.fixture_id && s.status === "rejected"
   ).length;
 }
-// null = not escalated yet (opponent's turn); "timeout" = the 24h window
-// passed; "dispute-cap" = this fixture's been disputed too many times already.
+// null = not escalated yet (opponent's turn); "timeout" = the 30-minute
+// window passed; "dispute-cap" = this fixture's been disputed too many times
+// already.
 function resultEscalationReason(league, submission) {
   if (priorRejectedCount(league, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
   if (resultConfirmExpired(submission)) return "timeout";
@@ -2702,7 +2704,7 @@ export default function App() {
   };
 
   // Admin-only fallback once challengeResultConfirmExpired(challenge) is true —
-  // the opponent had 24h to confirm/dispute and didn't, so an admin can
+  // the opponent had 30 minutes to confirm/dispute and didn't, so an admin can
   // settle it directly from the screenshot instead. Same two outcomes as
   // the opponent's own confirm/dispute above.
   const adminApproveChallengeResult = async (challenge) => {
@@ -5843,7 +5845,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
     .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-  // Admin-only: results whose 24h opponent-confirm window has passed without
+  // Admin-only: results whose 30-minute opponent-confirm window has passed without
   // a response — these move here instead of staying stuck waiting forever.
   const escalatedChallenges = isAdmin
     ? challenges.filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
@@ -5890,7 +5892,7 @@ function ChallengesScreen({ session, members, challenges, openChallenges, recent
       {isAdmin && (escalatedChallenges.length > 0 || escalatedOpenChallenges.length > 0) && (
         <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
-            <AlertTriangle size={13} /> Needs admin review — opponent didn't respond within 24h
+            <AlertTriangle size={13} /> Needs admin review — opponent didn't respond within the window
           </div>
           <div className="flex flex-col gap-2">
             {escalatedChallenges.map((ch) => (
@@ -6546,9 +6548,9 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
           {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const h = challengeResultHoursLeft(ch); return h !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: h <= 3 ? c.red : c.textFaint }}>
-              {iReported ? `Goes to admin in ${h}h if they don't respond` : `Confirm within ${h}h or it goes to admin`}
+          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
+              {iReported ? `Goes to admin in ${m}m if they don't respond` : `Confirm within ${m}m or it goes to admin`}
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
@@ -6599,7 +6601,7 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
   );
 }
 
-// A pending challenge/open-challenge result that's blown past its 24h
+// A pending challenge/open-challenge result that's blown past its 30-minute
 // opponent-confirm window, shown to admins for a manual call — same
 // approve/reject choice the opponent would have had, just made by an admin
 // instead since the opponent didn't act in time.
@@ -6700,9 +6702,9 @@ function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, on
           {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
           )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const h = challengeResultHoursLeft(ch); return h !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: h <= 3 ? c.red : c.textFaint }}>
-              {iReported ? `Goes to admin in ${h}h if they don't respond` : `Confirm within ${h}h or it goes to admin`}
+          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
+              {iReported ? `Goes to admin in ${m}m if they don't respond` : `Confirm within ${m}m or it goes to admin`}
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
@@ -9221,12 +9223,12 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                   {showDeadline && (() => {
                     const reason = resultEscalationReason(league, s);
                     return (
-                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmHoursLeft(s) <= 3 ? c.red : "#B8860B") }}>
+                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s) <= 5 ? c.red : "#B8860B") }}>
                         {reason === "dispute-cap"
                           ? "This fixture's been disputed too many times already — sent straight to the admin"
                           : reason === "timeout"
                           ? "Confirmation window passed — this has been sent to the admin"
-                          : `${resultConfirmHoursLeft(s)}h left to respond — after that it goes to the admin`}
+                          : `${resultConfirmMinutesLeft(s)}m left to respond — after that it goes to the admin`}
                       </div>
                     );
                   })()}
@@ -9525,7 +9527,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
   const myPendingResults = session
     ? pendingResults.filter((s) => s.submitted_by !== session.user.id && findSubmissionOpponentId(league, s) === session.user.id)
     : [];
-  // The opponent has 24 hours to confirm or dispute a submission themselves
+  // The opponent has 30 minutes to confirm or dispute a submission themselves
   // (see resultConfirmDeadline) — unless this fixture has already burned
   // through its dispute allowance (see resultEscalationReason), in which case
   // it skips straight to the admin queue. Only once one of those two
@@ -9725,7 +9727,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {canManage && awaitingOpponentResults.length > 0 && (
         <div className="rounded-xl p-4 border mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
           <Clock size={13} className="shrink-0" />
-          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's 24h confirmation window
+          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's 30-minute confirmation window
           {" — "}lands here for your review only if they don't respond in time.
         </div>
       )}
