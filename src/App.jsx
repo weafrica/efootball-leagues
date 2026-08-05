@@ -3900,6 +3900,14 @@ export default function App() {
     });
 
     const winners = [];
+    // A tie where every leg went unplayed past its deadline is level on
+    // aggregate for the same reason both sides no-showed — nobody actually
+    // played to earn advancement. Rather than making an admin arbitrarily
+    // pick a "winner" via a manual score edit, both clubs are knocked out.
+    // A tie that's level because of an actual played (or partially played)
+    // scoreline still needs the manual edit, since that's a real result
+    // dispute the away-goals rule can't resolve on its own.
+    const bothEliminatedIds = [];
     let undecided = 0;
     Object.values(ties).forEach((legs) => {
       if (legs[0].away_team_id === null) { winners.push(legs[0].home_team_id); return; }
@@ -3909,17 +3917,34 @@ export default function App() {
         totals[f.away_team_id] = (totals[f.away_team_id] || 0) + f.away_score;
       });
       const [teamA, teamB] = Object.keys(totals);
-      if (totals[teamA] === totals[teamB]) { undecided++; return; }
+      if (totals[teamA] === totals[teamB]) {
+        const allLegsNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
+        if (allLegsNoShow) { bothEliminatedIds.push(teamA, teamB); return; }
+        undecided++;
+        return;
+      }
       winners.push(totals[teamA] > totals[teamB] ? teamA : teamB);
     });
     if (undecided > 0) { showToast(`${undecided} tie${undecided === 1 ? " is" : "s are"} level on aggregate — edit a leg's score to break it (no away-goals rule).`); return; }
+
+    if (bothEliminatedIds.length > 0) {
+      const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", bothEliminatedIds).select("id");
+      if (error) { showToast(`Couldn't eliminate the no-show teams: ${error.message}`); return; }
+      if ((updatedRows?.length || 0) < bothEliminatedIds.length) {
+        showToast(`Only ${updatedRows?.length || 0} of ${bothEliminatedIds.length} no-show clubs were actually eliminated (permissions issue) — round NOT advanced. Try again or check with support.`);
+        return;
+      }
+    }
     if (winners.length <= 1) { showToast("This league already has a champion."); return; }
 
     const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), league.knockout_legs || 1);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     await loadLeagues();
-    showToast(`Round ${maxRound + 1} created.`);
+    const eliminatedTiesCount = bothEliminatedIds.length / 2;
+    showToast(eliminatedTiesCount > 0
+      ? `Round ${maxRound + 1} created. ${bothEliminatedIds.length} club${bothEliminatedIds.length === 1 ? "" : "s"} eliminated — no-show on both sides in ${eliminatedTiesCount} tie${eliminatedTiesCount === 1 ? "" : "s"}.`
+      : `Round ${maxRound + 1} created.`);
   };
 
   const advanceSurvivor = async (league) => {
