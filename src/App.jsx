@@ -1124,7 +1124,18 @@ function computeStandings(teams, fixtures, league) {
   });
   const rows = Object.values(table);
   rows.forEach((r) => { r.gd = r.gf - r.ga; });
-  rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
+  // Teams that haven't actually played a single fixture yet in this stage
+  // (0 pts, 0 gd — nothing on the board either way) would otherwise tie
+  // with, or even outrank, a team that played and genuinely struggled (real
+  // losses drag gd negative). A team with zero games played always sits
+  // below any team that's played at least one, so a club that never showed
+  // up isn't mistaken for one that's merely had a bad run.
+  rows.sort((a, b) => {
+    const aPlayed = a.p > 0 ? 1 : 0;
+    const bPlayed = b.p > 0 ? 1 : 0;
+    if (aPlayed !== bPlayed) return bPlayed - aPlayed;
+    return b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name);
+  });
   return rows;
 }
 
