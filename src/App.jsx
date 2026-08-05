@@ -3837,10 +3837,38 @@ export default function App() {
   // member red (for every admin) until the due date the message was about
   // passes. dueAt is skipped (nothing to store) for messages with no date,
   // e.g. the "you've been eliminated" text.
+  //
+  // This write races the browser navigating away to open WhatsApp (the
+  // link's href starts loading the instant it's tapped). On some phones the
+  // tab/page context survives that handoff long enough for a normal
+  // supabase-js call to finish; on others it gets torn down first and the
+  // write is silently cut off mid-flight — same code, purely device/browser
+  // timing. A raw fetch with keepalive:true is what a normal client update
+  // can't do: it tells the browser to keep the request alive independent of
+  // the page's lifecycle, so it still lands even if this tab is unloaded a
+  // moment later. Scoped to just this call (not the shared supabase client)
+  // since keepalive requests cap out at 64KB — fine for this tiny patch, but
+  // wrong to apply blanket to calls elsewhere that upload scoreboard photos.
   const markWaReminder = async (member, dueAt) => {
     if (!dueAt) return;
-    const { error } = await supabase.from("members").update({ wa_reminder_due_at: dueAt }).eq("id", member.id);
-    if (error) return; // best effort — don't interrupt the WhatsApp send with a toast
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const token = currentSession?.access_token;
+      if (!token) return;
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
+        method: "PATCH",
+        keepalive: true,
+        headers: {
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ wa_reminder_due_at: dueAt }),
+      });
+    } catch {
+      // best effort — don't interrupt the WhatsApp send with a toast
+    }
     await loadLeagues();
   };
 
