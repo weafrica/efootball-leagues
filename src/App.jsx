@@ -4259,7 +4259,7 @@ export default function App() {
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: c.bg }}><Loader c={c} /></div>;
   }
-  if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} />;
+  if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} userEmail={session.user.email} onSignOut={signOut} />;
 
   // loadRecentResults and loadBoardComments aren't called here even though
   // this is "opening" the screen — the effects that poll them already fire
@@ -5176,7 +5176,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   );
 }
 
-function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
+function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) {
   const [phone, setPhone] = useState("");
   const [username, setUsername] = useState("");
   const [age, setAge] = useState("");
@@ -5190,7 +5190,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const usernameIsOneWord = usernameTrimmed.length > 0 && !/\s/.test(usernameTrimmed);
   const usernameValid = usernameTrimmed.length >= 2 && usernameIsOneWord;
   const ageNum = parseInt(age, 10);
-  const ageValid = Number.isInteger(ageNum) && ageNum >= 18 && ageNum <= 99;
+  const ageValid = Number.isInteger(ageNum) && ageNum > 0;
   const phoneTrimmed = phone.trim();
   const phoneValid = phoneTrimmed.startsWith("+") && phoneTrimmed.length >= 8;
   const valid = usernameValid && ageValid && phoneValid && agreedToTerms;
@@ -5201,7 +5201,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
   const disabledReason = !usernameValid
     ? "Enter your eFootball username"
     : !ageValid
-    ? "Enter your age (18+) to continue"
+    ? "Enter your age to continue"
     : !phoneValid
     ? "Enter a valid phone number with country code"
     : !agreedToTerms
@@ -5215,6 +5215,14 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   };
+
+  // Object URLs aren't garbage-collected automatically — without this, picking
+  // a photo then changing it (or leaving this screen, e.g. via the sign-out
+  // link above) leaks the blob for the life of the tab. Runs on every change
+  // AND on unmount, since the cleanup closes over whichever URL was current.
+  useEffect(() => {
+    return () => { if (photoPreview) URL.revokeObjectURL(photoPreview); };
+  }, [photoPreview]);
 
   const submit = async () => {
     if (!valid || submitting) return;
@@ -5240,6 +5248,12 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
       <p className="font-body text-center max-w-sm mb-6" style={{ color: c.textDim }}>
         Confirm your age, phone number and eFootball username before you can access leagues. Other players use these to reach you for matches.
       </p>
+      {userEmail && onSignOut && (
+        <p className="font-mono text-[11px] text-center mb-6" style={{ color: c.textFaint }}>
+          Signed in as {userEmail} ·{" "}
+          <button type="button" onClick={onSignOut} className="underline">Not you? Sign out</button>
+        </p>
+      )}
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-5">
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
@@ -5254,29 +5268,31 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
         </div>
         <label htmlFor="pg-username" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
         <input id="pg-username" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={handleKeyDown}
-          placeholder="e.g. Ndosi_123" autoFocus autoComplete="username" aria-invalid={usernameTrimmed.length > 0 && !usernameIsOneWord}
+          placeholder="e.g. Ndosi_123" autoFocus autoComplete="username" required
+          aria-invalid={usernameTrimmed.length > 0 && !usernameIsOneWord}
+          aria-describedby={usernameTrimmed.length > 0 && !usernameIsOneWord ? "pg-username-error" : undefined}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {usernameTrimmed.length > 0 && !usernameIsOneWord && (
-          <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
+          <p id="pg-username-error" className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
         )}
         <div className="mb-4" />
         <label htmlFor="pg-age" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Age</label>
-        <input id="pg-age" value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, "").slice(0, 2))} onKeyDown={handleKeyDown}
-          placeholder="e.g. 24" type="text" inputMode="numeric" autoComplete="off" aria-invalid={age.length > 0 && !ageValid}
+        <input id="pg-age" value={age} onChange={(e) => setAge(e.target.value.replace(/\D/g, "").slice(0, 3))} onKeyDown={handleKeyDown}
+          placeholder="e.g. 24" type="text" inputMode="numeric" autoComplete="off" required
+          aria-invalid={age.length > 0 && !ageValid}
+          aria-describedby={age.length > 0 && !ageValid ? "pg-age-error" : undefined}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {age.length > 0 && !ageValid && (
-          <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>Must be 18 or older to join.</p>
+          <p id="pg-age-error" className="font-body text-xs mb-1.5" style={{ color: c.red }}>Enter a valid age.</p>
         )}
         <div className="mb-4" />
         <label htmlFor="pg-phone" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Phone number <span style={{ color: c.textFaint }}>(with country code)</span></label>
         <input id="pg-phone" value={phone} onChange={(e) => setPhone(e.target.value)} onKeyDown={handleKeyDown}
-          placeholder="+27 82 123 4567" type="tel" autoComplete="tel" aria-invalid={phoneTrimmed.length > 0 && !phoneValid}
+          placeholder="+27 82 123 4567" type="tel" autoComplete="tel" required
+          aria-invalid={phoneTrimmed.length > 0 && !phoneValid}
+          aria-describedby="pg-phone-hint"
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
-        {phoneTrimmed.length > 0 && !phoneValid ? (
-          <p className="font-body text-xs mb-5" style={{ color: c.red }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
-        ) : (
-          <p className="font-body text-xs mb-5" style={{ color: c.textFaint }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
-        )}
+        <p id="pg-phone-hint" className="font-body text-xs mb-5" style={{ color: phoneTrimmed.length > 0 && !phoneValid ? c.red : c.textFaint }}>Must start with + and your country code, e.g. +27, +234, +1.</p>
         <label className="flex items-start gap-2.5 mb-5 cursor-pointer">
           <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
             className="mt-0.5 w-4 h-4 shrink-0 rounded" style={{ accentColor: c.accent }} />
@@ -5293,6 +5309,9 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit }) {
           style={valid ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
           {submitting ? "Saving..." : "Continue to Matchday"}
         </button>
+        {disabledReason && !submitting && (
+          <p className="font-body text-xs text-center mt-2" style={{ color: c.textFaint }}>{disabledReason}</p>
+        )}
       </div>
       <SupportWhatsAppButton />
       {termsOpen && (
