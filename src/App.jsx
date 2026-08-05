@@ -9343,6 +9343,7 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, c }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(league.wa_message_template || "");
   const [saving, setSaving] = useState(false);
+  const MAX_LEN = 500;
 
   useEffect(() => { setText(league.wa_message_template || ""); }, [league.wa_message_template]);
 
@@ -9374,14 +9375,31 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, c }) {
     );
   }
 
+  // A real member's display_name if one's already joined, so the preview
+  // reads like an actual message rather than a placeholder — falls back to
+  // a generic name for a brand-new league with no members yet.
+  const sampleName = (league.members || []).find((m) => m.display_name)?.display_name || "Alex";
+  const preview = text.trim() ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name) : "";
+
   return (
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
         Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name and <strong>{"{league}"}</strong> for the league name.
       </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
+      <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
         placeholder="Hey {name}! Just a reminder to get your match in for {league} 🔥⚽"
-        className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none mb-2" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+        className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+      <div className="font-mono text-[10px] text-right mb-2" style={{ color: text.length >= MAX_LEN ? c.red : c.textFaint }}>
+        {text.length}/{MAX_LEN}
+      </div>
+      {preview && (
+        <div className="rounded-lg px-3 py-2 mb-2 font-body text-xs whitespace-pre-wrap" style={{ background: c.surfaceHover, color: c.textDim }}>
+          <span className="font-mono text-[10px] uppercase tracking-wide block mb-1" style={{ color: c.textFaint }}>
+            Preview — as {sampleName} would see it
+          </span>
+          {preview}
+        </div>
+      )}
       <div className="flex items-center gap-2 justify-end">
         {league.wa_message_template && (
           <button onClick={clear} disabled={saving} className="mr-auto font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.red, opacity: saving ? 0.6 : 1 }}>
