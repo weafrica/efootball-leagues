@@ -4655,7 +4655,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             with the general Leagues list. Hidden entirely outside a
             qualifying window rather than showing an empty promo. */}
         {weekendLeagues.length > 0 && (
-          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} onJoin={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
+          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
         )}
 
         {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
@@ -4738,7 +4738,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 // Ladder), a "Hottest" flame badge on whichever league has the most matches
 // due, and a per-card heat bar so activity is visible at a glance, not just
 // a number.
-function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onJoin, c }) {
+function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, isJoined, c }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60000);
@@ -4788,11 +4788,11 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onJoin, c }) 
         )}
       </div>
       <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1.5">
-        {items.slice(0, 6).map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
+        {items.map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
           const isHottest = matchCount > 0 && matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
           const heatPct = Math.round((matchCount / maxMatches) * 100);
           return (
-            <button key={l.id} onClick={onJoin} className="relative flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
+            <button key={l.id} onClick={() => onCardClick(l)} className="relative flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
               style={{ background: c.surface, border: `1px solid ${i < 3 ? rankColors[i] + "66" : c.border}` }}>
               {isHottest && (
                 <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
@@ -4820,7 +4820,7 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onJoin, c }) 
                 </div>
               )}
               <span className="flex items-center gap-1 font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
-                <Lock size={9} /> Join the action
+                {isJoined?.(l) ? <><ChevronRight size={9} /> View league</> : <><Lock size={9} /> Join the action</>}
               </span>
             </button>
           );
@@ -6931,6 +6931,22 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
 
+  // Same Weekend League spotlight PublicHome shows guests, surfaced here
+  // too so a signed-in player who hasn't joined yet — or who's a member of
+  // an entirely different set of leagues — still sees what's kicking off
+  // this Friday–Sunday and can jump straight in with one tap instead of
+  // only discovering it while logged out.
+  const [weekendStart, weekendEnd] = weekendWindow();
+  const weekendLeagues = funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
+    const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
+    const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
+    const dueFixtures = l.fixtures.filter((f) => !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
+    if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
+    const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
+    items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
+    return items;
+  }, []).sort((a, b) => a.earliest - b.earliest);
+
   // Open random challenges anyone but the signed-in member can still grab —
   // same "unaccepted and up for grabs" definition ChallengesScreen uses.
   const grabbableChallenges = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id);
@@ -7172,6 +7188,16 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           top-to-bottom as: who you are, what's live, what needs you now. */}
       <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
       <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
+
+      {/* Weekend League spotlight — same admin-curated Fri–Sun highlight
+          PublicHome shows guests, so a signed-in player still sees (and can
+          one-tap join or jump into) whatever's kicking off this weekend,
+          even if it's not among the leagues they're already in. */}
+      {weekendLeagues.length > 0 && (
+        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
+          isJoined={(l) => isMemberOf(l)}
+          onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
+      )}
 
       {/* Quick actions — one equal-weight action dock. Shop lives here as a
           tile like everything else instead of a standing promo banner. */}
