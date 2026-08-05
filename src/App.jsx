@@ -4236,6 +4236,30 @@ export default function App() {
     showToast(text ? "Member message updated — used for every WhatsApp nudge in this league from now on." : "Member message cleared — back to the default auto message.");
   };
 
+  // Broadcasts the league's saved custom message to every member right
+  // now, at no cost — no SMS/WhatsApp Business API involved. It posts as
+  // an auto-generated comment (same "isResult" mechanic already used for
+  // auto-posted matchday results and no-show eliminations) in the league's
+  // own comment feed, which every member already reads. That's the honest
+  // tradeoff: it's instant and genuinely free, but it's an in-app
+  // notification, not a push straight to someone's phone — a member sees
+  // it the next time they open this league, same as every other
+  // auto-posted comment in the app. Requires a saved custom message first:
+  // there's no single sensible "broadcast" version of the default status
+  // message, since that one reads differently per member (eliminated vs.
+  // upcoming fixture vs. league not started yet).
+  const notifyAllMembers = (league) => {
+    if (!league.wa_message_template) { showToast("Set a custom message first, then you can notify everyone with it."); return; }
+    const memberCount = (league.members || []).length;
+    requestConfirm([
+      `Notify all ${memberCount} member${memberCount === 1 ? "" : "s"} of "${league.name}" right now? Posts your saved message to the league's comment feed for everyone to see.`,
+    ], async () => {
+      const body = league.wa_message_template.replace(/\{name\}/g, "everyone").replace(/\{league\}/g, league.name);
+      const posted = await postComment(league, body, null, null, null, true);
+      if (posted) showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
+    });
+  };
+
   // Comments live on every league regardless of stage — still filling up (pending)
   // or already generated fixtures (created/active) — so members can talk trash,
   // coordinate, or ask questions in one place. Anyone who can see the league can
@@ -4465,7 +4489,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -9339,7 +9363,7 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
 // template can still read as personal even though it's the same text for
 // everyone. Admin-only — this is an internal tool for whoever's sending
 // the nudges, not something the rest of the league needs to see.
-function MemberMessageEditor({ league, onUpdateMemberMessage, c }) {
+function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers, c }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(league.wa_message_template || "");
   const [saving, setSaving] = useState(false);
@@ -9364,13 +9388,20 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, c }) {
 
   if (!editing) {
     return (
-      <div className="rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-2" style={{ background: c.surface }}>
+      <div className="rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-2 flex-wrap" style={{ background: c.surface }}>
         <div className="min-w-0 font-mono text-[11px] uppercase tracking-wide" style={{ color: c.textFaint }}>
           {league.wa_message_template ? "Custom WhatsApp message active for this league" : "Using the default auto WhatsApp message"}
         </div>
-        <button onClick={() => setEditing(true)} className="shrink-0 font-mono text-[11px] uppercase tracking-wide" style={{ color: c.accent }}>
-          {league.wa_message_template ? "Edit" : "Customize"}
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {league.wa_message_template && (
+            <button onClick={() => onNotifyAllMembers(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: WHATSAPP_GREEN }}>
+              <MessageCircle size={11} /> Notify everyone now
+            </button>
+          )}
+          <button onClick={() => setEditing(true)} className="font-mono text-[11px] uppercase tracking-wide" style={{ color: c.accent }}>
+            {league.wa_message_template ? "Edit" : "Customize"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -9732,7 +9763,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onUpdateMemberMessage, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -10068,7 +10099,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
 
       {tab === "members" && (
         <div>
-          {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} c={c} />}
+          {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
           {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
             <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
               <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
