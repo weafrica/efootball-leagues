@@ -5238,12 +5238,16 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
   const isPaused = isWithinWeekend && isWeekendPauseHour(now);
   const isLiveNow = isWithinWeekend && !isPaused;
 
-  // Paused: counting down to the 9am SAST resume. Live: counting down to
-  // whichever comes first — the 9pm SAST pause or the weekend actually
-  // ending. Not started: counting down to weekendStart, same as before.
-  let targetTime, liveTargetIsEnd = true;
+  // Paused: counting down to the 9am SAST resume — unless the weekend
+  // window itself wraps up first (Sunday night's pause has no Monday
+  // morning to resume into), in which case it's just counting down to the
+  // end. Live: counting down to whichever comes first — the 9pm SAST pause
+  // or the weekend ending. Not started: counting down to weekendStart.
+  let targetTime, liveTargetIsEnd = true, pausedTargetIsEnd = false;
   if (isPaused) {
-    targetTime = nextSastHourBoundary(now, 9);
+    const resumeAt = nextSastHourBoundary(now, 9);
+    if (resumeAt > weekendEnd) { targetTime = weekendEnd; pausedTargetIsEnd = true; }
+    else { targetTime = resumeAt; }
   } else if (isLiveNow) {
     const nextPause = nextSastHourBoundary(now, 21);
     if (nextPause < weekendEnd) { targetTime = nextPause; liveTargetIsEnd = false; }
@@ -5272,7 +5276,7 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
           {isPaused ? (
-            <><Pause size={10} /> Paused · resumes in {countdownLabel}</>
+            <><Pause size={10} /> Paused · {pausedTargetIsEnd ? "ends" : "resumes"} in {countdownLabel}</>
           ) : isLiveNow ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
