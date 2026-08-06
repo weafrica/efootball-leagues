@@ -1575,6 +1575,29 @@ function weekendWindow(now = new Date()) {
   return [start, end];
 }
 
+// The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
+// wall-clock window too — not whatever timezone the visitor's device happens
+// to be in. South Africa doesn't observe DST, so SAST is a fixed UTC+2.
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
+// True from 9pm through 8:59am SAST — the overnight stretch the Weekend
+// League spotlight shows as "Paused" rather than "Live". Only the spotlight's
+// live/paused badge reads this; it never gates joining a league or submitting
+// a result, so players can still upload results for a match played overnight.
+function isWeekendPauseHour(now = new Date()) {
+  const sastHour = new Date(now.getTime() + SAST_OFFSET_MS).getUTCHours();
+  return sastHour >= 21 || sastHour < 9;
+}
+
+// Next real moment (as a Date, in UTC) at which SAST wall-clock time reaches
+// `hour`:00, at or after `now`. Used to count down to the next 9pm pause or
+// 9am resume without ever constructing a Date in the visitor's own timezone.
+function nextSastHourBoundary(now, hour) {
+  const sastNow = new Date(now.getTime() + SAST_OFFSET_MS);
+  const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate(), hour, 0, 0, 0) - SAST_OFFSET_MS);
+  return candidate >= now ? candidate : new Date(candidate.getTime() + 86400000);
+}
+
 // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> expects, in the browser's local time — the
 // exact inverse of how CreateLeague turns that same input's value back into
@@ -5211,8 +5234,23 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
     return () => clearInterval(id);
   }, []);
 
-  const isLiveNow = now >= weekendStart && now <= weekendEnd;
-  const targetTime = isLiveNow ? weekendEnd : weekendStart;
+  const isWithinWeekend = now >= weekendStart && now <= weekendEnd;
+  const isPaused = isWithinWeekend && isWeekendPauseHour(now);
+  const isLiveNow = isWithinWeekend && !isPaused;
+
+  // Paused: counting down to the 9am SAST resume. Live: counting down to
+  // whichever comes first — the 9pm SAST pause or the weekend actually
+  // ending. Not started: counting down to weekendStart, same as before.
+  let targetTime, liveTargetIsEnd = true;
+  if (isPaused) {
+    targetTime = nextSastHourBoundary(now, 9);
+  } else if (isLiveNow) {
+    const nextPause = nextSastHourBoundary(now, 21);
+    if (nextPause < weekendEnd) { targetTime = nextPause; liveTargetIsEnd = false; }
+    else { targetTime = weekendEnd; }
+  } else {
+    targetTime = weekendStart;
+  }
   const diffMs = Math.max(0, targetTime.getTime() - now.getTime());
   const diffDays = Math.floor(diffMs / 86400000);
   const diffHours = Math.floor((diffMs % 86400000) / 3600000);
@@ -5233,12 +5271,14 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
           <Calendar size={12} /> Weekend League
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
-          {isLiveNow ? (
+          {isPaused ? (
+            <><Pause size={10} /> Paused · resumes in {countdownLabel}</>
+          ) : isLiveNow ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
               </span>
-              Live · ends in {countdownLabel}
+              Live · {liveTargetIsEnd ? "ends" : "pauses"} in {countdownLabel}
             </>
           ) : (
             <><Clock size={10} /> Starts in {countdownLabel}</>
@@ -5246,7 +5286,9 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
       </div>
       <div className="relative px-4 pb-1.5 flex items-center gap-1.5 font-body text-xs" style={{ color: c.textDim }}>
-        {items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday
+        {isPaused
+          ? "Overnight break — results can still be uploaded"
+          : `${items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday`}
         {totalMatches > 0 && (
           <span className="flex items-center gap-0.5 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${c.accent}22`, color: c.accent }}>
             <Zap size={9} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
