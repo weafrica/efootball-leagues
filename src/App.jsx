@@ -2320,7 +2320,10 @@ function VoiceNotePlayer({ url, duration, c, compact = false }) {
 
   const toggle = () => {
     if (!audioRef.current) {
-      const audio = new Audio(url);
+      // Same fix as photos/avatars — old voice notes recorded before the
+      // proxy existed still hold a raw Supabase URL in the database, so
+      // this rewrites it to the cached proxy path right at playback time.
+      const audio = new Audio(toProxiedUrl(url));
       audio.onended = () => { setPlaying(false); setProgress(0); audioArbiter.release(stopRef.current); };
       audio.onloadedmetadata = () => { if (isFinite(audio.duration) && audio.duration > 0) setDur(audio.duration); };
       audio.ontimeupdate = () => { if (audio.duration) setProgress(audio.currentTime / audio.duration); };
@@ -9823,14 +9826,25 @@ function adminStatusMessage(m, t, league) {
     // knockout bracket starting for groups_knockout, or a new survivor
     // stage (current_stage > 1) — so lead with a congrats line instead of
     // the plain reminder. Round 1 of stage 1 (a league just starting, or
-    // plain single/double round-robin/knockout with no earlier cut to
-    // survive) isn't a promotion, so it's excluded here on purpose.
-    const justAdvanced = !t.eliminated && upcoming.round === 1 && (
-      (league.format === "groups_knockout" && upcoming.stage === 2) ||
-      (league.format === "survivor" && league.current_stage > 1 && upcoming.stage === league.current_stage)
+    // plain single/double round-robin with no earlier cut to survive)
+    // isn't a promotion, so it's excluded here on purpose.
+    //
+    // A plain knockout league has no earlier stage to be promoted FROM —
+    // round 1 is just the bracket starting, same as any other league's
+    // opening round. But round 2 onward is different: reaching it always
+    // means this club just won its previous tie (or, rarely, had a bye),
+    // so that's worth congratulating the same way, every round.
+    const justAdvanced = !t.eliminated && (
+      (upcoming.round === 1 && (
+        (league.format === "groups_knockout" && upcoming.stage === 2) ||
+        (league.format === "survivor" && league.current_stage > 1 && upcoming.stage === league.current_stage)
+      )) ||
+      (league.format === "knockout" && upcoming.round > 1)
     );
     if (justAdvanced) {
-      const throughTo = league.format === "survivor" && league.final_stage_started ? "the final stage" : "the knockout stage";
+      const throughTo = league.format === "knockout" ? "the next round"
+        : league.format === "survivor" ? (league.final_stage_started ? "the final stage" : "the next stage")
+        : "the knockout stage";
       return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
     }
     return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
