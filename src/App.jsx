@@ -4530,12 +4530,13 @@ export default function App() {
       const broadcastFixture = nextFixtureForLeague(league);
       const broadcastRound = broadcastFixture ? String(broadcastFixture.round) : "";
       const broadcastDue = broadcastFixture ? fmtDate(broadcastFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "";
+      const broadcastStart = broadcastFixture ? fixtureStartsAt(broadcastFixture, league) : league.starts_at;
       const body = league.wa_message_template
         .replace(/\{name\}/g, "everyone")
         .replace(/\{league\}/g, league.name)
         .replace(/\{round\}/g, broadcastRound)
         .replace(/\{due\}/g, broadcastDue)
-        .replace(/\{start\}/g, league.starts_at ? fmtDate(league.starts_at) : "");
+        .replace(/\{start\}/g, broadcastStart ? fmtDate(broadcastStart) : "");
       const posted = await postComment(league, body, null, null, null, true);
       if (posted) {
         // Same red "reminded" highlight the per-member WhatsApp icon sets
@@ -9766,9 +9767,10 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers
   // a generic name for a brand-new league with no members yet.
   const sampleName = (league.members || []).find((m) => m.display_name)?.display_name || "Alex";
   const sampleFixture = nextFixtureForLeague(league);
-  const sampleRound = sampleFixture ? String(sampleFixture.round) : "1";
   const sampleDue = sampleFixture ? fmtDate(sampleFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "Fri";
-  const sampleStart = league.starts_at ? fmtDate(league.starts_at) : "Fri";
+  const sampleRound = sampleFixture ? String(sampleFixture.round) : "1";
+  const sampleStartRaw = sampleFixture ? fixtureStartsAt(sampleFixture, league) : league.starts_at;
+  const sampleStart = sampleStartRaw ? fmtDate(sampleStartRaw) : "Fri";
   const preview = text.trim()
     ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name).replace(/\{round\}/g, sampleRound).replace(/\{due\}/g, sampleDue).replace(/\{start\}/g, sampleStart)
     : "";
@@ -9777,7 +9779,7 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
         Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name, <strong>{"{league}"}</strong> for the league name,
-        <strong> {"{round}"}</strong> for their next round number, <strong> {"{due}"}</strong> for its due date, and <strong> {"{start}"}</strong> for the league's kickoff date. Round and due date update automatically each round.
+        <strong> {"{round}"}</strong> for their next round number, <strong> {"{due}"}</strong> for its deadline, and <strong> {"{start}"}</strong> for when that round actually kicks off. Round, due, and start all update automatically each round.
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
         placeholder="Hey {name}! Round {round} of {league} is due {due} — lock it in! 🔥⚽"
@@ -9915,7 +9917,7 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 // unconditionally, to every member.
 function usesCustomMessage(t, league) {
   if (!league.wa_message_template) return false;
-  const usesRoundOrDue = /\{round\}|\{due\}/.test(league.wa_message_template);
+  const usesRoundOrDue = /\{round\}|\{due\}|\{start\}/.test(league.wa_message_template);
   if (!usesRoundOrDue) return true;
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   const notStarted = league.fixtures.length === 0;
@@ -9923,13 +9925,19 @@ function usesCustomMessage(t, league) {
   return !!(upcoming || due);
 }
 
-// League-start-date line appended to every auto-generated status message
-// below (not just the pre-kickoff one) — so a member gets a reminder of
-// when things kicked off even mid-league or after they've been eliminated,
-// not just in the very first message they ever get. Empty string (no line
-// added) when the league has no starts_at set yet.
-function leagueStartLine(league) {
-  return league.starts_at ? `\n🏁 Started ${fmtDate(league.starts_at)}` : "";
+// The real kickoff moment for a fixture — when players should actually
+// start playing it, as opposed to due_at (the deadline by which it must be
+// done). Knockout fixtures record this directly in starts_at (see
+// knockoutRoundFixtures); round-robin/group fixtures don't have their own
+// column for it, so it's derived by stepping due_at back by one round
+// period — same fallback logic already used for two-legged knockout ties
+// elsewhere (NextOpponentCard, OpponentFinder) when starts_at is missing on
+// an older fixture.
+function fixtureStartsAt(fixture, league) {
+  if (!fixture) return null;
+  if (fixture.starts_at) return fixture.starts_at;
+  if (!fixture.due_at) return null;
+  return new Date(new Date(fixture.due_at).getTime() - roundPeriodMs(league)).toISOString();
 }
 
 function adminStatusMessage(m, t, league) {
@@ -9942,21 +9950,23 @@ function adminStatusMessage(m, t, league) {
   // {due} are also live — sourced from this member's own next unplayed
   // fixture (same lookup the default message uses), so a custom template
   // still tracks the bracket forward each round instead of freezing on
-  // whatever round it was written during. {start} is the league's kickoff
-  // date, same for every member and every round — blank if not set yet.
+  // whatever round it was written during. {start} is that same fixture's
+  // real kickoff moment (see fixtureStartsAt) — blank if there's no
+  // upcoming fixture yet to attach one to.
   if (usesCustomMessage(t, league)) {
     const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
     const notStarted = league.fixtures.length === 0;
     const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
+    const start = upcoming ? fixtureStartsAt(upcoming, league) : notStarted ? league.starts_at : null;
     return league.wa_message_template
       .replace(/\{name\}/g, name)
       .replace(/\{league\}/g, league.name)
       .replace(/\{round\}/g, upcoming ? String(upcoming.round) : "")
       .replace(/\{due\}/g, due ? fmtDate(due) : "")
-      .replace(/\{start\}/g, league.starts_at ? fmtDate(league.starts_at) : "");
+      .replace(/\{start\}/g, start ? fmtDate(start) : "");
   }
   if (t?.eliminated) {
-    return `Hey ${name}! 👋\n🔴 Tough one — you've been eliminated from ${league.name}.\n🔥 Try again on the next one — jump into one of our other available leagues and get straight back in the fight!\n👉 ${SITE_URL}${leagueStartLine(league)}`;
+    return `Hey ${name}! 👋\n🔴 Tough one — you've been eliminated from ${league.name}.\n🔥 Try again on the next one — jump into one of our other available leagues and get straight back in the fight!\n👉 ${SITE_URL}`;
   }
   const notStarted = league.fixtures.length === 0;
   if (notStarted) {
@@ -9970,6 +9980,15 @@ function adminStatusMessage(m, t, league) {
   // this message goes out it names the new round on its own.
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   if (upcoming) {
+    // The window this fixture can be played in — real kickoff moment
+    // through the deadline. For most rounds these are genuinely different
+    // times (see fixtureStartsAt); if they happen to land on the exact same
+    // moment (e.g. an older fixture with no round period recorded), only
+    // show it once rather than printing the same time twice.
+    const start = fixtureStartsAt(upcoming, league);
+    const windowLine = start && start !== upcoming.due_at
+      ? `📅 Starts ${fmtDate(start)} · Due ${fmtDate(upcoming.due_at)}`
+      : `📅 Due ${fmtDate(upcoming.due_at)}`;
     // Round 1 of a fresh stage means this club just survived a cut — the
     // knockout bracket starting for groups_knockout, or a new survivor
     // stage (current_stage > 1) — so lead with a congrats line instead of
@@ -9993,11 +10012,11 @@ function adminStatusMessage(m, t, league) {
       const throughTo = league.format === "knockout" ? "the next round"
         : league.format === "survivor" ? (league.final_stage_started ? "the final stage" : "the next stage")
         : "the knockout stage";
-      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}${leagueStartLine(league)}`;
+      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
     }
-    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}${leagueStartLine(league)}`;
+    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
   }
-  return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.${leagueStartLine(league)}`;
+  return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
 // Red "reminded" highlight for a member row. members.wa_reminder_due_at is
