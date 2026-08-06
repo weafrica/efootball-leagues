@@ -33,6 +33,14 @@ const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_ROUND_PERIOD_HOURS = 48;
+// A two-legged (home & away) knockout tie always gets a fixed 4-day window
+// to play both matches, regardless of whatever the league's own
+// round_period_hours is set to for single-leg fixtures. It used to be
+// derived as roundPeriodMs(league) * 2 — but that silently gave ties a
+// shorter (or longer) window than 4 days whenever a league's round period
+// was configured to something other than the 48-hour default, since that
+// setting was never meant to double as the two-legged tie window too.
+const KNOCKOUT_TIE_WINDOW_MS = 4 * ONE_DAY_MS;
 // Older leagues created before this setting existed have no round_period_hours
 // column value — fall back to the original fixed 48-hour (2-day) gap so their
 // schedules don't shift.
@@ -392,10 +400,14 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
   // normal single-round window (e.g. 4 days instead of 2) — instead of each
   // leg getting its own separate due date. Either leg can be played any
   // time within that shared window; the tie only counts as expired once
-  // this one date passes. tieDue - periodMs*2 reconstructs the tie's start
-  // moment for display, since dueOffset is always 1 relative to whatever
-  // "dueBase" actually was when this round got generated (see callers).
-  const tieDue = new Date(dueBase.getTime() + dueOffset * periodMs * 2);
+  // this one date passes.
+  const tieDue = new Date(dueBase.getTime() + dueOffset * KNOCKOUT_TIE_WINDOW_MS);
+  // starts_at records the round's real start moment directly, rather than
+  // making the UI reconstruct it later by subtracting the window back off
+  // due_at. That reconstruction silently goes wrong the moment due_at is
+  // ever adjusted after creation (a dispute extension, a manual edit) —
+  // storing the true start here means the display never has to guess it.
+  const startsAt = dueBase.toISOString();
   const rows = [];
   pairs.forEach(({ home, away }) => {
     const bye = away === null;
@@ -404,20 +416,20 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: bye, home_score: bye ? 1 : 0, away_score: 0,
-        due_at: singleLegDue.toISOString(),
+        due_at: singleLegDue.toISOString(), starts_at: startsAt,
       });
     } else {
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: false, home_score: 0, away_score: 0,
-        due_at: tieDue.toISOString(),
+        due_at: tieDue.toISOString(), starts_at: startsAt,
       });
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 2, stage,
         home_team_id: away, away_team_id: home,
         played: false, home_score: 0, away_score: 0,
-        due_at: tieDue.toISOString(),
+        due_at: tieDue.toISOString(), starts_at: startsAt,
       });
     }
   });
@@ -1307,8 +1319,8 @@ function seasonKey(idx) { return `S${idx + 1}`; }
 function seasonLabel(idx, anchor) {
   const { start, end } = seasonBounds(idx, anchor);
   const lastDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const fmt = { day: "numeric", month: "short", year: "numeric" };
-  return `Season ${idx + 1} · ${start.toLocaleDateString(undefined, fmt)} – ${lastDay.toLocaleDateString(undefined, fmt)}`;
+  const fmt = { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Johannesburg" };
+  return `Season ${idx + 1} · ${start.toLocaleDateString("en-ZA", fmt)} – ${lastDay.toLocaleDateString("en-ZA", fmt)}`;
 }
 function currentSeason(anchor) { return anchor ? seasonIndexForDate(new Date(), anchor) : 0; }
 function daysUntilSeasonReset(anchor) {
@@ -1538,9 +1550,13 @@ function findSubmissionOpponentId(league, submission) {
   return opponentMember?.user_id || null;
 }
 
+// Fixed to Africa/Johannesburg (UTC+2, no DST) rather than each viewer's own
+// device timezone — so every player and admin sees the exact same time for
+// a fixture regardless of what timezone their phone/browser happens to be
+// set to. This league runs on SAST, not "whatever device opened the app."
 function fmtDate(iso) {
   if (!iso) return "";
-  return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
 }
 
 // Returns [start, end] Date objects spanning the nearest Friday 00:00 through
@@ -9323,14 +9339,14 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                 const pensH = pensAggregateFor(legs, f0.home_team_id);
                 const pensA = pensAggregateFor(legs, f0.away_team_id);
                 // Two-legged ties now carry ONE shared due_at across both
-                // legs (see knockoutRoundFixtures) — reconstruct the tie's
-                // start moment by subtracting the double-length window back
-                // off that shared deadline, so this can show as one
+                // legs (see knockoutRoundFixtures), so this shows as one
                 // "start → expiry (N days)" range instead of two separate
-                // per-leg dates.
+                // per-leg dates. f0.starts_at is the real recorded start
+                // moment; only fall back to reconstructing it from due_at
+                // for older fixtures created before that column existed.
                 const tieDueAt = twoLegged ? f0.due_at : null;
-                const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
-                const tieStartAt = tieDueAt ? new Date(new Date(tieDueAt).getTime() - tieWindowMs) : null;
+                const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
+                const tieStartAt = !tieDueAt ? null : f0.starts_at ? new Date(f0.starts_at) : new Date(new Date(tieDueAt).getTime() - tieWindowMs);
                 const tieWindowDays = tieWindowMs / ONE_DAY_MS;
                 const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
                 return (
@@ -11240,14 +11256,15 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
 
   // A knockout tie's second leg shares the same round/stage and the same
   // two clubs (home/away flipped) — if one exists, both legs already carry
-  // the same shared due_at (see knockoutRoundFixtures), so the start of
-  // that window can be reconstructed by subtracting it back off.
+  // the same shared due_at (see knockoutRoundFixtures). fixture.starts_at
+  // is the real recorded start moment; only reconstruct it from due_at for
+  // older fixtures created before that column existed.
   const siblingLeg = fixture.leg ? league.fixtures.find((f) => f.id !== fixture.id && f.round === fixture.round && f.stage === fixture.stage
     && ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id)
       || (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id))) : null;
   const twoLegged = !!siblingLeg;
-  const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
-  const tieStartAt = twoLegged ? new Date(new Date(fixture.due_at).getTime() - tieWindowMs) : null;
+  const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
+  const tieStartAt = !twoLegged ? null : fixture.starts_at ? new Date(fixture.starts_at) : new Date(new Date(fixture.due_at).getTime() - tieWindowMs);
   const tieWindowDays = tieWindowMs / ONE_DAY_MS;
 
   return (
@@ -11395,8 +11412,8 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
             // pattern used in KnockoutFixturesList and OpponentFinder.
             const allPlayed = result.myFixtures.every((f) => f.played);
             const f0 = result.myFixtures[0];
-            const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
-            const tieStartAt = twoLegged ? new Date(new Date(f0.due_at).getTime() - tieWindowMs) : null;
+            const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
+            const tieStartAt = !twoLegged ? null : f0.starts_at ? new Date(f0.starts_at) : new Date(new Date(f0.due_at).getTime() - tieWindowMs);
             const tieWindowDays = tieWindowMs / ONE_DAY_MS;
             const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
             return (
@@ -11557,12 +11574,13 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
             const level = allPlayed && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id);
             const isFinalTie = level && isFinalRoundFixtures(fixtures.filter((f) => f.round === result.legs[0].round));
             // Two-legged ties share one due_at across both legs (see
-            // knockoutRoundFixtures) — reconstruct the tie's start moment
-            // by subtracting the double-length window back off that shared
-            // deadline, so both the player and the admin see the full
-            // "start → expiry" window here, not just the cutoff.
-            const tieWindowMs = result.twoLegged ? roundPeriodMs(league) * 2 : 0;
-            const tieStartAt = result.twoLegged ? new Date(new Date(result.legs[0].due_at).getTime() - tieWindowMs) : null;
+            // knockoutRoundFixtures), so both the player and the admin see
+            // the full "start → expiry" window here, not just the cutoff.
+            // legs[0].starts_at is the real recorded start moment; only
+            // reconstruct it from due_at for older fixtures created before
+            // that column existed.
+            const tieWindowMs = result.twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
+            const tieStartAt = !result.twoLegged ? null : result.legs[0].starts_at ? new Date(result.legs[0].starts_at) : new Date(new Date(result.legs[0].due_at).getTime() - tieWindowMs);
             const tieWindowDays = tieWindowMs / ONE_DAY_MS;
             if (!result.twoLegged && !level) return null;
             return (
