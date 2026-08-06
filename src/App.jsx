@@ -1584,7 +1584,12 @@ const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
 // League spotlight shows as "Paused" rather than "Live". Only the spotlight's
 // live/paused badge reads this; it never gates joining a league or submitting
 // a result, so players can still upload results for a match played overnight.
-function isWeekendPauseHour(now = new Date()) {
+// `override` ("paused" | "live" | null) is an admin's manual call — see
+// weekendOverride in App() — and always wins over the clock when set, so an
+// admin can force an early resume or an extra-long pause when necessary.
+function isWeekendPauseHour(now = new Date(), override = null) {
+  if (override === "paused") return true;
+  if (override === "live") return false;
   const sastHour = new Date(now.getTime() + SAST_OFFSET_MS).getUTCHours();
   return sastHour >= 21 || sastHour < 9;
 }
@@ -2432,6 +2437,14 @@ export default function App() {
   const [profile, setProfile] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leagues, setLeagues] = useState(null);
+  // Admin override for the Weekend League spotlight's nightly auto-pause
+  // (see isWeekendPauseHour / WeekendLeagueSpotlight). null = follow the
+  // 9pm–9am SAST schedule as usual; "paused" / "live" forces that state
+  // regardless of the clock, until an admin clears it back to null. Lives
+  // in a single-row `app_settings` table (id=1) rather than per-league,
+  // since the spotlight's live/paused badge is one global state shared by
+  // every weekend league at once — see APP-SETTINGS-MIGRATION.md.
+  const [weekendOverride, setWeekendOverrideState] = useState(null);
   // A hard refresh re-mounts the whole app from scratch, so React state
   // always starts from these defaults — but the browser itself preserves
   // window.history.state across a reload of the same entry (it's tied to
@@ -2611,6 +2624,32 @@ export default function App() {
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
   }, [showToast]);
+
+  // Public setting (no auth required to read — guests need it too, see
+  // PublicHome's own copy of this query), so this loads regardless of
+  // sign-in state rather than waiting on the session/isAdmin effect below.
+  const loadWeekendOverride = useCallback(async () => {
+    const { data, error } = await supabase.from("app_settings").select("weekend_league_override").eq("id", 1).maybeSingle();
+    if (error) return; // table may not exist yet if the migration hasn't been run — fail quiet, spotlight just falls back to the auto schedule
+    setWeekendOverrideState(data?.weekend_league_override ?? null);
+  }, []);
+
+  // Admin-only. Writing null clears the override and hands control back to
+  // the 9pm–9am SAST auto schedule.
+  const setWeekendOverride = useCallback(async (value) => {
+    const { error } = await supabase.from("app_settings")
+      .update({ weekend_league_override: value, weekend_league_override_at: new Date().toISOString(), weekend_league_override_by: session?.user?.id || null })
+      .eq("id", 1);
+    if (error) { showToast(`Couldn't update Weekend League override: ${error.message}`); return; }
+    setWeekendOverrideState(value);
+    showToast(value === "paused" ? "Weekend League forced to Paused." : value === "live" ? "Weekend League forced to Live." : "Weekend League back on the auto schedule.");
+  }, [session, showToast]);
+
+  useEffect(() => { loadWeekendOverride(); }, [loadWeekendOverride]);
+  // Realtime rather than a poll — an admin toggling this on one device
+  // (or another admin, elsewhere) should flip everyone's spotlight badge
+  // immediately, not on the next visibility-poll tick.
+  useRealtimeRefresh("app_settings", loadWeekendOverride, true);
 
   // Admin-only — every account on the platform, for the Accounts screen.
   // Calls a SECURITY DEFINER function (get_all_accounts) rather than
@@ -4788,7 +4827,8 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url} showToast={showToast} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
+                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -4949,7 +4989,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes] = await Promise.all([
+      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes] = await Promise.all([
         supabase.from("public_leagues").select("*"),
         supabase.from("public_league_teams").select("*"),
         supabase.from("public_league_fixtures").select("*"),
@@ -4960,6 +5000,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         // avatar_url only (see public_team_avatars view), nothing else about
         // the owning member is exposed to guests.
         supabase.from("public_team_avatars").select("*"),
+        // Admin's manual override of the Weekend League auto pause/resume
+        // (see isWeekendPauseHour) — read-only here, guests never see the
+        // toggle itself, just the resulting Live/Paused badge.
+        supabase.from("app_settings").select("weekend_league_override").eq("id", 1).maybeSingle(),
       ]);
       if (cancelled) return;
       const avatarByTeamId = {};
@@ -4972,6 +5016,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         ladder: ladderRes.data || [],
         results: resultsRes.data || [],
         avatarByTeamId,
+        weekendOverride: settingsRes.data?.weekend_league_override ?? null,
       });
     })();
     return () => { cancelled = true; };
@@ -5144,7 +5189,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             with the general Leagues list. Hidden entirely outside a
             qualifying window rather than showing an empty promo. */}
         {weekendLeagues.length > 0 && (
-          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
+          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} override={guestData?.weekendOverride ?? null} onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
         )}
 
         {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
@@ -5227,7 +5272,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 // Ladder), a "Hottest" flame badge on whichever league has the most matches
 // due, and a per-card heat bar so activity is visible at a glance, not just
 // a number.
-function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, isJoined, c }) {
+function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, isJoined, override, isAdmin, onSetOverride, c }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60000);
@@ -5235,8 +5280,9 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
   }, []);
 
   const isWithinWeekend = now >= weekendStart && now <= weekendEnd;
-  const isPaused = isWithinWeekend && isWeekendPauseHour(now);
+  const isPaused = isWithinWeekend && isWeekendPauseHour(now, override);
   const isLiveNow = isWithinWeekend && !isPaused;
+  const isOverridden = isWithinWeekend && (override === "paused" || override === "live");
 
   // Paused: counting down to the 9am SAST resume — unless the weekend
   // window itself wraps up first (Sunday night's pause has no Monday
@@ -5276,13 +5322,13 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
           {isPaused ? (
-            <><Pause size={10} /> Paused · {pausedTargetIsEnd ? "ends" : "resumes"} in {countdownLabel}</>
+            <><Pause size={10} /> Paused · {isOverridden ? "admin override" : `${pausedTargetIsEnd ? "ends" : "resumes"} in ${countdownLabel}`}</>
           ) : isLiveNow ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
               </span>
-              Live · {liveTargetIsEnd ? "ends" : "pauses"} in {countdownLabel}
+              Live · {isOverridden ? "admin override" : `${liveTargetIsEnd ? "ends" : "pauses"} in ${countdownLabel}`}
             </>
           ) : (
             <><Clock size={10} /> Starts in {countdownLabel}</>
@@ -5299,6 +5345,31 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
           </span>
         )}
       </div>
+      {/* Admin-only manual override of the 9pm–9am auto pause/resume — for
+          the odd weekend where the schedule needs a nudge (e.g. keep it
+          live late for a big final, or pause early for maintenance).
+          Hidden entirely for everyone else, including logged-in players. */}
+      {isAdmin && onSetOverride && (
+        <div className="relative px-4 pb-1.5 flex items-center gap-1.5">
+          <span className="font-mono text-[9px] uppercase tracking-wide shrink-0" style={{ color: c.textFaint }}>Admin:</span>
+          {[
+            { key: null, label: "Auto" },
+            { key: "live", label: "Force live" },
+            { key: "paused", label: "Force pause" },
+          ].map((opt) => {
+            const active = (override ?? null) === opt.key;
+            return (
+              <button key={opt.label} onClick={() => onSetOverride(opt.key)}
+                className="font-mono text-[9px] uppercase tracking-wide px-2 py-0.5 rounded-full transition-transform active:scale-95"
+                style={active
+                  ? { background: c.accent, color: "#fff" }
+                  : { background: c.surfaceHover, color: c.textDim, border: `1px solid ${c.border}` }}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1.5">
         {items.map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
           const isHottest = matchCount > 0 && matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
@@ -7502,7 +7573,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, showToast, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
@@ -7779,7 +7850,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           even if it's not among the leagues they're already in. */}
       {weekendLeagues.length > 0 && (
         <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
-          isJoined={(l) => isMemberOf(l)}
+          isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
           onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
       )}
 
