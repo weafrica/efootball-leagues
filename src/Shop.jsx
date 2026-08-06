@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedMediaUrl } from "./utils/mediaUrl";
+import { proxiedMediaUrl, toProxiedUrl } from "./utils/mediaUrl";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
@@ -728,7 +728,7 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
           // Distinct products' photos (not the same item repeated) — up to 4,
           // arranged as a collage so the tile itself hints at what's actually
           // in the department before anyone taps in.
-          const photos = [...new Set(items.map((it) => it.image_url).filter(Boolean))].slice(0, 4);
+          const photos = [...new Set(items.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
           return (
             <button key={dept.id} onClick={() => onSelect(dept.id)}
               className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
@@ -801,7 +801,7 @@ function CategoryShowcase({ categories, allCategories, itemsForCat, onSelect, c 
     <div className="grid grid-cols-2 gap-2 mb-4">
       {categories.map((cat) => {
         const items = itemsForCat(cat.id);
-        const photos = [...new Set(items.map((it) => it.image_url).filter(Boolean))].slice(0, 4);
+        const photos = [...new Set(items.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
         const hasChildren = categoryChildren(allCategories, cat.id).length > 0;
         return (
           <button key={cat.id} onClick={() => onSelect(cat.id)}
@@ -849,7 +849,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
             className="text-left rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border, opacity: p.active ? 1 : 0.5 }}>
             <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
-              {p.image_url ? <img src={p.image_url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
+              {p.image_url ? <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
               {canQuickAdd && (
                 <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
                   className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -877,7 +877,7 @@ function ProductModal({ product, onClose, onAdd, onShare, c }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div className="w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl overflow-hidden max-h-[85vh] overflow-y-auto" style={{ background: c.bg }} onClick={(e) => e.stopPropagation()}>
         <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
-          {product.image_url ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
+          {product.image_url ? <img src={toProxiedUrl(product.image_url)} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
           <button onClick={onShare} aria-label="Share this product" title="Share this product" className="absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><Share2 size={15} /></button>
           <button onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><X size={16} /></button>
         </div>
@@ -927,7 +927,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
             {cart.map((it) => (
               <div key={it.productId} className="flex items-center gap-3 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
                 <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
-                  {it.image_url ? <img src={it.image_url} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={16} style={{ color: c.textFaint }} />}
+                  {it.image_url ? <img src={toProxiedUrl(it.image_url)} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={16} style={{ color: c.textFaint }} />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-body text-xs font-semibold truncate">{it.name}</div>
@@ -1248,7 +1248,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
         {filtered.map((p) => (
           <div key={p.id} className="flex items-center gap-2.5 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
             <div className="w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
-              {p.image_url ? <img src={p.image_url} alt="" className="w-full h-full object-cover" /> : <ImageIcon size={14} style={{ color: c.textFaint }} />}
+              {p.image_url ? <img src={toProxiedUrl(p.image_url)} alt="" className="w-full h-full object-cover" /> : <ImageIcon size={14} style={{ color: c.textFaint }} />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>

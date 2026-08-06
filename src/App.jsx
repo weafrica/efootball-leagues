@@ -5374,7 +5374,7 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   // bypassed upstream.
   const photoAndDescription = extra?.photo_url && (
     <div className="mb-3 -mt-1">
-      <img src={extra.photo_url} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />
+      <img src={toProxiedUrl(extra.photo_url)} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />
     </div>
   );
 
@@ -5501,7 +5501,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
                 style={{ animationDelay: i === 0 ? "0s" : "0.9s" }}>
                 <span className="animate-pick-ring hex-clip w-11 h-11 overflow-hidden flex items-center justify-center"
                   style={{ "--pick-ring": SHOP_GOLD, background: c.surface }}>
-                  <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                  <img src={toProxiedUrl(p.image_url)} alt={p.name} className="w-full h-full object-cover" />
                 </span>
                 <span className="font-mono text-[8px] font-bold mt-1 px-1.5 py-0.5 rounded-full whitespace-nowrap"
                   style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -8603,7 +8603,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
       <div className="relative h-[86px] flex items-center justify-center overflow-hidden"
         style={{ background: isCash ? "linear-gradient(150deg, #B8860B33, #B8860B0D)" : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
         {l.photo_url ? (
-          <img src={l.photo_url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span className="font-extrabold text-3xl" style={{ color: isCash ? "#B8860B" : c.accent, opacity: 0.85 }}>{initial}</span>
         )}
@@ -9345,7 +9345,7 @@ function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
   return (
     <div className="relative mb-5 rounded-xl overflow-hidden" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {league.photo_url ? (
-        <img src={league.photo_url} alt="" className="w-full h-40 sm:h-48 object-cover" />
+        <img src={toProxiedUrl(league.photo_url)} alt="" className="w-full h-40 sm:h-48 object-cover" />
       ) : (
         <div className="w-full h-28 flex items-center justify-center font-body text-sm" style={{ color: c.textFaint }}>No league photo yet</div>
       )}
@@ -11025,8 +11025,8 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
               <Camera size={12} /> View proof photo
             </button>
           ) : (
-            <button onClick={() => window.open(cm.photo_url, "_blank", "noopener,noreferrer")} className="block mt-2">
-              <img src={cm.photo_url} alt="Scoreboard proof photo" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
+            <button onClick={() => window.open(toProxiedUrl(cm.photo_url), "_blank", "noopener,noreferrer")} className="block mt-2">
+              <img src={toProxiedUrl(cm.photo_url)} alt="Scoreboard proof photo" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
             </button>
           )
         )}
