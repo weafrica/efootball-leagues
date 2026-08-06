@@ -9827,7 +9827,7 @@ function adminStatusMessage(m, t, league) {
     );
     if (justAdvanced) {
       const throughTo = league.format === "survivor" && league.final_stage_started ? "the final stage" : "the knockout stage";
-      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
+      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
     }
     return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
   }
