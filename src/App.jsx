@@ -4502,7 +4502,21 @@ export default function App() {
         .replace(/\{round\}/g, broadcastRound)
         .replace(/\{due\}/g, broadcastDue);
       const posted = await postComment(league, body, null, null, null, true);
-      if (posted) showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
+      if (posted) {
+        // Same red "reminded" highlight the per-member WhatsApp icon sets
+        // (see markWaReminder) — a broadcast is still notifying every
+        // member, so every member's row should reflect that, each against
+        // their own current due date (not the broadcast's), same as
+        // isWaReminderActive checks it. Members with no due date (already
+        // eliminated, no upcoming fixture) are skipped, same as tapping
+        // their individual icon would skip them.
+        (league.members || []).forEach((mm) => {
+          const team = (league.teams || []).find((tt) => tt.id === mm.team_id);
+          const dueAt = adminStatusReminderDate(mm, team, league);
+          if (dueAt) markWaReminder(mm, dueAt);
+        });
+        showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
+      }
     });
   };
 
