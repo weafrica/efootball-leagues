@@ -1618,7 +1618,7 @@ function waLink(phone, text) {
 const SITE_URL = "https://www.weafrica.co.za/";
 function firstMatchdayNote(round) {
   if (round !== 1) return "";
-  return ` Also, jump on ${SITE_URL} — you'll find your opponent right at the top of the homepage 👆`;
+  return `\n👆 Also, jump on ${SITE_URL} — you'll find your opponent right at the top of the homepage`;
 }
 
 // Small pill button used anywhere we offer to message a club's registered
@@ -9757,53 +9757,81 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 // member's club status right now: eliminated, not-yet-started league, or
 // the next fixture due date. Kept upbeat on purpose — this is the message
 // that lands in a player's WhatsApp, not a formal notice.
+// Whether THIS member would actually get the league's saved custom
+// template, or fall back to the automated status message — shared by
+// adminStatusMessage (to decide what to send) and the members tab (to
+// decide which of the two lists a member belongs in), so the two can never
+// disagree about which bucket a member is in.
+//
+// A template that references {round}/{due} needs real fixture data to fill
+// them — for a member with none (eliminated, or nothing left to play),
+// sending it would read as a broken half-blank line like "Round is due ".
+// Rather than inventing filler text for that gap, such members fall back to
+// automated. Templates that don't reference {round} or {due} at all apply
+// unconditionally, to every member.
+function usesCustomMessage(t, league) {
+  if (!league.wa_message_template) return false;
+  const usesRoundOrDue = /\{round\}|\{due\}/.test(league.wa_message_template);
+  if (!usesRoundOrDue) return true;
+  const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
+  const notStarted = league.fixtures.length === 0;
+  const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
+  return !!(upcoming || due);
+}
+
 function adminStatusMessage(m, t, league) {
   const name = m.display_name || "there";
   // An admin-edited template on the league overrides the status-based
-  // message entirely, for every member, until it's edited or cleared again
-  // — see updateLeagueMemberMessage. {name} and {league} get swapped in per
+  // message entirely, for every eligible member (see usesCustomMessage
+  // above), until it's edited or cleared again — see
+  // updateLeagueMemberMessage. {name} and {league} get swapped in per
   // member so a single saved template still reads as personal. {round} and
   // {due} are also live — sourced from this member's own next unplayed
   // fixture (same lookup the default message uses), so a custom template
   // still tracks the bracket forward each round instead of freezing on
   // whatever round it was written during.
-  //
-  // A template that actually uses {round}/{due} needs real fixture data to
-  // fill them — for a member with none (eliminated, or nothing left to
-  // play), sending it would read as a broken half-blank line like "Round
-  // is due ". Rather than inventing filler text for that gap, fall through
-  // to the default status message below, which already handles eliminated/
-  // not-started members cleanly. Templates that don't reference {round} or
-  // {due} at all are unaffected — those keep overriding unconditionally,
-  // same as before.
-  const usesRoundOrDue = /\{round\}|\{due\}/.test(league.wa_message_template || "");
-  if (league.wa_message_template) {
+  if (usesCustomMessage(t, league)) {
     const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
     const notStarted = league.fixtures.length === 0;
     const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
-    const hasRoundDueData = !!(upcoming || due);
-    if (!usesRoundOrDue || hasRoundDueData) {
-      return league.wa_message_template
-        .replace(/\{name\}/g, name)
-        .replace(/\{league\}/g, league.name)
-        .replace(/\{round\}/g, upcoming ? String(upcoming.round) : "")
-        .replace(/\{due\}/g, due ? fmtDate(due) : "");
-    }
+    return league.wa_message_template
+      .replace(/\{name\}/g, name)
+      .replace(/\{league\}/g, league.name)
+      .replace(/\{round\}/g, upcoming ? String(upcoming.round) : "")
+      .replace(/\{due\}/g, due ? fmtDate(due) : "");
   }
   if (t?.eliminated) {
-    return `Hey ${name}! 🔴 Tough one — you've been eliminated from ${league.name}. But the fun doesn't stop here, jump into one of our other available leagues and get straight back in the fight! 🔥`;
+    return `Hey ${name}! 👋\n🔴 Tough one — you've been eliminated from ${league.name}.\n🔥 Try again on the next one — jump into one of our other available leagues and get straight back in the fight!\n👉 ${SITE_URL}`;
   }
   const notStarted = league.fixtures.length === 0;
   if (notStarted) {
     return league.starts_at
-      ? `Hey ${name}! 🎉 ${league.name} kicks off ${fmtDate(league.starts_at)} — get ready, it's going to be a good one! 🏆⚽`
-      : `Hey ${name}! 🎉 ${league.name} is filling up fast — we'll confirm the kickoff date soon, get hyped! 🏆⚽`;
+      ? `Hey ${name}! 🎉\n🏆 ${league.name} kicks off ${fmtDate(league.starts_at)}.\n⚽ Get ready, it's going to be a good one!`
+      : `Hey ${name}! 🎉\n📋 ${league.name} is filling up fast.\n⚽ We'll confirm the kickoff date soon — get hyped!`;
   }
+  // {round} is read fresh off this member's own next unplayed fixture every
+  // time this message is generated (never stored), so as soon as a round's
+  // results are in and the next round's fixtures exist, the very next time
+  // this message goes out it names the new round on its own.
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   if (upcoming) {
-    return `Hey ${name}! ⚡ Your next fixture in ${league.name} is due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent and bring the heat! 🔥⚽${firstMatchdayNote(upcoming.round)}`;
+    // Round 1 of a fresh stage means this club just survived a cut — the
+    // knockout bracket starting for groups_knockout, or a new survivor
+    // stage (current_stage > 1) — so lead with a congrats line instead of
+    // the plain reminder. Round 1 of stage 1 (a league just starting, or
+    // plain single/double round-robin/knockout with no earlier cut to
+    // survive) isn't a promotion, so it's excluded here on purpose.
+    const justAdvanced = !t.eliminated && upcoming.round === 1 && (
+      (league.format === "groups_knockout" && upcoming.stage === 2) ||
+      (league.format === "survivor" && league.current_stage > 1 && upcoming.stage === league.current_stage)
+    );
+    if (justAdvanced) {
+      const throughTo = league.format === "survivor" && league.final_stage_started ? "the final stage" : "the knockout stage";
+      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
+    }
+    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
   }
-  return `Hey ${name}! 👋 This is weAfrica admin Saul, checking in on ${league.name}.`;
+  return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
 // The date an "upcoming league / upcoming fixture" WhatsApp text is really
@@ -10349,18 +10377,51 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
           )}
           {league.members.length === 0 ? (
             <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's joined yet.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {[...league.members]
-                .sort((a, b) => (a.payment_status === "pending" ? -1 : 0) - (b.payment_status === "pending" ? -1 : 0))
-                .map((m) => (
-                  <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
-                    isCash={league.league_type === "cash"} canManage={canManage}
-                    isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            const sorted = [...league.members].sort((a, b) => (a.payment_status === "pending" ? -1 : 0) - (b.payment_status === "pending" ? -1 : 0));
+            const row = (m) => (
+              <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
+                isCash={league.league_type === "cash"} canManage={canManage}
+                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
+                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
+            );
+            // Only worth splitting into two lists once a custom template
+            // actually exists on the league — with none set, every member
+            // gets the automated message and a "Custom" list would just sit
+            // there empty. See usesCustomMessage: within one league some
+            // members can still land on automated (eliminated, or nothing
+            // left to play) even with a template active, which is exactly
+            // the split this surfaces.
+            if (!league.wa_message_template) {
+              return <div className="space-y-1.5">{sorted.map(row)}</div>;
+            }
+            const custom = sorted.filter((m) => usesCustomMessage(league.teams.find((t) => t.id === m.team_id), league));
+            const automated = sorted.filter((m) => !usesCustomMessage(league.teams.find((t) => t.id === m.team_id), league));
+            return (
+              <div className="space-y-5">
+                <div>
+                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
+                    Custom message ({custom.length})
+                  </div>
+                  {custom.length === 0 ? (
+                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members will get the custom message right now.</div>
+                  ) : (
+                    <div className="space-y-1.5">{custom.map(row)}</div>
+                  )}
+                </div>
+                <div>
+                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
+                    Automated message ({automated.length})
+                  </div>
+                  {automated.length === 0 ? (
+                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members are on the automated message right now.</div>
+                  ) : (
+                    <div className="space-y-1.5">{automated.map(row)}</div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
           {league.league_type === "cash" && league.members.some((m) => m.payment_status === "approved") && (
             <PrizeBreakdownPanel league={league} c={c} />
           )}
