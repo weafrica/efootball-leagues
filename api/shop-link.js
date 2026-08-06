@@ -17,6 +17,47 @@
 const BOT_UA_PATTERN =
   /facebookexternalhit|Facebot|WhatsApp|Twitterbot|Slackbot|TelegramBot|LinkedInBot|Discordbot|Pinterest|vkShare|SkypeUriPreview|Googlebot|Applebot|redditbot|Embedly|W3C_Validator|Iframely|Bitly|SnapchatAds/i;
 
+// Buckets api/image.js will actually proxy — kept in sync with that file's
+// ALLOWED_BUCKETS and mediaUrl.js's PROXIED_BUCKETS.
+const PROXIED_BUCKETS = new Set(["avatars", "league-photos", "comment-photos", "shop-photos", "comment-voice-notes"]);
+
+// Turns whatever's in product.image_url into an ABSOLUTE, proxied URL, so
+// this page's og:image/twitter:image tags are something every crawler can
+// actually fetch.
+//
+// Two cases land here, and both need fixing the same way:
+//  - A raw Supabase public-storage URL (products uploaded before the proxy
+//    existed) — every unfurl (WhatsApp, Facebook, Twitter, Slack...) would
+//    otherwise fetch that image straight from Supabase, spending Cached
+//    Egress on crawler traffic that has nothing to do with real visitors.
+//  - An already-proxied but RELATIVE path (products uploaded after the
+//    fix, e.g. "/api/image?bucket=..."), which technically isn't valid in
+//    an og:image tag at all — crawlers expect a full absolute URL.
+// Either way, the fix is the same: resolve to this same bucket/path pair
+// and build `${proto}://${host}/api/image?...` — an absolute URL that
+// still resolves through Vercel's cache, not Supabase.
+function absoluteProxiedImage(imageUrl, supabaseUrl, proto, host) {
+  if (!imageUrl) return null;
+  const origin = `${proto}://${host}`;
+  if (imageUrl.startsWith("/api/image?")) return `${origin}${imageUrl}`;
+  if (imageUrl.startsWith(origin)) return imageUrl; // already absolute-proxied somehow
+  if (supabaseUrl) {
+    const prefix = `${supabaseUrl}/storage/v1/object/public/`;
+    if (imageUrl.startsWith(prefix)) {
+      const rest = imageUrl.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash !== -1) {
+        const bucket = rest.slice(0, slash);
+        const path = rest.slice(slash + 1);
+        if (PROXIED_BUCKETS.has(bucket)) {
+          return `${origin}/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+        }
+      }
+    }
+  }
+  return imageUrl; // unrecognized shape — leave alone rather than guess
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -82,7 +123,7 @@ export default async function handler(req, res) {
     ? (product.description ? product.description : `${priceText} — available now on WeAfrica Shop.`)
     : "Browse the WeAfrica Shop.";
   const fullTitle = product && priceText ? `${title} — ${priceText}` : title;
-  const image = product?.image_url || `${proto}://${host}/hero-emblem.png`;
+  const image = absoluteProxiedImage(product?.image_url, supabaseUrl, proto, host) || `${proto}://${host}/hero-emblem.png`;
 
   const html = `<!doctype html>
 <html lang="en">
