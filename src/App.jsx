@@ -1635,6 +1635,11 @@ const WHATSAPP_GREEN = "#25D366";
 // every screen (signed in or not) so anyone can reach a human fast.
 const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
 
+// How long a member's row stays highlighted red after an admin taps their
+// WhatsApp icon (see markWaReminder / isWaReminderActive below). Simple
+// "I messaged them recently" flag — not tied to any fixture due date.
+const WA_REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 // Builds a wa.me deep link with an optional prefilled message. wa.me opens
 // whichever WhatsApp variant — regular or Business — is installed as the
 // device's default handler for that number; there's no separate universal
@@ -3873,9 +3878,9 @@ export default function App() {
   };
 
   // Fired when an admin taps the WhatsApp icon next to a member — flags that
-  // member red (for every admin) until the due date the message was about
-  // passes. dueAt is skipped (nothing to store) for messages with no date,
-  // e.g. the "you've been eliminated" text.
+  // member red (for every admin) for WA_REMINDER_WINDOW_MS. Just "someone
+  // messaged them recently" — not tied to a fixture due date, so it fires
+  // every time regardless of the member's or league's state.
   //
   // This write races the browser navigating away to open WhatsApp (the
   // link's href starts loading the instant it's tapped). On some phones the
@@ -3896,10 +3901,10 @@ export default function App() {
   // navigation race, the actual write never even starts. Reading `session`
   // synchronously keeps this to exactly one network call — the keepalive
   // one — instead of stacking a second, unprotected one in front of it.
-  const markWaReminder = async (member, dueAt) => {
-    if (!dueAt) { console.warn("[wa-reminder] skipped — no dueAt for", member?.display_name); return; }
+  const markWaReminder = async (member) => {
     const token = session?.access_token;
     if (!token) { console.warn("[wa-reminder] skipped — no session token"); return; }
+    const sentAt = new Date().toISOString();
 
     // Update the highlight LOCALLY, immediately, before firing the network
     // call. On mobile, tapping this icon hands off to the WhatsApp app right
@@ -3913,7 +3918,7 @@ export default function App() {
     setLeagues((prev) => (prev || []).map((lg) => (
       lg.id !== member.league_id ? lg : {
         ...lg,
-        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: dueAt } : mm)),
+        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: sentAt } : mm)),
       }
     )));
 
@@ -3927,7 +3932,7 @@ export default function App() {
           "Content-Type": "application/json",
           Prefer: "return=minimal",
         },
-        body: JSON.stringify({ wa_reminder_due_at: dueAt }),
+        body: JSON.stringify({ wa_reminder_due_at: sentAt }),
       });
       // TEMP DEBUG — remove once confirmed working. keepalive responses can't
       // always be read, but when they can, this surfaces the real failure
@@ -3936,7 +3941,7 @@ export default function App() {
         const body = await res.text().catch(() => "");
         console.error("[wa-reminder] PATCH failed", res.status, body);
       } else {
-        console.log("[wa-reminder] PATCH ok for", member.id, dueAt);
+        console.log("[wa-reminder] PATCH ok for", member.id, sentAt);
       }
     } catch (err) {
       console.error("[wa-reminder] PATCH threw", err);
@@ -4505,16 +4510,8 @@ export default function App() {
       if (posted) {
         // Same red "reminded" highlight the per-member WhatsApp icon sets
         // (see markWaReminder) — a broadcast is still notifying every
-        // member, so every member's row should reflect that, each against
-        // their own current due date (not the broadcast's), same as
-        // isWaReminderActive checks it. Members with no due date (already
-        // eliminated, no upcoming fixture) are skipped, same as tapping
-        // their individual icon would skip them.
-        (league.members || []).forEach((mm) => {
-          const team = (league.teams || []).find((tt) => tt.id === mm.team_id);
-          const dueAt = adminStatusReminderDate(mm, team, league);
-          if (dueAt) markWaReminder(mm, dueAt);
-        });
+        // member, so every member's row gets flagged too.
+        (league.members || []).forEach((mm) => markWaReminder(mm));
         showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
       }
     });
@@ -9961,28 +9958,16 @@ function adminStatusMessage(m, t, league) {
   return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
-// The date an "upcoming league / upcoming fixture" WhatsApp text is really
-// about — league kickoff before fixtures exist, otherwise the club's next
-// fixture due date. Returns null for the eliminated/no-date messages, since
-// those aren't "upcoming" reminders and have no due date to reset against.
-function adminStatusReminderDate(m, t, league) {
-  if (t?.eliminated) return null;
-  const notStarted = league.fixtures.length === 0;
-  if (notStarted) return league.starts_at || null;
-  const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
-  return upcoming ? upcoming.due_at : null;
-}
-
 // Red "reminded" highlight for a member row. members.wa_reminder_due_at is
-// set (by every admin, via markWaReminder below) the moment someone sends
-// that member the WhatsApp text, and stored in Supabase so the highlight is
-// the same for every admin looking at the league, not just whoever sent it.
-// It's active only while it matches the CURRENT due date and that date
-// hasn't passed yet — so it clears the instant the deadline passes, and
-// also clears early if a newer fixture becomes the upcoming one before the
-// old date even arrives.
-function isWaReminderActive(m, dueAt) {
-  return !!dueAt && m.wa_reminder_due_at === dueAt && new Date(dueAt) > new Date();
+// set (by every admin, via markWaReminder) to the timestamp someone last
+// sent that member the WhatsApp text, and stored in Supabase so the
+// highlight is the same for every admin looking at the league, not just
+// whoever sent it. Active for WA_REMINDER_WINDOW_MS after that timestamp,
+// regardless of fixtures, due dates, or elimination status — purely "was
+// this person messaged recently".
+function isWaReminderActive(m) {
+  if (!m.wa_reminder_due_at) return false;
+  return Date.now() - new Date(m.wa_reminder_due_at).getTime() < WA_REMINDER_WINDOW_MS;
 }
 
 // Re-render on a slow tick purely so a reminder's red highlight clears
@@ -9998,8 +9983,7 @@ function useNow(intervalMs = 60000) {
 
 function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, c }) {
   useNow();
-  const reminderDueAt = adminStatusReminderDate(m, t, league);
-  const reminded = isWaReminderActive(m, reminderDueAt);
+  const reminded = isWaReminderActive(m);
   return (
     <div className="rounded-lg px-4 py-2.5 border transition-colors"
       style={reminded ? { background: c.redSoft, borderColor: c.red } : { background: c.surface, borderColor: "transparent" }}>
@@ -10008,7 +9992,7 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
         <span className="font-body text-sm flex-1">{m.display_name}</span>
         {canManage && t?.phone && (
           <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)}
-            onClick={() => onMarkWaReminder(m, reminderDueAt)} c={c} />
+            onClick={() => onMarkWaReminder(m)} c={c} />
         )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
