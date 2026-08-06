@@ -581,7 +581,7 @@ function findGhostTeamIds(league) {
 // with no due date yet falls back to round order.
 function nextFixtureForTeam(league, teamId) {
   return (league.fixtures || [])
-    .filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
+    .filter((f) => !f.played && !isFixtureLocked(f, league) && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
     .sort((a, b) => {
       const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
       const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
@@ -591,10 +591,14 @@ function nextFixtureForTeam(league, teamId) {
 
 // Earliest not-yet-played, fully-paired fixture across the whole league —
 // used as the status message's fallback for spectators or once a member's
-// own club has no games left to schedule.
+// own club has no games left to schedule. A fixture whose deadline has
+// already passed unplayed is a resolved no-show (auto-loss), not something
+// still "due" — it stays played:false forever in the DB, so it has to be
+// filtered out here explicitly or it would keep winning as the "next"
+// fixture by due date long after it's no longer relevant.
 function nextFixtureForLeague(league) {
   return (league.fixtures || [])
-    .filter((f) => !f.played && f.away_team_id !== null)
+    .filter((f) => !f.played && !isFixtureLocked(f, league) && f.away_team_id !== null)
     .sort((a, b) => {
       const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
       const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
