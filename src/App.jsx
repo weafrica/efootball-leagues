@@ -3861,11 +3861,11 @@ export default function App() {
   // synchronously keeps this to exactly one network call — the keepalive
   // one — instead of stacking a second, unprotected one in front of it.
   const markWaReminder = async (member, dueAt) => {
-    if (!dueAt) return;
+    if (!dueAt) { console.warn("[wa-reminder] skipped — no dueAt for", member?.display_name); return; }
     const token = session?.access_token;
-    if (!token) return;
+    if (!token) { console.warn("[wa-reminder] skipped — no session token"); return; }
     try {
-      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
         method: "PATCH",
         keepalive: true,
         headers: {
@@ -3876,8 +3876,19 @@ export default function App() {
         },
         body: JSON.stringify({ wa_reminder_due_at: dueAt }),
       });
-    } catch {
-      // best effort — don't interrupt the WhatsApp send with a toast
+      // TEMP DEBUG — remove once confirmed working. keepalive responses can't
+      // always be read, but when they can, this surfaces the real failure
+      // (missing column, RLS rejection, etc.) instead of eating it silently.
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error("[wa-reminder] PATCH failed", res.status, body);
+        showToast(`WA reminder didn't save (${res.status}) — check console`);
+      } else {
+        console.log("[wa-reminder] PATCH ok for", member.id, dueAt);
+      }
+    } catch (err) {
+      console.error("[wa-reminder] PATCH threw", err);
+      showToast(`WA reminder request failed — check console`);
     }
     await loadLeagues();
   };
