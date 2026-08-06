@@ -3951,6 +3951,35 @@ export default function App() {
     }
   };
 
+  // Manually clears a member's WhatsApp "reminded" highlight before its
+  // normal WA_REMINDER_WINDOW_MS auto-clear (see markWaReminder /
+  // isWaReminderActive above) — e.g. once the admin knows the member has
+  // replied or sorted themselves out and the red flag is no longer useful.
+  // No navigation race here (unlike markWaReminder, this button doesn't
+  // hand off to WhatsApp), so a normal supabase-js call is fine.
+  const clearWaReminder = async (member) => {
+    setLeagues((prev) => (prev || []).map((lg) => (
+      lg.id !== member.league_id ? lg : {
+        ...lg,
+        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: null } : mm)),
+      }
+    )));
+    const { error } = await supabase.from("members").update({ wa_reminder_due_at: null }).eq("id", member.id);
+    if (error) { console.error("[wa-reminder] clear failed", error); showToast(`Couldn't clear the highlight: ${error.message}`); }
+  };
+
+  // Bulk version of clearWaReminder — clears every currently-highlighted
+  // member in one league at once, e.g. after a round of messaging is done
+  // and the admin wants a clean slate rather than clicking each × one at
+  // a time.
+  const clearAllWaReminders = async (league) => {
+    setLeagues((prev) => (prev || []).map((lg) => (
+      lg.id !== league.id ? lg : { ...lg, members: lg.members.map((mm) => ({ ...mm, wa_reminder_due_at: null })) }
+    )));
+    const { error } = await supabase.from("members").update({ wa_reminder_due_at: null }).eq("league_id", league.id);
+    if (error) { console.error("[wa-reminder] clear-all failed", error); showToast(`Couldn't clear highlights: ${error.message}`); }
+  };
+
   // Admin/creator entering a result directly (no approval step needed, it's
   // their own call) — but a photo of the final scoreboard is required here
   // too, same as submitMatchResult's rule for regular players. Once saved,
@@ -4745,7 +4774,7 @@ export default function App() {
                 blockedByLeague={isMemberOf(activeLeague) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, activeLeague)}
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
-                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
+                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
@@ -9981,7 +10010,7 @@ function useNow(intervalMs = 60000) {
   }, [intervalMs]);
 }
 
-function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, c }) {
+function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
   useNow();
   const reminded = isWaReminderActive(m);
   return (
@@ -9993,6 +10022,12 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
         {canManage && t?.phone && (
           <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)}
             onClick={() => onMarkWaReminder(m)} c={c} />
+        )}
+        {canManage && reminded && (
+          <button onClick={() => onClearWaReminder(m)} title="Clear reminder highlight"
+            className="w-5 h-5 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}>
+            <X size={12} />
+          </button>
         )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
@@ -10144,7 +10179,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -10312,7 +10347,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
                 m ? (
                   <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
                     isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
+                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
                 ) : (
                   <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
                     <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
@@ -10481,6 +10516,13 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {tab === "members" && (
         <div>
           {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
+          {canManage && league.members.some((m) => isWaReminderActive(m)) && (
+            <div className="flex justify-end mb-2">
+              <button onClick={() => onClearAllWaReminders(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
+                <X size={11} /> Clear all highlights
+              </button>
+            </div>
+          )}
           {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
             <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
               <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
@@ -10494,7 +10536,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
               <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
                 isCash={league.league_type === "cash"} canManage={canManage}
                 isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
+                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
             );
             // Only worth splitting into two lists once a custom template
             // actually exists on the league — with none set, every member
