@@ -374,12 +374,28 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 // always played as a single decisive match, regardless of the league's
 // home/away legs setting, since a drawn final goes to penalties instead of
 // a second leg (see isFinalRoundFixtures / advanceKnockout).
-function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS) {
+// dueOffset controls how many periodMs get added to dueBase for THIS round's
+// due date — defaults to roundNumber so existing callers that pass a fixed
+// anchor date (the league's start date, or a bracket's start date) and let
+// roundNumber climb 1, 2, 3... keep working unchanged. Callers that instead
+// reset dueBase to "right now" every time a round advances (see
+// advanceKnockout) need to pass dueOffset: 1 explicitly — otherwise the
+// round's real number (2, 3, 4...) gets used as the multiplier against
+// "now," pushing each new round's deadline further and further out instead
+// of the intended one-period gap from whenever it was actually generated.
+function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber) {
   const pairs = knockoutRound1(teamIds);
   const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
   if (isFinalRound) legs = 1;
-  const leg1Due = new Date(dueBase.getTime() + roundNumber * periodMs);
-  const leg2Due = new Date(leg1Due.getTime() + periodMs);
+  const singleLegDue = new Date(dueBase.getTime() + dueOffset * periodMs);
+  // Two-legged ties share ONE deadline covering both matches — double the
+  // normal single-round window (e.g. 4 days instead of 2) — instead of each
+  // leg getting its own separate due date. Either leg can be played any
+  // time within that shared window; the tie only counts as expired once
+  // this one date passes. tieDue - periodMs*2 reconstructs the tie's start
+  // moment for display, since dueOffset is always 1 relative to whatever
+  // "dueBase" actually was when this round got generated (see callers).
+  const tieDue = new Date(dueBase.getTime() + dueOffset * periodMs * 2);
   const rows = [];
   pairs.forEach(({ home, away }) => {
     const bye = away === null;
@@ -388,20 +404,20 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: bye, home_score: bye ? 1 : 0, away_score: 0,
-        due_at: leg1Due.toISOString(),
+        due_at: singleLegDue.toISOString(),
       });
     } else {
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: false, home_score: 0, away_score: 0,
-        due_at: leg1Due.toISOString(),
+        due_at: tieDue.toISOString(),
       });
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 2, stage,
         home_team_id: away, away_team_id: home,
         played: false, home_score: 0, away_score: 0,
-        due_at: leg2Due.toISOString(),
+        due_at: tieDue.toISOString(),
       });
     }
   });
@@ -4232,7 +4248,13 @@ export default function App() {
     }
     if (winners.length <= 1) { showToast("This league already has a champion."); return; }
 
-    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), league.knockout_legs || 1);
+    // dueOffset: 1 — dueBase here is "right now" (the moment this round is
+    // generated), not the bracket's original start date, so the new round's
+    // deadline should always be exactly one period out from now, regardless
+    // of what the actual round number (maxRound + 1) is. See
+    // knockoutRoundFixtures for why this can't just default to roundNumber
+    // here the way the opening round's call does.
+    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), league.knockout_legs || 1, roundPeriodMs(league), 1);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     await loadLeagues();
@@ -9099,7 +9121,7 @@ function aggregateFor(legs, teamId) {
 // the other directly off the bracket instead of hunting them down through
 // "Find yourself" — each icon calls the OTHER team's number and is signed
 // with the icon-owner's own club name.
-function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, league, c }) {
+function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, hideDueDate, league, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
   const [ph, setPh] = useState(fixture.pens_home ?? "");
@@ -9172,8 +9194,14 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
       <span className="flex-1 min-w-0 truncate font-body text-sm">{awayTeam.name}</span>
+      {/* For a two-legged tie, both legs now share one due_at — showing it
+          on every row would just repeat the same date twice. The shared
+          start–expiry window is shown once instead, at the tie level (see
+          KnockoutFixturesList) — this column is skipped here via
+          hideDueDate, except "Expired" still shows per row since a
+          leg-specific played/unplayed state is still worth flagging. */}
       <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
-        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : fmtDate(fixture.due_at)}
+        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : hideDueDate ? "" : fmtDate(fixture.due_at)}
       </span>
       {canManage && (
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -9294,13 +9322,32 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                 const level = allPlayed && hAgg === aAgg;
                 const pensH = pensAggregateFor(legs, f0.home_team_id);
                 const pensA = pensAggregateFor(legs, f0.away_team_id);
+                // Two-legged ties now carry ONE shared due_at across both
+                // legs (see knockoutRoundFixtures) — reconstruct the tie's
+                // start moment by subtracting the double-length window back
+                // off that shared deadline, so this can show as one
+                // "start → expiry (N days)" range instead of two separate
+                // per-leg dates.
+                const tieDueAt = twoLegged ? f0.due_at : null;
+                const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
+                const tieStartAt = tieDueAt ? new Date(new Date(tieDueAt).getTime() - tieWindowMs) : null;
+                const tieWindowDays = tieWindowMs / ONE_DAY_MS;
+                const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
                 return (
                   <div key={f0.id} className="px-4 py-2.5">
+                    {twoLegged && !allPlayed && (
+                      <div className="font-mono text-[10px] mb-1.5" style={{ color: tieExpired ? c.red : c.textDim }}>
+                        {tieExpired
+                          ? "Expired"
+                          : `${fmtDate(tieStartAt)} → ${fmtDate(tieDueAt)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
+                      </div>
+                    )}
                     {legs.map((f) => {
                       const legHome = league.teams.find((t) => t.id === f.home_team_id);
                       const legAway = league.teams.find((t) => t.id === f.away_team_id);
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={legHome} awayTeam={legAway} canManage={canManage}
                         onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
+                        hideDueDate={twoLegged}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
                     {(twoLegged || level) && (
@@ -11191,6 +11238,18 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
   const opponentId = isHome ? fixture.away_team_id : fixture.home_team_id;
   const opponent = league.teams.find((t) => t.id === opponentId);
 
+  // A knockout tie's second leg shares the same round/stage and the same
+  // two clubs (home/away flipped) — if one exists, both legs already carry
+  // the same shared due_at (see knockoutRoundFixtures), so the start of
+  // that window can be reconstructed by subtracting it back off.
+  const siblingLeg = fixture.leg ? league.fixtures.find((f) => f.id !== fixture.id && f.round === fixture.round && f.stage === fixture.stage
+    && ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id)
+      || (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id))) : null;
+  const twoLegged = !!siblingLeg;
+  const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
+  const tieStartAt = twoLegged ? new Date(new Date(fixture.due_at).getTime() - tieWindowMs) : null;
+  const tieWindowDays = tieWindowMs / ONE_DAY_MS;
+
   return (
     <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your next match</div>
@@ -11199,7 +11258,11 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
           <div className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {opponent?.name || "TBD"}</div>
           <div className="font-mono text-xs mt-1" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textDim }}>
             {isHome ? "Home" : "Away"} · Matchday {fixture.round}
-            {isFixtureLocked(fixture, league) ? " · Expired" : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
+            {isFixtureLocked(fixture, league)
+              ? " · Expired"
+              : twoLegged
+              ? ` · ${fmtDate(tieStartAt)} → ${fmtDate(fixture.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`
+              : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
           </div>
         </div>
         {canSeePhones && opponent?.phone && (
@@ -11417,7 +11480,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
 
     const anyExpired = legs.some((f) => isFixtureLocked(f, league));
     if (anyExpired && !canManage) {
-      setResult({ notFound: true, reason: "This match passed its 2-day deadline without a result — both clubs received a loss. It's no longer viewable." });
+      setResult({ notFound: true, reason: `This match passed its deadline without a result — both clubs received a loss. It's no longer viewable.` });
       return;
     }
 
@@ -11470,9 +11533,24 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
             const allPlayed = result.legs.every((f) => f.played);
             const level = allPlayed && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id);
             const isFinalTie = level && isFinalRoundFixtures(fixtures.filter((f) => f.round === result.legs[0].round));
+            // Two-legged ties share one due_at across both legs (see
+            // knockoutRoundFixtures) — reconstruct the tie's start moment
+            // by subtracting the double-length window back off that shared
+            // deadline, so both the player and the admin see the full
+            // "start → expiry" window here, not just the cutoff.
+            const tieWindowMs = result.twoLegged ? roundPeriodMs(league) * 2 : 0;
+            const tieStartAt = result.twoLegged ? new Date(new Date(result.legs[0].due_at).getTime() - tieWindowMs) : null;
+            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
             if (!result.twoLegged && !level) return null;
             return (
               <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
+                {result.twoLegged && !allPlayed && (
+                  <div>
+                    {isFixtureLocked(result.legs[0], league)
+                      ? <span style={{ color: c.red }}>Expired</span>
+                      : `${fmtDate(tieStartAt)} → ${fmtDate(result.legs[0].due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
+                  </div>
+                )}
                 {result.twoLegged && <>Aggregate: {result.team.name} {aggregate(result.legs, result.team.id)} – {aggregate(result.legs, result.opponent.id)} {result.opponent.name}</>}
                 {level && (isFinalTie
                   ? <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
@@ -11505,7 +11583,11 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
               <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
                 <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
                   {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}` : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
+                  {fixture.played
+                    ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}`
+                    : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4"
+                    : result.twoLegged ? "" // shared start–expiry window already shown once, above
+                    : ` — due ${fmtDate(fixture.due_at)}`}
                 </div>
                 {canManage && (
                   <div className="flex items-center gap-2 flex-wrap">
