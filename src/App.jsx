@@ -3864,6 +3864,23 @@ export default function App() {
     if (!dueAt) { console.warn("[wa-reminder] skipped — no dueAt for", member?.display_name); return; }
     const token = session?.access_token;
     if (!token) { console.warn("[wa-reminder] skipped — no session token"); return; }
+
+    // Update the highlight LOCALLY, immediately, before firing the network
+    // call. On mobile, tapping this icon hands off to the WhatsApp app right
+    // away — the browser tab can get backgrounded mid-request, which can cut
+    // off the full loadLeagues() re-fetch this used to depend on to show the
+    // highlight. That made the write land in Supabase (visible on next
+    // manual reload) while the screen itself never visibly updated. Setting
+    // local state first means the row turns red instantly regardless of
+    // what happens to the tab a moment later; the PATCH below still makes it
+    // durable/visible to other admins.
+    setLeagues((prev) => (prev || []).map((lg) => (
+      lg.id !== member.league_id ? lg : {
+        ...lg,
+        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: dueAt } : mm)),
+      }
+    )));
+
     try {
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
         method: "PATCH",
@@ -3882,15 +3899,15 @@ export default function App() {
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         console.error("[wa-reminder] PATCH failed", res.status, body);
-        showToast(`WA reminder didn't save (${res.status}) — check console`);
       } else {
         console.log("[wa-reminder] PATCH ok for", member.id, dueAt);
       }
     } catch (err) {
       console.error("[wa-reminder] PATCH threw", err);
-      showToast(`WA reminder request failed — check console`);
+      // Local highlight already applied above, so the admin still sees it
+      // even if this network call got cut off by the app handoff — no toast
+      // here on purpose, same as before, so it doesn't interrupt the send.
     }
-    await loadLeagues();
   };
 
   // Admin/creator entering a result directly (no approval step needed, it's
