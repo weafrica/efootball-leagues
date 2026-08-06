@@ -11387,12 +11387,31 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
             if (opp.bye) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>Automatic advance this round (bye).</div>;
             const twoLegged = result.myFixtures.length > 1;
             const agg = (teamId) => result.myFixtures.reduce((sum, f) => sum + (f.home_team_id === teamId ? f.home_score : f.away_score), 0);
+            // Two-legged (home & away) ties share one due_at across both legs
+            // (see knockoutRoundFixtures) — reconstruct the tie's start moment
+            // by subtracting the double-length window back off that shared
+            // deadline, so this shows one "start → expiry (N days)" range
+            // instead of a due date repeated on every leg. Matches the same
+            // pattern used in KnockoutFixturesList and OpponentFinder.
+            const allPlayed = result.myFixtures.every((f) => f.played);
+            const f0 = result.myFixtures[0];
+            const tieWindowMs = twoLegged ? roundPeriodMs(league) * 2 : 0;
+            const tieStartAt = twoLegged ? new Date(new Date(f0.due_at).getTime() - tieWindowMs) : null;
+            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
+            const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
             return (
               <div>
                 <div className="font-mono text-xs" style={{ color: c.textDim }}>
                   Round {result.myFixtures[0].round} vs <span style={{ color: c.text }}>{opp.opponent?.name}</span>
                   {twoLegged ? " (home & away)" : ` (${opp.isHome ? "Home" : "Away"})`}
                 </div>
+                {twoLegged && !allPlayed && (
+                  <div className="font-mono text-xs mt-1" style={{ color: tieExpired ? c.red : c.textDim }}>
+                    {tieExpired
+                      ? "Expired"
+                      : `${fmtDate(tieStartAt)} → ${fmtDate(f0.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
+                  </div>
+                )}
                 {twoLegged && (
                   <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     Aggregate: {result.team.name} {agg(result.team.id)} – {agg(opp.opponent.id)} {opp.opponent.name}
@@ -11401,7 +11420,11 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {result.myFixtures.map((f) => (
                   <div key={f.id} className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     {twoLegged ? `Leg ${f.leg} (${f.home_team_id === result.team.id ? "Home" : "Away"}): ` : ""}
-                    {f.played ? `${f.home_score} – ${f.away_score}` : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span> : `Due by ${fmtDate(f.due_at)}`}
+                    {f.played
+                      ? `${f.home_score} – ${f.away_score}`
+                      : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span>
+                      : twoLegged ? "" // shared start–expiry window already shown once, above
+                      : `Due by ${fmtDate(f.due_at)}`}
                   </div>
                 ))}
                 {canSeePhones && (
