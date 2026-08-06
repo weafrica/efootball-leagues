@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedMediaUrl, proxiedSignedUrl } from "./utils/mediaUrl";
+import { proxiedMediaUrl, proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -5711,7 +5711,7 @@ function EditProfileModal({ profile, onCancel, onSubmit, onUpdatePhoto, c }) {
           <button onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}
             className="relative w-20 h-20 rounded-full overflow-hidden flex items-center justify-center mb-2"
             style={{ background: c.surface, border: `1px solid ${c.border}`, opacity: uploadingPhoto ? 0.6 : 1 }}>
-            {profile?.avatar_url ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
+            {profile?.avatar_url ? <img src={toProxiedUrl(profile.avatar_url)} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
           </button>
           <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>
             {uploadingPhoto ? "Uploading…" : profile?.avatar_url ? "Change photo" : "Add profile photo"}
@@ -6128,7 +6128,11 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
 // has one, otherwise the same colored-initial fallback used for comments.
 function MemberAvatar({ url, username, size = 32, c }) {
   if (url) {
-    return <img src={url} alt="" loading="lazy" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
+    // Every avatar in the app (comments, member lists, leaderboards,
+    // challenges) renders through this one component, so this single
+    // toProxiedUrl call is what stops old-style direct Supabase avatar
+    // URLs from costing Cached Egress on every view — see mediaUrl.js.
+    return <img src={toProxiedUrl(url)} alt="" loading="lazy" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
   }
   return (
     <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
