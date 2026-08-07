@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedMediaUrl, toProxiedUrl } from "./utils/mediaUrl";
+import { toProxiedUrl } from "./utils/mediaUrl";
+import { uploadToBlob } from "./utils/blobUpload";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
@@ -1187,10 +1188,14 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("shop-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
-      if (uploadErr) { showToast(`Couldn't upload image: ${uploadErr.message}`); return false; }
-      const pub = { publicUrl: proxiedMediaUrl("shop-photos", path) };
-      image_url = pub.publicUrl;
+      let publicUrl;
+      try {
+        publicUrl = await uploadToBlob("shop-photos", path, file);
+      } catch (err) {
+        showToast(`Couldn't upload image: ${err.message}`);
+        return false;
+      }
+      image_url = publicUrl;
     }
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null };
     const { error } = editing?.id
