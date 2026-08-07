@@ -1,15 +1,14 @@
-// Builds a same-origin URL that routes through the Vercel proxy
-// (api/image.js) instead of a direct Supabase Storage public URL.
-//
-// Use this ONLY when generating the URL for a file you just uploaded.
-// Existing photo_url / avatar_url values already sitting in the database
-// are direct Supabase URLs and are left as-is — see api/image.js's top
-// comment for why that's deliberate.
-export function proxiedMediaUrl(bucket, path) {
-  return `/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
-}
+// NOTE: uploads for the five public buckets (avatars, league-photos,
+// comment-photos, shop-photos, comment-voice-notes) no longer go through
+// Supabase Storage or this proxy — see src/utils/blobUpload.js. New
+// uploads get a permanent Vercel Blob CDN URL back directly and that gets
+// saved straight into the DB, same as this function used to return.
+// api/image.js and the buckets it proxies are kept only so any row still
+// holding an old direct-Supabase or already-proxied URL keeps rendering
+// until the one-time backfill (scripts/backfill-to-blob.mjs) runs — see
+// MIGRATION.md.
 
-// Same idea, for a private-bucket file that's already been signed (e.g. a
+// For a private-bucket file that's already been signed (e.g. a
 // long-lived signed URL that gets posted permanently into a comment). The
 // signed URL itself is already the access credential — wrapping it here
 // doesn't change who can view it, it just lets Vercel's edge cache hold a
@@ -31,21 +30,17 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 // pass through this function untouched (safe, just not fixed).
 const PROXIED_BUCKETS = new Set(["avatars", "league-photos", "comment-photos", "shop-photos", "comment-voice-notes"]);
 
-// Rewrites a direct Supabase Storage public URL — the kind stored in the
-// database for anything uploaded before the proxy existed, or for rows the
-// upload-time fix (proxiedMediaUrl) hasn't touched — into the same
-// /api/image proxy path new uploads already use. This is what actually
-// stops Cached Egress from still creeping up: proxiedMediaUrl only covers
-// files uploaded going forward, but every row already in the database
-// still points straight at Supabase until something rewrites it — and
-// nothing does, on its own. Wrapping the *rendering* side with this
-// function (rather than migrating the database) fixes old and new rows the
-// same way, the moment this ships, with nothing to backfill.
+// Rewrites a direct Supabase Storage public URL — the kind still sitting
+// in the database for anything uploaded before this Blob migration, until
+// scripts/backfill-to-blob.mjs runs — into the /api/image proxy path, so
+// it's at least edge-cached instead of hitting Supabase egress on every
+// view in the meantime. Once the backfill runs, every row holds a direct
+// Blob URL and this function becomes a no-op passthrough for all of them.
 //
 // Anything that isn't a recognizable direct public-storage URL for one of
-// the proxied buckets — an already-proxied path, an external URL, a signed
-// URL (those live under /object/sign/, not /object/public/), or
-// null/undefined — is returned completely unchanged, so this is safe to
+// the proxied buckets — a Blob URL, an already-proxied path, an external
+// URL, a signed URL (those live under /object/sign/, not /object/public/),
+// or null/undefined — is returned completely unchanged, so this is safe to
 // wrap around any image field without first checking what kind of value it
 // holds.
 export function toProxiedUrl(url) {
@@ -58,5 +53,5 @@ export function toProxiedUrl(url) {
   const bucket = rest.slice(0, slash);
   const path = rest.slice(slash + 1);
   if (!PROXIED_BUCKETS.has(bucket)) return url;
-  return proxiedMediaUrl(bucket, path);
+  return `/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 }
