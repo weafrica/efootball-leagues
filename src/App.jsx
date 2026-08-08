@@ -607,20 +607,38 @@ function nextFixtureForLeague(league) {
     })[0] || null;
 }
 
+// True if `league` counts as a weekend league right now — same definition
+// the homepage's Weekend League spotlight uses (see the comment on
+// setWeekendLeagueDates in the create-league form): admin-created, with a
+// starts_at that falls in the current Fri–Sun window. Deliberately doesn't
+// reuse the spotlight's extra "still has matches due this weekend" reach —
+// that's about what stays visible in the spotlight card, not about which
+// league a fixture's confirmation window belongs to.
+function isWeekendLeague(league, now = new Date()) {
+  if (!league || !league.created_by_admin || !league.starts_at) return false;
+  const [start, end] = weekendWindow(now);
+  const startsAtDate = new Date(league.starts_at);
+  return startsAtDate >= start && startsAtDate <= end;
+}
+
 // A submitted result gives the opponent 30 minutes to confirm or dispute it
 // (see respondToResultSubmission) before it escalates to the admin override
-// queue. These three helpers are the single source of truth for that window
-// so the opponent panel's countdown and the admin panel's visibility can't
-// drift out of sync.
+// queue — 10 minutes instead for a weekend league (see isWeekendLeague),
+// since weekend fixtures move faster and shouldn't sit unconfirmed as long.
+// These three helpers are the single source of truth for that window so the
+// opponent panel's countdown and the admin panel's visibility can't drift
+// out of sync.
 const RESULT_CONFIRM_WINDOW_MINUTES = 30;
-function resultConfirmDeadline(submission) {
-  return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
+const WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES = 10;
+function resultConfirmDeadline(submission, league) {
+  const minutes = isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES;
+  return new Date(new Date(submission.created_at).getTime() + minutes * 60 * 1000);
 }
-function resultConfirmExpired(submission) {
-  return Date.now() >= resultConfirmDeadline(submission).getTime();
+function resultConfirmExpired(submission, league) {
+  return Date.now() >= resultConfirmDeadline(submission, league).getTime();
 }
-function resultConfirmMinutesLeft(submission) {
-  const ms = resultConfirmDeadline(submission).getTime() - Date.now();
+function resultConfirmMinutesLeft(submission, league) {
+  const ms = resultConfirmDeadline(submission, league).getTime() - Date.now();
   return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
 }
 
@@ -659,7 +677,7 @@ function priorRejectedCount(league, submission) {
 // already.
 function resultEscalationReason(league, submission) {
   if (priorRejectedCount(league, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
-  if (resultConfirmExpired(submission)) return "timeout";
+  if (resultConfirmExpired(submission, league)) return "timeout";
   return null;
 }
 
@@ -10103,12 +10121,12 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                   {showDeadline && (() => {
                     const reason = resultEscalationReason(league, s);
                     return (
-                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s) <= 5 ? c.red : "#B8860B") }}>
+                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s, league) <= 5 ? c.red : "#B8860B") }}>
                         {reason === "dispute-cap"
                           ? "This fixture's been disputed too many times already — sent straight to the admin"
                           : reason === "timeout"
                           ? "Confirmation window passed — this has been sent to the admin"
-                          : `${resultConfirmMinutesLeft(s)}m left to respond — after that it goes to the admin`}
+                          : `${resultConfirmMinutesLeft(s, league)}m left to respond — after that it goes to the admin`}
                       </div>
                     );
                   })()}
@@ -10698,7 +10716,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {canManage && awaitingOpponentResults.length > 0 && (
         <div className="rounded-xl p-4 border mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
           <Clock size={13} className="shrink-0" />
-          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's 30-minute confirmation window
+          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's {isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES}-minute confirmation window
           {" — "}lands here for your review only if they don't respond in time.
         </div>
       )}
