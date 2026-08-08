@@ -3757,9 +3757,19 @@ export default function App() {
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
       const standings = computeStandings(groupTeams, groupFx, fresh);
-      const n = Math.min(league.group_qualifiers, standings.length);
-      standings.slice(0, n).forEach((r) => qualifiers.push(r.id));
-      standings.slice(n).forEach((r) => eliminatedIds.push(r.id));
+      // A club auto-eliminated mid-group-stage (findGhostTeamIds — no-show
+      // penalties) can still out-rank an opponent on points/gd earned
+      // before it was cut. Its already-played fixtures still have to count
+      // for real toward every OTHER team's standings (hence filtering
+      // AFTER computeStandings, not before, which would silently drop
+      // those fixtures for everyone), but the ghost club itself can never
+      // be a qualifier — bug: without this filter, an already-eliminated
+      // club could rank in the top N and get pushed straight into the
+      // knockout bracket as a "qualifier" despite eliminated: true.
+      const eligible = standings.filter((r) => !r.eliminated);
+      const n = Math.min(league.group_qualifiers, eligible.length);
+      eligible.slice(0, n).forEach((r) => qualifiers.push(r.id));
+      eligible.slice(n).forEach((r) => eliminatedIds.push(r.id));
     }
     if (qualifiers.length < 2) { showToast("Not enough qualifying clubs to start a knockout stage."); return; }
 
