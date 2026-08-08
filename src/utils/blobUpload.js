@@ -17,6 +17,7 @@ const KNOWN_BUCKETS = new Set([
   "comment-photos",
   "shop-photos",
   "comment-voice-notes",
+  "result-proofs",
 ]);
 
 // bucket: one of KNOWN_BUCKETS above (kept as the same name used everywhere
