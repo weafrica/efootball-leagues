@@ -551,30 +551,36 @@ function isFixtureLocked(fixture, league) {
   return isExpired(fixture);
 }
 
-// A "ghost" club: it has never actually played a single fixture in this
-// league — not one, in any stage or round — yet it's already carrying the
-// no-show penalty (both sides concede 4, per fixture, once a fixture locks
-// past its deadline unplayed — see computeStandings) on at least one
-// fixture. One no-show is already enough to put them at a -4 goal
-// difference with nothing else on the board, so there's no reason to wait
-// for a real match, a full round, or an admin's manual advance before
-// cutting them — this fires the moment the condition is true. A club that
-// has played at least one real fixture anywhere in the league (even if it
-// no-shows later on) is left alone; this only targets clubs that never
-// showed up at all. Works the same way regardless of format (round robin,
-// knockout, survivor, groups + knockout) since it only looks at raw
-// fixtures/teams, not any format-specific stage logic.
-function findGhostTeamIds(league) {
-  const fixtures = league.fixtures || [];
-  return (league.teams || [])
-    .filter((t) => !t.eliminated)
-    .filter((t) => {
-      const myFixtures = fixtures.filter((f) => f.away_team_id !== null && (f.home_team_id === t.id || f.away_team_id === t.id));
-      if (myFixtures.length === 0) return false;
-      if (myFixtures.some((f) => f.played)) return false;
-      return myFixtures.some((f) => isFixtureLocked(f, league));
-    })
-    .map((t) => t.id);
+// A no-show tie: every leg of a fixture pairing has gone past its deadline
+// unplayed. Both teams are eliminated the moment that's true — regardless
+// of what either side has done earlier in the league; missing this one
+// match (or, for a two-legged knockout tie, both legs of it) is enough on
+// its own. Legs are grouped by round + team pair, so a two-legged tie only
+// counts once BOTH legs are missed — not just one, since the other leg may
+// still genuinely decide it — while a plain single-match fixture (round
+// robin, survivor, a group-stage game) is judged entirely on its own, even
+// if the same two teams happen to meet again in a later round. This is the
+// same aggregate-no-show logic advanceKnockout already applies to the round
+// it's actively advancing, just running continuously across every round,
+// stage, and format — not only knockout, and not only once a round is
+// fully wrapped up enough for an admin to click "advance."
+function findNoShowTeamIds(league) {
+  const fixtures = (league.fixtures || []).filter((f) => f.away_team_id !== null);
+  const alreadyEliminated = new Set((league.teams || []).filter((t) => t.eliminated).map((t) => t.id));
+  const ties = {};
+  fixtures.forEach((f) => {
+    const key = `${f.round}~${[f.home_team_id, f.away_team_id].sort().join("~")}`;
+    (ties[key] = ties[key] || []).push(f);
+  });
+  const ids = new Set();
+  Object.values(ties).forEach((legs) => {
+    const [teamA, teamB] = legs[0].home_team_id < legs[0].away_team_id
+      ? [legs[0].home_team_id, legs[0].away_team_id] : [legs[0].away_team_id, legs[0].home_team_id];
+    if (alreadyEliminated.has(teamA) && alreadyEliminated.has(teamB)) return;
+    const allNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
+    if (allNoShow) { ids.add(teamA); ids.add(teamB); }
+  });
+  return [...ids].filter((id) => !alreadyEliminated.has(id));
 }
 
 // Earliest not-yet-played, fully-paired fixture for a given team (used for
@@ -3631,19 +3637,19 @@ export default function App() {
   const canManageLeague = (league) => !!session && (isAdmin || league.created_by === session.user.id);
 
   // Sweeps every league the signed-in member can manage, the moment league
-  // data loads (or reloads), and auto-eliminates any "ghost" club — see
-  // findGhostTeamIds above. This is what makes the cut automatic: it
-  // doesn't wait for a round/stage to fully finish or for an admin to hit
-  // an "advance" button, and it runs across every league and every format,
-  // not just knockout/survivor/groups where a manual elimination path
-  // already existed. Re-runs whenever `leagues` changes; once a league's
-  // ghosts are eliminated they no longer match findGhostTeamIds (they're
-  // marked eliminated), so the follow-up loadLeagues() this triggers
-  // doesn't loop.
+  // data loads (or reloads), and auto-eliminates any club caught in a
+  // no-show tie — see findNoShowTeamIds. This is what makes the cut
+  // automatic: it doesn't wait for a round/stage to fully finish or for an
+  // admin to hit an "advance" button, and it runs across every league and
+  // every format, not just knockout/survivor/groups where a manual
+  // elimination path already existed. Re-runs whenever `leagues` changes;
+  // once a league's no-shows are eliminated they no longer match
+  // findNoShowTeamIds (they're marked eliminated), so the follow-up
+  // loadLeagues() this triggers doesn't loop.
   useEffect(() => {
     if (!leagues || !session) return;
     const targets = leagues
-      .map((l) => ({ league: l, ids: canManageLeague(l) ? findGhostTeamIds(l) : [] }))
+      .map((l) => ({ league: l, ids: canManageLeague(l) ? findNoShowTeamIds(l) : [] }))
       .filter(({ ids }) => ids.length > 0);
     if (targets.length === 0) return;
     let cancelled = false;
@@ -3676,8 +3682,8 @@ export default function App() {
           return owner?.display_name ? `${team?.name || "A club"} (${owner.display_name})` : (team?.name || "A club");
         });
         const body = names.length === 1
-          ? `${names[0]} was automatically eliminated — no games played, and the no-show penalty already put them at -4.`
-          : `${names.join(", ")} were automatically eliminated — no games played, and the no-show penalty already put them at -4.`;
+          ? `${names[0]} was automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`
+          : `${names.join(", ")} were automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`;
         await postComment(league, body, null, null, null, true);
       }
 
@@ -3688,7 +3694,7 @@ export default function App() {
         showToast(`${updatedCount} of ${allIds.length} no-show clubs${where} were auto-eliminated — the rest hit a permissions issue and will retry next reload.`);
         return;
       }
-      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show with no games played.`);
+      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show on a match past its deadline.`);
     })();
     return () => { cancelled = true; };
   }, [leagues, session, isAdmin, loadLeagues, showToast]);
@@ -3829,12 +3835,12 @@ export default function App() {
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
       const standings = computeStandings(groupTeams, groupFx, fresh);
-      // A club auto-eliminated mid-group-stage (findGhostTeamIds — no-show
+      // A club auto-eliminated mid-group-stage (findNoShowTeamIds — no-show
       // penalties) can still out-rank an opponent on points/gd earned
       // before it was cut. Its already-played fixtures still have to count
       // for real toward every OTHER team's standings (hence filtering
       // AFTER computeStandings, not before, which would silently drop
-      // those fixtures for everyone), but the ghost club itself can never
+      // those fixtures for everyone), but the eliminated club itself can never
       // be a qualifier — bug: without this filter, an already-eliminated
       // club could rank in the top N and get pushed straight into the
       // knockout bracket as a "qualifier" despite eliminated: true.
