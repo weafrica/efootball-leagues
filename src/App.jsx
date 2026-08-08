@@ -359,11 +359,11 @@ function finalStageSchedule(teamIds, finalFormat) {
 
 // dueBase: Date the clock starts counting from. Each round gets +periodMs on top of the previous
 // (periodMs defaults to the original fixed 2-day gap when not given).
-function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, periodMs = TWO_DAYS_MS) {
+function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, periodMs = TWO_DAYS_MS, isWeekend = false) {
   const rows = [];
   rounds.forEach((round, ri) => {
     const roundNumber = ri + 1 + roundOffset;
-    const dueAt = new Date(dueBase.getTime() + roundNumber * periodMs).toISOString();
+    const dueAt = addPausableDuration(dueBase, roundNumber * periodMs, isWeekend).toISOString();
     round.forEach(({ home, away }) => {
       const bye = away === null;
       rows.push({
@@ -392,17 +392,17 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 // round's real number (2, 3, 4...) gets used as the multiplier against
 // "now," pushing each new round's deadline further and further out instead
 // of the intended one-period gap from whenever it was actually generated.
-function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber) {
+function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber, isWeekend = false) {
   const pairs = knockoutRound1(teamIds);
   const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
   if (isFinalRound) legs = 1;
-  const singleLegDue = new Date(dueBase.getTime() + dueOffset * periodMs);
+  const singleLegDue = addPausableDuration(dueBase, dueOffset * periodMs, isWeekend);
   // Two-legged ties share ONE deadline covering both matches — double the
   // normal single-round window (e.g. 4 days instead of 2) — instead of each
   // leg getting its own separate due date. Either leg can be played any
   // time within that shared window; the tie only counts as expired once
   // this one date passes.
-  const tieDue = new Date(dueBase.getTime() + dueOffset * KNOCKOUT_TIE_WINDOW_MS);
+  const tieDue = addPausableDuration(dueBase, dueOffset * KNOCKOUT_TIE_WINDOW_MS, isWeekend);
   // starts_at records the round's real start moment directly, rather than
   // making the UI reconstruct it later by subtracting the window back off
   // due_at. That reconstruction silently goes wrong the moment due_at is
@@ -440,14 +440,18 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
 function generateOpeningFixtures(league, teamIds, dueBase) {
   const { id: leagueId, format, survivor_matches_per_stage, survivor_target_count, survivor_final_format, group_size, knockout_legs } = league;
   const periodMs = roundPeriodMs(league);
-  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
-  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
-  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1, periodMs), startsInFinal: false, groups: null };
+  // Weekend leagues get deadlines that skip over the nightly 9pm-9am SAST
+  // pause (see addPausableDuration) — every fixture-row builder below is
+  // given this so every format respects it consistently.
+  const isWeekend = isWeekendLeague(league);
+  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
+  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
+  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1, periodMs, undefined, isWeekend), startsInFinal: false, groups: null };
   if (format === "survivor") {
     if (teamIds.length <= survivor_target_count) {
-      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase, 0, periodMs), startsInFinal: true, groups: null };
+      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: true, groups: null };
     }
-    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
+    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
   }
   if (format === "groups_knockout") {
     // Groups are sized to the admin's chosen "players per group" — the number of
@@ -456,7 +460,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
     const desiredSize = Math.max(2, group_size || 4);
     const groupsCount = Math.max(2, Math.round(teamIds.length / desiredSize));
     const groups = assignGroups(teamIds, groupsCount);
-    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase, 0, periodMs));
+    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase, 0, periodMs, isWeekend));
     return { fixtureRows, startsInFinal: false, groups, groupsCount };
   }
   return { fixtureRows: [], startsInFinal: false, groups: null };
@@ -465,7 +469,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
 // Builds the knockout bracket fixtures from a set of already-qualified team ids.
 // Knockout fixtures always live in stage 2, separate from the stage-1 group fixtures.
 function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, league) {
-  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league));
+  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league), undefined, isWeekendLeague(league));
 }
 
 // A knockout round is "the final" when it comes down to exactly one real
@@ -1693,6 +1697,39 @@ function nextSastHourBoundary(now, hour) {
   const sastNow = new Date(now.getTime() + SAST_OFFSET_MS);
   const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate(), hour, 0, 0, 0) - SAST_OFFSET_MS);
   return candidate >= now ? candidate : new Date(candidate.getTime() + 86400000);
+}
+
+// Adds `durationMs` of real elapsed time on top of `startDate`, but for
+// weekend leagues the 9pm-9am SAST pause doesn't count toward that time —
+// the countdown effectively freezes at 9pm and resumes at 9am, so a
+// deadline that would otherwise land overnight gets pushed out by however
+// many paused hours it crossed. Non-weekend leagues (isWeekend: false) get
+// plain addition, unaffected. Walks forward in "active" and "paused"
+// stretches rather than computing this in one shot, since a long enough
+// durationMs can span more than one overnight pause.
+function addPausableDuration(startDate, durationMs, isWeekend) {
+  if (!isWeekend) return new Date(startDate.getTime() + durationMs);
+  let cursor = new Date(startDate.getTime());
+  let remaining = durationMs;
+  // Safety cap so a bad input (e.g. a negative or absurd durationMs) can
+  // never spin this into an infinite loop.
+  let guard = 0;
+  while (remaining > 0 && guard < 10000) {
+    guard++;
+    if (isWeekendPauseHour(cursor)) {
+      // Currently in the paused window — jump straight to 9am, none of
+      // this stretch counts against `remaining`.
+      cursor = nextSastHourBoundary(cursor, 9);
+      continue;
+    }
+    // Active window — consume time up to the next 9pm pause, or all of
+    // what's left, whichever comes first.
+    const nextPause = nextSastHourBoundary(cursor, 21);
+    const step = Math.min(nextPause.getTime() - cursor.getTime(), remaining);
+    cursor = new Date(cursor.getTime() + step);
+    remaining -= step;
+  }
+  return cursor;
 }
 
 // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
@@ -3873,7 +3910,11 @@ export default function App() {
       }
     }
 
-    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), fresh.knockout_legs, fresh);
+    // Pass the outer `league` (not `fresh`) here — knockoutBracketFixtures
+    // needs created_by_admin/starts_at to know if this is a weekend league
+    // (see isWeekendLeague), and those never go stale the way scores/teams
+    // do, so the outer object is fine and `fresh` doesn't select them.
+    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), fresh.knockout_legs, { ...league, round_period_hours: fresh.round_period_hours });
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -4535,7 +4576,7 @@ export default function App() {
     // of what the actual round number (maxRound + 1) is. See
     // knockoutRoundFixtures for why this can't just default to roundNumber
     // here the way the opening round's call does.
-    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), fresh.knockout_legs || 1, roundPeriodMs(fresh), 1);
+    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), fresh.knockout_legs || 1, roundPeriodMs(fresh), 1, isWeekendLeague(league));
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     await loadLeagues();
@@ -4587,7 +4628,7 @@ export default function App() {
     const rounds = goingFinal
       ? finalStageSchedule(remainingIds, league.survivor_final_format)
       : stageSchedule(remainingIds, league.survivor_matches_per_stage);
-    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date(), 0, roundPeriodMs(league));
+    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date(), 0, roundPeriodMs(league), isWeekendLeague(league));
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
