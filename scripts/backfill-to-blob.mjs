@@ -9,9 +9,15 @@
 // database still points straight at Supabase (or at the interim
 // /api/image proxy) until this script runs.
 //
-// Private buckets (result-proofs, payment-proofs) are intentionally NOT
-// touched — they're low-traffic, access-controlled via short-lived signed
-// URLs, and aren't what's driving the egress overage. See MIGRATION.md.
+// result-proofs was added to this migration once it moved from Supabase
+// (private, signed-URL) to Blob (public) — see api/blob-upload.js and
+// MIGRATION.md for why: result-proof photos already end up posted publicly
+// into league comments with a ~5-year signed URL once reviewed, so a
+// permanent public Blob URL isn't a meaningfully different exposure.
+//
+// payment-proofs is intentionally still NOT touched — it's low-traffic,
+// stays private via short-lived signed URLs, and (unlike result-proofs) is
+// never posted publicly by the app, since it holds financial documents.
 //
 // USAGE
 //   1. npm install
@@ -56,10 +62,35 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // this bucket — comment-voice-notes, for example, is written into three
 // different comment tables (see src/App.jsx: postBoardComment,
 // postLadderComment, postComment).
+// Supabase errors don't always have a populated .message — print
+// everything useful (code/details/hint/name/toString/own keys) so a
+// blank .message isn't a dead end.
+function describeError(error) {
+  let extra = {};
+  try {
+    extra = JSON.parse(JSON.stringify(error, Object.getOwnPropertyNames(error)));
+  } catch { /* ignore */ }
+  return JSON.stringify({
+    message: error.message,
+    name: error.name,
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+    status: error.status,
+    statusCode: error.statusCode,
+    toString: String(error),
+    ownProps: extra,
+  });
+}
+
+// idColumn: profiles' primary key is user_id, not id (see src/App.jsx —
+// every profiles query uses .eq("user_id", ...)). Everything else uses the
+// default "id". This is only used for the referenced-row existence check
+// below; the actual URL update always targets the real column/value.
 const BUCKETS = [
   {
     bucket: "avatars",
-    urlColumns: [{ table: "profiles", column: "avatar_url" }],
+    urlColumns: [{ table: "profiles", column: "avatar_url", idColumn: "user_id" }],
   },
   {
     bucket: "league-photos",
@@ -81,6 +112,20 @@ const BUCKETS = [
       { table: "ladder_comments", column: "voice_url" },
     ],
   },
+  {
+    bucket: "result-proofs",
+    // Unlike every other bucket here, these columns store a raw Supabase
+    // storage path (e.g. "user-id/challenge-123-169...jpg"), not a full
+    // URL — the app calls createSignedUrl() at view-time instead. Flagged
+    // so candidateValues() below compares/replaces the path directly
+    // rather than building the usual public-URL / proxy-URL shapes.
+    pathBased: true,
+    urlColumns: [
+      { table: "challenges", column: "result_photo_path" },
+      { table: "open_challenges", column: "result_photo_path" },
+      { table: "result_submissions", column: "photo_path" },
+    ],
+  },
 ];
 
 // A stored URL for a given (bucket, path) file can currently be in one of
@@ -88,7 +133,11 @@ const BUCKETS = [
 //   1. Direct Supabase:  `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`
 //   2. Interim proxy:    `/api/image?bucket=${bucket}&path=${path}`
 //   3. Already Blob:     contains "blob.vercel-storage.com" (skip — already done)
-function candidateUrls(bucket, path) {
+function candidateValues(bucket, path, pathBased) {
+  // Path-based buckets (currently just result-proofs) store the raw
+  // storage path directly in the DB column — that IS the value to match
+  // and replace, there's no public-URL or proxy-URL shape to build.
+  if (pathBased) return [path];
   return [
     `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`,
     `/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`,
@@ -109,7 +158,7 @@ async function listAllFiles(bucket) {
         offset,
         sortBy: { column: "name", order: "asc" },
       });
-      if (error) throw new Error(`list(${bucket}/${prefix}) failed: ${error.message}`);
+      if (error) throw new Error(`list(${bucket}/${prefix}) failed: ${describeError(error)}`);
       if (!data || data.length === 0) break;
       for (const entry of data) {
         const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -130,7 +179,7 @@ async function listAllFiles(bucket) {
 
 async function migrateFile(bucket, path) {
   const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error) throw new Error(`download(${bucket}/${path}) failed: ${error.message}`);
+  if (error) throw new Error(`download(${bucket}/${path}) failed: ${describeError(error)}`);
   const arrayBuffer = await data.arrayBuffer();
 
   if (DRY_RUN) {
@@ -148,15 +197,15 @@ async function migrateFile(bucket, path) {
 
 async function updateReferencingRows(urlColumns, oldUrls, newUrl) {
   let updated = 0;
-  for (const { table, column } of urlColumns) {
+  for (const { table, column, idColumn = "id" } of urlColumns) {
     for (const oldUrl of oldUrls) {
       if (DRY_RUN) continue;
       const { data, error } = await supabase
         .from(table)
         .update({ [column]: newUrl })
         .eq(column, oldUrl)
-        .select("id");
-      if (error) throw new Error(`update ${table}.${column} failed: ${error.message}`);
+        .select(idColumn);
+      if (error) throw new Error(`update ${table}.${column} failed: ${describeError(error)}`);
       updated += data?.length || 0;
     }
   }
@@ -170,25 +219,31 @@ async function main() {
   let totalRowsUpdated = 0;
   let totalSkipped = 0;
 
-  for (const { bucket, urlColumns } of BUCKETS) {
+  for (const { bucket, urlColumns, pathBased } of BUCKETS) {
     console.log(`\n=== ${bucket} ===`);
     const paths = await listAllFiles(bucket);
     console.log(`Found ${paths.length} file(s).`);
 
     for (const path of paths) {
-      const oldUrls = candidateUrls(bucket, path);
+      const oldUrls = candidateValues(bucket, path, pathBased);
 
       // Skip files nothing in the DB references anymore (deleted rows,
       // orphaned uploads) — cheap to check, saves needless Blob writes.
       let referenced = false;
-      for (const { table, column } of urlColumns) {
+      for (const { table, column, idColumn = "id" } of urlColumns) {
         for (const oldUrl of oldUrls) {
-          const { count, error } = await supabase
+          // NOTE: deliberately not using { head: true } here — HEAD
+          // responses never carry a body, so if this ever errors (bad
+          // column, RLS, etc.) Supabase can't put a message in it and
+          // error.message comes back silently empty. A plain .limit(1)
+          // costs a tiny bit more but actually surfaces what went wrong.
+          const { data, error } = await supabase
             .from(table)
-            .select("id", { count: "exact", head: true })
-            .eq(column, oldUrl);
-          if (error) throw new Error(`check ${table}.${column} failed: ${error.message}`);
-          if (count > 0) referenced = true;
+            .select(idColumn)
+            .eq(column, oldUrl)
+            .limit(1);
+          if (error) throw new Error(`check ${table}.${column} failed: ${describeError(error)}`);
+          if (data && data.length > 0) referenced = true;
         }
       }
       if (!referenced) {

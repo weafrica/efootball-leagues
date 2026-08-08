@@ -18,20 +18,23 @@ import { handleUpload } from "@vercel/blob/client";
 // Mirrors the bucket names the app used to pass to Supabase Storage.
 // Kept as a prefix allow-list so an attacker can't mint a token for an
 // arbitrary path — every blob this route will ever authorize lives under
-// one of these five folders, matching the five public Supabase buckets
-// this migration replaces (avatars, league-photos, comment-photos,
-// shop-photos, comment-voice-notes). Private buckets (result-proofs,
-// payment-proofs) are NOT here on purpose — those stay on Supabase, see
-// MIGRATION.md.
+// one of these folders. result-proofs was added when that bucket moved
+// from Supabase (private, signed-URL) to Blob (public) — see MIGRATION.md;
+// short version is that result-proof photos already end up posted publicly
+// to league comments with a ~5-year signed URL once reviewed, so Blob's
+// permanent public URL isn't a meaningfully different exposure. payment-
+// proofs is NOT here — those stay private on Supabase, since they're
+// financial documents that are never posted publicly by the app.
 const ALLOWED_PREFIXES = [
   "avatars/",
   "league-photos/",
   "comment-photos/",
   "shop-photos/",
   "comment-voice-notes/",
+  "result-proofs/",
 ];
 
-const IMAGE_PREFIXES = new Set(["avatars/", "league-photos/", "comment-photos/", "shop-photos/"]);
+const IMAGE_PREFIXES = new Set(["avatars/", "league-photos/", "comment-photos/", "shop-photos/", "result-proofs/"]);
 
 export default async function handler(req, res) {
   try {
