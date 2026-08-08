@@ -917,6 +917,11 @@ const ACHIEVEMENTS_DEF = [
   { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", category: "level", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
   { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", category: "leagues", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
   { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", category: "leagues", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
+  // Gates the Wall of Fame (see computeWallOfFame) — only members holding
+  // this badge show up there. "Won" means owning (via `members`) the team
+  // that ends up champion of a completed league, any format — see
+  // computeMyLeagueWins.
+  { id: "league_champion", icon: Crown, color: "#FFD700", tier: "platinum", category: "leagues", label: "League Champion", desc: "Win a league", target: 1, value: (ctx) => ctx.leaguesWon },
   { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", category: "ladder", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
   { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", category: "ladder", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
   { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
@@ -963,22 +968,26 @@ const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", plat
 // Aggregates every row from the shared `achievements` table (every badge,
 // every member) into one ranked row per member — count earned, a weighted
 // trophy score, and their single best (highest-tier) badge to show off next
-// to their name. Members with no earned badges yet, or with rows we can't
-// match to a profile (memberAvatars only lists other members — the
-// signed-in player's own name/photo is merged in by the caller), are left
-// out rather than shown as a zero.
+// to their name. Restricted to actual league winners: a member only makes
+// the board if they hold the league_champion badge (see
+// computeMyLeagueWins), everyone else is filtered out regardless of how
+// many other badges they've earned. Members with rows we can't match to a
+// profile (memberAvatars only lists other members — the signed-in player's
+// own name/photo is merged in by the caller) are left out too.
 function computeWallOfFame(allAchievements, profileByUserId) {
   const byUser = {};
   (allAchievements || []).forEach((row) => {
     const def = ACHIEVEMENTS_DEF.find((d) => d.id === row.achievement_id);
     if (!def) return; // ignore rows for a badge id that no longer exists
-    if (!byUser[row.user_id]) byUser[row.user_id] = { userId: row.user_id, count: 0, score: 0, bestBadge: null };
+    if (!byUser[row.user_id]) byUser[row.user_id] = { userId: row.user_id, count: 0, score: 0, bestBadge: null, isLeagueWinner: false };
     const entry = byUser[row.user_id];
     entry.count += 1;
     entry.score += TIER_WEIGHT[def.tier] || 1;
+    if (def.id === "league_champion") entry.isLeagueWinner = true;
     if (!entry.bestBadge || TIER_ORDER[def.tier] > TIER_ORDER[entry.bestBadge.tier]) entry.bestBadge = def;
   });
   return Object.values(byUser)
+    .filter((e) => e.isLeagueWinner)
     .map((e) => ({ ...e, profile: profileByUserId.get(e.userId) }))
     .filter((e) => e.profile)
     .sort((a, b) => b.score - a.score || b.count - a.count)
@@ -1113,9 +1122,10 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
 }
 
 // Compact homepage preview of the platform-wide Wall of Fame — top 3 by
-// trophy score, podium-styled like the Leaderboard/Ladder strips it sits
-// next to. Renders nothing until at least one badge has been earned by
-// anyone, same "don't show an empty shelf" reasoning as those strips.
+// trophy score among actual league winners only (see computeWallOfFame),
+// podium-styled like the Leaderboard/Ladder strips it sits next to.
+// Renders nothing until someone has actually won a league, same "don't
+// show an empty shelf" reasoning as those strips.
 function WallOfFameStrip({ standings, onOpen, c }) {
   if (!standings || standings.length === 0) return null;
   const top3 = standings.slice(0, 3);
@@ -1150,9 +1160,10 @@ function WallOfFameStrip({ standings, onOpen, c }) {
   );
 }
 
-// The full Wall of Fame — every member who's earned at least one badge,
-// ranked by trophy score (rarer badges count for more, so it rewards
-// chasing hard badges rather than just racking up easy ones), each row
+// The full Wall of Fame — every member who's actually won a league (holds
+// the league_champion badge — see computeWallOfFame), ranked by trophy
+// score across all their badges (rarer badges count for more, so it
+// rewards chasing hard badges, not just racking up easy ones), each row
 // showing their badge count and single best badge as a preview.
 function WallOfFameModal({ standings, myUserId, onClose, c }) {
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
@@ -1240,6 +1251,49 @@ function computeStandings(teams, fixtures, league) {
     return b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name);
   });
   return rows;
+}
+
+// How many of `leagues` the given user has actually won — checked the same
+// way each league's own page decides its champion (knockoutChampion /
+// survivorChampion / round-robin standings winner), just run across every
+// league at once so it can feed the League Champion achievement. A user
+// "wins" a league by owning (via `members`) the team that ends up champion;
+// leagues that haven't finished yet contribute nothing.
+function computeMyLeagueWins(leagues, userId) {
+  if (!userId) return 0;
+  let wins = 0;
+  for (const league of leagues || []) {
+    const isKnockout = league.format === "knockout";
+    const isSurvivor = league.format === "survivor";
+    const isGroupsKnockout = league.format === "groups_knockout";
+    const inKnockoutBracket = isKnockout || (isGroupsKnockout && league.final_stage_started);
+
+    let championTeamId = null;
+    if (inKnockoutBracket) {
+      const bracketStage = isGroupsKnockout ? 2 : 1;
+      const stageFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
+      const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
+      const activeTeams = league.teams.filter((t) => !t.eliminated);
+      if (stageDone && activeTeams.length === 1) championTeamId = activeTeams[0].id;
+    } else if (isSurvivor) {
+      if (league.final_stage_started) {
+        const stageFixtures = league.fixtures.filter((f) => f.stage === league.current_stage);
+        const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
+        if (stageDone) {
+          const displayTeams = league.teams.filter((t) => !t.eliminated);
+          championTeamId = computeStandings(displayTeams, stageFixtures, league)[0]?.id ?? null;
+        }
+      }
+    } else {
+      const leagueComplete = league.fixtures.length > 0 && league.fixtures.every((f) => f.played);
+      if (leagueComplete) championTeamId = computeStandings(league.teams, league.fixtures, league)[0]?.id ?? null;
+    }
+
+    if (!championTeamId) continue;
+    const championMember = (league.members || []).find((m) => m.team_id === championTeamId);
+    if (championMember?.user_id === userId) wins += 1;
+  }
+  return wins;
 }
 
 // Points-table standings don't reflect a bracket properly — two teams that
@@ -7768,9 +7822,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // object, since that object gets a new identity on every background
   // ladder poll even when the rank itself hasn't moved.
   const joinedLeagueCount = leagues.filter((l) => isMemberOf(l)).length;
+  const myLeaguesWon = useMemo(() => computeMyLeagueWins(leagues, myId), [leagues, myId]);
   const achievements = useMemo(
-    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank }),
-    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position]
+    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank, leaguesWon: myLeaguesWon }),
+    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position, myLeaguesWon]
   );
   const earnedAchievementCount = achievements.filter((a) => a.earned).length;
   const [achievementsOpen, setAchievementsOpen] = useState(false);
