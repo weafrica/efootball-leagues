@@ -3742,7 +3742,7 @@ export default function App() {
     // admin's browser already had — a stale copy here can both cut the
     // wrong clubs from the group stage and seed the knockout bracket wrong.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("format, groups_count, group_stage_due_at, teams(*), fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("format, groups_count, group_stage_due_at, group_qualifiers, knockout_legs, round_period_hours, teams(*), fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
@@ -3767,7 +3767,7 @@ export default function App() {
       // club could rank in the top N and get pushed straight into the
       // knockout bracket as a "qualifier" despite eliminated: true.
       const eligible = standings.filter((r) => !r.eliminated);
-      const n = Math.min(league.group_qualifiers, eligible.length);
+      const n = Math.min(fresh.group_qualifiers, eligible.length);
       eligible.slice(0, n).forEach((r) => qualifiers.push(r.id));
       eligible.slice(n).forEach((r) => eliminatedIds.push(r.id));
     }
@@ -3782,7 +3782,7 @@ export default function App() {
       }
     }
 
-    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), league.knockout_legs, league);
+    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), fresh.knockout_legs, fresh);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -4365,7 +4365,7 @@ export default function App() {
     // off stale local data here is the worst version of this bug — it can
     // advance the wrong team to the next round entirely.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("knockout_legs, round_period_hours, fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     // Pure knockout leagues run their whole bracket in stage 1; groups_knockout
@@ -4444,7 +4444,7 @@ export default function App() {
     // of what the actual round number (maxRound + 1) is. See
     // knockoutRoundFixtures for why this can't just default to roundNumber
     // here the way the opening round's call does.
-    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), league.knockout_legs || 1, roundPeriodMs(league), 1);
+    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), fresh.knockout_legs || 1, roundPeriodMs(fresh), 1);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     await loadLeagues();
