@@ -569,20 +569,23 @@ function isFixtureLocked(fixture, league) {
 // stage, and format — not only knockout, and not only once a round is
 // fully wrapped up enough for an admin to click "advance."
 function findNoShowTeamIds(league) {
-  // Once a Groups + Knockout league has moved into its bracket
-  // (final_stage_started), the group stage is conclusively over — its
-  // outcome already locked in via qualifier selection. A group-stage
-  // fixture nobody ever played (common: not every group fixture is needed
-  // once qualification is already decided) is moot at that point, not a
-  // live no-show — acting on it now would retroactively eliminate a team
-  // that may have already won rounds in the bracket since. Bug, found the
-  // hard way: exactly this cost Sambulo his spot after he'd already won
-  // knockout round 1, off a stale unplayed group fixture from days earlier.
-  const isGroupsKnockout = league.format === "groups_knockout";
-  const bracketOpen = isGroupsKnockout && league.final_stage_started;
+  // Only situations where a single missed match is genuinely "win or
+  // you're out" get an instant no-show elimination: a pure knockout
+  // league, or the bracket rounds of Groups + Knockout. Everywhere
+  // points-based — a group stage, a Survivor stage, plain round robin —
+  // who's actually through is decided by final standings once that
+  // stage/group wraps up. A no-show there still counts as a loss (0 pts,
+  // -4 goal difference — see computeStandings) but doesn't, on its own,
+  // end a club's run early: a club that missed one match but still has
+  // enough points from its other results to qualify should still
+  // qualify. Found the hard way: a group-stage no-show cost Sambulo his
+  // spot in the Three-Day Titans League despite him having already won
+  // enough of his other group matches to top the group and go on to win
+  // knockout round 1 — the exact case this guards against now.
+  if (league.format !== "knockout" && league.format !== "groups_knockout") return [];
   const fixtures = (league.fixtures || [])
     .filter((f) => f.away_team_id !== null)
-    .filter((f) => !(bracketOpen && isGroupStageFixture(f, league)));
+    .filter((f) => !isGroupStageFixture(f, league));
   const alreadyEliminated = new Set((league.teams || []).filter((t) => t.eliminated).map((t) => t.id));
   const ties = {};
   fixtures.forEach((f) => {
