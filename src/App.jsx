@@ -5308,20 +5308,95 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // own round trip, and so the HUD stats can be computed from the same data.
   const [guestData, setGuestData] = useState(null);
 
+  // Every guest page load (every visitor, every refresh — not gated behind
+  // sign-in) was firing this whole bundle fresh, with `select("*")` pulling
+  // every column even where only one or two are ever read. That scales with
+  // both total content (leagues/teams/fixtures only grow) and traffic, and
+  // was a real contributor to Supabase Egress climbing well before the
+  // Vercel Blob media migration was even in the picture.
+  //
+  // Two independent fixes here:
+  //   1. Every one of the eight queries below is narrowed to the exact
+  //      columns its guest-tree consumer(s) actually read — traced through
+  //      computeStandings, isFixtureLocked/isGroupStageFixture,
+  //      StandingsPanel, GroupTables, WeekendLeagueSpotlight,
+  //      PublicLeagueCard, leagueGoalExtremes, GuestLadderStrip, and
+  //      CommunityResultRow (see the comment on each query below for the
+  //      specific reasoning). computeStandings/StandingsPanel/GroupTables
+  //      are also used by the signed-in league page elsewhere in this file,
+  //      but against a SEPARATE query there — narrowing the guest-only
+  //      selects here doesn't touch that code path at all, so this is safe
+  //      without needing to know what that other query returns.
+  //      FixtureScoreRow (phone numbers, penalty scores) is never rendered
+  //      on the guest page, so those columns are excluded entirely here.
+  //   2. GUEST_DATA_CACHE_MS: cache the whole bundle in sessionStorage for a
+  //      short window, so a guest refreshing the page, opening a second tab,
+  //      or bouncing back from the shop within that window reuses the last
+  //      fetch instead of re-querying every table again. Short enough that
+  //      nobody sees meaningfully stale standings/ladder data.
+  const GUEST_DATA_CACHE_MS = 90 * 1000;
+  const GUEST_DATA_CACHE_KEY = "guestDataCacheV1";
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      try {
+        const cachedRaw = sessionStorage.getItem(GUEST_DATA_CACHE_KEY);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (cached?.data && Date.now() - cached.ts < GUEST_DATA_CACHE_MS) {
+            if (!cancelled) setGuestData(cached.data);
+            return;
+          }
+        }
+      } catch { /* corrupt/unavailable sessionStorage — just refetch */ }
+
       const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes] = await Promise.all([
-        supabase.from("public_leagues").select("*"),
-        supabase.from("public_league_teams").select("*"),
-        supabase.from("public_league_fixtures").select("*"),
-        supabase.from("public_league_extra").select("*"),
-        supabase.from("public_ladder_full").select("*").order("rank_position", { ascending: true }),
-        supabase.from("public_challenge_results").select("*").order("result_confirmed_at", { ascending: false }).limit(50),
+        // Traced through every guest-tree consumer of a league object
+        // (computeStandings, isFixtureLocked/isGroupStageFixture,
+        // StandingsPanel, GroupTables, WeekendLeagueSpotlight,
+        // PublicLeagueCard, leagueGoalExtremes) — these are the only
+        // columns any of them read. Deliberately excludes admin/member-only
+        // fields like description, wa_message_template, created_by,
+        // round_period_hours, entry_closes_at, comments/members/
+        // result_submissions joins, etc. — none of those are touched by the
+        // guest render path, only by the signed-in league page elsewhere.
+        supabase.from("public_leagues").select(
+          "id, name, format, starts_at, group_stage_due_at, current_stage, final_stage_started, survivor_elimination_percent, survivor_target_count, groups_count, group_qualifiers"
+        ),
+        // id/name/eliminated feed computeStandings; league_id is the join
+        // key; group_number is read directly by GroupTables. No other team
+        // field is touched anywhere in the guest tree (in particular: phone
+        // is only used by FixtureScoreRow's WhatsApp call links, which the
+        // guest page never renders).
+        supabase.from("public_league_teams").select("id, name, eliminated, league_id, group_number"),
+        // played/home_score/away_score/home_team_id/away_team_id feed
+        // computeStandings and the match-history list; stage/due_at feed
+        // isFixtureLocked and the weekend-window checks above. pens_home/
+        // pens_away are deliberately excluded — nothing in the guest tree
+        // reads them (that's FixtureScoreRow's final-penalties display,
+        // also never rendered for guests).
+        supabase.from("public_league_fixtures").select(
+          "id, league_id, home_team_id, away_team_id, home_score, away_score, played, stage, due_at"
+        ),
+        // Only photo_url and league_type (isCashLeague) are ever read from
+        // this view — see PublicLeagueCard / isCashLeague above.
+        supabase.from("public_league_extra").select("league_id, photo_url, league_type"),
+        // GuestLadderStrip is the only consumer of this data on the guest
+        // page, and only ever reads these five fields off each row.
+        supabase.from("public_ladder_full").select("user_id, username, points, wins, losses")
+          .order("rank_position", { ascending: true }),
+        // CommunityResultRow (via PublicActivityFeed) is the only consumer
+        // here, and only reads these fields — same component the signed-in
+        // Challenges screen uses against its own, separate query, so this
+        // narrowing is scoped to just the guest fetch below.
+        supabase.from("public_challenge_results")
+          .select("kind, player_one, player_two, player_one_id, player_two_id, score_one, score_two, confirmed, result_confirmed_at")
+          .order("result_confirmed_at", { ascending: false }).limit(50),
         // Club-owner photos for the standings tables below — team_id ->
         // avatar_url only (see public_team_avatars view), nothing else about
         // the owning member is exposed to guests.
-        supabase.from("public_team_avatars").select("*"),
+        supabase.from("public_team_avatars").select("team_id, avatar_url"),
         // Admin's manual override of the Weekend League auto pause/resume
         // (see isWeekendPauseHour) — read-only here, guests never see the
         // toggle itself, just the resulting Live/Paused badge.
@@ -5330,7 +5405,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       if (cancelled) return;
       const avatarByTeamId = {};
       (teamAvatarsRes.data || []).forEach((row) => { if (row.avatar_url) avatarByTeamId[row.team_id] = row.avatar_url; });
-      setGuestData({
+      const nextGuestData = {
         leagues: leaguesRes.data || [],
         teams: teamsRes.data || [],
         fixtures: fixturesRes.data || [],
@@ -5339,7 +5414,11 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         results: resultsRes.data || [],
         avatarByTeamId,
         weekendOverride: settingsRes.data?.weekend_league_override ?? null,
-      });
+      };
+      setGuestData(nextGuestData);
+      try {
+        sessionStorage.setItem(GUEST_DATA_CACHE_KEY, JSON.stringify({ data: nextGuestData, ts: Date.now() }));
+      } catch { /* storage full/unavailable — not worth failing the page over */ }
     })();
     return () => { cancelled = true; };
   }, []);
