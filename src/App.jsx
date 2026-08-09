@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
-import { uploadToBlob } from "./utils/blobUpload";
+import { proxiedMediaUrl, proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -34,14 +33,6 @@ const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_ROUND_PERIOD_HOURS = 48;
-// A two-legged (home & away) knockout tie always gets a fixed 4-day window
-// to play both matches, regardless of whatever the league's own
-// round_period_hours is set to for single-leg fixtures. It used to be
-// derived as roundPeriodMs(league) * 2 — but that silently gave ties a
-// shorter (or longer) window than 4 days whenever a league's round period
-// was configured to something other than the 48-hour default, since that
-// setting was never meant to double as the two-legged tie window too.
-const KNOCKOUT_TIE_WINDOW_MS = 4 * ONE_DAY_MS;
 // Older leagues created before this setting existed have no round_period_hours
 // column value — fall back to the original fixed 48-hour (2-day) gap so their
 // schedules don't shift.
@@ -359,11 +350,11 @@ function finalStageSchedule(teamIds, finalFormat) {
 
 // dueBase: Date the clock starts counting from. Each round gets +periodMs on top of the previous
 // (periodMs defaults to the original fixed 2-day gap when not given).
-function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, periodMs = TWO_DAYS_MS, isWeekend = false) {
+function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, periodMs = TWO_DAYS_MS) {
   const rows = [];
   rounds.forEach((round, ri) => {
     const roundNumber = ri + 1 + roundOffset;
-    const dueAt = addPausableDuration(dueBase, roundNumber * periodMs, isWeekend).toISOString();
+    const dueAt = new Date(dueBase.getTime() + roundNumber * periodMs).toISOString();
     round.forEach(({ home, away }) => {
       const bye = away === null;
       rows.push({
@@ -383,32 +374,12 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 // always played as a single decisive match, regardless of the league's
 // home/away legs setting, since a drawn final goes to penalties instead of
 // a second leg (see isFinalRoundFixtures / advanceKnockout).
-// dueOffset controls how many periodMs get added to dueBase for THIS round's
-// due date — defaults to roundNumber so existing callers that pass a fixed
-// anchor date (the league's start date, or a bracket's start date) and let
-// roundNumber climb 1, 2, 3... keep working unchanged. Callers that instead
-// reset dueBase to "right now" every time a round advances (see
-// advanceKnockout) need to pass dueOffset: 1 explicitly — otherwise the
-// round's real number (2, 3, 4...) gets used as the multiplier against
-// "now," pushing each new round's deadline further and further out instead
-// of the intended one-period gap from whenever it was actually generated.
-function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber, isWeekend = false) {
+function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS) {
   const pairs = knockoutRound1(teamIds);
   const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
   if (isFinalRound) legs = 1;
-  const singleLegDue = addPausableDuration(dueBase, dueOffset * periodMs, isWeekend);
-  // Two-legged ties share ONE deadline covering both matches — double the
-  // normal single-round window (e.g. 4 days instead of 2) — instead of each
-  // leg getting its own separate due date. Either leg can be played any
-  // time within that shared window; the tie only counts as expired once
-  // this one date passes.
-  const tieDue = addPausableDuration(dueBase, dueOffset * KNOCKOUT_TIE_WINDOW_MS, isWeekend);
-  // starts_at records the round's real start moment directly, rather than
-  // making the UI reconstruct it later by subtracting the window back off
-  // due_at. That reconstruction silently goes wrong the moment due_at is
-  // ever adjusted after creation (a dispute extension, a manual edit) —
-  // storing the true start here means the display never has to guess it.
-  const startsAt = dueBase.toISOString();
+  const leg1Due = new Date(dueBase.getTime() + roundNumber * periodMs);
+  const leg2Due = new Date(leg1Due.getTime() + periodMs);
   const rows = [];
   pairs.forEach(({ home, away }) => {
     const bye = away === null;
@@ -417,20 +388,20 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: bye, home_score: bye ? 1 : 0, away_score: 0,
-        due_at: singleLegDue.toISOString(), starts_at: startsAt,
+        due_at: leg1Due.toISOString(),
       });
     } else {
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 1, stage,
         home_team_id: home, away_team_id: away,
         played: false, home_score: 0, away_score: 0,
-        due_at: tieDue.toISOString(), starts_at: startsAt,
+        due_at: leg1Due.toISOString(),
       });
       rows.push({
         league_id: leagueId, round: roundNumber, leg: 2, stage,
         home_team_id: away, away_team_id: home,
         played: false, home_score: 0, away_score: 0,
-        due_at: tieDue.toISOString(), starts_at: startsAt,
+        due_at: leg2Due.toISOString(),
       });
     }
   });
@@ -440,18 +411,14 @@ function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, l
 function generateOpeningFixtures(league, teamIds, dueBase) {
   const { id: leagueId, format, survivor_matches_per_stage, survivor_target_count, survivor_final_format, group_size, knockout_legs } = league;
   const periodMs = roundPeriodMs(league);
-  // Weekend leagues get deadlines that skip over the nightly 9pm-9am SAST
-  // pause (see addPausableDuration) — every fixture-row builder below is
-  // given this so every format respects it consistently.
-  const isWeekend = isWeekendLeague(league);
-  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
-  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
-  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1, periodMs, undefined, isWeekend), startsInFinal: false, groups: null };
+  if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
+  if (format === "double_round_robin") return { fixtureRows: toFixtureRows(leagueId, doubleRoundRobin(teamIds), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
+  if (format === "knockout") return { fixtureRows: knockoutRoundFixtures(leagueId, teamIds, 1, 1, dueBase, knockout_legs || 1, periodMs), startsInFinal: false, groups: null };
   if (format === "survivor") {
     if (teamIds.length <= survivor_target_count) {
-      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: true, groups: null };
+      return { fixtureRows: toFixtureRows(leagueId, finalStageSchedule(teamIds, survivor_final_format), 1, dueBase, 0, periodMs), startsInFinal: true, groups: null };
     }
-    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
+    return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs), startsInFinal: false, groups: null };
   }
   if (format === "groups_knockout") {
     // Groups are sized to the admin's chosen "players per group" — the number of
@@ -460,7 +427,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
     const desiredSize = Math.max(2, group_size || 4);
     const groupsCount = Math.max(2, Math.round(teamIds.length / desiredSize));
     const groups = assignGroups(teamIds, groupsCount);
-    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase, 0, periodMs, isWeekend));
+    const fixtureRows = groups.flatMap((groupTeamIds) => toFixtureRows(leagueId, roundRobin(groupTeamIds), 1, dueBase, 0, periodMs));
     return { fixtureRows, startsInFinal: false, groups, groupsCount };
   }
   return { fixtureRows: [], startsInFinal: false, groups: null };
@@ -469,7 +436,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
 // Builds the knockout bracket fixtures from a set of already-qualified team ids.
 // Knockout fixtures always live in stage 2, separate from the stage-1 group fixtures.
 function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, league) {
-  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league), undefined, isWeekendLeague(league));
+  return knockoutRoundFixtures(leagueId, teamIds, 2, roundOffset + 1, dueBase, legs || 1, roundPeriodMs(league));
 }
 
 // A knockout round is "the final" when it comes down to exactly one real
@@ -555,52 +522,30 @@ function isFixtureLocked(fixture, league) {
   return isExpired(fixture);
 }
 
-// A no-show tie: every leg of a fixture pairing has gone past its deadline
-// unplayed. Both teams are eliminated the moment that's true — regardless
-// of what either side has done earlier in the league; missing this one
-// match (or, for a two-legged knockout tie, both legs of it) is enough on
-// its own. Legs are grouped by round + team pair, so a two-legged tie only
-// counts once BOTH legs are missed — not just one, since the other leg may
-// still genuinely decide it — while a plain single-match fixture (round
-// robin, survivor, a group-stage game) is judged entirely on its own, even
-// if the same two teams happen to meet again in a later round. This is the
-// same aggregate-no-show logic advanceKnockout already applies to the round
-// it's actively advancing, just running continuously across every round,
-// stage, and format — not only knockout, and not only once a round is
-// fully wrapped up enough for an admin to click "advance."
-function findNoShowTeamIds(league) {
-  // Only situations where a single missed match is genuinely "win or
-  // you're out" get an instant no-show elimination: a pure knockout
-  // league, or the bracket rounds of Groups + Knockout. Everywhere
-  // points-based — a group stage, a Survivor stage, plain round robin —
-  // who's actually through is decided by final standings once that
-  // stage/group wraps up. A no-show there still counts as a loss (0 pts,
-  // -4 goal difference — see computeStandings) but doesn't, on its own,
-  // end a club's run early: a club that missed one match but still has
-  // enough points from its other results to qualify should still
-  // qualify. Found the hard way: a group-stage no-show cost Sambulo his
-  // spot in the Three-Day Titans League despite him having already won
-  // enough of his other group matches to top the group and go on to win
-  // knockout round 1 — the exact case this guards against now.
-  if (league.format !== "knockout" && league.format !== "groups_knockout") return [];
-  const fixtures = (league.fixtures || [])
-    .filter((f) => f.away_team_id !== null)
-    .filter((f) => !isGroupStageFixture(f, league));
-  const alreadyEliminated = new Set((league.teams || []).filter((t) => t.eliminated).map((t) => t.id));
-  const ties = {};
-  fixtures.forEach((f) => {
-    const key = `${f.round}~${[f.home_team_id, f.away_team_id].sort().join("~")}`;
-    (ties[key] = ties[key] || []).push(f);
-  });
-  const ids = new Set();
-  Object.values(ties).forEach((legs) => {
-    const [teamA, teamB] = legs[0].home_team_id < legs[0].away_team_id
-      ? [legs[0].home_team_id, legs[0].away_team_id] : [legs[0].away_team_id, legs[0].home_team_id];
-    if (alreadyEliminated.has(teamA) && alreadyEliminated.has(teamB)) return;
-    const allNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
-    if (allNoShow) { ids.add(teamA); ids.add(teamB); }
-  });
-  return [...ids].filter((id) => !alreadyEliminated.has(id));
+// A "ghost" club: it has never actually played a single fixture in this
+// league — not one, in any stage or round — yet it's already carrying the
+// no-show penalty (both sides concede 4, per fixture, once a fixture locks
+// past its deadline unplayed — see computeStandings) on at least one
+// fixture. One no-show is already enough to put them at a -4 goal
+// difference with nothing else on the board, so there's no reason to wait
+// for a real match, a full round, or an admin's manual advance before
+// cutting them — this fires the moment the condition is true. A club that
+// has played at least one real fixture anywhere in the league (even if it
+// no-shows later on) is left alone; this only targets clubs that never
+// showed up at all. Works the same way regardless of format (round robin,
+// knockout, survivor, groups + knockout) since it only looks at raw
+// fixtures/teams, not any format-specific stage logic.
+function findGhostTeamIds(league) {
+  const fixtures = league.fixtures || [];
+  return (league.teams || [])
+    .filter((t) => !t.eliminated)
+    .filter((t) => {
+      const myFixtures = fixtures.filter((f) => f.away_team_id !== null && (f.home_team_id === t.id || f.away_team_id === t.id));
+      if (myFixtures.length === 0) return false;
+      if (myFixtures.some((f) => f.played)) return false;
+      return myFixtures.some((f) => isFixtureLocked(f, league));
+    })
+    .map((t) => t.id);
 }
 
 // Earliest not-yet-played, fully-paired fixture for a given team (used for
@@ -608,7 +553,7 @@ function findNoShowTeamIds(league) {
 // with no due date yet falls back to round order.
 function nextFixtureForTeam(league, teamId) {
   return (league.fixtures || [])
-    .filter((f) => !f.played && !isFixtureLocked(f, league) && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
+    .filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
     .sort((a, b) => {
       const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
       const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
@@ -618,14 +563,10 @@ function nextFixtureForTeam(league, teamId) {
 
 // Earliest not-yet-played, fully-paired fixture across the whole league —
 // used as the status message's fallback for spectators or once a member's
-// own club has no games left to schedule. A fixture whose deadline has
-// already passed unplayed is a resolved no-show (auto-loss), not something
-// still "due" — it stays played:false forever in the DB, so it has to be
-// filtered out here explicitly or it would keep winning as the "next"
-// fixture by due date long after it's no longer relevant.
+// own club has no games left to schedule.
 function nextFixtureForLeague(league) {
   return (league.fixtures || [])
-    .filter((f) => !f.played && !isFixtureLocked(f, league) && f.away_team_id !== null)
+    .filter((f) => !f.played && f.away_team_id !== null)
     .sort((a, b) => {
       const ad = a.due_at ? new Date(a.due_at).getTime() : Infinity;
       const bd = b.due_at ? new Date(b.due_at).getTime() : Infinity;
@@ -633,38 +574,20 @@ function nextFixtureForLeague(league) {
     })[0] || null;
 }
 
-// True if `league` counts as a weekend league right now — same definition
-// the homepage's Weekend League spotlight uses (see the comment on
-// setWeekendLeagueDates in the create-league form): admin-created, with a
-// starts_at that falls in the current Fri–Sun window. Deliberately doesn't
-// reuse the spotlight's extra "still has matches due this weekend" reach —
-// that's about what stays visible in the spotlight card, not about which
-// league a fixture's confirmation window belongs to.
-function isWeekendLeague(league, now = new Date()) {
-  if (!league || !league.created_by_admin || !league.starts_at) return false;
-  const [start, end] = weekendWindow(now);
-  const startsAtDate = new Date(league.starts_at);
-  return startsAtDate >= start && startsAtDate <= end;
-}
-
 // A submitted result gives the opponent 30 minutes to confirm or dispute it
 // (see respondToResultSubmission) before it escalates to the admin override
-// queue — 10 minutes instead for a weekend league (see isWeekendLeague),
-// since weekend fixtures move faster and shouldn't sit unconfirmed as long.
-// These three helpers are the single source of truth for that window so the
-// opponent panel's countdown and the admin panel's visibility can't drift
-// out of sync.
+// queue. These three helpers are the single source of truth for that window
+// so the opponent panel's countdown and the admin panel's visibility can't
+// drift out of sync.
 const RESULT_CONFIRM_WINDOW_MINUTES = 30;
-const WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES = 10;
-function resultConfirmDeadline(submission, league) {
-  const minutes = isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES;
-  return new Date(new Date(submission.created_at).getTime() + minutes * 60 * 1000);
+function resultConfirmDeadline(submission) {
+  return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
 }
-function resultConfirmExpired(submission, league) {
-  return Date.now() >= resultConfirmDeadline(submission, league).getTime();
+function resultConfirmExpired(submission) {
+  return Date.now() >= resultConfirmDeadline(submission).getTime();
 }
-function resultConfirmMinutesLeft(submission, league) {
-  const ms = resultConfirmDeadline(submission, league).getTime() - Date.now();
+function resultConfirmMinutesLeft(submission) {
+  const ms = resultConfirmDeadline(submission).getTime() - Date.now();
   return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
 }
 
@@ -703,7 +626,7 @@ function priorRejectedCount(league, submission) {
 // already.
 function resultEscalationReason(league, submission) {
   if (priorRejectedCount(league, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
-  if (resultConfirmExpired(submission, league)) return "timeout";
+  if (resultConfirmExpired(submission)) return "timeout";
   return null;
 }
 
@@ -961,11 +884,6 @@ const ACHIEVEMENTS_DEF = [
   { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", category: "level", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
   { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", category: "leagues", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
   { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", category: "leagues", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
-  // Gates the Wall of Fame (see computeWallOfFame) — only members holding
-  // this badge show up there. "Won" means owning (via `members`) the team
-  // that ends up champion of a completed league, any format — see
-  // computeMyLeagueWins.
-  { id: "league_champion", icon: Crown, color: "#FFD700", tier: "platinum", category: "leagues", label: "League Champion", desc: "Win a league", target: 1, value: (ctx) => ctx.leaguesWon },
   { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", category: "ladder", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
   { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", category: "ladder", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
   { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
@@ -1012,26 +930,22 @@ const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", plat
 // Aggregates every row from the shared `achievements` table (every badge,
 // every member) into one ranked row per member — count earned, a weighted
 // trophy score, and their single best (highest-tier) badge to show off next
-// to their name. Restricted to actual league winners: a member only makes
-// the board if they hold the league_champion badge (see
-// computeMyLeagueWins), everyone else is filtered out regardless of how
-// many other badges they've earned. Members with rows we can't match to a
-// profile (memberAvatars only lists other members — the signed-in player's
-// own name/photo is merged in by the caller) are left out too.
+// to their name. Members with no earned badges yet, or with rows we can't
+// match to a profile (memberAvatars only lists other members — the
+// signed-in player's own name/photo is merged in by the caller), are left
+// out rather than shown as a zero.
 function computeWallOfFame(allAchievements, profileByUserId) {
   const byUser = {};
   (allAchievements || []).forEach((row) => {
     const def = ACHIEVEMENTS_DEF.find((d) => d.id === row.achievement_id);
     if (!def) return; // ignore rows for a badge id that no longer exists
-    if (!byUser[row.user_id]) byUser[row.user_id] = { userId: row.user_id, count: 0, score: 0, bestBadge: null, isLeagueWinner: false };
+    if (!byUser[row.user_id]) byUser[row.user_id] = { userId: row.user_id, count: 0, score: 0, bestBadge: null };
     const entry = byUser[row.user_id];
     entry.count += 1;
     entry.score += TIER_WEIGHT[def.tier] || 1;
-    if (def.id === "league_champion") entry.isLeagueWinner = true;
     if (!entry.bestBadge || TIER_ORDER[def.tier] > TIER_ORDER[entry.bestBadge.tier]) entry.bestBadge = def;
   });
   return Object.values(byUser)
-    .filter((e) => e.isLeagueWinner)
     .map((e) => ({ ...e, profile: profileByUserId.get(e.userId) }))
     .filter((e) => e.profile)
     .sort((a, b) => b.score - a.score || b.count - a.count)
@@ -1166,10 +1080,9 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
 }
 
 // Compact homepage preview of the platform-wide Wall of Fame — top 3 by
-// trophy score among actual league winners only (see computeWallOfFame),
-// podium-styled like the Leaderboard/Ladder strips it sits next to.
-// Renders nothing until someone has actually won a league, same "don't
-// show an empty shelf" reasoning as those strips.
+// trophy score, podium-styled like the Leaderboard/Ladder strips it sits
+// next to. Renders nothing until at least one badge has been earned by
+// anyone, same "don't show an empty shelf" reasoning as those strips.
 function WallOfFameStrip({ standings, onOpen, c }) {
   if (!standings || standings.length === 0) return null;
   const top3 = standings.slice(0, 3);
@@ -1204,10 +1117,9 @@ function WallOfFameStrip({ standings, onOpen, c }) {
   );
 }
 
-// The full Wall of Fame — every member who's actually won a league (holds
-// the league_champion badge — see computeWallOfFame), ranked by trophy
-// score across all their badges (rarer badges count for more, so it
-// rewards chasing hard badges, not just racking up easy ones), each row
+// The full Wall of Fame — every member who's earned at least one badge,
+// ranked by trophy score (rarer badges count for more, so it rewards
+// chasing hard badges rather than just racking up easy ones), each row
 // showing their badge count and single best badge as a preview.
 function WallOfFameModal({ standings, myUserId, onClose, c }) {
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
@@ -1297,49 +1209,6 @@ function computeStandings(teams, fixtures, league) {
   return rows;
 }
 
-// How many of `leagues` the given user has actually won — checked the same
-// way each league's own page decides its champion (knockoutChampion /
-// survivorChampion / round-robin standings winner), just run across every
-// league at once so it can feed the League Champion achievement. A user
-// "wins" a league by owning (via `members`) the team that ends up champion;
-// leagues that haven't finished yet contribute nothing.
-function computeMyLeagueWins(leagues, userId) {
-  if (!userId) return 0;
-  let wins = 0;
-  for (const league of leagues || []) {
-    const isKnockout = league.format === "knockout";
-    const isSurvivor = league.format === "survivor";
-    const isGroupsKnockout = league.format === "groups_knockout";
-    const inKnockoutBracket = isKnockout || (isGroupsKnockout && league.final_stage_started);
-
-    let championTeamId = null;
-    if (inKnockoutBracket) {
-      const bracketStage = isGroupsKnockout ? 2 : 1;
-      const stageFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
-      const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
-      const activeTeams = league.teams.filter((t) => !t.eliminated);
-      if (stageDone && activeTeams.length === 1) championTeamId = activeTeams[0].id;
-    } else if (isSurvivor) {
-      if (league.final_stage_started) {
-        const stageFixtures = league.fixtures.filter((f) => f.stage === league.current_stage);
-        const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
-        if (stageDone) {
-          const displayTeams = league.teams.filter((t) => !t.eliminated);
-          championTeamId = computeStandings(displayTeams, stageFixtures, league)[0]?.id ?? null;
-        }
-      }
-    } else {
-      const leagueComplete = league.fixtures.length > 0 && league.fixtures.every((f) => f.played);
-      if (leagueComplete) championTeamId = computeStandings(league.teams, league.fixtures, league)[0]?.id ?? null;
-    }
-
-    if (!championTeamId) continue;
-    const championMember = (league.members || []).find((m) => m.team_id === championTeamId);
-    if (championMember?.user_id === userId) wins += 1;
-  }
-  return wins;
-}
-
 // Points-table standings don't reflect a bracket properly — two teams that
 // both lost in the semifinal are miles apart on points despite going
 // exactly as far. This ranks knockout teams by the round they exited in
@@ -1422,8 +1291,8 @@ function seasonKey(idx) { return `S${idx + 1}`; }
 function seasonLabel(idx, anchor) {
   const { start, end } = seasonBounds(idx, anchor);
   const lastDay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const fmt = { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Johannesburg" };
-  return `Season ${idx + 1} · ${start.toLocaleDateString("en-ZA", fmt)} – ${lastDay.toLocaleDateString("en-ZA", fmt)}`;
+  const fmt = { day: "numeric", month: "short", year: "numeric" };
+  return `Season ${idx + 1} · ${start.toLocaleDateString(undefined, fmt)} – ${lastDay.toLocaleDateString(undefined, fmt)}`;
 }
 function currentSeason(anchor) { return anchor ? seasonIndexForDate(new Date(), anchor) : 0; }
 function daysUntilSeasonReset(anchor) {
@@ -1653,13 +1522,9 @@ function findSubmissionOpponentId(league, submission) {
   return opponentMember?.user_id || null;
 }
 
-// Fixed to Africa/Johannesburg (UTC+2, no DST) rather than each viewer's own
-// device timezone — so every player and admin sees the exact same time for
-// a fixture regardless of what timezone their phone/browser happens to be
-// set to. This league runs on SAST, not "whatever device opened the app."
 function fmtDate(iso) {
   if (!iso) return "";
-  return new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
+  return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 // Returns [start, end] Date objects spanning the nearest Friday 00:00 through
@@ -1672,67 +1537,6 @@ function weekendWindow(now = new Date()) {
   const start = new Date(now); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() + toFriday);
   const end = new Date(start); end.setDate(start.getDate() + 2); end.setHours(23, 59, 59, 999);
   return [start, end];
-}
-
-// The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
-// wall-clock window too — not whatever timezone the visitor's device happens
-// to be in. South Africa doesn't observe DST, so SAST is a fixed UTC+2.
-const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
-
-// True from 9pm through 8:59am SAST — the overnight stretch the Weekend
-// League spotlight shows as "Paused" rather than "Live". Only the spotlight's
-// live/paused badge reads this; it never gates joining a league or submitting
-// a result, so players can still upload results for a match played overnight.
-// `override` ("paused" | "live" | null) is an admin's manual call — see
-// weekendOverride in App() — and always wins over the clock when set, so an
-// admin can force an early resume or an extra-long pause when necessary.
-function isWeekendPauseHour(now = new Date(), override = null) {
-  if (override === "paused") return true;
-  if (override === "live") return false;
-  const sastHour = new Date(now.getTime() + SAST_OFFSET_MS).getUTCHours();
-  return sastHour >= 21 || sastHour < 9;
-}
-
-// Next real moment (as a Date, in UTC) at which SAST wall-clock time reaches
-// `hour`:00, at or after `now`. Used to count down to the next 9pm pause or
-// 9am resume without ever constructing a Date in the visitor's own timezone.
-function nextSastHourBoundary(now, hour) {
-  const sastNow = new Date(now.getTime() + SAST_OFFSET_MS);
-  const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate(), hour, 0, 0, 0) - SAST_OFFSET_MS);
-  return candidate >= now ? candidate : new Date(candidate.getTime() + 86400000);
-}
-
-// Adds `durationMs` of real elapsed time on top of `startDate`, but for
-// weekend leagues the 9pm-9am SAST pause doesn't count toward that time —
-// the countdown effectively freezes at 9pm and resumes at 9am, so a
-// deadline that would otherwise land overnight gets pushed out by however
-// many paused hours it crossed. Non-weekend leagues (isWeekend: false) get
-// plain addition, unaffected. Walks forward in "active" and "paused"
-// stretches rather than computing this in one shot, since a long enough
-// durationMs can span more than one overnight pause.
-function addPausableDuration(startDate, durationMs, isWeekend) {
-  if (!isWeekend) return new Date(startDate.getTime() + durationMs);
-  let cursor = new Date(startDate.getTime());
-  let remaining = durationMs;
-  // Safety cap so a bad input (e.g. a negative or absurd durationMs) can
-  // never spin this into an infinite loop.
-  let guard = 0;
-  while (remaining > 0 && guard < 10000) {
-    guard++;
-    if (isWeekendPauseHour(cursor)) {
-      // Currently in the paused window — jump straight to 9am, none of
-      // this stretch counts against `remaining`.
-      cursor = nextSastHourBoundary(cursor, 9);
-      continue;
-    }
-    // Active window — consume time up to the next 9pm pause, or all of
-    // what's left, whichever comes first.
-    const nextPause = nextSastHourBoundary(cursor, 21);
-    const step = Math.min(nextPause.getTime() - cursor.getTime(), remaining);
-    cursor = new Date(cursor.getTime() + step);
-    remaining -= step;
-  }
-  return cursor;
 }
 
 // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
@@ -1794,11 +1598,6 @@ const WHATSAPP_GREEN = "#25D366";
 // The one support line for the whole site — shown as a floating button on
 // every screen (signed in or not) so anyone can reach a human fast.
 const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
-
-// How long a member's row stays highlighted red after an admin taps their
-// WhatsApp icon (see markWaReminder / isWaReminderActive below). Simple
-// "I messaged them recently" flag — not tied to any fixture due date.
-const WA_REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // Builds a wa.me deep link with an optional prefilled message. wa.me opens
 // whichever WhatsApp variant — regular or Business — is installed as the
@@ -2569,14 +2368,6 @@ export default function App() {
   const [profile, setProfile] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leagues, setLeagues] = useState(null);
-  // Admin override for the Weekend League spotlight's nightly auto-pause
-  // (see isWeekendPauseHour / WeekendLeagueSpotlight). null = follow the
-  // 9pm–9am SAST schedule as usual; "paused" / "live" forces that state
-  // regardless of the clock, until an admin clears it back to null. Lives
-  // in a single-row `app_settings` table (id=1) rather than per-league,
-  // since the spotlight's live/paused badge is one global state shared by
-  // every weekend league at once — see APP-SETTINGS-MIGRATION.md.
-  const [weekendOverride, setWeekendOverrideState] = useState(null);
   // A hard refresh re-mounts the whole app from scratch, so React state
   // always starts from these defaults — but the browser itself preserves
   // window.history.state across a reload of the same entry (it's tied to
@@ -2756,32 +2547,6 @@ export default function App() {
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
   }, [showToast]);
-
-  // Public setting (no auth required to read — guests need it too, see
-  // PublicHome's own copy of this query), so this loads regardless of
-  // sign-in state rather than waiting on the session/isAdmin effect below.
-  const loadWeekendOverride = useCallback(async () => {
-    const { data, error } = await supabase.from("app_settings").select("weekend_league_override").eq("id", 1).maybeSingle();
-    if (error) return; // table may not exist yet if the migration hasn't been run — fail quiet, spotlight just falls back to the auto schedule
-    setWeekendOverrideState(data?.weekend_league_override ?? null);
-  }, []);
-
-  // Admin-only. Writing null clears the override and hands control back to
-  // the 9pm–9am SAST auto schedule.
-  const setWeekendOverride = useCallback(async (value) => {
-    const { error } = await supabase.from("app_settings")
-      .update({ weekend_league_override: value, weekend_league_override_at: new Date().toISOString(), weekend_league_override_by: session?.user?.id || null })
-      .eq("id", 1);
-    if (error) { showToast(`Couldn't update Weekend League override: ${error.message}`); return; }
-    setWeekendOverrideState(value);
-    showToast(value === "paused" ? "Weekend League forced to Paused." : value === "live" ? "Weekend League forced to Live." : "Weekend League back on the auto schedule.");
-  }, [session, showToast]);
-
-  useEffect(() => { loadWeekendOverride(); }, [loadWeekendOverride]);
-  // Realtime rather than a poll — an admin toggling this on one device
-  // (or another admin, elsewhere) should flip everyone's spotlight badge
-  // immediately, not on the next visibility-poll tick.
-  useRealtimeRefresh("app_settings", loadWeekendOverride, true);
 
   // Admin-only — every account on the platform, for the Accounts screen.
   // Calls a SECURITY DEFINER function (get_all_accounts) rather than
@@ -2999,13 +2764,8 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/challenge-${challenge.id}-${Date.now()}.${ext}`;
-    let photoUrl;
-    try {
-      photoUrl = await uploadToBlob("result-proofs", path, file);
-    } catch (uploadErr) {
-      showToast(`Couldn't upload photo: ${uploadErr.message}`);
-      return;
-    }
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
 
     const iAmChallenger = challenge.challenger_id === session.user.id;
     const update = {
@@ -3014,7 +2774,7 @@ export default function App() {
       result_status: "pending",
       result_reported_by: session.user.id,
       result_reported_at: new Date().toISOString(),
-      result_photo_path: photoUrl,
+      result_photo_path: path,
     };
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
@@ -3042,13 +2802,6 @@ export default function App() {
   // challenge row's result_photo_path rather than a league submission.
   const viewChallengeResultProof = async (challenge) => {
     if (!challenge.result_photo_path) return;
-    // New rows store a permanent Blob URL directly — open it as-is. Rows
-    // from before the result-proofs migration still hold a Supabase storage
-    // path, so fall back to signing those.
-    if (challenge.result_photo_path.startsWith("http")) {
-      window.open(challenge.result_photo_path, "_blank", "noopener,noreferrer");
-      return;
-    }
     const { data, error } = await supabase.storage.from("result-proofs").createSignedUrl(challenge.result_photo_path, 120);
     if (error || !data) { showToast("Couldn't generate a download link."); return; }
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
@@ -3178,14 +2931,10 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
-      try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
       voice_url = pub.publicUrl;
       voice_duration = voiceClip.duration || null;
     }
@@ -3280,14 +3029,10 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
-      try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
       voice_url = pub.publicUrl;
       voice_duration = voiceClip.duration || null;
     }
@@ -3387,13 +3132,8 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/open-challenge-${challenge.id}-${Date.now()}.${ext}`;
-    let photoUrl;
-    try {
-      photoUrl = await uploadToBlob("result-proofs", path, file);
-    } catch (uploadErr) {
-      showToast(`Couldn't upload photo: ${uploadErr.message}`);
-      return;
-    }
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
 
     const iAmCreator = challenge.creator_id === session.user.id;
     const update = {
@@ -3402,7 +3142,7 @@ export default function App() {
       result_status: "pending",
       result_reported_by: session.user.id,
       result_reported_at: new Date().toISOString(),
-      result_photo_path: photoUrl,
+      result_photo_path: path,
     };
     const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
@@ -3610,14 +3350,9 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 512, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}-${Date.now()}.${ext}`;
-    let publicUrl;
-    try {
-      publicUrl = await uploadToBlob("avatars", path, file);
-    } catch (err) {
-      showToast(`Couldn't upload photo: ${err.message}`);
-      return;
-    }
-    const pub = { publicUrl };
+    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+    const pub = { publicUrl: proxiedMediaUrl("avatars", path) };
     const { data, error } = await supabase.from("profiles")
       .update({ avatar_url: pub.publicUrl }).eq("user_id", session.user.id)
       .select().single();
@@ -3690,19 +3425,19 @@ export default function App() {
   const canManageLeague = (league) => !!session && (isAdmin || league.created_by === session.user.id);
 
   // Sweeps every league the signed-in member can manage, the moment league
-  // data loads (or reloads), and auto-eliminates any club caught in a
-  // no-show tie — see findNoShowTeamIds. This is what makes the cut
-  // automatic: it doesn't wait for a round/stage to fully finish or for an
-  // admin to hit an "advance" button, and it runs across every league and
-  // every format, not just knockout/survivor/groups where a manual
-  // elimination path already existed. Re-runs whenever `leagues` changes;
-  // once a league's no-shows are eliminated they no longer match
-  // findNoShowTeamIds (they're marked eliminated), so the follow-up
-  // loadLeagues() this triggers doesn't loop.
+  // data loads (or reloads), and auto-eliminates any "ghost" club — see
+  // findGhostTeamIds above. This is what makes the cut automatic: it
+  // doesn't wait for a round/stage to fully finish or for an admin to hit
+  // an "advance" button, and it runs across every league and every format,
+  // not just knockout/survivor/groups where a manual elimination path
+  // already existed. Re-runs whenever `leagues` changes; once a league's
+  // ghosts are eliminated they no longer match findGhostTeamIds (they're
+  // marked eliminated), so the follow-up loadLeagues() this triggers
+  // doesn't loop.
   useEffect(() => {
     if (!leagues || !session) return;
     const targets = leagues
-      .map((l) => ({ league: l, ids: canManageLeague(l) ? findNoShowTeamIds(l) : [] }))
+      .map((l) => ({ league: l, ids: canManageLeague(l) ? findGhostTeamIds(l) : [] }))
       .filter(({ ids }) => ids.length > 0);
     if (targets.length === 0) return;
     let cancelled = false;
@@ -3735,8 +3470,8 @@ export default function App() {
           return owner?.display_name ? `${team?.name || "A club"} (${owner.display_name})` : (team?.name || "A club");
         });
         const body = names.length === 1
-          ? `${names[0]} was automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`
-          : `${names.join(", ")} were automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`;
+          ? `${names[0]} was automatically eliminated — no games played, and the no-show penalty already put them at -4.`
+          : `${names.join(", ")} were automatically eliminated — no games played, and the no-show penalty already put them at -4.`;
         await postComment(league, body, null, null, null, true);
       }
 
@@ -3747,7 +3482,7 @@ export default function App() {
         showToast(`${updatedCount} of ${allIds.length} no-show clubs${where} were auto-eliminated — the rest hit a permissions issue and will retry next reload.`);
         return;
       }
-      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show on a match past its deadline.`);
+      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show with no games played.`);
     })();
     return () => { cancelled = true; };
   }, [leagues, session, isAdmin, loadLeagues, showToast]);
@@ -3873,7 +3608,7 @@ export default function App() {
     // admin's browser already had — a stale copy here can both cut the
     // wrong clubs from the group stage and seed the knockout bracket wrong.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("format, groups_count, group_stage_due_at, group_qualifiers, knockout_legs, round_period_hours, teams(*), fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("format, groups_count, group_stage_due_at, teams(*), fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
@@ -3888,19 +3623,9 @@ export default function App() {
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
       const standings = computeStandings(groupTeams, groupFx, fresh);
-      // A club auto-eliminated mid-group-stage (findNoShowTeamIds — no-show
-      // penalties) can still out-rank an opponent on points/gd earned
-      // before it was cut. Its already-played fixtures still have to count
-      // for real toward every OTHER team's standings (hence filtering
-      // AFTER computeStandings, not before, which would silently drop
-      // those fixtures for everyone), but the eliminated club itself can never
-      // be a qualifier — bug: without this filter, an already-eliminated
-      // club could rank in the top N and get pushed straight into the
-      // knockout bracket as a "qualifier" despite eliminated: true.
-      const eligible = standings.filter((r) => !r.eliminated);
-      const n = Math.min(fresh.group_qualifiers, eligible.length);
-      eligible.slice(0, n).forEach((r) => qualifiers.push(r.id));
-      eligible.slice(n).forEach((r) => eliminatedIds.push(r.id));
+      const n = Math.min(league.group_qualifiers, standings.length);
+      standings.slice(0, n).forEach((r) => qualifiers.push(r.id));
+      standings.slice(n).forEach((r) => eliminatedIds.push(r.id));
     }
     if (qualifiers.length < 2) { showToast("Not enough qualifying clubs to start a knockout stage."); return; }
 
@@ -3913,11 +3638,7 @@ export default function App() {
       }
     }
 
-    // Pass the outer `league` (not `fresh`) here — knockoutBracketFixtures
-    // needs created_by_admin/starts_at to know if this is a weekend league
-    // (see isWeekendLeague), and those never go stale the way scores/teams
-    // do, so the outer object is fine and `fresh` doesn't select them.
-    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), fresh.knockout_legs, { ...league, round_period_hours: fresh.round_period_hours });
+    const fixtureRows = knockoutBracketFixtures(league.id, shuffle(qualifiers), 0, new Date(), league.knockout_legs, league);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -4116,9 +3837,9 @@ export default function App() {
   };
 
   // Fired when an admin taps the WhatsApp icon next to a member — flags that
-  // member red (for every admin) for WA_REMINDER_WINDOW_MS. Just "someone
-  // messaged them recently" — not tied to a fixture due date, so it fires
-  // every time regardless of the member's or league's state.
+  // member red (for every admin) until the due date the message was about
+  // passes. dueAt is skipped (nothing to store) for messages with no date,
+  // e.g. the "you've been eliminated" text.
   //
   // This write races the browser navigating away to open WhatsApp (the
   // link's href starts loading the instant it's tapped). On some phones the
@@ -4139,27 +3860,10 @@ export default function App() {
   // navigation race, the actual write never even starts. Reading `session`
   // synchronously keeps this to exactly one network call — the keepalive
   // one — instead of stacking a second, unprotected one in front of it.
-  const markWaReminder = async (member) => {
+  const markWaReminder = async (member, dueAt) => {
+    if (!dueAt) { console.warn("[wa-reminder] skipped — no dueAt for", member?.display_name); return; }
     const token = session?.access_token;
     if (!token) { console.warn("[wa-reminder] skipped — no session token"); return; }
-    const sentAt = new Date().toISOString();
-
-    // Update the highlight LOCALLY, immediately, before firing the network
-    // call. On mobile, tapping this icon hands off to the WhatsApp app right
-    // away — the browser tab can get backgrounded mid-request, which can cut
-    // off the full loadLeagues() re-fetch this used to depend on to show the
-    // highlight. That made the write land in Supabase (visible on next
-    // manual reload) while the screen itself never visibly updated. Setting
-    // local state first means the row turns red instantly regardless of
-    // what happens to the tab a moment later; the PATCH below still makes it
-    // durable/visible to other admins.
-    setLeagues((prev) => (prev || []).map((lg) => (
-      lg.id !== member.league_id ? lg : {
-        ...lg,
-        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: sentAt } : mm)),
-      }
-    )));
-
     try {
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/members?id=eq.${member.id}`, {
         method: "PATCH",
@@ -4170,7 +3874,7 @@ export default function App() {
           "Content-Type": "application/json",
           Prefer: "return=minimal",
         },
-        body: JSON.stringify({ wa_reminder_due_at: sentAt }),
+        body: JSON.stringify({ wa_reminder_due_at: dueAt }),
       });
       // TEMP DEBUG — remove once confirmed working. keepalive responses can't
       // always be read, but when they can, this surfaces the real failure
@@ -4178,44 +3882,15 @@ export default function App() {
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         console.error("[wa-reminder] PATCH failed", res.status, body);
+        showToast(`WA reminder didn't save (${res.status}) — check console`);
       } else {
-        console.log("[wa-reminder] PATCH ok for", member.id, sentAt);
+        console.log("[wa-reminder] PATCH ok for", member.id, dueAt);
       }
     } catch (err) {
       console.error("[wa-reminder] PATCH threw", err);
-      // Local highlight already applied above, so the admin still sees it
-      // even if this network call got cut off by the app handoff — no toast
-      // here on purpose, same as before, so it doesn't interrupt the send.
+      showToast(`WA reminder request failed — check console`);
     }
-  };
-
-  // Manually clears a member's WhatsApp "reminded" highlight before its
-  // normal WA_REMINDER_WINDOW_MS auto-clear (see markWaReminder /
-  // isWaReminderActive above) — e.g. once the admin knows the member has
-  // replied or sorted themselves out and the red flag is no longer useful.
-  // No navigation race here (unlike markWaReminder, this button doesn't
-  // hand off to WhatsApp), so a normal supabase-js call is fine.
-  const clearWaReminder = async (member) => {
-    setLeagues((prev) => (prev || []).map((lg) => (
-      lg.id !== member.league_id ? lg : {
-        ...lg,
-        members: lg.members.map((mm) => (mm.id === member.id ? { ...mm, wa_reminder_due_at: null } : mm)),
-      }
-    )));
-    const { error } = await supabase.from("members").update({ wa_reminder_due_at: null }).eq("id", member.id);
-    if (error) { console.error("[wa-reminder] clear failed", error); showToast(`Couldn't clear the highlight: ${error.message}`); }
-  };
-
-  // Bulk version of clearWaReminder — clears every currently-highlighted
-  // member in one league at once, e.g. after a round of messaging is done
-  // and the admin wants a clean slate rather than clicking each × one at
-  // a time.
-  const clearAllWaReminders = async (league) => {
-    setLeagues((prev) => (prev || []).map((lg) => (
-      lg.id !== league.id ? lg : { ...lg, members: lg.members.map((mm) => ({ ...mm, wa_reminder_due_at: null })) }
-    )));
-    const { error } = await supabase.from("members").update({ wa_reminder_due_at: null }).eq("league_id", league.id);
-    if (error) { console.error("[wa-reminder] clear-all failed", error); showToast(`Couldn't clear highlights: ${error.message}`); }
+    await loadLeagues();
   };
 
   // Admin/creator entering a result directly (no approval step needed, it's
@@ -4306,18 +3981,13 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}/${fixture.id}-${Date.now()}.${ext}`;
-    let photoUrl;
-    try {
-      photoUrl = await uploadToBlob("result-proofs", path, file);
-    } catch (uploadErr) {
-      showToast(`Couldn't upload photo: ${uploadErr.message}`);
-      return false;
-    }
+    const { error: uploadErr } = await supabase.storage.from("result-proofs").upload(path, file, { cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
 
     const { error } = await supabase.from("result_submissions").insert({
       league_id: league.id, fixture_id: fixture.id, submitted_by: session.user.id,
       submitted_by_username: profile?.efootball_username || session.user.email,
-      home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, photo_path: photoUrl,
+      home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, photo_path: path,
     });
     if (error) {
       if (error.code === "23505") showToast("Someone already submitted a result for this match — it's waiting on their opponent (or an admin) to review.");
@@ -4338,13 +4008,6 @@ export default function App() {
   // Admin/creator only — downloads a submitted result's photo proof via a
   // short-lived signed URL, same pattern as downloadPaymentProof.
   const downloadResultProof = async (submission) => {
-    // New rows store a permanent Blob URL directly — open it as-is. Rows
-    // from before the result-proofs migration still hold a Supabase storage
-    // path, so fall back to signing those.
-    if (submission.photo_path?.startsWith("http")) {
-      window.open(submission.photo_path, "_blank", "noopener,noreferrer");
-      return;
-    }
     const { data, error } = await supabase.storage.from("result-proofs").createSignedUrl(submission.photo_path, 120);
     if (error || !data) { showToast("Couldn't generate a download link."); return; }
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
@@ -4373,20 +4036,13 @@ export default function App() {
     if (submission.photo_path) {
       const homeName = league.teams.find((t) => t.id === fixture?.home_team_id)?.name || "Home";
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
-      // New rows already hold a permanent Blob URL — use it directly. Rows
-      // from before the result-proofs migration still hold a Supabase
-      // storage path, so fall back to a long-lived signed URL for those.
-      let photoUrl = submission.photo_path.startsWith("http") ? submission.photo_path : null;
-      if (!photoUrl) {
-        const { data } = await supabase.storage.from("result-proofs")
-          .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
-        photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
-      }
-      if (photoUrl) {
+      const { data } = await supabase.storage.from("result-proofs")
+        .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
+      if (data?.signedUrl) {
         await postComment(
           league,
           `Photo proof for ${submission.submitted_by_username}'s approved result — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
-          null, null, photoUrl, true,
+          null, null, proxiedSignedUrl(data.signedUrl), true,
         );
       }
     }
@@ -4415,16 +4071,9 @@ export default function App() {
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       let photoUrl = null;
       if (submission.photo_path) {
-        // New rows already hold a permanent Blob URL — use it directly.
-        // Rows from before the result-proofs migration still hold a
-        // Supabase storage path, so fall back to a long-lived signed URL.
-        if (submission.photo_path.startsWith("http")) {
-          photoUrl = submission.photo_path;
-        } else {
-          const { data } = await supabase.storage.from("result-proofs")
-            .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
-          photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
-        }
+        const { data } = await supabase.storage.from("result-proofs")
+          .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
+        photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
       }
       await postComment(
         league,
@@ -4463,16 +4112,9 @@ export default function App() {
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       let photoUrl = null;
       if (submission.photo_path) {
-        // New rows already hold a permanent Blob URL — use it directly.
-        // Rows from before the result-proofs migration still hold a
-        // Supabase storage path, so fall back to a long-lived signed URL.
-        if (submission.photo_path.startsWith("http")) {
-          photoUrl = submission.photo_path;
-        } else {
-          const { data } = await supabase.storage.from("result-proofs")
-            .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
-          photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
-        }
+        const { data } = await supabase.storage.from("result-proofs")
+          .createSignedUrl(submission.photo_path, 60 * 60 * 24 * 365 * 5); // ~5 years
+        photoUrl = data?.signedUrl ? proxiedSignedUrl(data.signedUrl) : null;
       }
       await postComment(
         league,
@@ -4500,7 +4142,7 @@ export default function App() {
     // off stale local data here is the worst version of this bug — it can
     // advance the wrong team to the next round entirely.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("knockout_legs, round_period_hours, fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     // Pure knockout leagues run their whole bracket in stage 1; groups_knockout
@@ -4573,13 +4215,7 @@ export default function App() {
     }
     if (winners.length <= 1) { showToast("This league already has a champion."); return; }
 
-    // dueOffset: 1 — dueBase here is "right now" (the moment this round is
-    // generated), not the bracket's original start date, so the new round's
-    // deadline should always be exactly one period out from now, regardless
-    // of what the actual round number (maxRound + 1) is. See
-    // knockoutRoundFixtures for why this can't just default to roundNumber
-    // here the way the opening round's call does.
-    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), fresh.knockout_legs || 1, roundPeriodMs(fresh), 1, isWeekendLeague(league));
+    const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), league.knockout_legs || 1);
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     await loadLeagues();
@@ -4631,7 +4267,7 @@ export default function App() {
     const rounds = goingFinal
       ? finalStageSchedule(remainingIds, league.survivor_final_format)
       : stageSchedule(remainingIds, league.survivor_matches_per_stage);
-    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date(), 0, roundPeriodMs(league), isWeekendLeague(league));
+    const fixtureRows = toFixtureRows(league.id, rounds, nextStage, new Date(), 0, roundPeriodMs(league));
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
 
@@ -4709,14 +4345,9 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
     const ext = file.name.split(".").pop();
     const path = `${league.id}-${Date.now()}.${ext}`;
-    let publicUrl;
-    try {
-      publicUrl = await uploadToBlob("league-photos", path, file);
-    } catch (err) {
-      showToast(`Couldn't upload photo: ${err.message}`);
-      return;
-    }
-    const pub = { publicUrl };
+    const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+    const pub = { publicUrl: proxiedMediaUrl("league-photos", path) };
     const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
     await loadLeagues();
@@ -4806,21 +4437,13 @@ export default function App() {
       const broadcastFixture = nextFixtureForLeague(league);
       const broadcastRound = broadcastFixture ? String(broadcastFixture.round) : "";
       const broadcastDue = broadcastFixture ? fmtDate(broadcastFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "";
-      const broadcastStart = broadcastFixture ? fixtureStartsAt(broadcastFixture, league) : league.starts_at;
       const body = league.wa_message_template
         .replace(/\{name\}/g, "everyone")
         .replace(/\{league\}/g, league.name)
         .replace(/\{round\}/g, broadcastRound)
-        .replace(/\{due\}/g, broadcastDue)
-        .replace(/\{start\}/g, broadcastStart ? fmtDate(broadcastStart) : "");
+        .replace(/\{due\}/g, broadcastDue);
       const posted = await postComment(league, body, null, null, null, true);
-      if (posted) {
-        // Same red "reminded" highlight the per-member WhatsApp icon sets
-        // (see markWaReminder) — a broadcast is still notifying every
-        // member, so every member's row gets flagged too.
-        (league.members || []).forEach((mm) => markWaReminder(mm));
-        showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
-      }
+      if (posted) showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
     });
   };
 
@@ -4844,14 +4467,9 @@ export default function App() {
       const compressed = await compressImage(file, { maxDimension: 900, quality: 0.85 });
       const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
-      try {
-        publicUrl = await uploadToBlob("comment-photos", path, compressed);
-      } catch (err) {
-        showToast(`Couldn't upload photo: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
+      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed, { cacheControl: "31536000" });
+      if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
+      const pub = { publicUrl: proxiedMediaUrl("comment-photos", path) };
       photo_url = pub.publicUrl;
     }
     let voice_url = null;
@@ -4859,14 +4477,10 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
-      try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
+      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
+        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
+      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
       voice_url = pub.publicUrl;
       voice_duration = voiceClip.duration || null;
     }
@@ -5050,8 +4664,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
-                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} c={c} />
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url} showToast={showToast} c={c} />
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
@@ -5062,7 +4675,7 @@ export default function App() {
                 blockedByLeague={isMemberOf(activeLeague) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, activeLeague)}
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
-                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
+                onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
@@ -5212,7 +4825,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes] = await Promise.all([
+      const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes] = await Promise.all([
         supabase.from("public_leagues").select("*"),
         supabase.from("public_league_teams").select("*"),
         supabase.from("public_league_fixtures").select("*"),
@@ -5223,10 +4836,6 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         // avatar_url only (see public_team_avatars view), nothing else about
         // the owning member is exposed to guests.
         supabase.from("public_team_avatars").select("*"),
-        // Admin's manual override of the Weekend League auto pause/resume
-        // (see isWeekendPauseHour) — read-only here, guests never see the
-        // toggle itself, just the resulting Live/Paused badge.
-        supabase.from("app_settings").select("weekend_league_override").eq("id", 1).maybeSingle(),
       ]);
       if (cancelled) return;
       const avatarByTeamId = {};
@@ -5239,7 +4848,6 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         ladder: ladderRes.data || [],
         results: resultsRes.data || [],
         avatarByTeamId,
-        weekendOverride: settingsRes.data?.weekend_league_override ?? null,
       });
     })();
     return () => { cancelled = true; };
@@ -5412,7 +5020,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             with the general Leagues list. Hidden entirely outside a
             qualifying window rather than showing an empty promo. */}
         {weekendLeagues.length > 0 && (
-          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} override={guestData?.weekendOverride ?? null} onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
+          <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} c={c} />
         )}
 
         {/* Menu tiles — usable ones lead now (Ladder, Leagues both just
@@ -5495,35 +5103,15 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 // Ladder), a "Hottest" flame badge on whichever league has the most matches
 // due, and a per-card heat bar so activity is visible at a glance, not just
 // a number.
-function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, isJoined, override, isAdmin, onSetOverride, c }) {
+function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, isJoined, c }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
   }, []);
 
-  const isWithinWeekend = now >= weekendStart && now <= weekendEnd;
-  const isPaused = isWithinWeekend && isWeekendPauseHour(now, override);
-  const isLiveNow = isWithinWeekend && !isPaused;
-  const isOverridden = isWithinWeekend && (override === "paused" || override === "live");
-
-  // Paused: counting down to the 9am SAST resume — unless the weekend
-  // window itself wraps up first (Sunday night's pause has no Monday
-  // morning to resume into), in which case it's just counting down to the
-  // end. Live: counting down to whichever comes first — the 9pm SAST pause
-  // or the weekend ending. Not started: counting down to weekendStart.
-  let targetTime, liveTargetIsEnd = true, pausedTargetIsEnd = false;
-  if (isPaused) {
-    const resumeAt = nextSastHourBoundary(now, 9);
-    if (resumeAt > weekendEnd) { targetTime = weekendEnd; pausedTargetIsEnd = true; }
-    else { targetTime = resumeAt; }
-  } else if (isLiveNow) {
-    const nextPause = nextSastHourBoundary(now, 21);
-    if (nextPause < weekendEnd) { targetTime = nextPause; liveTargetIsEnd = false; }
-    else { targetTime = weekendEnd; }
-  } else {
-    targetTime = weekendStart;
-  }
+  const isLiveNow = now >= weekendStart && now <= weekendEnd;
+  const targetTime = isLiveNow ? weekendEnd : weekendStart;
   const diffMs = Math.max(0, targetTime.getTime() - now.getTime());
   const diffDays = Math.floor(diffMs / 86400000);
   const diffHours = Math.floor((diffMs % 86400000) / 3600000);
@@ -5544,14 +5132,12 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
           <Calendar size={12} /> Weekend League
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
-          {isPaused ? (
-            <><Pause size={10} /> Paused · {isOverridden ? "admin override" : `${pausedTargetIsEnd ? "ends" : "resumes"} in ${countdownLabel}`}</>
-          ) : isLiveNow ? (
+          {isLiveNow ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
               </span>
-              Live · {isOverridden ? "admin override" : `${liveTargetIsEnd ? "ends" : "pauses"} in ${countdownLabel}`}
+              Live · ends in {countdownLabel}
             </>
           ) : (
             <><Clock size={10} /> Starts in {countdownLabel}</>
@@ -5559,40 +5145,13 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
       </div>
       <div className="relative px-4 pb-1.5 flex items-center gap-1.5 font-body text-xs" style={{ color: c.textDim }}>
-        {isPaused
-          ? "Overnight break — results can still be uploaded"
-          : `${items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday`}
+        {items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday
         {totalMatches > 0 && (
           <span className="flex items-center gap-0.5 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${c.accent}22`, color: c.accent }}>
             <Zap size={9} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
           </span>
         )}
       </div>
-      {/* Admin-only manual override of the 9pm–9am auto pause/resume — for
-          the odd weekend where the schedule needs a nudge (e.g. keep it
-          live late for a big final, or pause early for maintenance).
-          Hidden entirely for everyone else, including logged-in players. */}
-      {isAdmin && onSetOverride && (
-        <div className="relative px-4 pb-1.5 flex items-center gap-1.5">
-          <span className="font-mono text-[9px] uppercase tracking-wide shrink-0" style={{ color: c.textFaint }}>Admin:</span>
-          {[
-            { key: null, label: "Auto" },
-            { key: "live", label: "Force live" },
-            { key: "paused", label: "Force pause" },
-          ].map((opt) => {
-            const active = (override ?? null) === opt.key;
-            return (
-              <button key={opt.label} onClick={() => onSetOverride(opt.key)}
-                className="font-mono text-[9px] uppercase tracking-wide px-2 py-0.5 rounded-full transition-transform active:scale-95"
-                style={active
-                  ? { background: c.accent, color: "#fff" }
-                  : { background: c.surfaceHover, color: c.textDim, border: `1px solid ${c.border}` }}>
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1.5">
         {items.map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
           const isHottest = matchCount > 0 && matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
@@ -7796,7 +7355,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, showToast, c }) {
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
@@ -7903,10 +7462,9 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // object, since that object gets a new identity on every background
   // ladder poll even when the rank itself hasn't moved.
   const joinedLeagueCount = leagues.filter((l) => isMemberOf(l)).length;
-  const myLeaguesWon = useMemo(() => computeMyLeagueWins(leagues, myId), [leagues, myId]);
   const achievements = useMemo(
-    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank, leaguesWon: myLeaguesWon }),
-    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position, myLeaguesWon]
+    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank }),
+    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position]
   );
   const earnedAchievementCount = achievements.filter((a) => a.earned).length;
   const [achievementsOpen, setAchievementsOpen] = useState(false);
@@ -8074,7 +7632,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           even if it's not among the leagues they're already in. */}
       {weekendLeagues.length > 0 && (
         <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
-          isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
+          isJoined={(l) => isMemberOf(l)}
           onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
       )}
 
@@ -9524,7 +9082,7 @@ function aggregateFor(legs, teamId) {
 // the other directly off the bracket instead of hunting them down through
 // "Find yourself" — each icon calls the OTHER team's number and is signed
 // with the icon-owner's own club name.
-function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, hideDueDate, league, c }) {
+function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, league, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
   const [ph, setPh] = useState(fixture.pens_home ?? "");
@@ -9597,14 +9155,8 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
       <span className="flex-1 min-w-0 truncate font-body text-sm">{awayTeam.name}</span>
-      {/* For a two-legged tie, both legs now share one due_at — showing it
-          on every row would just repeat the same date twice. The shared
-          start–expiry window is shown once instead, at the tie level (see
-          KnockoutFixturesList) — this column is skipped here via
-          hideDueDate, except "Expired" still shows per row since a
-          leg-specific played/unplayed state is still worth flagging. */}
       <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
-        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : hideDueDate ? "" : fmtDate(fixture.due_at)}
+        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : fmtDate(fixture.due_at)}
       </span>
       {canManage && (
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -9725,32 +9277,13 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
                 const level = allPlayed && hAgg === aAgg;
                 const pensH = pensAggregateFor(legs, f0.home_team_id);
                 const pensA = pensAggregateFor(legs, f0.away_team_id);
-                // Two-legged ties now carry ONE shared due_at across both
-                // legs (see knockoutRoundFixtures), so this shows as one
-                // "start → expiry (N days)" range instead of two separate
-                // per-leg dates. f0.starts_at is the real recorded start
-                // moment; only fall back to reconstructing it from due_at
-                // for older fixtures created before that column existed.
-                const tieDueAt = twoLegged ? f0.due_at : null;
-                const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-                const tieStartAt = !tieDueAt ? null : f0.starts_at ? new Date(f0.starts_at) : new Date(new Date(tieDueAt).getTime() - tieWindowMs);
-                const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-                const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
                 return (
                   <div key={f0.id} className="px-4 py-2.5">
-                    {twoLegged && !allPlayed && (
-                      <div className="font-mono text-[10px] mb-1.5" style={{ color: tieExpired ? c.red : c.textDim }}>
-                        {tieExpired
-                          ? "Expired"
-                          : `${fmtDate(tieStartAt)} → ${fmtDate(tieDueAt)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
-                      </div>
-                    )}
                     {legs.map((f) => {
                       const legHome = league.teams.find((t) => t.id === f.home_team_id);
                       const legAway = league.teams.find((t) => t.id === f.away_team_id);
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={legHome} awayTeam={legAway} canManage={canManage}
                         onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
-                        hideDueDate={twoLegged}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
                     {(twoLegged || level) && (
@@ -10108,19 +9641,17 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers
   // a generic name for a brand-new league with no members yet.
   const sampleName = (league.members || []).find((m) => m.display_name)?.display_name || "Alex";
   const sampleFixture = nextFixtureForLeague(league);
-  const sampleDue = sampleFixture ? fmtDate(sampleFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "Fri";
   const sampleRound = sampleFixture ? String(sampleFixture.round) : "1";
-  const sampleStartRaw = sampleFixture ? fixtureStartsAt(sampleFixture, league) : league.starts_at;
-  const sampleStart = sampleStartRaw ? fmtDate(sampleStartRaw) : "Fri";
+  const sampleDue = sampleFixture ? fmtDate(sampleFixture.due_at) : league.starts_at ? fmtDate(league.starts_at) : "Fri";
   const preview = text.trim()
-    ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name).replace(/\{round\}/g, sampleRound).replace(/\{due\}/g, sampleDue).replace(/\{start\}/g, sampleStart)
+    ? text.replace(/\{name\}/g, sampleName).replace(/\{league\}/g, league.name).replace(/\{round\}/g, sampleRound).replace(/\{due\}/g, sampleDue)
     : "";
 
   return (
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
         Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name, <strong>{"{league}"}</strong> for the league name,
-        <strong> {"{round}"}</strong> for their next round number, <strong> {"{due}"}</strong> for its deadline, and <strong> {"{start}"}</strong> for when that round actually kicks off. Round, due, and start all update automatically each round.
+        <strong> {"{round}"}</strong> for their next round number, and <strong>{"{due}"}</strong> for its due date. Round and due date update automatically each round.
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
         placeholder="Hey {name}! Round {round} of {league} is due {due} — lock it in! 🔥⚽"
@@ -10184,12 +9715,12 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
                   {showDeadline && (() => {
                     const reason = resultEscalationReason(league, s);
                     return (
-                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s, league) <= 5 ? c.red : "#B8860B") }}>
+                      <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s) <= 5 ? c.red : "#B8860B") }}>
                         {reason === "dispute-cap"
                           ? "This fixture's been disputed too many times already — sent straight to the admin"
                           : reason === "timeout"
                           ? "Confirmation window passed — this has been sent to the admin"
-                          : `${resultConfirmMinutesLeft(s, league)}m left to respond — after that it goes to the admin`}
+                          : `${resultConfirmMinutesLeft(s)}m left to respond — after that it goes to the admin`}
                       </div>
                     );
                   })()}
@@ -10258,27 +9789,12 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 // unconditionally, to every member.
 function usesCustomMessage(t, league) {
   if (!league.wa_message_template) return false;
-  const usesRoundOrDue = /\{round\}|\{due\}|\{start\}/.test(league.wa_message_template);
+  const usesRoundOrDue = /\{round\}|\{due\}/.test(league.wa_message_template);
   if (!usesRoundOrDue) return true;
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   const notStarted = league.fixtures.length === 0;
   const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
   return !!(upcoming || due);
-}
-
-// The real kickoff moment for a fixture — when players should actually
-// start playing it, as opposed to due_at (the deadline by which it must be
-// done). Knockout fixtures record this directly in starts_at (see
-// knockoutRoundFixtures); round-robin/group fixtures don't have their own
-// column for it, so it's derived by stepping due_at back by one round
-// period — same fallback logic already used for two-legged knockout ties
-// elsewhere (NextOpponentCard, OpponentFinder) when starts_at is missing on
-// an older fixture.
-function fixtureStartsAt(fixture, league) {
-  if (!fixture) return null;
-  if (fixture.starts_at) return fixture.starts_at;
-  if (!fixture.due_at) return null;
-  return new Date(new Date(fixture.due_at).getTime() - roundPeriodMs(league)).toISOString();
 }
 
 function adminStatusMessage(m, t, league) {
@@ -10291,20 +9807,16 @@ function adminStatusMessage(m, t, league) {
   // {due} are also live — sourced from this member's own next unplayed
   // fixture (same lookup the default message uses), so a custom template
   // still tracks the bracket forward each round instead of freezing on
-  // whatever round it was written during. {start} is that same fixture's
-  // real kickoff moment (see fixtureStartsAt) — blank if there's no
-  // upcoming fixture yet to attach one to.
+  // whatever round it was written during.
   if (usesCustomMessage(t, league)) {
     const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
     const notStarted = league.fixtures.length === 0;
     const due = upcoming ? upcoming.due_at : notStarted ? league.starts_at : null;
-    const start = upcoming ? fixtureStartsAt(upcoming, league) : notStarted ? league.starts_at : null;
     return league.wa_message_template
       .replace(/\{name\}/g, name)
       .replace(/\{league\}/g, league.name)
       .replace(/\{round\}/g, upcoming ? String(upcoming.round) : "")
-      .replace(/\{due\}/g, due ? fmtDate(due) : "")
-      .replace(/\{start\}/g, start ? fmtDate(start) : "");
+      .replace(/\{due\}/g, due ? fmtDate(due) : "");
   }
   if (t?.eliminated) {
     return `Hey ${name}! 👋\n🔴 Tough one — you've been eliminated from ${league.name}.\n🔥 Try again on the next one — jump into one of our other available leagues and get straight back in the fight!\n👉 ${SITE_URL}`;
@@ -10321,15 +9833,6 @@ function adminStatusMessage(m, t, league) {
   // this message goes out it names the new round on its own.
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   if (upcoming) {
-    // The window this fixture can be played in — real kickoff moment
-    // through the deadline. For most rounds these are genuinely different
-    // times (see fixtureStartsAt); if they happen to land on the exact same
-    // moment (e.g. an older fixture with no round period recorded), only
-    // show it once rather than printing the same time twice.
-    const start = fixtureStartsAt(upcoming, league);
-    const windowLine = start && start !== upcoming.due_at
-      ? `📅 Starts ${fmtDate(start)} · Due ${fmtDate(upcoming.due_at)}`
-      : `📅 Due ${fmtDate(upcoming.due_at)}`;
     // Round 1 of a fresh stage means this club just survived a cut — the
     // knockout bracket starting for groups_knockout, or a new survivor
     // stage (current_stage > 1) — so lead with a congrats line instead of
@@ -10353,23 +9856,35 @@ function adminStatusMessage(m, t, league) {
       const throughTo = league.format === "knockout" ? "the next round"
         : league.format === "survivor" ? (league.final_stage_started ? "the final stage" : "the next stage")
         : "the knockout stage";
-      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
+      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
     }
-    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
+    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n📅 Due ${fmtDate(upcoming.due_at)} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
   }
   return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
+// The date an "upcoming league / upcoming fixture" WhatsApp text is really
+// about — league kickoff before fixtures exist, otherwise the club's next
+// fixture due date. Returns null for the eliminated/no-date messages, since
+// those aren't "upcoming" reminders and have no due date to reset against.
+function adminStatusReminderDate(m, t, league) {
+  if (t?.eliminated) return null;
+  const notStarted = league.fixtures.length === 0;
+  if (notStarted) return league.starts_at || null;
+  const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
+  return upcoming ? upcoming.due_at : null;
+}
+
 // Red "reminded" highlight for a member row. members.wa_reminder_due_at is
-// set (by every admin, via markWaReminder) to the timestamp someone last
-// sent that member the WhatsApp text, and stored in Supabase so the
-// highlight is the same for every admin looking at the league, not just
-// whoever sent it. Active for WA_REMINDER_WINDOW_MS after that timestamp,
-// regardless of fixtures, due dates, or elimination status — purely "was
-// this person messaged recently".
-function isWaReminderActive(m) {
-  if (!m.wa_reminder_due_at) return false;
-  return Date.now() - new Date(m.wa_reminder_due_at).getTime() < WA_REMINDER_WINDOW_MS;
+// set (by every admin, via markWaReminder below) the moment someone sends
+// that member the WhatsApp text, and stored in Supabase so the highlight is
+// the same for every admin looking at the league, not just whoever sent it.
+// It's active only while it matches the CURRENT due date and that date
+// hasn't passed yet — so it clears the instant the deadline passes, and
+// also clears early if a newer fixture becomes the upcoming one before the
+// old date even arrives.
+function isWaReminderActive(m, dueAt) {
+  return !!dueAt && m.wa_reminder_due_at === dueAt && new Date(dueAt) > new Date();
 }
 
 // Re-render on a slow tick purely so a reminder's red highlight clears
@@ -10383,9 +9898,10 @@ function useNow(intervalMs = 60000) {
   }, [intervalMs]);
 }
 
-function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, c }) {
   useNow();
-  const reminded = isWaReminderActive(m);
+  const reminderDueAt = adminStatusReminderDate(m, t, league);
+  const reminded = isWaReminderActive(m, reminderDueAt);
   return (
     <div className="rounded-lg px-4 py-2.5 border transition-colors"
       style={reminded ? { background: c.redSoft, borderColor: c.red } : { background: c.surface, borderColor: "transparent" }}>
@@ -10394,13 +9910,7 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
         <span className="font-body text-sm flex-1">{m.display_name}</span>
         {canManage && t?.phone && (
           <WhatsAppLink phone={t.phone} iconOnly text={adminStatusMessage(m, t, league)}
-            onClick={() => onMarkWaReminder(m)} c={c} />
-        )}
-        {canManage && reminded && (
-          <button onClick={() => onClearWaReminder(m)} title="Clear reminder highlight"
-            className="w-5 h-5 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}>
-            <X size={12} />
-          </button>
+            onClick={() => onMarkWaReminder(m, reminderDueAt)} c={c} />
         )}
         {t && <span className="font-mono text-xs" style={{ color: t.eliminated ? c.red : c.textFaint }}>{t.name}{t.eliminated ? " (out)" : ""}</span>}
         {isCash && (
@@ -10552,7 +10062,7 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
   );
 }
 
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -10720,7 +10230,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
                 m ? (
                   <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
                     isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
                 ) : (
                   <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
                     <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
@@ -10779,7 +10289,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {canManage && awaitingOpponentResults.length > 0 && (
         <div className="rounded-xl p-4 border mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
           <Clock size={13} className="shrink-0" />
-          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's {isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES}-minute confirmation window
+          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's 30-minute confirmation window
           {" — "}lands here for your review only if they don't respond in time.
         </div>
       )}
@@ -10889,13 +10399,6 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
       {tab === "members" && (
         <div>
           {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
-          {canManage && league.members.some((m) => isWaReminderActive(m)) && (
-            <div className="flex justify-end mb-2">
-              <button onClick={() => onClearAllWaReminders(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
-                <X size={11} /> Clear all highlights
-              </button>
-            </div>
-          )}
           {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
             <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
               <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
@@ -10909,7 +10412,7 @@ function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, 
               <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
                 isCash={league.league_type === "cash"} canManage={canManage}
                 isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} c={c} />
             );
             // Only worth splitting into two lists once a custom template
             // actually exists on the league — with none set, every member
@@ -11671,19 +11174,6 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
   const opponentId = isHome ? fixture.away_team_id : fixture.home_team_id;
   const opponent = league.teams.find((t) => t.id === opponentId);
 
-  // A knockout tie's second leg shares the same round/stage and the same
-  // two clubs (home/away flipped) — if one exists, both legs already carry
-  // the same shared due_at (see knockoutRoundFixtures). fixture.starts_at
-  // is the real recorded start moment; only reconstruct it from due_at for
-  // older fixtures created before that column existed.
-  const siblingLeg = fixture.leg ? league.fixtures.find((f) => f.id !== fixture.id && f.round === fixture.round && f.stage === fixture.stage
-    && ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id)
-      || (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id))) : null;
-  const twoLegged = !!siblingLeg;
-  const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-  const tieStartAt = !twoLegged ? null : fixture.starts_at ? new Date(fixture.starts_at) : new Date(new Date(fixture.due_at).getTime() - tieWindowMs);
-  const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-
   return (
     <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your next match</div>
@@ -11692,11 +11182,7 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
           <div className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {opponent?.name || "TBD"}</div>
           <div className="font-mono text-xs mt-1" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textDim }}>
             {isHome ? "Home" : "Away"} · Matchday {fixture.round}
-            {isFixtureLocked(fixture, league)
-              ? " · Expired"
-              : twoLegged
-              ? ` · ${fmtDate(tieStartAt)} → ${fmtDate(fixture.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`
-              : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
+            {isFixtureLocked(fixture, league) ? " · Expired" : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
           </div>
         </div>
         {canSeePhones && opponent?.phone && (
@@ -11821,31 +11307,12 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
             if (opp.bye) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>Automatic advance this round (bye).</div>;
             const twoLegged = result.myFixtures.length > 1;
             const agg = (teamId) => result.myFixtures.reduce((sum, f) => sum + (f.home_team_id === teamId ? f.home_score : f.away_score), 0);
-            // Two-legged (home & away) ties share one due_at across both legs
-            // (see knockoutRoundFixtures) — reconstruct the tie's start moment
-            // by subtracting the double-length window back off that shared
-            // deadline, so this shows one "start → expiry (N days)" range
-            // instead of a due date repeated on every leg. Matches the same
-            // pattern used in KnockoutFixturesList and OpponentFinder.
-            const allPlayed = result.myFixtures.every((f) => f.played);
-            const f0 = result.myFixtures[0];
-            const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-            const tieStartAt = !twoLegged ? null : f0.starts_at ? new Date(f0.starts_at) : new Date(new Date(f0.due_at).getTime() - tieWindowMs);
-            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-            const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
             return (
               <div>
                 <div className="font-mono text-xs" style={{ color: c.textDim }}>
                   Round {result.myFixtures[0].round} vs <span style={{ color: c.text }}>{opp.opponent?.name}</span>
                   {twoLegged ? " (home & away)" : ` (${opp.isHome ? "Home" : "Away"})`}
                 </div>
-                {twoLegged && !allPlayed && (
-                  <div className="font-mono text-xs mt-1" style={{ color: tieExpired ? c.red : c.textDim }}>
-                    {tieExpired
-                      ? "Expired"
-                      : `${fmtDate(tieStartAt)} → ${fmtDate(f0.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
-                  </div>
-                )}
                 {twoLegged && (
                   <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     Aggregate: {result.team.name} {agg(result.team.id)} – {agg(opp.opponent.id)} {opp.opponent.name}
@@ -11854,11 +11321,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {result.myFixtures.map((f) => (
                   <div key={f.id} className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
                     {twoLegged ? `Leg ${f.leg} (${f.home_team_id === result.team.id ? "Home" : "Away"}): ` : ""}
-                    {f.played
-                      ? `${f.home_score} – ${f.away_score}`
-                      : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span>
-                      : twoLegged ? "" // shared start–expiry window already shown once, above
-                      : `Due by ${fmtDate(f.due_at)}`}
+                    {f.played ? `${f.home_score} – ${f.away_score}` : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span> : `Due by ${fmtDate(f.due_at)}`}
                   </div>
                 ))}
                 {canSeePhones && (
@@ -11937,7 +11400,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
 
     const anyExpired = legs.some((f) => isFixtureLocked(f, league));
     if (anyExpired && !canManage) {
-      setResult({ notFound: true, reason: `This match passed its deadline without a result — both clubs received a loss. It's no longer viewable.` });
+      setResult({ notFound: true, reason: "This match passed its 2-day deadline without a result — both clubs received a loss. It's no longer viewable." });
       return;
     }
 
@@ -11990,25 +11453,9 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
             const allPlayed = result.legs.every((f) => f.played);
             const level = allPlayed && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id);
             const isFinalTie = level && isFinalRoundFixtures(fixtures.filter((f) => f.round === result.legs[0].round));
-            // Two-legged ties share one due_at across both legs (see
-            // knockoutRoundFixtures), so both the player and the admin see
-            // the full "start → expiry" window here, not just the cutoff.
-            // legs[0].starts_at is the real recorded start moment; only
-            // reconstruct it from due_at for older fixtures created before
-            // that column existed.
-            const tieWindowMs = result.twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-            const tieStartAt = !result.twoLegged ? null : result.legs[0].starts_at ? new Date(result.legs[0].starts_at) : new Date(new Date(result.legs[0].due_at).getTime() - tieWindowMs);
-            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
             if (!result.twoLegged && !level) return null;
             return (
               <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
-                {result.twoLegged && !allPlayed && (
-                  <div>
-                    {isFixtureLocked(result.legs[0], league)
-                      ? <span style={{ color: c.red }}>Expired</span>
-                      : `${fmtDate(tieStartAt)} → ${fmtDate(result.legs[0].due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
-                  </div>
-                )}
                 {result.twoLegged && <>Aggregate: {result.team.name} {aggregate(result.legs, result.team.id)} – {aggregate(result.legs, result.opponent.id)} {result.opponent.name}</>}
                 {level && (isFinalTie
                   ? <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
@@ -12041,11 +11488,7 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
               <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
                 <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
                   {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played
-                    ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}`
-                    : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4"
-                    : result.twoLegged ? "" // shared start–expiry window already shown once, above
-                    : ` — due ${fmtDate(fixture.due_at)}`}
+                  {fixture.played ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}` : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4" : ` — due ${fmtDate(fixture.due_at)}`}
                 </div>
                 {canManage && (
                   <div className="flex items-center gap-2 flex-wrap">
