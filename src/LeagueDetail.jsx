@@ -7,9 +7,10 @@ import {
 import { toProxiedUrl } from "./utils/mediaUrl";
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
-  KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueScheduleLine,
-  LeagueStatusBanner, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS, PendingResultsPanel,
-  PrizeBreakdownPanel, RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, StandingsPanel,
+  KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+  LeagueScheduleLine, LeagueStatusBanner, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
+  PendingResultsPanel, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
+  RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, StandingsPanel,
   VoiceNotePlayer, VoiceRecorderButton, WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES, WhatsAppCallLink,
   WhatsAppLink, avatarColor, commentSpeech, computeStandings, findSubmissionOpponentId,
   firstMatchdayNote, fmtDate, groupLabel, isExpired, isFinalFixture, isFinalRoundFixtures,
@@ -450,104 +451,6 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
 // comment at every depth still gets its own Reply button and its own count.
 const COMMENT_PAGE_SIZE = 6;
 const MAX_INDENT_DEPTH = 4;
-const REACTIONS = [
-  { key: "like", emoji: "👍" },
-  { key: "love", emoji: "❤️" },
-  { key: "laugh", emoji: "😂" },
-  { key: "fire", emoji: "🔥" },
-  { key: "wow", emoji: "😮" },
-  { key: "skull", emoji: "💀" },
-];
-const REACTION_EMOJI = Object.fromEntries(REACTIONS.map((r) => [r.key, r.emoji]));
-
-// A reaction bar for the league itself — same emoji-picker pattern as a
-// comment's reaction button, just scoped to league_reactions instead of
-// comment_likes. Open to anyone signed in (not gated by canComment/joined),
-// so the general public can react to a league without joining it.
-function LeagueReactionBar({ league, session, onToggle, c, compact = false }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pendingReaction, setPendingReaction] = useState(undefined);
-  const pickerRef = useRef(null);
-  const realReactions = league.league_reactions || [];
-
-  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
-  useEffect(() => {
-    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
-  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const reactions = useMemo(() => {
-    if (pendingReaction === undefined) return realReactions;
-    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
-    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
-  }, [realReactions, pendingReaction, session]);
-
-  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
-  const summary = useMemo(() => {
-    const counts = new Map();
-    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [reactions]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
-  }, [pickerOpen]);
-
-  const react = async (emoji) => {
-    if (!session) return;
-    setPickerOpen(false);
-    setPendingReaction(emoji);
-    const ok = await onToggle(league, emoji);
-    if (!ok) setPendingReaction(undefined);
-  };
-
-  const handleMainClick = async () => {
-    if (!session) return;
-    if (myReaction) {
-      setPendingReaction(null);
-      const ok = await onToggle(league, null);
-      if (!ok) setPendingReaction(undefined);
-    } else {
-      setPickerOpen((v) => !v);
-    }
-  };
-
-  // Reacting lives inside league cards on Home (so people can react before
-  // ever opening a league) as well as inside LeagueDetail — stopping
-  // propagation here keeps a tap on the reaction button from also
-  // triggering the card's onClick (which opens the league).
-  return (
-    <div className={compact ? "relative shrink-0" : "relative mb-5"} ref={pickerRef} onClick={(e) => e.stopPropagation()}>
-      <button onClick={handleMainClick} disabled={!session}
-        className={compact
-          ? "flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded-full transition-colors"
-          : "flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1.5 rounded-full transition-colors"}
-        style={{ background: c.surface, color: myReaction ? c.accent : c.textFaint }}>
-        <span style={{ fontSize: compact ? 12 : 13, lineHeight: 1 }}>{myReaction ? REACTION_EMOJI[myReaction] : "🤍"}</span>
-        {!compact && (myReaction ? "You reacted" : "React to this league")}
-        {reactions.length > 0 && (
-          <span>{compact ? "" : "· "}{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-        )}
-      </button>
-
-      {pickerOpen && (
-        <div className="reaction-picker absolute top-full right-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-          style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-          {REACTIONS.map((r) => (
-            <button key={r.key} onClick={() => react(r.key)} title={r.key}
-              className="reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-              {r.emoji}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function CommentsSection({ league, session, canComment, onPost, onDelete, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
