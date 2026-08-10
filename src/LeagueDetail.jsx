@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
   ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download,
-  LogOut, MessageCircle, Phone, ReceiptText, Search, Send, Settings2, Trash2,
+  LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2, Trash2,
   Trophy, Users, Volume2, X, XCircle,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
@@ -27,7 +27,7 @@ import {
 // App.jsx the same way Shop/Terms/Rules already are.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -328,7 +328,8 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
           <CommentsSection league={league} session={session} canComment={joined || canManage}
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as matches are played."
-            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+            canEditResults={canManage}
+            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
       )}
 
@@ -452,7 +453,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
 const COMMENT_PAGE_SIZE = 6;
 const MAX_INDENT_DEPTH = 4;
 
-function CommentsSection({ league, session, canComment, onPost, onDelete, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
+function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count
@@ -601,7 +602,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
         <div className="space-y-3 mb-3">
           {visibleRoots.map((cm) => (
             <CommentNode key={cm.id} comment={cm} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={0} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={0} />
           ))}
         </div>
       )}
@@ -683,7 +684,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onTogg
 // underneath it, no matter how deep. Each node owns its own "reply box
 // open?" / "replies expanded?" state independently of its siblings and
 // ancestors.
-function CommentNode({ comment, league, session, canComment, onPost, onDelete, onToggleReaction, c, depth }) {
+function CommentNode({ comment, league, session, canComment, onPost, onDelete, onEdit, canEditResults = false, onToggleReaction, c, depth }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [repliesShown, setRepliesShown] = useState(false);
   const [replyText, setReplyText] = useState("");
@@ -729,7 +730,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
   return (
     <div className={comment.pending ? "opacity-60" : "comment-pop-in"}>
       <CommentRow comment={comment} league={league} session={session} canComment={canComment}
-        onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
+        onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
         onReplyClick={canReply ? () => setReplyOpen((v) => !v) : null} />
 
       {children.length > 0 && (
@@ -745,7 +746,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
         <div className="mt-2 space-y-2 pl-3 border-l" style={{ marginLeft: indent, borderColor: c.border }}>
           {children.map((r) => (
             <CommentNode key={r.id} comment={r} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -817,7 +818,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
 // go (fast un-react, same as the old single-emoji like). To switch to a
 // different emoji, remove yours first, then pick again — keeps the whole
 // thing usable with touch, not just hover.
-function CommentRow({ comment: cm, league, session, canComment, onDelete, onToggleReaction, onReplyClick, c, isReply = false }) {
+function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit, canEditResults = false, onToggleReaction, onReplyClick, c, isReply = false }) {
   const isOwn = session && cm.user_id === session.user.id;
   const isManager = cm.user_id === league.created_by;
   const realReactions = cm.comment_likes || [];
@@ -829,6 +830,23 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
   const [popKey, setPopKey] = useState(0);
   const [photoRevealed, setPhotoRevealed] = useState(false);
   const pickerRef = useRef(null);
+
+  // Admin-only correction for a posted result line — only offered on the
+  // actual auto-posted scoreline row itself (not on chat replies underneath
+  // it), and only from the Results tab (canEditResults).
+  const canEditThis = canEditResults && !cm.pending && isResultComment(cm.body, cm.is_result);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(cm.body || "");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const startEdit = () => { setEditText(cm.body || ""); setEditing(true); };
+  const saveEdit = async () => {
+    const trimmed = editText.trim();
+    if (!trimmed || savingEdit) return;
+    setSavingEdit(true);
+    const ok = await onEdit(cm, league, trimmed);
+    setSavingEdit(false);
+    if (ok) setEditing(false);
+  };
 
   const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
   useEffect(() => {
@@ -906,6 +924,12 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
                 <Volume2 size={11} />
               </button>
             )}
+            {canEditThis && !editing && (
+              <button onClick={startEdit} title="Edit result"
+                className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
+                <Pencil size={11} />
+              </button>
+            )}
             {!cm.pending && (isOwn || canComment) && (
               <button onClick={() => onDelete(cm, league)} title="Delete"
                 className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
@@ -914,7 +938,27 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onTogg
             )}
           </div>
         </div>
-        {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
+        {editing ? (
+          <div className="mt-1.5">
+            <textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={2} autoFocus
+              className="w-full rounded-lg px-2.5 py-1.5 font-body text-sm outline-none resize-none"
+              style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+            <div className="flex items-center gap-2 mt-1.5">
+              <button onClick={saveEdit} disabled={savingEdit || !editText.trim()}
+                className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || !editText.trim()) ? 0.5 : 1 }}>
+                {savingEdit ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => setEditing(false)} disabled={savingEdit}
+                className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: c.surfaceHover, color: c.textDim }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>
+        )}
         {cm.photo_url && (
           isResultComment(cm.body, cm.is_result) && !photoRevealed ? (
             <button onClick={() => setPhotoRevealed(true)} title="Tap to view the scoreboard photo"

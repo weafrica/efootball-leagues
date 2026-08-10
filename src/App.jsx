@@ -5028,6 +5028,21 @@ export default function App() {
     return true;
   };
 
+  // Admin-only correction for a posted result line (Results tab) — edits the
+  // comment's text in place. This does NOT touch the fixture's home_score/
+  // away_score or recompute standings/knockout progress; it only fixes what's
+  // displayed in the results history. If the actual match score was wrong,
+  // that still needs correcting separately via the Fixtures tab.
+  const editComment = async (comment, league, newBody) => {
+    const trimmed = newBody.trim();
+    if (!trimmed) return false;
+    const { error } = await supabase.from("comments").update({ body: trimmed }).eq("id", comment.id);
+    if (error) { showToast(`Couldn't update result: ${error.message}`); return false; }
+    await refreshLeague(league.id);
+    showToast("Result updated.");
+    return true;
+  };
+
   const deleteComment = (comment, league) => {
     const replyCount = (league?.comments || []).filter((c) => c.parent_comment_id === comment.id).length;
     const noun = comment.parent_comment_id ? "reply" : replyCount > 0 ? `comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "comment";
@@ -5224,7 +5239,7 @@ export default function App() {
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
                 onRespondToResultSubmission={respondToResultSubmission}
-                onPostComment={postComment} onDeleteComment={deleteComment} onToggleReaction={toggleCommentReaction}
+                onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onToggleReaction={toggleCommentReaction}
                 onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} c={c} />
               </Suspense>
             )}
