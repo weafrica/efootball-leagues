@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import {
   ChallengeBoard, ChallengeChatModal, ChallengeRow, LADDER_THEME, Loader,
-  RulesButton, ShareRangeModal, timeAgo,
+  MemberAvatar, PlayerProfileModal, RulesButton, ShareRangeModal, timeAgo,
 } from "./App.jsx";
 
 const RulesModal = lazy(() => import("./Rules.jsx"));
@@ -37,12 +37,23 @@ const SHARE_LADDER_COLUMNS = [
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
 export default function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
-  challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast }) {
+  challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, memberAvatars, myAvatarUrl }) {
   const c = LADDER_THEME; // the Ladder always renders in its own black/gold/red look, not the app's normal theme
   const [rulesOpen, setRulesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
+  const [profileRow, setProfileRow] = useState(null); // the ladder row currently shown in PlayerProfileModal, or null
+  // Same platform-wide roster (and same "layer my own photo in separately"
+  // trick) the Leaderboard uses — reused here purely as a lookup so tapping
+  // a ladder row can show a real photo without this screen fetching
+  // anything of its own.
+  const avatarByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, m.avatar_url || null); });
+    if (session && myAvatarUrl) map.set(session.user.id, myAvatarUrl);
+    return map;
+  }, [memberAvatars, session, myAvatarUrl]);
   // How many rows of "#11 and below" are actually rendered — the ladder has
   // no cap on membership (it's the permanent, ever-growing one), so with
   // hundreds of players this was putting every single row (and every
@@ -80,7 +91,8 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
     const canChallenge = targetIds.has(row.user_id);
     const rankIdx = row.rank_position - 1;
     return (
-      <div key={row.user_id} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
+      <div key={row.user_id} role="button" tabIndex={0} onClick={() => setProfileRow(row)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(row); }}
+        className="flex items-center gap-3 rounded-lg px-4 py-2.5 cursor-pointer"
         style={{ background: isMe ? c.surfaceHover : c.surface, border: isMe ? `1px solid ${c.accent}` : "1px solid transparent" }}>
         {rankIdx >= 0 && rankIdx < 3 ? (
           <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[rankIdx]}22`, border: `1px solid ${rankColors[rankIdx]}66` }}>
@@ -89,9 +101,7 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
         ) : (
           <span className="w-7 h-7 text-center font-mono text-xs shrink-0 flex items-center justify-center" style={{ color: c.textFaint }}>#{row.rank_position}</span>
         )}
-        <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
-          {row.username?.[0]?.toUpperCase() || "?"}
-        </div>
+        <MemberAvatar url={avatarByUserId.get(row.user_id)} username={row.username} size={28} c={c} />
         <div className="min-w-0 flex-1">
           <div className="font-body text-sm truncate flex items-center gap-1.5">
             {row.username}{isMe ? " (you)" : ""}
@@ -102,7 +112,7 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
           <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</div>
         </div>
         {canChallenge && (
-          <button onClick={onOpenChallenge} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+          <button onClick={(e) => { e.stopPropagation(); onOpenChallenge(); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
             Challenge
           </button>
         )}
@@ -209,7 +219,8 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
               const canChallenge = targetIds.has(r.user_id);
               const rankIdx = r.rank_position - 1;
               return (
-                <div key={r.user_id} className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2"
+                <div key={r.user_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
+                  className="flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 cursor-pointer"
                   style={{
                     background: rankIdx === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
                     border: `1px solid ${isMe ? c.accent : rankIdx === 0 ? c.accent + "55" : c.border}`,
@@ -228,7 +239,7 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
                     <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{r.points}pts · {r.wins}W–{r.losses}L</span>
                   </div>
                   {canChallenge && (
-                    <button onClick={onOpenChallenge} className="ml-1 font-body text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
+                    <button onClick={(e) => { e.stopPropagation(); onOpenChallenge(); }} className="ml-1 font-body text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
                       Challenge
                     </button>
                   )}
@@ -305,6 +316,22 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
       <ChallengeBoard session={session} comments={comments} isAdmin={isAdmin} myUsername={myUsername}
         onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleCommentReaction}
         heading="Ladder talk" emptyText="No comments yet — call someone out." c={c} />
+
+      {profileRow && (
+        <PlayerProfileModal
+          username={profileRow.username}
+          avatarUrl={avatarByUserId.get(profileRow.user_id)}
+          isMe={session && profileRow.user_id === session.user.id}
+          rank={profileRow.rank_position}
+          medal={profileRow.rank_position === 1 ? "🥇" : profileRow.rank_position === 2 ? "🥈" : profileRow.rank_position === 3 ? "🥉" : null}
+          stats={[
+            { label: "Points", value: profileRow.points },
+            { label: "W · D · L", value: `${profileRow.wins} · ${profileRow.draws} · ${profileRow.losses}` },
+          ]}
+          onClose={() => setProfileRow(null)}
+          c={c}
+        />
+      )}
     </div>
   );
 }

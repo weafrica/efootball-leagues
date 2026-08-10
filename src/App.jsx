@@ -5245,6 +5245,7 @@ export default function App() {
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onConfirmResult={confirmChallengeResult} onDisputeResult={disputeChallengeResult}
                 onViewResultProof={viewChallengeResultProof} showToast={showToast}
+                memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url}
                 c={c} />
               </Suspense>
             )}
@@ -6658,6 +6659,43 @@ export function MemberAvatar({ url, username, size = 32, c }) {
     <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
       style={{ width: size, height: size, background: avatarColor(username || "?"), color: "#fff", fontSize: size * 0.4 }}>
       {(username || "?")[0]?.toUpperCase()}
+    </div>
+  );
+}
+
+// A simple read-only popup showing one player's photo and stats — reused by
+// the Leaderboard and Ladder screens so tapping any row (not just your own)
+// shows who they are and how they're doing. `stats` is a plain list of
+// {label, value} pairs the caller has already computed, so this component
+// stays completely agnostic to whether it's showing leaderboard fields
+// (W/D/L, goals) or ladder fields (points, rank) — no extra data fetching
+// happens here, it only ever renders what's already in memory (the same
+// row object the list itself was built from), so opening it costs nothing
+// beyond the avatar image, which already goes through MemberAvatar's
+// egress-safe proxying.
+export function PlayerProfileModal({ username, avatarUrl, rank, medal, isMe, stats, onClose, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-end">
+          <button aria-label="Close" onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
+        </div>
+        <div className="flex flex-col items-center text-center -mt-2 mb-4">
+          <div className="mb-2"><MemberAvatar url={avatarUrl} username={username} size={72} c={c} /></div>
+          <div className="font-extrabold text-lg leading-tight">{username}{isMe ? " (you)" : ""}</div>
+          {rank != null && (
+            <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{medal ? `${medal} ` : ""}Rank #{rank}</div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {stats.map((s) => (
+            <div key={s.label} className="rounded-xl px-3 py-2.5 text-center" style={{ background: c.surface }}>
+              <div className="font-mono text-base font-bold">{s.value}</div>
+              <div className="font-mono text-[10px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

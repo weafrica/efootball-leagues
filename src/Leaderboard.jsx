@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ArrowLeft, Trophy, Search, History, ChevronDown, Check } from "lucide-react";
 import {
-  fmtDate, MemberAvatar, fixturePlayedDate, seasonAnchor, seasonBounds,
+  fmtDate, MemberAvatar, PlayerProfileModal, fixturePlayedDate, seasonAnchor, seasonBounds,
   currentSeason, computeGlobalLeaderboard, goalExtremes, rankLeaderboard,
   GoalExtremesBar, LEADERBOARD_MIN_PLAYED_FOR_WINRATE,
 } from "./App.jsx";
@@ -133,6 +133,7 @@ function SeasonPicker({ value, seasons, anchor, cur, onChange, c }) {
 export default function Leaderboard({ leagues, session, memberAvatars, myAvatarUrl, onBack, embedded, c }) {
   const [metric, setMetric] = useState("wins");
   const [query, setQuery] = useState("");
+  const [profileRow, setProfileRow] = useState(null); // the ranked row currently shown in PlayerProfileModal, or null
   // memberAvatars is the same platform-wide roster the Challenges picker uses
   // (user_id + username + avatar_url) — reused here purely as a lookup so
   // ranked rows (keyed by user_id) can show a real photo instead of just an
@@ -173,7 +174,8 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
   const medal = (rank) => (rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null);
 
   const row = (r) => (
-    <div key={r.userId} className="flex items-center gap-3 rounded-lg px-4 py-2.5"
+    <div key={r.userId} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
+      className="flex items-center gap-3 rounded-lg px-4 py-2.5 cursor-pointer"
       style={{ background: session && r.userId === session.user.id ? c.surfaceHover : c.surface, border: session && r.userId === session.user.id ? `1px solid ${c.accent}` : "1px solid transparent" }}>
       <span className="w-6 text-center font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{medal(r.rank) || `#${r.rank}`}</span>
       <MemberAvatar url={r.userId ? avatarByUserId.get(r.userId) : null} username={r.name} size={28} c={c} />
@@ -261,6 +263,26 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
           </div>
         )}
       </div>
+
+      {profileRow && (
+        <PlayerProfileModal
+          username={profileRow.name}
+          avatarUrl={profileRow.userId ? avatarByUserId.get(profileRow.userId) : null}
+          isMe={session && profileRow.userId === session.user.id}
+          rank={profileRow.rank}
+          medal={medal(profileRow.rank)}
+          stats={[
+            { label: "Played", value: profileRow.p },
+            { label: "Win rate", value: `${Math.round(profileRow.winRate * 100)}%` },
+            { label: "W · D · L", value: `${profileRow.w} · ${profileRow.d} · ${profileRow.l}` },
+            { label: "Points", value: profileRow.pts },
+            { label: "Goals for", value: profileRow.gf },
+            { label: "Goal diff", value: `${profileRow.gd >= 0 ? "+" : ""}${profileRow.gd}` },
+          ]}
+          onClose={() => setProfileRow(null)}
+          c={c}
+        />
+      )}
     </div>
   );
 }
