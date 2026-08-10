@@ -17,6 +17,14 @@ const TermsPage = lazy(() => import("./Terms.jsx"));
 // lazy-loading it the same way keeps that text out of everyone else's
 // initial download.
 const RulesModal = lazy(() => import("./Rules.jsx"));
+// LeagueDetail is the biggest single screen in the app (standings, fixtures,
+// comments, payments, admin controls) and is only ever opened by a signed-in
+// user tapping into a specific league — never on the guest/login page — so
+// it's split out the same way.
+const LeagueDetail = lazy(() => import("./LeagueDetail.jsx"));
+// ChallengesScreen (community board + open/1-on-1 challenges + chat) is
+// similarly only opened by a signed-in user from the header menu.
+const ChallengesScreen = lazy(() => import("./ChallengesScreen.jsx"));
 import { pickBestVoice } from "./utils/pickBestVoice";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
@@ -31,7 +39,7 @@ import {
 const THEME_KEY = "efootball-theme-v1";
 const ACCENT_KEY = "efootball-accent-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_ROUND_PERIOD_HOURS = 48;
 // A two-legged (home & away) knockout tie always gets a fixed 4-day window
@@ -41,7 +49,7 @@ const DEFAULT_ROUND_PERIOD_HOURS = 48;
 // shorter (or longer) window than 4 days whenever a league's round period
 // was configured to something other than the 48-hour default, since that
 // setting was never meant to double as the two-legged tie window too.
-const KNOCKOUT_TIE_WINDOW_MS = 4 * ONE_DAY_MS;
+export const KNOCKOUT_TIE_WINDOW_MS = 4 * ONE_DAY_MS;
 // Older leagues created before this setting existed have no round_period_hours
 // column value — fall back to the original fixed 48-hour (2-day) gap so their
 // schedules don't shift.
@@ -233,7 +241,7 @@ const LADDER_THEME = {
 // round-robin-style league, so a club active in any one of them counts as
 // active for all of them (kind: "round_robin"). Knockout and groups_knockout
 // each get their own kind, so they only block against themselves.
-const FORMATS = [
+export const FORMATS = [
   { id: "single_round_robin", label: "Single Round Robin", kind: "round_robin", desc: "Every club plays every other club once.", available: true },
   { id: "double_round_robin", label: "Double Round Robin", kind: "round_robin", desc: "Home and away — every club plays every other club twice.", available: true },
   { id: "knockout", label: "Knockout", kind: "knockout", desc: "Single elimination. Lose and you're out.", available: true },
@@ -290,7 +298,7 @@ function blockingLeagueFor(activeByKind, league) {
 }
 
 // Letter labels for groups: Group A, Group B, ... Group Z, then AA, AB...
-function groupLabel(n) {
+export function groupLabel(n) {
   let s = "";
   let x = n;
   do { s = String.fromCharCode(65 + (x % 26)) + s; x = Math.floor(x / 26) - 1; } while (x >= 0);
@@ -392,7 +400,7 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 // round's real number (2, 3, 4...) gets used as the multiplier against
 // "now," pushing each new round's deadline further and further out instead
 // of the intended one-period gap from whenever it was actually generated.
-function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber, isWeekend = false) {
+export function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, dueBase, legs, periodMs = TWO_DAYS_MS, dueOffset = roundNumber, isWeekend = false) {
   const pairs = knockoutRound1(teamIds);
   const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
   if (isFinalRound) legs = 1;
@@ -477,7 +485,7 @@ function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, 
 // that tie becomes champion. Only the final ever needs penalties: every
 // earlier round instead lets both sides through when level on aggregate,
 // since there's always a next round to sort it out further either way.
-function isFinalRoundFixtures(roundFixtures) {
+export function isFinalRoundFixtures(roundFixtures) {
   const ties = new Set();
   let hasBye = false;
   roundFixtures.forEach((f) => {
@@ -489,7 +497,7 @@ function isFinalRoundFixtures(roundFixtures) {
 
 // Same check, scoped down to whichever tie a single fixture belongs to —
 // used by result-entry UI to decide whether to offer a penalty score field.
-function isFinalFixture(fixture, league) {
+export function isFinalFixture(fixture, league) {
   if (!fixture || fixture.away_team_id === null) return false;
   const roundFixtures = (league.fixtures || []).filter((f) => f.stage === fixture.stage && f.round === fixture.round);
   return isFinalRoundFixtures(roundFixtures);
@@ -528,7 +536,7 @@ async function insertChunked(table, rows, showToast) {
   return true;
 }
 
-function isExpired(fixture) {
+export function isExpired(fixture) {
   return !fixture.played && !!fixture.due_at && new Date(fixture.due_at) < new Date();
 }
 
@@ -547,7 +555,7 @@ function isGroupStageFixture(fixture, league) {
 // loss. The real cutoff is the whole group's shared due date the admin sets
 // on the league (league.group_stage_due_at), since group results all need
 // to be in before the group as a whole can be finalized.
-function isFixtureLocked(fixture, league) {
+export function isFixtureLocked(fixture, league) {
   if (fixture.played) return false;
   if (isGroupStageFixture(fixture, league)) {
     return !!league.group_stage_due_at && new Date(league.group_stage_due_at) < new Date();
@@ -606,7 +614,7 @@ function findNoShowTeamIds(league) {
 // Earliest not-yet-played, fully-paired fixture for a given team (used for
 // the "next fixture" status message). Sorted by due date first so a fixture
 // with no due date yet falls back to round order.
-function nextFixtureForTeam(league, teamId) {
+export function nextFixtureForTeam(league, teamId) {
   return (league.fixtures || [])
     .filter((f) => !f.played && !isFixtureLocked(f, league) && f.away_team_id !== null && (f.home_team_id === teamId || f.away_team_id === teamId))
     .sort((a, b) => {
@@ -640,7 +648,7 @@ function nextFixtureForLeague(league) {
 // reuse the spotlight's extra "still has matches due this weekend" reach —
 // that's about what stays visible in the spotlight card, not about which
 // league a fixture's confirmation window belongs to.
-function isWeekendLeague(league, now = new Date()) {
+export function isWeekendLeague(league, now = new Date()) {
   if (!league || !league.created_by_admin || !league.starts_at) return false;
   const [start, end] = weekendWindow(now);
   const startsAtDate = new Date(league.starts_at);
@@ -654,9 +662,9 @@ function isWeekendLeague(league, now = new Date()) {
 // These three helpers are the single source of truth for that window so the
 // opponent panel's countdown and the admin panel's visibility can't drift
 // out of sync.
-const RESULT_CONFIRM_WINDOW_MINUTES = 30;
-const WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES = 10;
-function resultConfirmDeadline(submission, league) {
+export const RESULT_CONFIRM_WINDOW_MINUTES = 30;
+export const WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES = 10;
+export function resultConfirmDeadline(submission, league) {
   const minutes = isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES;
   return new Date(new Date(submission.created_at).getTime() + minutes * 60 * 1000);
 }
@@ -677,11 +685,11 @@ function resultConfirmMinutesLeft(submission, league) {
 function challengeResultConfirmDeadline(ch) {
   return new Date(new Date(ch.result_reported_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
 }
-function challengeResultConfirmExpired(ch) {
+export function challengeResultConfirmExpired(ch) {
   if (!ch.result_reported_at) return false;
   return Date.now() >= challengeResultConfirmDeadline(ch).getTime();
 }
-function challengeResultMinutesLeft(ch) {
+export function challengeResultMinutesLeft(ch) {
   if (!ch.result_reported_at) return null;
   const ms = challengeResultConfirmDeadline(ch).getTime() - Date.now();
   return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
@@ -701,7 +709,7 @@ function priorRejectedCount(league, submission) {
 // null = not escalated yet (opponent's turn); "timeout" = the 30-minute
 // window passed; "dispute-cap" = this fixture's been disputed too many times
 // already.
-function resultEscalationReason(league, submission) {
+export function resultEscalationReason(league, submission) {
   if (priorRejectedCount(league, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
   if (resultConfirmExpired(submission, league)) return "timeout";
   return null;
@@ -1285,7 +1293,7 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
 // this fixture. This is a standings-table penalty only, not a real
 // scoreline — the fixture itself stays unplayed/scoreless in the database;
 // isExpired just tells computeStandings to treat it this way live.
-function computeStandings(teams, fixtures, league) {
+export function computeStandings(teams, fixtures, league) {
   const table = {};
   teams.forEach((t) => { table[t.id] = { id: t.id, name: t.name, eliminated: t.eliminated, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
   fixtures.forEach((f) => {
@@ -1705,7 +1713,7 @@ function memberBalance(league, member) {
 // that column, so this also recognises the scoreline shape it writes
 // ("Home 2 – 1 Away") as a fallback, keeping older/DB-side result posts grouped
 // correctly even before that function is updated to set the flag itself.
-function isResultComment(body, isResultFlag) {
+export function isResultComment(body, isResultFlag) {
   if (isResultFlag) return true;
   if (!body) return false;
   if (body.includes("approved result —") || body.includes("result was rejected —")) return true;
@@ -1717,7 +1725,7 @@ function isResultComment(body, isResultFlag) {
 // root. A reply inherits its root's bucket even if the reply text itself
 // doesn't look like a scoreline, so a whole results thread (and its chatter)
 // stays together under the Table tab, separate from general discussion.
-function splitCommentsByRoot(comments) {
+export function splitCommentsByRoot(comments) {
   const byId = new Map(comments.map((cm) => [cm.id, cm]));
   const results = [];
   const regular = [];
@@ -1740,7 +1748,7 @@ function splitCommentsByRoot(comments) {
 // fixture's other team_id -> that team's member row -> its user_id. Returns
 // null if any link is missing (spectator submitted it, team unclaimed, etc.),
 // in which case only an admin override applies.
-function findSubmissionOpponentId(league, submission) {
+export function findSubmissionOpponentId(league, submission) {
   const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
   if (!fixture) return null;
   const submitterMember = (league.members || []).find((m) => m.user_id === submission.submitted_by);
@@ -1756,7 +1764,7 @@ function findSubmissionOpponentId(league, submission) {
 // device timezone — so every player and admin sees the exact same time for
 // a fixture regardless of what timezone their phone/browser happens to be
 // set to. This league runs on SAST, not "whatever device opened the app."
-function fmtDate(iso) {
+export function fmtDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
 }
@@ -1849,7 +1857,7 @@ function toDatetimeLocalValue(iso) {
 // Short relative timestamp for comments/replies — falls back to the full
 // date once something's more than a week old, where "how many days ago"
 // stops being useful and the actual date is what you want.
-function timeAgo(iso) {
+export function timeAgo(iso) {
   if (!iso) return "";
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -1871,14 +1879,14 @@ const AVATAR_HUES = [142, 168, 25, 45, 200, 280, 340, 10];
 // hits 0 nothing resolves it automatically — it just becomes visible in the
 // admin queue (see escalatedLadderAccepts) for an admin to grant a walkover
 // or cancel the challenge.
-function ladderDaysLeft(fromISO, windowDays) {
+export function ladderDaysLeft(fromISO, windowDays) {
   if (!fromISO) return null;
   const deadline = new Date(fromISO).getTime() + windowDays * 24 * 60 * 60 * 1000;
   const ms = deadline - Date.now();
   if (ms <= 0) return 0;
   return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
 }
-function avatarColor(seed) {
+export function avatarColor(seed) {
   const s = seed || "?";
   let hash = 0;
   for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
@@ -1916,7 +1924,7 @@ function waLink(phone, text) {
 // (the "Up next" strip right at the top of the homepage). Later matchdays
 // skip this since by then they've already been there.
 const SITE_URL = "https://www.weafrica.co.za/";
-function firstMatchdayNote(round) {
+export function firstMatchdayNote(round) {
   if (round !== 1) return "";
   return `\n👆 Also, jump on ${SITE_URL} — you'll find your opponent right at the top of the homepage`;
 }
@@ -1927,7 +1935,7 @@ function firstMatchdayNote(round) {
 // iconOnly, renders as a plain round icon button and drops the text label —
 // used in fixtures where we show the WhatsApp entry point but not the raw
 // number itself.
-function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
+export function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
   const href = waLink(phone, text);
   if (!href) return null;
   if (iconOnly) {
@@ -1956,7 +1964,7 @@ function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
 // so the other person immediately knows to expect a call. From there the
 // person taps WhatsApp's own call icon. Renders nothing without a usable
 // number, same guard pattern as WhatsAppLink so the two can sit side-by-side.
-function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
+export function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
   const href = waLink(phone, text);
   if (!href) return null;
   if (iconOnly) {
@@ -2093,7 +2101,7 @@ function RefereeNotification({ data, c }) {
   );
 }
 
-function Loader({ c }) {
+export function Loader({ c }) {
   return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 rounded-full animate-spin" style={{ border: `2px solid ${c.green}`, borderTopColor: "transparent" }} />
@@ -2434,7 +2442,7 @@ const audioArbiter = {
   },
 };
 
-const commentSpeech = {
+export const commentSpeech = {
   speakingId: null,
   utterance: null,
   watchdog: null,
@@ -2485,7 +2493,7 @@ const commentSpeech = {
 
 // Returns the id of whichever comment is currently being read aloud (or
 // null), staying in sync across every comment row via commentSpeech above.
-function useCommentSpeakingId() {
+export function useCommentSpeakingId() {
   const [id, setId] = useState(commentSpeech.speakingId);
   useEffect(() => commentSpeech.subscribe(setId), []);
   return id;
@@ -2501,7 +2509,7 @@ const fmtDuration = (s) => {
 // own instance of this, same as they each get their own text/photo state —
 // nothing here is shared across composers, unlike commentSpeech/audioArbiter
 // above which coordinate *playback* across the whole app.
-function useVoiceRecorder() {
+export function useVoiceRecorder() {
   const [state, setState] = useState("idle"); // idle | recording | recorded | denied
   const [seconds, setSeconds] = useState(0);
   const [clip, setClip] = useState(null); // { blob, duration }
@@ -2577,7 +2585,7 @@ function useVoiceRecorder() {
 // Mic button for a comment composer: idle → tap to start recording → tap
 // again to stop. While recording it swaps to a small pulsing timer, mirroring
 // how the Camera attach button sits next to the textarea everywhere else.
-function VoiceRecorderButton({ recorder, c, size = 40, iconSize = 15 }) {
+export function VoiceRecorderButton({ recorder, c, size = 40, iconSize = 15 }) {
   const handleClick = () => {
     if (recorder.state === "recording") recorder.stop();
     else if (recorder.state === "idle" || recorder.state === "denied") recorder.start();
@@ -2605,7 +2613,7 @@ function VoiceRecorderButton({ recorder, c, size = 40, iconSize = 15 }) {
 // clip (object URL, still local) and for a posted comment's voice note
 // (public storage URL). Registers with audioArbiter so playing one stops
 // any read-aloud comment, or another voice note, that was already going.
-function VoiceNotePlayer({ url, duration, c, compact = false }) {
+export function VoiceNotePlayer({ url, duration, c, compact = false }) {
   const audioRef = useRef(null);
   const stopRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -2655,7 +2663,7 @@ function VoiceNotePlayer({ url, duration, c, compact = false }) {
 // Small pill button that opens a RulesModal — dropped in wherever a player
 // might want a quick reminder of how something works without leaving the
 // screen: on a league page, next to the ladder, and in the challenges hub.
-function RulesButton({ label, onClick, c }) {
+export function RulesButton({ label, onClick, c }) {
   return (
     <button onClick={onClick} className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}>
       <Info size={11} /> {label}
@@ -5192,6 +5200,7 @@ export default function App() {
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
         ) : view === "challenges" ? (
+          <Suspense fallback={<Loader c={c} />}>
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
             boardComments={boardComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
             onPostBoardComment={postBoardComment} onDeleteBoardComment={deleteBoardComment} onToggleBoardCommentReaction={toggleBoardCommentReaction}
@@ -5207,6 +5216,7 @@ export default function App() {
             onViewResultProof={viewChallengeResultProof}
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={goBack} showToast={showToast} c={c} />
+          </Suspense>
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (
@@ -5222,6 +5232,7 @@ export default function App() {
             )}
             {view === "create" && <CreateLeague onCancel={goBack} onCreate={createLeague} isAdmin={isAdmin} c={c} />}
             {view === "league" && activeLeague && (
+              <Suspense fallback={<Loader c={c} />}>
               <LeagueDetail league={activeLeague} session={session} isAdmin={isAdmin} joined={isMemberOf(activeLeague)}
                 myUsername={profile?.efootball_username || session.user.email}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
@@ -5238,6 +5249,7 @@ export default function App() {
                 onRespondToResultSubmission={respondToResultSubmission}
                 onPostComment={postComment} onDeleteComment={deleteComment} onToggleReaction={toggleCommentReaction}
                 onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} c={c} />
+              </Suspense>
             )}
             {view === "leaderboard" && (
               <Leaderboard leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack} c={c} />
@@ -6847,7 +6859,7 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
 
 // Small round avatar used on the Challenges screen — a photo if the member
 // has one, otherwise the same colored-initial fallback used for comments.
-function MemberAvatar({ url, username, size = 32, c }) {
+export function MemberAvatar({ url, username, size = 32, c }) {
   if (url) {
     // Every avatar in the app (comments, member lists, leaderboards,
     // challenges) renders through this one component, so this single
@@ -6868,1087 +6880,6 @@ function MemberAvatar({ url, username, size = 32, c }) {
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
-function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onAdminGrantLadderWalkover, onAdminCancelLadderChallenge, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
-  const [query, setQuery] = useState("");
-  const [sendingTo, setSendingTo] = useState(null);
-  const [sendingRandom, setSendingRandom] = useState(false);
-  const [resultsQuery, setResultsQuery] = useState("");
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
-
-  if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
-
-  const myId = session.user.id;
-  const activeUserIds = new Set(
-    challenges.filter((ch) => ch.status === "pending" || ch.status === "accepted")
-      .map((ch) => (ch.challenger_id === myId ? ch.opponent_id : ch.challenger_id))
-  );
-
-  const q = query.trim().toLowerCase();
-  const results = q ? members.filter((m) => (m.username || "").toLowerCase().includes(q)) : [];
-
-  const send = async (member) => {
-    setSendingTo(member.user_id);
-    await onSendChallenge(member);
-    setSendingTo(null);
-    setQuery("");
-  };
-
-  const sorted = [...challenges].sort((a, b) => {
-    const rank = (ch) => (ch.status === "pending" && ch.opponent_id === myId ? 0 : ch.status === "accepted" ? 1 : ch.status === "pending" ? 2 : 3);
-    return rank(a) - rank(b) || new Date(b.created_at) - new Date(a.created_at);
-  });
-
-  // My own broadcast still up for grabs, if I have one — only one at a time.
-  const myOpenBroadcast = (openChallenges || []).find((ch) => ch.creator_id === myId && ch.status === "open");
-  // Everyone else's open broadcasts, oldest-first exception aside — newest first, ready to grab.
-  const grabbable = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== myId);
-  // My own resolved broadcasts (sent or grabbed) worth keeping visible briefly.
-  const myResolvedOpen = (openChallenges || [])
-    .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-  // Admin-only: results whose 30-minute opponent-confirm window has passed without
-  // a response — these move here instead of staying stuck waiting forever.
-  const escalatedChallenges = isAdmin
-    ? challenges.filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
-    : [];
-  const escalatedOpenChallenges = isAdmin
-    ? (openChallenges || []).filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
-    : [];
-  // Admin-only: ladder challenges still pending after their 5-day accept
-  // window — these no longer auto-resolve as a walkover, so an admin picks
-  // between granting the walkover or cancelling the challenge.
-  const escalatedLadderAccepts = isAdmin
-    ? challenges.filter((ch) => ch.is_ladder && ch.status === "pending" && ladderDaysLeft(ch.created_at, 5) === 0)
-    : [];
-
-  const fireRandom = async () => {
-    setSendingRandom(true);
-    await onSendRandom();
-    setSendingRandom(false);
-  };
-
-  // Community results feed: last 100 confirmed results platform-wide. Filter
-  // client-side by username, and flag which rows involve the signed-in
-  // member so their own results stand out scrolling past everyone else's.
-  const rq = resultsQuery.trim().toLowerCase();
-  const filteredResults = (recentResults || []).filter((r) => {
-    if (!rq) return true;
-    return (r.player_one || "").toLowerCase().includes(rq) || (r.player_two || "").toLowerCase().includes(rq);
-  });
-  const resultsToday = (recentResults || []).filter((r) => {
-    const d = new Date(r.result_confirmed_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
-
-  return (
-    <div className="pt-6">
-      <div className="flex items-center gap-3 mb-6">
-        <button aria-label="Back" onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}><ArrowLeft size={16} /></button>
-        <h1 className="text-2xl font-extrabold uppercase tracking-tight flex-1">Challenges</h1>
-        <RulesButton label="Challenge Rules" onClick={() => setRulesOpen(true)} c={c} />
-      </div>
-      {rulesOpen && <Suspense fallback={null}><RulesModal type="challenge" onClose={() => setRulesOpen(false)} c={c} /></Suspense>}
-
-      {isAdmin && (escalatedChallenges.length > 0 || escalatedOpenChallenges.length > 0) && (
-        <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
-            <AlertTriangle size={13} /> Needs admin review — opponent didn't respond within the window
-          </div>
-          <div className="flex flex-col gap-2">
-            {escalatedChallenges.map((ch) => (
-              <AdminEscalatedResultRow key={`ch-${ch.id}`} nameA={ch.challenger_username} nameB={ch.opponent_username}
-                scoreA={ch.challenger_score} scoreB={ch.opponent_score} reportedByUsername={ch.result_reported_by === ch.challenger_id ? ch.challenger_username : ch.opponent_username}
-                onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
-            ))}
-            {escalatedOpenChallenges.map((ch) => (
-              <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
-                scoreA={ch.creator_score} scoreB={ch.accepted_by_score} reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
-                onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {isAdmin && escalatedLadderAccepts.length > 0 && (
-        <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
-            <AlertTriangle size={13} /> Needs admin review — not accepted within 5 days
-          </div>
-          <div className="flex flex-col gap-2">
-            {escalatedLadderAccepts.map((ch) => (
-              <AdminEscalatedLadderAcceptRow key={`la-${ch.id}`} challengerUsername={ch.challenger_username} opponentUsername={ch.opponent_username}
-                onGrantWalkover={() => onAdminGrantLadderWalkover(ch)} onCancel={() => onAdminCancelLadderChallenge(ch)} c={c} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Random challenge</div>
-        <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-          Fire one challenge open to every other player — whoever accepts it first gets it, then it's gone for everyone else.
-        </div>
-        {myOpenBroadcast ? (
-          <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: c.accent, color: c.accentText }}><Shuffle size={14} /></div>
-            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Waiting for someone to accept your open challenge…</div>
-            <button onClick={() => onCancelOpen(myOpenBroadcast)} title="Cancel" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        ) : (
-          <button onClick={fireRandom} disabled={sendingRandom}
-            className="w-full flex items-center justify-center gap-2 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-            style={{ background: c.accent, color: c.accentText, opacity: sendingRandom ? 0.6 : 1 }}>
-            <Shuffle size={15} /> {sendingRandom ? "Sending…" : "Send random challenge to everyone"}
-          </button>
-        )}
-      </div>
-
-      {grabbable.length > 0 && (
-        <>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Open challenges — grab one</div>
-          <div className="flex flex-col gap-2 mb-6">
-            {grabbable.map((ch) => <OpenChallengeRow key={ch.id} challenge={ch} onAccept={onAcceptOpen} c={c} />)}
-          </div>
-        </>
-      )}
-
-      {myResolvedOpen.length > 0 && (
-        <>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your random challenges</div>
-          <div className="flex flex-col gap-2 mb-6">
-            {myResolvedOpen.map((ch) => <ResolvedOpenChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onRemove={onRemoveOpen}
-              onOpenLogResult={onOpenLogResultOpen} onConfirmResult={onConfirmResultOpen} onDisputeResult={onDisputeResultOpen} onViewResultProof={onViewResultProof}
-              onOpenChat={setChatModal} c={c} />)}
-          </div>
-        </>
-      )}
-
-      <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Challenge someone</div>
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by eFootball username"
-            className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        </div>
-        {q && (
-          <div className="mt-2 max-h-56 overflow-y-auto flex flex-col gap-1.5">
-            {results.length === 0 && <div className="font-body text-xs py-2" style={{ color: c.textFaint }}>No members match "{query}".</div>}
-            {results.map((m) => {
-              const already = activeUserIds.has(m.user_id);
-              return (
-                <div key={m.user_id} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2" style={{ background: c.surfaceHover }}>
-                  <MemberAvatar url={m.avatar_url} username={m.username} size={30} c={c} />
-                  <div className="flex-1 min-w-0 font-body text-sm truncate">{m.username}</div>
-                  <button onClick={() => send(m)} disabled={already || sendingTo === m.user_id}
-                    className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
-                    style={already ? { background: c.surface, color: c.textFaint } : { background: c.accent, color: c.accentText, opacity: sendingTo === m.user_id ? 0.6 : 1 }}>
-                    {already ? "Already active" : sendingTo === m.user_id ? "Sending…" : "Challenge"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your challenges</div>
-      {sorted.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No challenges yet — search above for someone to challenge.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
-            onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof}
-            onOpenChat={setChatModal} c={c} />)}
-        </div>
-      )}
-
-      <div className="mt-8 flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-          <History size={12} /> Community results
-        </div>
-        {recentResults && recentResults.length > 0 && (
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-            {resultsToday > 0 ? `${resultsToday} today` : `${recentResults.length} shown`}
-          </div>
-        )}
-      </div>
-      <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-        The last 100 logged results across Matchday — direct and random challenges, everyone included.
-      </div>
-
-      {recentResults === null ? (
-        <Loader c={c} />
-      ) : recentResults.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No results logged yet — once someone logs a challenge score, it'll show up here for everyone.
-        </div>
-      ) : (
-        <>
-          <div className="relative mb-2.5">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-            <input value={resultsQuery} onChange={(e) => setResultsQuery(e.target.value)} placeholder="Filter by username"
-              className="w-full border rounded-lg pl-8 pr-3 py-1.5 font-body text-xs outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-          </div>
-          {filteredResults.length === 0 ? (
-            <div className="font-body text-xs py-2 text-center" style={{ color: c.textFaint }}>No results match "{resultsQuery}".</div>
-          ) : (
-            <div className="flex flex-col gap-1.5 max-h-[28rem] overflow-y-auto pr-0.5">
-              {filteredResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
-            </div>
-          )}
-        </>
-      )}
-
-      <ChallengeBoard session={session} comments={boardComments} isAdmin={isAdmin} myUsername={myUsername}
-        onPost={onPostBoardComment} onDelete={onDeleteBoardComment} onToggleReaction={onToggleBoardCommentReaction} c={c} />
-
-      {chatModal && (
-        <ChallengeChatModal challengeId={chatModal.challengeId} kind={chatModal.kind} myId={myId}
-          counterpartUsername={chatModal.counterpartUsername} onClose={() => setChatModal(null)} showToast={showToast} c={c} />
-      )}
-    </div>
-  );
-}
-
-// One row in the platform-wide "Community results" feed at the bottom of the
-// Challenges screen — every confirmed result from every member, not just the
-// signed-in member's own. Winner's name is bolded, loser's dimmed, draws
-// stay neutral; rows the signed-in member played in get a subtle highlight
-// so their own results are easy to spot scrolling past everyone else's.
-function CommunityResultRow({ result: r, myId, c }) {
-  const p1Wins = r.score_one > r.score_two;
-  const p2Wins = r.score_two > r.score_one;
-  const involvesMe = myId && (r.player_one_id === myId || r.player_two_id === myId);
-  const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
-
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}`, opacity: r.confirmed ? 1 : 0.75 }}>
-      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}>
-        {r.kind === "open" ? <Shuffle size={12} /> : <Trophy size={12} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm flex items-center gap-1.5 min-w-0">
-          <span className="truncate" style={nameStyle(p1Wins)}>{r.player_one}</span>
-          <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}–{r.score_two}</span>
-          <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
-        </div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const BOARD_PAGE_SIZE = 8;
-const BOARD_MAX_INDENT_DEPTH = 4;
-
-// A single platform-wide comment wall at the very bottom of the Challenges
-// screen — banter, callouts, "who's on tonight" — open to any signed-in
-// member regardless of which challenges they're personally involved in.
-// Threads nest to unlimited depth, same as the per-league comments system —
-// a reply can be replied to, and so on, with no cap on how many levels deep
-// a conversation under one root comment can go. Indentation stops growing
-// past a few levels purely for legibility on a phone; that's cosmetic only.
-function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c, heading = "Challenge board", emptyText = "No comments yet — say something to get things going." }) {
-  const [text, setText] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
-  const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
-  const voiceRecorder = useVoiceRecorder();
-  const textareaRef = useRef(null);
-  const source = comments || [];
-
-  useEffect(() => {
-    if (pending.length === 0) return;
-    setPending((prev) => prev.filter((p) => !source.some((real) =>
-      real.user_id === p.user_id && real.body === p.body && real.parent_comment_id === p.parent_comment_id
-      && Math.abs(new Date(real.created_at) - new Date(p.created_at)) < 15000
-    )));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
-
-  // Build the full reply tree (unlimited depth) from the flat list, same
-  // approach as the per-league comment thread: every comment becomes a node
-  // with a children array, parented by walking parent_comment_id.
-  const { roots, totalCount } = useMemo(() => {
-    const all = [...source, ...pending];
-    const byId = new Map(all.map((cm) => [cm.id, { ...cm, children: [] }]));
-    const topLevel = [];
-    for (const node of byId.values()) {
-      if (node.parent_comment_id && byId.has(node.parent_comment_id)) {
-        byId.get(node.parent_comment_id).children.push(node);
-      } else if (!node.parent_comment_id) {
-        topLevel.push(node);
-      }
-      // A reply whose parent isn't in byId (parent already deleted) falls
-      // back to top-level rather than vanishing.
-    }
-    const sortChildren = (node) => {
-      node.children.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      node.children.forEach(sortChildren);
-      return node;
-    };
-    topLevel.forEach(sortChildren);
-    const sortedRoots = [...topLevel].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return { roots: sortedRoots, totalCount: all.length };
-  }, [source, pending]);
-
-  const visibleRoots = roots.slice(0, visibleCount);
-  const hiddenCount = roots.length - visibleRoots.length;
-
-  const submit = async (parentComment = null, body = text, voiceClip = null) => {
-    const trimmed = body.trim();
-    if ((!trimmed && !voiceClip) || posting) return false;
-    setPosting(true);
-    const tempId = `temp-${Date.now()}`;
-    const optimistic = {
-      id: tempId, user_id: session.user.id, username: myUsername,
-      body: trimmed, created_at: new Date().toISOString(),
-      parent_comment_id: parentComment?.id || null,
-      voice_url: voiceClip ? URL.createObjectURL(voiceClip.blob) : null, voice_duration: voiceClip?.duration || null,
-      challenge_board_comment_likes: [], pending: true,
-    };
-    setPending((prev) => [...prev, optimistic]);
-    if (!parentComment) {
-      setText("");
-      voiceRecorder.discard();
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-    }
-    const ok = await onPost(trimmed, parentComment, voiceClip);
-    setPosting(false);
-    if (!ok) {
-      setPending((prev) => prev.filter((p) => p.id !== tempId));
-      if (!parentComment) { setText(trimmed); voiceRecorder.restore(voiceClip); }
-    }
-    return ok;
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(null, text, voiceRecorder.state === "recorded" ? voiceRecorder.clip : null); }
-  };
-
-  return (
-    <div className="mt-8 pt-6 border-t" style={{ borderColor: c.border }}>
-      <style>{`
-        @keyframes boardPopIn { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 1; transform: translateY(0); } }
-        .board-pop-in { animation: boardPopIn 0.22s ease-out; }
-        @keyframes boardReactPop { 0% { transform: scale(1); } 35% { transform: scale(1.4); } 100% { transform: scale(1); } }
-        .board-react-pop { animation: boardReactPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); display: inline-block; }
-        @keyframes boardPickerIn { 0% { opacity: 0; transform: scale(0.85) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
-        .board-reaction-picker { animation: boardPickerIn 0.12s ease-out; }
-        .board-textarea:focus { border-color: ${c.accent} !important; }
-        .board-reaction-emoji-btn:hover { transform: scale(1.3); }
-        @media (prefers-reduced-motion: reduce) {
-          .board-pop-in, .board-react-pop, .board-reaction-picker { animation: none; }
-          .board-reaction-emoji-btn:hover { transform: none; }
-        }
-      `}</style>
-
-      <div className="flex items-center gap-2 mb-3 font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
-        <MessageCircle size={13} /> {heading} {totalCount > 0 && `(${totalCount})`}
-      </div>
-
-      {comments === null ? (
-        <Loader c={c} />
-      ) : (
-        <>
-          {roots.length === 0 ? (
-            <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-              <MessageCircle size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
-              <div className="font-body text-sm">{emptyText}</div>
-            </div>
-          ) : (
-            <div className="space-y-2.5 mb-3">
-              {visibleRoots.map((cm) => (
-                <BoardCommentNode key={cm.id} comment={cm} session={session} isAdmin={isAdmin}
-                  onPost={submit} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={0} />
-              ))}
-            </div>
-          )}
-
-          {hiddenCount > 0 && (
-            <button onClick={() => setVisibleCount((v) => v + BOARD_PAGE_SIZE)}
-              className="mb-4 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors"
-              style={{ background: c.surface, color: c.textDim }}>
-              Show {Math.min(hiddenCount, BOARD_PAGE_SIZE)} more comment{Math.min(hiddenCount, BOARD_PAGE_SIZE) === 1 ? "" : "s"}
-            </button>
-          )}
-
-          {voiceRecorder.state === "recorded" && voiceRecorder.clip && (
-            <div className="flex items-center gap-2 mb-2 ml-10">
-              <VoiceNotePlayer url={URL.createObjectURL(voiceRecorder.clip.blob)} duration={voiceRecorder.clip.duration} c={c} compact />
-              <button onClick={voiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {voiceRecorder.state === "denied" && (
-            <div className="font-mono text-[10px] mb-2 ml-10" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
-              style={{ background: avatarColor(myUsername || "?"), color: "#fff" }}>
-              {(myUsername || "?")[0]?.toUpperCase()}
-            </div>
-            <textarea ref={textareaRef} value={text}
-              onChange={(e) => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
-              onKeyDown={onKeyDown}
-              placeholder="Say something…" rows={1} maxLength={1000}
-              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
-            <button onClick={() => submit(null, text, voiceRecorder.state === "recorded" ? voiceRecorder.clip : null)}
-              disabled={(!text.trim() && voiceRecorder.state !== "recorded") || posting}
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={(text.trim() || voiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Send size={15} />
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// A single comment on the challenge board, its reaction/reply row, and —
-// recursively — every reply underneath it, no matter how deep. Each node
-// owns its own "reply box open?" / "replies expanded?" state independently
-// of its siblings and ancestors, exactly like the per-league CommentNode.
-function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onToggleReaction, c, depth }) {
-  const isOwn = session && cm.user_id === session.user.id;
-  const realReactions = cm.challenge_board_comment_likes || [];
-  const children = cm.children || [];
-  const indent = Math.min(depth + 1, BOARD_MAX_INDENT_DEPTH) * 36;
-  const speakingId = useCommentSpeakingId();
-  const isSpeaking = speakingId === cm.id;
-
-  const [pendingReaction, setPendingReaction] = useState(undefined);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [popKey, setPopKey] = useState(0);
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [repliesShown, setRepliesShown] = useState(false);
-  const [replyText, setReplyText] = useState("");
-  const [replying, setReplying] = useState(false);
-  const replyVoiceRecorder = useVoiceRecorder();
-  const pickerRef = useRef(null);
-  const replyRef = useRef(null);
-
-  // A reply that's still in flight should already be visible under this
-  // thread, so expand it the moment the optimistic reply is queued rather
-  // than waiting for the round trip to finish.
-  useEffect(() => {
-    if (children.some((r) => r.pending)) setRepliesShown(true);
-  }, [children]);
-
-  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
-  useEffect(() => {
-    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
-  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const reactions = useMemo(() => {
-    if (pendingReaction === undefined) return realReactions;
-    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
-    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
-  }, [realReactions, pendingReaction, session]);
-
-  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
-  const summary = useMemo(() => {
-    const counts = new Map();
-    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [reactions]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
-  }, [pickerOpen]);
-
-  const react = async (emoji) => {
-    if (!session || cm.pending) return;
-    setPickerOpen(false);
-    setPendingReaction(emoji);
-    setPopKey((k) => k + 1);
-    const ok = await onToggleReaction(cm, emoji);
-    if (!ok) setPendingReaction(undefined);
-  };
-
-  const handleMainClick = async () => {
-    if (!session || cm.pending) return;
-    if (myReaction) {
-      setPendingReaction(null);
-      const ok = await onToggleReaction(cm, null);
-      if (!ok) setPendingReaction(undefined);
-    } else {
-      setPickerOpen((v) => !v);
-    }
-  };
-
-  const canReply = !!session && !cm.pending;
-
-  const submitReply = async () => {
-    const trimmed = replyText.trim();
-    const voiceClip = replyVoiceRecorder.state === "recorded" ? replyVoiceRecorder.clip : null;
-    if ((!trimmed && !voiceClip) || replying) return;
-    setReplying(true);
-    setReplyText("");
-    replyVoiceRecorder.discard();
-    setReplyOpen(false);
-    const ok = await onPost(cm, trimmed, voiceClip);
-    setReplying(false);
-    if (!ok) { setReplyText(trimmed); replyVoiceRecorder.restore(voiceClip); }
-  };
-
-  const onReplyKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(); }
-    if (e.key === "Escape") { setReplyOpen(false); setReplyText(""); }
-  };
-
-  return (
-    <div className={cm.pending ? "opacity-60" : "board-pop-in"}>
-      <div className="flex items-start gap-2.5 group" style={{ marginLeft: indent }}>
-        <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
-          style={{ background: avatarColor(cm.username), color: "#fff", width: 28, height: 28, fontSize: 12 }}>
-          {cm.username?.[0]?.toUpperCase() || "?"}
-        </div>
-        <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: isSpeaking ? c.surfaceHover : c.surface }}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
-                {cm.pending ? "sending…" : timeAgo(cm.created_at)}
-              </span>
-              {!cm.pending && cm.body && (
-                <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
-                  className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
-                  <Volume2 size={11} />
-                </button>
-              )}
-              {!cm.pending && (isOwn || isAdmin) && (
-                <button onClick={() => onDelete(cm)} title="Delete"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
-                  <Trash2 size={11} />
-                </button>
-              )}
-            </div>
-          </div>
-          {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
-          {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}
-          {!cm.pending && (
-            <div className="flex items-center gap-3 mt-1.5">
-              <div className="relative" ref={pickerRef}>
-                <button onClick={handleMainClick} disabled={!session}
-                  className="flex items-center gap-1 font-mono text-[10px] transition-colors"
-                  style={{ color: myReaction ? c.accent : c.textFaint }}>
-                  <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
-                    {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
-                  </span>
-                  {reactions.length > 0 && (
-                    <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-                  )}
-                </button>
-
-                {pickerOpen && (
-                  <div className="board-reaction-picker absolute top-full left-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-                    style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-                    {REACTIONS.map((r) => (
-                      <button key={r.key} onClick={() => react(r.key)} title={r.key}
-                        className="board-reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-                        {r.emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {canReply && (
-                <button onClick={() => setReplyOpen((v) => !v)}
-                  className="font-mono text-[10px] uppercase tracking-wider transition-colors"
-                  style={{ color: c.textFaint }}>
-                  Reply
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {children.length > 0 && (
-        <button onClick={() => setRepliesShown((v) => !v)}
-          className="mt-1 font-mono text-[10px] uppercase tracking-wider flex items-center gap-1"
-          style={{ color: c.textFaint, marginLeft: indent + 38 }}>
-          <CornerDownRight size={11} />
-          {repliesShown ? "Hide" : "Show"} {children.length} repl{children.length === 1 ? "y" : "ies"}
-        </button>
-      )}
-
-      {repliesShown && (
-        <div className="mt-2 space-y-2">
-          {children.map((r) => (
-            <BoardCommentNode key={r.id} comment={r} session={session} isAdmin={isAdmin}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
-          ))}
-        </div>
-      )}
-
-      {replyOpen && (
-        <div className="mt-2" style={{ marginLeft: indent + 38 }}>
-          <div className="flex items-center gap-1.5 mb-1.5 font-mono text-[10px]" style={{ color: c.textFaint }}>
-            <CornerDownRight size={11} />
-            Replying to {cm.username}
-            <button onClick={() => { setReplyOpen(false); setReplyText(""); }} className="ml-0.5" style={{ color: c.textFaint }}>
-              <X size={11} />
-            </button>
-          </div>
-          {replyVoiceRecorder.state === "recorded" && replyVoiceRecorder.clip && (
-            <div className="flex items-center gap-2 mb-1.5">
-              <VoiceNotePlayer url={URL.createObjectURL(replyVoiceRecorder.clip.blob)} duration={replyVoiceRecorder.clip.duration} c={c} compact />
-              <button onClick={replyVoiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {replyVoiceRecorder.state === "denied" && (
-            <div className="font-mono text-[10px] mb-1.5" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <textarea ref={replyRef} value={replyText}
-              onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
-              onKeyDown={onReplyKeyDown}
-              placeholder={`Reply to ${cm.username}…`} rows={1} maxLength={1000} autoFocus
-              className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
-            <button aria-label="Send reply" onClick={submitReply} disabled={(!replyText.trim() && replyVoiceRecorder.state !== "recorded") || replying}
-              className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={(replyText.trim() || replyVoiceRecorder.state === "recorded") && !replying ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Send size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One grabbable row in the open-challenge pool — anyone but the creator can
-// accept it. The accept button locally disables itself the instant it's
-// tapped so a slow network round-trip can't look like nothing happened,
-// and the row simply vanishes (via the next reload) once it's taken.
-function OpenChallengeRow({ challenge: ch, onAccept, c }) {
-  const [accepting, setAccepting] = useState(false);
-  const accept = async () => {
-    setAccepting(true);
-    await onAccept(ch);
-    setAccepting(false);
-  };
-  return (
-    <div className="rounded-xl p-3.5 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <MemberAvatar url={null} username={ch.creator_username} size={34} c={c} />
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{ch.creator_username}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Open to anyone — first to accept wins it</div>
-      </div>
-      <button onClick={accept} disabled={accepting}
-        className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
-        style={{ background: c.accent, color: c.accentText, opacity: accepting ? 0.6 : 1 }}>
-        {accepting ? "Accepting…" : "Accept"}
-      </button>
-    </div>
-  );
-}
-
-// A resolved (accepted/cancelled) broadcast, shown to whichever side is
-// looking at it — the creator or whoever grabbed it.
-function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
-  const [resolving, setResolving] = useState(false);
-  const iAmCreator = ch.creator_id === myId;
-  const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
-  const counterpartPhone = iAmCreator ? ch.accepted_by_phone : ch.creator_phone;
-
-  // Scores are stored from the creator's perspective — flip for display when
-  // the signed-in member is the one who accepted it.
-  const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
-  const theirScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
-  const iReported = ch.result_reported_by === myId;
-
-  const resolve = async (fn) => {
-    setResolving(true);
-    await fn(ch);
-    setResolving(false);
-  };
-
-  return (
-    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex items-center gap-3">
-        <MemberAvatar url={null} username={counterpartUsername || ch.creator_username} size={34} c={c} />
-        <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
-          {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
-              Final: you {myScore} – {theirScore} {counterpartUsername}
-              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
-            </div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
-              {iReported ? `Goes to admin in ${m}m if they don't respond` : `Confirm within ${m}m or it goes to admin`}
-            </div>
-          ); })()}
-          {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
-          )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-          {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
-        </div>
-        {ch.status === "accepted" && !ch.result_status && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
-            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        )}
-        {ch.status === "cancelled" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-      </div>
-      {ch.status === "accepted" && !ch.result_status && (
-        <button onClick={() => onOpenLogResult(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-          style={{ background: c.accent, color: c.accentText }}>
-          <Trophy size={14} /> Log result
-        </button>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && (
-        <button onClick={() => onViewResultProof(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
-          style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          <Camera size={13} /> View photo proof
-        </button>
-      )}
-    </div>
-  );
-}
-
-// A pending challenge/open-challenge result that's blown past its 30-minute
-// opponent-confirm window, shown to admins for a manual call — same
-// approve/reject choice the opponent would have had, just made by an admin
-// instead since the opponent didn't act in time.
-function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, onApprove, onReject, onViewProof, c }) {
-  const [busy, setBusy] = useState(false);
-  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
-  return (
-    <div className="rounded-lg p-3 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{nameA} {scoreA} – {scoreB} {nameB}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Reported by {reportedByUsername}</div>
-      </div>
-      <button onClick={onViewProof} title="View photo proof" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Camera size={14} /></button>
-      <button onClick={() => run(onApprove)} disabled={busy} title="Approve" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-      <button onClick={() => run(onReject)} disabled={busy} title="Reject" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-    </div>
-  );
-}
-
-// A ladder challenge whose 5-day accept window has passed with no response,
-// shown to admins for a manual call — either grant the challenger the
-// walkover (a nominal 3-0 win, same points/rank effect as any other
-// confirmed ladder win) or cancel the challenge outright with no ladder
-// effect on either side.
-function AdminEscalatedLadderAcceptRow({ challengerUsername, opponentUsername, onGrantWalkover, onCancel, c }) {
-  const [busy, setBusy] = useState(false);
-  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
-  return (
-    <div className="rounded-lg p-3 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{challengerUsername} challenged {opponentUsername}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Never accepted or declined</div>
-      </div>
-      <button onClick={() => run(onGrantWalkover)} disabled={busy} title={`Grant walkover to ${challengerUsername}`}
-        className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}>
-        Grant walkover
-      </button>
-      <button onClick={() => run(onCancel)} disabled={busy} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-    </div>
-  );
-}
-
-function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
-  const [responding, setResponding] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const iAmChallenger = ch.challenger_id === myId;
-  const counterpartUsername = iAmChallenger ? ch.opponent_username : ch.challenger_username;
-  const counterpartPhone = iAmChallenger ? ch.opponent_phone : ch.challenger_phone;
-
-  // Scores are stored from the challenger's perspective — flip them for
-  // display when the signed-in member is the opponent, so "my score" always
-  // reads on the left regardless of who challenged whom.
-  const myScore = iAmChallenger ? ch.challenger_score : ch.opponent_score;
-  const theirScore = iAmChallenger ? ch.opponent_score : ch.challenger_score;
-  const iReported = ch.result_reported_by === myId;
-
-  const respond = async (accept) => {
-    setResponding(true);
-    await (accept ? onAccept(ch) : onDecline(ch));
-    setResponding(false);
-  };
-
-  const resolve = async (fn) => {
-    setResolving(true);
-    await fn(ch);
-    setResolving(false);
-  };
-
-  return (
-    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex items-center gap-3">
-        <MemberAvatar url={null} username={counterpartUsername} size={34} c={c} />
-        <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
-            {counterpartUsername}
-            {ch.is_ladder && (
-              <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1" style={{ background: c.surfaceHover, color: c.textFaint }}>
-                <Swords size={9} /> Ladder
-              </span>
-            )}
-          </div>
-          {ch.status === "pending" && !iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Challenged you</div>}
-          {ch.status === "pending" && iAmChallenger && <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> Waiting for them to accept</div>}
-          {ch.status === "pending" && ch.is_ladder && (() => { const d = ladderDaysLeft(ch.created_at, 5); return d !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: d <= 2 ? c.red : c.textFaint }}>
-              {iAmChallenger ? `Goes to admin in ${d}d if they don't respond` : `Accept within ${d}d or it goes to admin for a walkover decision`}
-            </div>
-          ); })()}
-          {ch.status === "accepted" && ch.result_status === "confirmed" && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
-              Final: you {myScore} – {theirScore} {counterpartUsername}
-              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
-            </div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
-          )}
-          {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
-              {iReported ? `Goes to admin in ${m}m if they don't respond` : `Confirm within ${m}m or it goes to admin`}
-            </div>
-          ); })()}
-          {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
-          )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
-          {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
-          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover — admin closed it out" : "Expired — you didn't respond in time"}</div>}
-        </div>
-        {ch.status === "pending" && !iAmChallenger && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => respond(true)} disabled={responding} title="Accept" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => respond(false)} disabled={responding} title="Decline" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "pending" && iAmChallenger && (
-          <button onClick={() => onRemove(ch)} title="Cancel challenge" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-        )}
-        {ch.status === "accepted" && !ch.result_status && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
-            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => resolve(onConfirmResult)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => resolve(onDisputeResult)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
-          </div>
-        )}
-        {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
-        )}
-        {ch.status === "accepted" && ch.result_status === "expired" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-        {ch.status === "declined" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-        {ch.status === "expired" && (
-          <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
-        )}
-      </div>
-      {ch.status === "accepted" && !ch.result_status && (
-        <button onClick={() => onOpenLogResult(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
-          style={{ background: c.accent, color: c.accentText }}>
-          <Trophy size={14} /> Log result
-        </button>
-      )}
-      {ch.status === "accepted" && ch.result_status === "pending" && (
-        <button onClick={() => onViewResultProof(ch)}
-          className="w-full mt-3 flex items-center justify-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-lg border"
-          style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          <Camera size={13} /> View photo proof
-        </button>
-      )}
-    </div>
-  );
-}
-
-// Lets two people already matched — an accepted direct challenge or a
-// grabbed random challenge — message each other without leaving the site.
-// Backed by a small `challenge_messages` table (see
-// supabase/chat-migration.sql) plus Supabase Realtime, so new messages show
-// up live on both ends without a refresh. History loads once on open; the
-// realtime subscription only needs to carry what happens after that.
-function ChallengeChatModal({ challengeId, kind, myId, counterpartUsername, onClose, showToast, c }) {
-  const [messages, setMessages] = useState(null);
-  const [body, setBody] = useState("");
-  const [sending, setSending] = useState(false);
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const { data, error } = await supabase.from("challenge_messages")
-        .select("*")
-        .eq("challenge_id", challengeId)
-        .eq("challenge_kind", kind)
-        .order("created_at", { ascending: true });
-      if (!active) return;
-      if (error) {
-        console.error("Couldn't load chat:", error.message);
-        showToast?.(`Couldn't load chat: ${error.message}`);
-        setMessages([]);
-        return;
-      }
-      setMessages(data || []);
-    })();
-
-    // Live updates: postgres_changes filters can only match one column, so
-    // it's filtered by challenge_id here and challenge_kind is re-checked in
-    // the handler — direct and open challenges never actually share an id
-    // (both are uuids from separate tables) but this keeps it airtight.
-    const channel = supabase.channel(`challenge-chat-${kind}-${challengeId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "challenge_messages", filter: `challenge_id=eq.${challengeId}` },
-        (payload) => {
-          if (payload.new.challenge_kind !== kind) return;
-          setMessages((prev) => ((prev || []).some((m) => m.id === payload.new.id) ? prev : [...(prev || []), payload.new]));
-        })
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Chat realtime subscription failed:", status, err?.message);
-          showToast?.("Live chat updates aren't connecting — try reopening the chat.");
-        }
-      });
-
-    return () => { active = false; supabase.removeChannel(channel); };
-  }, [challengeId, kind]);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages]);
-
-  const send = async () => {
-    const text = body.trim();
-    if (!text || sending) return;
-    setSending(true);
-    setBody("");
-    const { error } = await supabase.from("challenge_messages").insert({
-      challenge_id: challengeId, challenge_kind: kind, sender_id: myId, body: text,
-    });
-    setSending(false);
-    if (error) {
-      console.error("Couldn't send message:", error.message);
-      showToast?.(`Couldn't send: ${error.message}`);
-      setBody(text); // send failed — put the draft back rather than lose it
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col" style={{ background: c.bg, border: `1px solid ${c.border}`, height: "min(80vh, 640px)" }}>
-        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: c.border }}>
-          <div className="flex items-center gap-2 min-w-0">
-            <MessageCircle size={18} style={{ color: c.accent }} />
-            <h2 className="text-lg font-extrabold uppercase tracking-tight truncate">{counterpartUsername || "Chat"}</h2>
-          </div>
-          <button aria-label="Close chat" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
-        </div>
-
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
-          {messages === null ? (
-            <Loader c={c} />
-          ) : messages.length === 0 ? (
-            <div className="font-body text-xs text-center mt-6" style={{ color: c.textFaint }}>Say hi — messages stay right here, no need to leave the site.</div>
-          ) : (
-            messages.map((m) => {
-              const mine = m.sender_id === myId;
-              return (
-                <div key={m.id} className="max-w-[80%] px-3 py-2 rounded-2xl font-body text-sm break-words"
-                  style={mine
-                    ? { background: c.accent, color: c.accentText, alignSelf: "flex-end" }
-                    : { background: c.surface, color: c.text, alignSelf: "flex-start" }}>
-                  {m.body}
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: c.border }}>
-          <input value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder="Message…" maxLength={1000}
-            className="flex-1 min-w-0 border rounded-full px-4 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-          <button onClick={send} disabled={!body.trim() || sending} title="Send"
-            className="w-9 h-9 flex items-center justify-center rounded-full shrink-0"
-            style={body.trim() ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-            <Send size={15} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCreate, grabbableCount }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -9662,7 +8593,7 @@ function leagueGoalExtremes(standings, league) {
   return goalExtremes(named);
 }
 
-function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, c }) {
+export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, c }) {
   const [query, setQuery] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const q = query.trim().toLowerCase();
@@ -9912,7 +8843,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
 
 // Full listing of every group-stage fixture, organized by group then matchday.
 // Small enough (unlike full round-robin leagues) that a plain list beats search.
-function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
+export function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
   const groupsCount = league.groups_count || 0;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);
 
@@ -9956,7 +8887,7 @@ function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getS
 
 // Full listing of every knockout-bracket fixture, organized by round. Legs of the
 // same tie (home & away) are grouped together with an aggregate score shown.
-function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, c }) {
+export function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, c }) {
   const rounds = {};
   bracketFixtures.forEach((f) => { (rounds[f.round] ||= []).push(f); });
   const roundNumbers = Object.keys(rounds).map(Number).sort((a, b) => a - b);
@@ -10049,7 +8980,7 @@ function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getS
   );
 }
 
-function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
+export function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
   const groupsCount = league.groups_count || 0;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);
 
@@ -10079,7 +9010,7 @@ function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
   );
 }
 
-function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
+export function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
 
@@ -10120,7 +9051,7 @@ function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
 // datetime-local inputs (same control CreateLeague uses) so plans can
 // change after the league already exists, without needing to delete and
 // recreate it. Mirrors LeagueDescriptionBlock's edit-in-place pattern.
-function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRoundPeriod, c }) {
+export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRoundPeriod, c }) {
   const [editing, setEditing] = useState(false);
   const [entryClosesAt, setEntryClosesAt] = useState(toDatetimeLocalValue(league.entry_closes_at));
   const [startsAt, setStartsAt] = useState(toDatetimeLocalValue(league.starts_at));
@@ -10213,7 +9144,7 @@ function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRound
 // matchday's own due_at stays purely advisory once this exists — it's still
 // shown on every fixture as a nudge, but this date is what actually decides
 // when unplayed matches get locked out and auto-scored as a no-show loss.
-function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, c }) {
+export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, c }) {
   const [editing, setEditing] = useState(false);
   const [dueAt, setDueAt] = useState(toDatetimeLocalValue(league.group_stage_due_at));
   const [saving, setSaving] = useState(false);
@@ -10271,7 +9202,7 @@ function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, c }) {
   );
 }
 
-function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription, descOpen, setDescOpen, c }) {
+export function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription, descOpen, setDescOpen, c }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(league.description || "");
   const [saving, setSaving] = useState(false);
@@ -10331,7 +9262,7 @@ function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDescription
 // template can still read as personal even though it's the same text for
 // everyone. Admin-only — this is an internal tool for whoever's sending
 // the nudges, not something the rest of the league needs to see.
-function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers, c }) {
+export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers, c }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(league.wa_message_template || "");
   const [saving, setSaving] = useState(false);
@@ -10430,7 +9361,7 @@ function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers
 // their photo proof, and Approve/Reject actions. Approving locks in the
 // fixture score and auto-posts a comment under the player's name (handled
 // server-side); rejecting just leaves the fixture open for a resubmission.
-function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
+export function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
   title = `${submissions.length} result${submissions.length === 1 ? "" : "s"} awaiting your review`,
   approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false, showEscalationReason = false }) {
   return (
@@ -10492,7 +9423,7 @@ function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, 
 // before kickoff it names the start date; once fixtures exist it switches
 // automatically to the next unplayed fixture's due date — the viewer's own
 // club's next game if they have one, otherwise the league's next game overall.
-function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
+export function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
   if (notStarted) {
     return (
       <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, color: c.textDim }}>
@@ -10527,7 +9458,7 @@ function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 // Rather than inventing filler text for that gap, such members fall back to
 // automated. Templates that don't reference {round} or {due} at all apply
 // unconditionally, to every member.
-function usesCustomMessage(t, league) {
+export function usesCustomMessage(t, league) {
   if (!league.wa_message_template) return false;
   const usesRoundOrDue = /\{round\}|\{due\}|\{start\}/.test(league.wa_message_template);
   if (!usesRoundOrDue) return true;
@@ -10638,7 +9569,7 @@ function adminStatusMessage(m, t, league) {
 // whoever sent it. Active for WA_REMINDER_WINDOW_MS after that timestamp,
 // regardless of fixtures, due dates, or elimination status — purely "was
 // this person messaged recently".
-function isWaReminderActive(m) {
+export function isWaReminderActive(m) {
   if (!m.wa_reminder_due_at) return false;
   return Date.now() - new Date(m.wa_reminder_due_at).getTime() < WA_REMINDER_WINDOW_MS;
 }
@@ -10654,7 +9585,7 @@ function useNow(intervalMs = 60000) {
   }, [intervalMs]);
 }
 
-function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
   useNow();
   const reminded = isWaReminderActive(m);
   return (
@@ -10724,7 +9655,7 @@ function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false
 // Contribution → direct prize → redistributed → total balance, for every
 // approved member, per the WeAfrica payout rule. Ranked live off current
 // standings, so it's a running projection until the league is complete.
-function PrizeBreakdownPanel({ league, c }) {
+export function PrizeBreakdownPanel({ league, c }) {
   const prizes = computeCashPrizes(league);
   const complete = league.fixtures.length > 0 && league.fixtures.every((f) => f.played);
   const rows = (league.members || [])
@@ -10790,7 +9721,7 @@ function PrizeBreakdownPanel({ league, c }) {
 // Kebab menu on the league page for admin/creator actions — keeps "Delete league"
 // tucked away behind a deliberate open-then-tap, rather than a bare trash icon
 // sitting next to the back button where it's easy to hit by accident.
-function LeagueMenu({ league, onShare, onDelete, c }) {
+export function LeagueMenu({ league, onShare, onDelete, c }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -10819,1562 +9750,6 @@ function LeagueMenu({ league, onShare, onDelete, c }) {
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
-  const [tab, setTab] = useState("table");
-  const [descOpen, setDescOpen] = useState(false);
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const isCreator = session && league.created_by === session.user.id;
-  const canManage = isCreator || isAdmin;
-  // Results (auto-posted scorelines/photo-proof rows) live under the Table
-  // tab; everything else stays under Fixtures as regular chat. Both are
-  // still just rows in `comments` — this only decides which panel shows them.
-  const { results: resultComments, regular: regularComments } = useMemo(
-    () => splitCommentsByRoot(league.comments || []), [league.comments]);
-  const myMembership = session ? league.members.find((m) => m.user_id === session.user.id) : null;
-  // Pending review takes priority over a stale rejected one; approved
-  // submissions don't matter here since the fixture itself flips to played.
-  const submissionForFixture = (fixtureId) => {
-    const subs = (league.result_submissions || []).filter((s) => s.fixture_id === fixtureId);
-    const pending = subs.find((s) => s.status === "pending");
-    if (pending) return pending;
-    return subs.filter((s) => s.status === "rejected").sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
-  };
-  const pendingResults = (league.result_submissions || []).filter((s) => s.status === "pending");
-  // The subset of those where the signed-in member is specifically the
-  // opponent (not the submitter, not an uninvolved member) — these get their
-  // own confirm/dispute panel, separate from the admin override panel below.
-  const myPendingResults = session
-    ? pendingResults.filter((s) => s.submitted_by !== session.user.id && findSubmissionOpponentId(league, s) === session.user.id)
-    : [];
-  // The opponent has 30 minutes to confirm or dispute a submission themselves
-  // (see resultConfirmDeadline) — unless this fixture has already burned
-  // through its dispute allowance (see resultEscalationReason), in which case
-  // it skips straight to the admin queue. Only once one of those two
-  // conditions is true does a submission escalate into the admin's override
-  // queue — before that, it's still the opponent's to act on, so admins see
-  // it as a heads-up only.
-  const escalatedResults = pendingResults.filter((s) => resultEscalationReason(league, s));
-  const awaitingOpponentResults = pendingResults.filter((s) => !resultEscalationReason(league, s));
-  const isKnockout = league.format === "knockout";
-  const isSurvivor = league.format === "survivor";
-  const isGroupsKnockout = league.format === "groups_knockout";
-  const inGroupStage = isGroupsKnockout && !league.final_stage_started;
-  const inKnockoutBracket = isKnockout || (isGroupsKnockout && league.final_stage_started);
-
-  const stageFixtures = (isSurvivor || isGroupsKnockout) ? league.fixtures.filter((f) => f.stage === league.current_stage) : league.fixtures;
-  const displayTeams = isSurvivor ? league.teams.filter((t) => !t.eliminated) : league.teams;
-  const standings = useMemo(() => computeStandings(displayTeams, stageFixtures, league), [displayTeams, stageFixtures, league]);
-  const totalRounds = Math.max(...stageFixtures.map((f) => f.round), 0);
-  const groupStageFixtures = isGroupsKnockout ? league.fixtures.filter((f) => f.stage === 1) : [];
-  const groupStageDone = groupStageFixtures.length > 0 && groupStageFixtures.every((f) => f.played || isFixtureLocked(f, league));
-
-  const n = standings.length;
-  const zoneFor = (idx) => {
-    if (idx === 0 && n > 4) return c.accent;
-    if (idx < Math.ceil(n / 3) && n > 6) return c.green;
-    if (idx >= n - Math.max(1, Math.floor(n / 4)) && n > 6) return c.red;
-    return "transparent";
-  };
-
-  const currentRoundFixtures = league.fixtures.filter((f) => f.round === totalRounds && (!(isSurvivor || isGroupsKnockout) || f.stage === league.current_stage));
-  const currentRoundDone = currentRoundFixtures.length > 0 && currentRoundFixtures.every((f) => f.played || isExpired(f));
-  const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
-
-  const activeTeamsCount = league.teams.filter((t) => !t.eliminated).length;
-  const knockoutChampion = inKnockoutBracket && stageDone && activeTeamsCount === 1 ? league.teams.find((t) => !t.eliminated) : null;
-  const survivorComplete = isSurvivor && league.final_stage_started && stageDone;
-  const survivorChampion = survivorComplete ? standings[0] : null;
-
-  const formatLabel = FORMATS.find((f) => f.id === league.format)?.label;
-  const notStarted = league.fixtures.length === 0;
-  const expiredCount = league.fixtures.filter((f) => isFixtureLocked(f, league)).length;
-
-  return (
-    <div className="pt-8">
-      <div className="flex items-center justify-between mb-5">
-        <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
-        <div className="flex items-center gap-2">
-          <RulesButton label="League Rules" onClick={() => setRulesOpen(true)} c={c} />
-          {canManage && (
-            <LeagueMenu league={league} onShare={onShare} onDelete={onDelete} c={c} />
-          )}
-          {!canManage && joined && (
-            <button onClick={() => onLeave(league)} title="Leave league" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.red }}><LogOut size={14} /></button>
-          )}
-        </div>
-      </div>
-
-      {rulesOpen && <Suspense fallback={null}><RulesModal type="league" onClose={() => setRulesOpen(false)} c={c} /></Suspense>}
-
-      <LeaguePhotoBanner league={league} canManage={canManage} onUpdatePhoto={onUpdatePhoto} c={c} />
-
-      <div className="flex items-start justify-between mb-5">
-        <div>
-          <h1 className="text-3xl font-extrabold uppercase tracking-tight leading-none flex items-center gap-2">
-            {league.name}
-            {league.league_type === "cash" && (
-              <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded align-middle" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>Cash</span>
-            )}
-          </h1>
-          <div className="font-mono text-xs mt-2" style={{ color: c.textFaint }}>
-            {formatLabel} · {league.teams.length} clubs · {league.members.length} member{league.members.length === 1 ? "" : "s"}
-          </div>
-          <LeagueScheduleLine league={league} canManage={canManage} onUpdateSchedule={onUpdateSchedule} onUpdateRoundPeriod={onUpdateRoundPeriod} c={c} />
-          {isGroupsKnockout && notStarted && (
-            <GroupStageDueLine league={league} canManage={canManage} onUpdateGroupStageDueAt={onUpdateGroupStageDueAt} c={c} />
-          )}
-        </div>
-        {!joined && !entryClosed && !blockedByLeague && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
-        {!joined && !entryClosed && blockedByLeague && (
-          <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
-            className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>
-            Locked · active in "{blockedByLeague.name}"
-          </span>
-        )}
-        {!joined && entryClosed && <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded shrink-0" style={{ background: c.redSoft, color: c.red }}>Entry closed</span>}
-        {joined && myPaymentStatus === "pending" && (
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}><Clock size={11} /> Payment pending</span>
-        )}
-        {joined && myPaymentStatus === "rejected" && (
-          <button onClick={() => onResubmitPayment(myMembership)} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-xs px-3 py-2 rounded-full" style={{ background: c.redSoft, color: c.red }}>
-            <XCircle size={13} /> Payment rejected — resubmit
-          </button>
-        )}
-      </div>
-
-      <LeagueReactionBar league={league} session={session} onToggle={onToggleLeagueReaction} c={c} />
-
-      {(league.description || canManage) && (
-        <LeagueDescriptionBlock league={league} canManage={canManage} joined={joined} onUpdateDescription={onUpdateDescription}
-          descOpen={descOpen} setDescOpen={setDescOpen} c={c} />
-      )}
-
-      <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />
-
-      {notStarted ? (
-        <div>
-          <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
-            <div className="font-body font-bold text-base mb-1">Registration open</div>
-            <div className="font-body text-sm mb-3" style={{ color: c.textDim }}>
-              {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered
-              {isSurvivor ? ` · needs 2+ to start, cuts to ${league.survivor_target_count} over time`
-                : isGroupsKnockout ? ` · needs at least 4 to form groups of ~${league.group_size || 4} (top ${league.group_qualifiers} from each group go through)`
-                : " · needs 2+ to start"}.
-              {" "}Players who join automatically register their eFootball username as their club — no need to list them upfront.
-            </div>
-            {canManage && (
-              <button disabled={league.teams.length < 2 || (isGroupsKnockout && league.teams.length < 4)} onClick={() => onGenerateFixtures(league)}
-                className="font-body text-sm font-semibold px-4 py-2.5 rounded-full"
-                style={(league.teams.length >= 2 && !(isGroupsKnockout && league.teams.length < 4)) ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-                Start league &amp; generate fixtures
-              </button>
-            )}
-          </div>
-          {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
-            <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
-              <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
-            </div>
-          )}
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
-          {league.teams.length === 0 ? (
-            <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {[...league.teams]
-                .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
-                .sort((a, b) => (a.m?.payment_status === "pending" ? -1 : 0) - (b.m?.payment_status === "pending" ? -1 : 0))
-                .map(({ t, m }) => (
-                m ? (
-                  <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
-                    isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                    onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
-                ) : (
-                  <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
-                    <span className="font-body text-sm flex-1">{t.name}</span>
-                    <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Not yet claimed</span>
-                    {canManage && (
-                      <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}>
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-                )
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-      <>
-      {knockoutChampion && (
-        <div className="rounded-xl p-4 mb-5 flex items-center gap-3" style={{ background: c.greenSoft }}>
-          <Crown size={20} style={{ color: c.accent }} />
-          <div><div className="font-body font-bold text-sm">{knockoutChampion.name} wins the league!</div><div className="font-body text-xs" style={{ color: c.textDim }}>Knockout complete.</div></div>
-        </div>
-      )}
-      {survivorChampion && (
-        <div className="rounded-xl p-4 mb-5 flex items-center gap-3" style={{ background: c.greenSoft }}>
-          <Crown size={20} style={{ color: c.accent }} />
-          <div><div className="font-body font-bold text-sm">{survivorChampion.name} wins the league!</div><div className="font-body text-xs" style={{ color: c.textDim }}>Survivor final stage complete.</div></div>
-        </div>
-      )}
-
-      {joined && myTeam && myTeam.eliminated && (
-        <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center justify-between gap-3 flex-wrap" style={{ background: c.redSoft, color: c.red }}>
-          <span>You have been eliminated — you can now join one of the available leagues.</span>
-          <button onClick={onBack} className="shrink-0 font-body font-semibold px-3 py-1.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
-            Browse leagues
-          </button>
-        </div>
-      )}
-
-      {expiredCount > 0 && (
-        <div className="rounded-xl p-3 mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.redSoft, color: c.red }}>
-          <Clock size={13} /> The 2-day deadline unplayed — both clubs recorded a loss and conceded 4 goals automatically.
-        </div>
-      )}
-
-      {myPendingResults.length > 0 && (
-        <PendingResultsPanel league={league} submissions={myPendingResults}
-          title={`${myPendingResults.length} result${myPendingResults.length === 1 ? "" : "s"} awaiting your confirmation`}
-          approveLabel="Confirm" rejectLabel="Dispute" showDeadline
-          onDownloadProof={onDownloadResultProof}
-          onApprove={(l, s) => onRespondToResultSubmission(l, s, true)}
-          onReject={(l, s) => onRespondToResultSubmission(l, s, false)} c={c} />
-      )}
-
-      {canManage && awaitingOpponentResults.length > 0 && (
-        <div className="rounded-xl p-4 border mb-5 font-body text-xs flex items-center gap-2" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
-          <Clock size={13} className="shrink-0" />
-          {awaitingOpponentResults.length} result{awaitingOpponentResults.length === 1 ? "" : "s"} still within the opponent's {isWeekendLeague(league) ? WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES : RESULT_CONFIRM_WINDOW_MINUTES}-minute confirmation window
-          {" — "}lands here for your review only if they don't respond in time.
-        </div>
-      )}
-
-      {canManage && escalatedResults.length > 0 && (
-        <PendingResultsPanel league={league} submissions={escalatedResults}
-          title={`${escalatedResults.length} result${escalatedResults.length === 1 ? "" : "s"} needing review — opponent didn't confirm in time or disputed it repeatedly`}
-          showEscalationReason
-          onDownloadProof={onDownloadResultProof} onApprove={onApproveResult} onReject={onRejectResult} c={c} />
-      )}
-
-      {isSurvivor && !survivorComplete && (
-        <div className="rounded-xl p-4 mb-5 border" style={{ background: c.surface, borderColor: c.border }}>
-          <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
-            {league.final_stage_started
-              ? `Final stage (${league.survivor_final_format === "double_round_robin" ? "double" : "single"} round robin) · ${activeTeamsCount} clubs · ${stageFixtures.filter((f) => f.played || isExpired(f)).length}/${stageFixtures.length} played`
-              : `Stage ${league.current_stage} · ${activeTeamsCount} clubs, ${league.survivor_matches_per_stage} matches each · ${stageFixtures.filter((f) => f.played || isExpired(f)).length}/${stageFixtures.length} played · bottom ${league.survivor_elimination_percent}% cut when complete`}
-          </div>
-          {canManage && !league.final_stage_started && (
-            <button disabled={!stageDone} onClick={() => onAdvance(league)}
-              className="font-body text-xs font-semibold px-3 py-2 rounded-full"
-              style={stageDone ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              {stageDone ? "Cut bottom % and start next stage" : "Waiting for all matches"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {isGroupsKnockout && inGroupStage && (
-        <div className="rounded-xl p-4 mb-5 border" style={{ background: c.surface, borderColor: c.border }}>
-          <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
-            Group stage · {league.groups_count} groups · {groupStageFixtures.filter((f) => f.played || isFixtureLocked(f, league)).length}/{groupStageFixtures.length} played · top {league.group_qualifiers} from each group advance
-          </div>
-          <GroupStageDueLine league={league} canManage={canManage} onUpdateGroupStageDueAt={onUpdateGroupStageDueAt} c={c} />
-          {canManage && (
-            <button disabled={!groupStageDone} onClick={() => onAdvance(league)}
-              className="font-body text-xs font-semibold px-3 py-2 rounded-full"
-              style={groupStageDone ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              {groupStageDone ? "Finalize groups & start knockout stage" : "Waiting for all group matches"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {canManage && inKnockoutBracket && !knockoutChampion && (
-        <div className="rounded-xl p-4 mb-5 border flex items-center justify-between gap-3" style={{ background: c.surface, borderColor: c.border }}>
-          <div className="font-body text-xs" style={{ color: c.textDim }}>
-            {currentRoundDone ? `Round ${totalRounds} complete — ready for the next round.` : `Round ${totalRounds} in progress: ${currentRoundFixtures.filter((f) => f.played || isExpired(f)).length}/${currentRoundFixtures.length} played.`}
-          </div>
-          <button disabled={!currentRoundDone} onClick={() => onAdvance(league)}
-            className="font-body text-xs font-semibold px-3 py-2 rounded-full shrink-0"
-            style={currentRoundDone ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-            Advance round
-          </button>
-        </div>
-      )}
-
-      <div className="flex gap-1 mb-5 rounded-full p-1 w-fit" style={{ background: c.surface }}>
-        {[{ id: "table", label: "Table", icon: Trophy }, { id: "fixtures", label: "Fixtures", icon: Calendar }, { id: "members", label: "Members", icon: Users }].map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-body text-xs font-semibold uppercase tracking-wide" style={tab === t.id ? { background: c.text, color: c.bg } : { color: c.textDim }}>
-            <t.icon size={13} /> {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "table" && (
-        <div>
-          {inGroupStage
-            ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} avatarByTeamId={avatarByTeamId} c={c} />
-            : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} avatarByTeamId={avatarByTeamId} c={c} />}
-          <CommentsSection league={league} session={session} canComment={joined || canManage}
-            comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
-            emptyText="No results posted yet — they'll show up here as matches are played."
-            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
-        </div>
-      )}
-
-      {tab === "fixtures" && (
-        <div className="space-y-6">
-          {inGroupStage && canManage && (
-            <GroupFixturesList league={league} groupStageFixtures={groupStageFixtures} canManage={canManage} joined={joined}
-              getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
-          )}
-          {(inGroupStage || inKnockoutBracket) && joined && !canManage && myTeam && (
-            <NextOpponentCard league={league} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
-          )}
-          <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
-            groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
-          {(joined || canManage) && (
-            <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
-              getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} c={c} />
-          )}
-          {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
-          {joined && !canSeePhones && (
-            <div className="rounded-xl p-4 border font-body text-xs" style={{ borderColor: c.borderStrong, color: c.textFaint }}>
-              Player contacts are hidden because your club has been eliminated from this league.
-            </div>
-          )}
-          <CommentsSection league={league} session={session} canComment={joined || canManage}
-            comments={regularComments} heading="Comments" allowCompose
-            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
-        </div>
-      )}
-
-      {tab === "members" && (
-        <div>
-          {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
-          {canManage && league.members.some((m) => isWaReminderActive(m)) && (
-            <div className="flex justify-end mb-2">
-              <button onClick={() => onClearAllWaReminders(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
-                <X size={11} /> Clear all highlights
-              </button>
-            </div>
-          )}
-          {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
-            <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
-              <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
-            </div>
-          )}
-          {league.members.length === 0 ? (
-            <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's joined yet.</div>
-          ) : (() => {
-            const sorted = [...league.members].sort((a, b) => (a.payment_status === "pending" ? -1 : 0) - (b.payment_status === "pending" ? -1 : 0));
-            const row = (m) => (
-              <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
-                isCash={league.league_type === "cash"} canManage={canManage}
-                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
-            );
-            // Only worth splitting into two lists once a custom template
-            // actually exists on the league — with none set, every member
-            // gets the automated message and a "Custom" list would just sit
-            // there empty. See usesCustomMessage: within one league some
-            // members can still land on automated (eliminated, or nothing
-            // left to play) even with a template active, which is exactly
-            // the split this surfaces.
-            if (!league.wa_message_template) {
-              return <div className="space-y-1.5">{sorted.map(row)}</div>;
-            }
-            const custom = sorted.filter((m) => usesCustomMessage(league.teams.find((t) => t.id === m.team_id), league));
-            const automated = sorted.filter((m) => !usesCustomMessage(league.teams.find((t) => t.id === m.team_id), league));
-            return (
-              <div className="space-y-5">
-                <div>
-                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
-                    Custom message ({custom.length})
-                  </div>
-                  {custom.length === 0 ? (
-                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members will get the custom message right now.</div>
-                  ) : (
-                    <div className="space-y-1.5">{custom.map(row)}</div>
-                  )}
-                </div>
-                <div>
-                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
-                    Automated message ({automated.length})
-                  </div>
-                  {automated.length === 0 ? (
-                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members are on the automated message right now.</div>
-                  ) : (
-                    <div className="space-y-1.5">{automated.map(row)}</div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-          {league.league_type === "cash" && league.members.some((m) => m.payment_status === "approved") && (
-            <PrizeBreakdownPanel league={league} c={c} />
-          )}
-        </div>
-      )}
-      </>
-      )}
-    </div>
-  );
-}
-
-// Shown on every league, whether it's still pending (open for registration,
-// notStarted) or already created and running — comments aren't gated by stage.
-// Reading is open to anyone who can open the league at all (visibility is
-// enforced by the leagues query itself); posting requires having joined or
-// having management rights, same as the rest of the league's tools.
-//
-// Posting and reacting are both optimistic: the UI reflects the action the
-// instant you take it, then quietly reconciles with the real row once the
-// reload completes. That round trip is normally invisible; on failure the
-// optimistic bit is rolled back and the existing error toast explains why.
-//
-// Threads nest to unlimited depth — a reply can be replied to, and so on.
-// Indentation stops growing past a few levels (deep threads would otherwise
-// squeeze down to nothing on a phone), but that's purely visual: every
-// comment at every depth still gets its own Reply button and its own count.
-const COMMENT_PAGE_SIZE = 6;
-const MAX_INDENT_DEPTH = 4;
-const REACTIONS = [
-  { key: "like", emoji: "👍" },
-  { key: "love", emoji: "❤️" },
-  { key: "laugh", emoji: "😂" },
-  { key: "fire", emoji: "🔥" },
-  { key: "wow", emoji: "😮" },
-  { key: "skull", emoji: "💀" },
-];
-const REACTION_EMOJI = Object.fromEntries(REACTIONS.map((r) => [r.key, r.emoji]));
-
-// A reaction bar for the league itself — same emoji-picker pattern as a
-// comment's reaction button, just scoped to league_reactions instead of
-// comment_likes. Open to anyone signed in (not gated by canComment/joined),
-// so the general public can react to a league without joining it.
-function LeagueReactionBar({ league, session, onToggle, c, compact = false }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pendingReaction, setPendingReaction] = useState(undefined);
-  const pickerRef = useRef(null);
-  const realReactions = league.league_reactions || [];
-
-  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
-  useEffect(() => {
-    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
-  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const reactions = useMemo(() => {
-    if (pendingReaction === undefined) return realReactions;
-    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
-    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
-  }, [realReactions, pendingReaction, session]);
-
-  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
-  const summary = useMemo(() => {
-    const counts = new Map();
-    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [reactions]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
-  }, [pickerOpen]);
-
-  const react = async (emoji) => {
-    if (!session) return;
-    setPickerOpen(false);
-    setPendingReaction(emoji);
-    const ok = await onToggle(league, emoji);
-    if (!ok) setPendingReaction(undefined);
-  };
-
-  const handleMainClick = async () => {
-    if (!session) return;
-    if (myReaction) {
-      setPendingReaction(null);
-      const ok = await onToggle(league, null);
-      if (!ok) setPendingReaction(undefined);
-    } else {
-      setPickerOpen((v) => !v);
-    }
-  };
-
-  // Reacting lives inside league cards on Home (so people can react before
-  // ever opening a league) as well as inside LeagueDetail — stopping
-  // propagation here keeps a tap on the reaction button from also
-  // triggering the card's onClick (which opens the league).
-  return (
-    <div className={compact ? "relative shrink-0" : "relative mb-5"} ref={pickerRef} onClick={(e) => e.stopPropagation()}>
-      <button onClick={handleMainClick} disabled={!session}
-        className={compact
-          ? "flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded-full transition-colors"
-          : "flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1.5 rounded-full transition-colors"}
-        style={{ background: c.surface, color: myReaction ? c.accent : c.textFaint }}>
-        <span style={{ fontSize: compact ? 12 : 13, lineHeight: 1 }}>{myReaction ? REACTION_EMOJI[myReaction] : "🤍"}</span>
-        {!compact && (myReaction ? "You reacted" : "React to this league")}
-        {reactions.length > 0 && (
-          <span>{compact ? "" : "· "}{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-        )}
-      </button>
-
-      {pickerOpen && (
-        <div className="reaction-picker absolute top-full right-0 mt-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-          style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-          {REACTIONS.map((r) => (
-            <button key={r.key} onClick={() => react(r.key)} title={r.key}
-              className="reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-              {r.emoji}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CommentsSection({ league, session, canComment, onPost, onDelete, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
-  const [text, setText] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count
-  const [visibleCount, setVisibleCount] = useState(COMMENT_PAGE_SIZE);
-  const [pending, setPending] = useState([]); // optimistic comments/replies, cleared once the real row lands
-  const [photo, setPhoto] = useState(null); // optional photo attached to the comment being composed
-  const voiceRecorder = useVoiceRecorder(); // optional voice note attached to the comment being composed
-  const [myResultsQuery, setMyResultsQuery] = useState("");
-  const textareaRef = useRef(null);
-  const photoInputRef = useRef(null);
-  const sourceComments = comments || league.comments || [];
-
-  // Once the real comment matching a pending one shows up in the source list,
-  // drop the optimistic stand-in — same author, same text, posted recently.
-  useEffect(() => {
-    if (pending.length === 0) return;
-    setPending((prev) => prev.filter((p) => !sourceComments.some((real) =>
-      real.user_id === p.user_id && real.body === p.body && real.parent_comment_id === p.parent_comment_id
-      && Math.abs(new Date(real.created_at) - new Date(p.created_at)) < 15000
-    )));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceComments]);
-
-  // Build the full reply tree (unlimited depth) from the flat list. Optimistic
-  // entries are merged in like real ones so a just-posted comment or reply
-  // appears in exactly the right spot, at any depth.
-  const { roots, totalCount } = useMemo(() => {
-    const all = [...sourceComments, ...pending];
-    const byId = new Map(all.map((cm) => [cm.id, { ...cm, children: [] }]));
-    const topLevel = [];
-    for (const node of byId.values()) {
-      if (node.parent_comment_id && byId.has(node.parent_comment_id)) {
-        byId.get(node.parent_comment_id).children.push(node);
-      } else if (!node.parent_comment_id) {
-        topLevel.push(node);
-      }
-      // A reply whose parent id isn't in byId (parent already deleted, or —
-      // extremely briefly — pointed at a not-yet-synced optimistic id that
-      // got superseded) falls back to top-level rather than vanishing.
-    }
-    const sortChildren = (node) => {
-      node.children.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      node.children.forEach(sortChildren);
-      return node;
-    };
-    topLevel.forEach(sortChildren);
-    const sortedRoots = sortBy === "top"
-      ? [...topLevel].sort((a, b) => (b.comment_likes?.length || 0) - (a.comment_likes?.length || 0)
-          || new Date(b.created_at) - new Date(a.created_at))
-      : [...topLevel].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return { roots: sortedRoots, totalCount: all.length };
-  }, [sourceComments, pending, sortBy]);
-
-  // A result post's body is the plain-text result line itself (e.g. "Matchday
-  // 1 — asiyetha 1 – 0 culerGMC"), so matching a club name just means
-  // checking whether that text mentions it — no separate team lookup needed.
-  const filteredRoots = showFindMyResults && myResultsQuery.trim()
-    ? roots.filter((r) => r.body?.toLowerCase().includes(myResultsQuery.trim().toLowerCase()))
-    : roots;
-  const visibleRoots = filteredRoots.slice(0, visibleCount);
-  const hiddenCount = filteredRoots.length - visibleRoots.length;
-
-  const submit = async () => {
-    const trimmed = text.trim();
-    const voiceClip = voiceRecorder.state === "recorded" ? voiceRecorder.clip : null;
-    if ((!trimmed && !photo && !voiceClip) || posting) return;
-    setPosting(true);
-    const tempId = `temp-${Date.now()}`;
-    const photoFile = photo;
-    const optimistic = {
-      id: tempId, league_id: league.id, user_id: session.user.id,
-      username: myUsername || session.user.email,
-      body: trimmed, created_at: new Date().toISOString(), parent_comment_id: null,
-      photo_url: photoFile ? URL.createObjectURL(photoFile) : null,
-      voice_url: voiceClip ? URL.createObjectURL(voiceClip.blob) : null, voice_duration: voiceClip?.duration || null,
-      comment_likes: [], pending: true,
-    };
-    setPending((prev) => [...prev, optimistic]);
-    setText("");
-    setPhoto(null);
-    voiceRecorder.discard();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    const ok = await onPost(league, trimmed, null, photoFile, null, false, voiceClip);
-    setPosting(false);
-    if (!ok) {
-      setPending((prev) => prev.filter((p) => p.id !== tempId));
-      setText(trimmed);
-      setPhoto(photoFile);
-      voiceRecorder.restore(voiceClip);
-    }
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-  };
-
-  return (
-    <div className="mt-8 pt-6 border-t" style={{ borderColor: c.border }}>
-      <style>{`
-        @keyframes commentPopIn { 0% { opacity: 0; transform: translateY(4px); } 100% { opacity: 1; transform: translateY(0); } }
-        .comment-pop-in { animation: commentPopIn 0.22s ease-out; }
-        @keyframes reactPop { 0% { transform: scale(1); } 35% { transform: scale(1.4); } 100% { transform: scale(1); } }
-        .react-pop { animation: reactPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); display: inline-block; }
-        @keyframes pickerIn { 0% { opacity: 0; transform: scale(0.85) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
-        .reaction-picker { animation: pickerIn 0.12s ease-out; }
-        .comment-textarea:focus { border-color: ${c.accent} !important; }
-        .reaction-emoji-btn:hover { transform: scale(1.3); }
-        @media (prefers-reduced-motion: reduce) {
-          .comment-pop-in, .react-pop, .reaction-picker { animation: none; }
-          .reaction-emoji-btn:hover { transform: none; }
-        }
-      `}</style>
-
-      <div className="flex items-center justify-between mb-3">
-        <div className="font-mono text-xs uppercase tracking-[0.2em] flex items-center gap-2" style={{ color: c.textFaint }}>
-          <HeadingIcon size={13} /> {heading} {totalCount > 0 && `(${totalCount})`}
-        </div>
-        {totalCount > 1 && (
-          <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">
-            {["newest", "top"].map((opt) => (
-              <button key={opt} onClick={() => setSortBy(opt)}
-                className="px-2 py-1 rounded-md transition-colors"
-                style={sortBy === opt ? { background: c.accent, color: c.accentText } : { color: c.textFaint }}>
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {showFindMyResults && (
-        <div className="mb-3">
-          <input value={myResultsQuery} onChange={(e) => { setMyResultsQuery(e.target.value); setVisibleCount(COMMENT_PAGE_SIZE); }}
-            placeholder="Find my results — enter your club name…"
-            className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none"
-            style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        </div>
-      )}
-
-      {filteredRoots.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-6 text-center mb-4" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          <HeadingIcon size={20} className="mx-auto mb-2" style={{ color: c.textFaint }} />
-          <div className="font-body text-sm">{myResultsQuery.trim() ? `No results found for "${myResultsQuery.trim()}".` : emptyText}</div>
-        </div>
-      ) : (
-        <div className="space-y-3 mb-3">
-          {visibleRoots.map((cm) => (
-            <CommentNode key={cm.id} comment={cm} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={0} />
-          ))}
-        </div>
-      )}
-
-      {hiddenCount > 0 && (
-        <button onClick={() => setVisibleCount((v) => v + 10)}
-          className="mb-4 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors"
-          style={{ background: c.surface, color: c.textDim }}>
-          Show {Math.min(hiddenCount, 10)} more comment{Math.min(hiddenCount, 10) === 1 ? "" : "s"}
-        </button>
-      )}
-
-      {allowCompose && (canComment ? (
-        <div>
-          {photo && (
-            <div className="flex items-center gap-2 mb-2 ml-10">
-              <img src={URL.createObjectURL(photo)} alt="" className="w-14 h-14 rounded-lg object-cover" style={{ border: `1px solid ${c.border}` }} />
-              <button onClick={() => setPhoto(null)} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {voiceRecorder.state === "recorded" && voiceRecorder.clip && (
-            <div className="flex items-center gap-2 mb-2 ml-10">
-              <VoiceNotePlayer url={URL.createObjectURL(voiceRecorder.clip.blob)} duration={voiceRecorder.clip.duration} c={c} compact />
-              <button onClick={voiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {voiceRecorder.state === "denied" && (
-            <div className="font-mono text-[10px] mb-2 ml-10" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center font-body font-bold text-xs shrink-0"
-              style={{ background: avatarColor(myUsername || session?.user?.email || "?"), color: "#fff" }}>
-              {(myUsername || session?.user?.email || "?")[0]?.toUpperCase()}
-            </div>
-            <textarea ref={textareaRef} value={text}
-              onChange={(e) => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
-              onKeyDown={onKeyDown}
-              placeholder="Write a comment…" rows={1} maxLength={1000}
-              className="comment-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
-              onChange={(e) => setPhoto(e.target.files?.[0] || null)} />
-            <button onClick={() => photoInputRef.current?.click()} title="Attach a photo"
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-colors"
-              style={photo ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Camera size={15} />
-            </button>
-            {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <button aria-label="Send" onClick={submit} disabled={(!text.trim() && !photo && voiceRecorder.state !== "recorded") || posting}
-                className="w-10 h-10 flex items-center justify-center rounded-full transition-transform active:scale-90"
-                style={(text.trim() || photo || voiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-                <Send size={15} />
-              </button>
-              {text.length > 800 && (
-                <span className="font-mono text-[9px]" style={{ color: text.length > 970 ? c.red : c.textFaint }}>
-                  {1000 - text.length}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="font-body text-xs" style={{ color: c.textFaint }}>Join this league to leave a comment.</div>
-      ))}
-    </div>
-  );
-}
-
-// A single comment, its reaction/reply row, and — recursively — every reply
-// underneath it, no matter how deep. Each node owns its own "reply box
-// open?" / "replies expanded?" state independently of its siblings and
-// ancestors.
-function CommentNode({ comment, league, session, canComment, onPost, onDelete, onToggleReaction, c, depth }) {
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [repliesShown, setRepliesShown] = useState(false);
-  const [replyText, setReplyText] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [replyPhoto, setReplyPhoto] = useState(null);
-  const replyVoiceRecorder = useVoiceRecorder();
-  const replyRef = useRef(null);
-  const replyPhotoInputRef = useRef(null);
-  const children = comment.children || [];
-  const indent = Math.min(depth + 1, MAX_INDENT_DEPTH) * 36; // px, mirrors the old ml-9 step per level
-
-  // A reply that's still in flight should already be visible under this
-  // thread, so expand it the moment the optimistic reply is queued rather
-  // than waiting for the round trip to finish.
-  useEffect(() => {
-    if (children.some((r) => r.pending)) setRepliesShown(true);
-  }, [children]);
-
-  const submitReply = async () => {
-    const trimmed = replyText.trim();
-    const voiceClip = replyVoiceRecorder.state === "recorded" ? replyVoiceRecorder.clip : null;
-    if ((!trimmed && !replyPhoto && !voiceClip) || posting) return;
-    setPosting(true);
-    const photoFile = replyPhoto;
-    setReplyText("");
-    setReplyPhoto(null);
-    replyVoiceRecorder.discard();
-    setReplyOpen(false);
-    const ok = await onPost(league, trimmed, comment, photoFile, null, false, voiceClip);
-    setPosting(false);
-    if (!ok) { setReplyText(trimmed); setReplyPhoto(photoFile); replyVoiceRecorder.restore(voiceClip); }
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(); }
-    if (e.key === "Escape") { setReplyOpen(false); setReplyText(""); }
-  };
-
-  // A comment that's still sending doesn't have a real id yet, so it can't
-  // be a reply target — the reply box only appears once it's confirmed.
-  const canReply = canComment && !comment.pending;
-
-  return (
-    <div className={comment.pending ? "opacity-60" : "comment-pop-in"}>
-      <CommentRow comment={comment} league={league} session={session} canComment={canComment}
-        onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
-        onReplyClick={canReply ? () => setReplyOpen((v) => !v) : null} />
-
-      {children.length > 0 && (
-        <button onClick={() => setRepliesShown((v) => !v)}
-          className="mt-1 font-mono text-[10px] uppercase tracking-wider flex items-center gap-1"
-          style={{ color: c.textFaint, marginLeft: indent }}>
-          <CornerDownRight size={11} />
-          {repliesShown ? "Hide" : "Show"} {children.length} repl{children.length === 1 ? "y" : "ies"}
-        </button>
-      )}
-
-      {repliesShown && (
-        <div className="mt-2 space-y-2 pl-3 border-l" style={{ marginLeft: indent, borderColor: c.border }}>
-          {children.map((r) => (
-            <CommentNode key={r.id} comment={r} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
-          ))}
-        </div>
-      )}
-
-      {replyOpen && (
-        <div className="mt-2" style={{ marginLeft: indent }}>
-          <div className="flex items-center gap-1.5 mb-1.5 font-mono text-[10px]" style={{ color: c.textFaint }}>
-            <CornerDownRight size={11} />
-            Replying to {comment.username}
-            <button onClick={() => { setReplyOpen(false); setReplyText(""); }} className="ml-0.5" style={{ color: c.textFaint }}>
-              <X size={11} />
-            </button>
-          </div>
-          {replyPhoto && (
-            <div className="flex items-center gap-2 mb-1.5">
-              <img src={URL.createObjectURL(replyPhoto)} alt="" className="w-11 h-11 rounded-lg object-cover" style={{ border: `1px solid ${c.border}` }} />
-              <button onClick={() => setReplyPhoto(null)} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {replyVoiceRecorder.state === "recorded" && replyVoiceRecorder.clip && (
-            <div className="flex items-center gap-2 mb-1.5">
-              <VoiceNotePlayer url={URL.createObjectURL(replyVoiceRecorder.clip.blob)} duration={replyVoiceRecorder.clip.duration} c={c} compact />
-              <button onClick={replyVoiceRecorder.discard} className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-full"
-                style={{ background: c.surface, color: c.textFaint }}>
-                Remove
-              </button>
-            </div>
-          )}
-          {replyVoiceRecorder.state === "denied" && (
-            <div className="font-mono text-[10px] mb-1.5" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <textarea ref={replyRef} value={replyText}
-              onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
-              onKeyDown={onKeyDown}
-              placeholder={`Reply to ${comment.username}…`} rows={1} maxLength={1000} autoFocus
-              className="comment-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <input ref={replyPhotoInputRef} type="file" accept="image/*" className="hidden"
-              onChange={(e) => setReplyPhoto(e.target.files?.[0] || null)} />
-            <button onClick={() => replyPhotoInputRef.current?.click()} title="Attach a photo"
-              className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-colors"
-              style={replyPhoto ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Camera size={13} />
-            </button>
-            {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
-            <button aria-label="Send reply" onClick={submitReply} disabled={(!replyText.trim() && !replyPhoto && replyVoiceRecorder.state !== "recorded") || posting}
-              className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full transition-transform active:scale-90"
-              style={(replyText.trim() || replyPhoto || replyVoiceRecorder.state === "recorded") && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-              <Send size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// A single comment or reply row: avatar, username (+ manager badge for the
-// league creator), timestamp, delete, body, and a reaction button.
-//
-// Tap the reaction button: if you haven't reacted yet, a row of emoji opens
-// so you can pick one; if you already reacted, tapping removes it in one
-// go (fast un-react, same as the old single-emoji like). To switch to a
-// different emoji, remove yours first, then pick again — keeps the whole
-// thing usable with touch, not just hover.
-function CommentRow({ comment: cm, league, session, canComment, onDelete, onToggleReaction, onReplyClick, c, isReply = false }) {
-  const isOwn = session && cm.user_id === session.user.id;
-  const isManager = cm.user_id === league.created_by;
-  const realReactions = cm.comment_likes || [];
-  const speakingId = useCommentSpeakingId();
-  const isSpeaking = speakingId === cm.id;
-
-  const [pendingReaction, setPendingReaction] = useState(undefined); // undefined = no optimistic override
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [popKey, setPopKey] = useState(0);
-  const [photoRevealed, setPhotoRevealed] = useState(false);
-  const pickerRef = useRef(null);
-
-  const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
-  useEffect(() => {
-    if (pendingReaction !== undefined && pendingReaction === myRealReaction) setPendingReaction(undefined);
-  }, [myRealReaction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reactions list with the optimistic change folded in, so both the total
-  // count and the "top emoji" summary update instantly on click.
-  const reactions = useMemo(() => {
-    if (pendingReaction === undefined) return realReactions;
-    const others = realReactions.filter((l) => !(session && l.user_id === session.user.id));
-    return pendingReaction === null ? others : [...others, { user_id: session.user.id, reaction: pendingReaction }];
-  }, [realReactions, pendingReaction, session]);
-
-  const myReaction = pendingReaction !== undefined ? pendingReaction : myRealReaction;
-  const summary = useMemo(() => {
-    const counts = new Map();
-    for (const r of reactions) counts.set(r.reaction, (counts.get(r.reaction) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [reactions]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onOutside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    const onEscape = (e) => { if (e.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => { document.removeEventListener("mousedown", onOutside); document.removeEventListener("keydown", onEscape); };
-  }, [pickerOpen]);
-
-  const react = async (emoji) => {
-    if (!session || cm.pending) return;
-    setPickerOpen(false);
-    setPendingReaction(emoji);
-    setPopKey((k) => k + 1);
-    const ok = await onToggleReaction(cm, emoji);
-    if (!ok) setPendingReaction(undefined);
-  };
-
-  const handleMainClick = async () => {
-    if (!session || cm.pending) return;
-    if (myReaction) {
-      setPendingReaction(null);
-      const ok = await onToggleReaction(cm, null);
-      if (!ok) setPendingReaction(undefined);
-    } else {
-      setPickerOpen((v) => !v);
-    }
-  };
-
-  return (
-    <div className="flex items-start gap-2.5 group">
-      <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
-        style={{ background: avatarColor(cm.username), color: "#fff", width: isReply ? 22 : 28, height: isReply ? 22 : 28, fontSize: isReply ? 10 : 12 }}>
-        {cm.username?.[0]?.toUpperCase() || "?"}
-      </div>
-      <div className="flex-1 min-w-0 rounded-xl px-3 py-2 transition-colors" style={{ background: isSpeaking ? c.surfaceHover : c.surface }}>
-        <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 min-w-0">
-            <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
-            {isManager && (
-              <span className="font-mono text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
-                style={{ background: c.accent, color: c.accentText }}>
-                Manager
-              </span>
-            )}
-          </span>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
-              {cm.pending ? "sending…" : timeAgo(cm.created_at)}
-            </span>
-            {!cm.pending && cm.body && (
-              <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
-                className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
-                <Volume2 size={11} />
-              </button>
-            )}
-            {!cm.pending && (isOwn || canComment) && (
-              <button onClick={() => onDelete(cm, league)} title="Delete"
-                className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: c.textFaint }}>
-                <Trash2 size={11} />
-              </button>
-            )}
-          </div>
-        </div>
-        {cm.body && <div className="font-body text-sm mt-0.5 whitespace-pre-wrap break-words">{cm.body}</div>}
-        {cm.photo_url && (
-          isResultComment(cm.body, cm.is_result) && !photoRevealed ? (
-            <button onClick={() => setPhotoRevealed(true)} title="Tap to view the scoreboard photo"
-              aria-label="View proof photo"
-              className="flex items-center gap-1.5 mt-2 font-mono text-[11px] font-semibold px-2.5 py-1.5 rounded-lg"
-              style={{ background: c.surfaceHover, color: c.textDim, border: `1px solid ${c.border}` }}>
-              <Camera size={12} /> View proof photo
-            </button>
-          ) : (
-            <button onClick={() => window.open(toProxiedUrl(cm.photo_url), "_blank", "noopener,noreferrer")} className="block mt-2">
-              <img src={toProxiedUrl(cm.photo_url)} alt="Scoreboard proof photo" loading="lazy" className="rounded-lg max-h-56 object-cover" style={{ border: `1px solid ${c.border}` }} />
-            </button>
-          )
-        )}
-        {cm.voice_url && <div className="mt-2"><VoiceNotePlayer url={cm.voice_url} duration={cm.voice_duration} c={c} /></div>}
-        {!cm.pending && (
-          <div className="flex items-center gap-3 mt-1.5">
-            <div className="relative" ref={pickerRef}>
-              <button onClick={handleMainClick} disabled={!session}
-                className="flex items-center gap-1 font-mono text-[10px] transition-colors"
-                style={{ color: myReaction ? c.accent : c.textFaint }}>
-                <span key={popKey} className={popKey > 0 ? "react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
-                  {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
-                </span>
-                {reactions.length > 0 && (
-                  <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
-                )}
-              </button>
-
-              {pickerOpen && (
-                <div className="reaction-picker absolute bottom-full left-0 mb-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg z-10"
-                  style={{ background: c.surfaceHover, border: `1px solid ${c.borderStrong}` }}>
-                  {REACTIONS.map((r) => (
-                    <button key={r.key} onClick={() => react(r.key)} title={r.key}
-                      className="reaction-emoji-btn px-1 transition-transform" style={{ fontSize: 16, lineHeight: 1 }}>
-                      {r.emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {onReplyClick && (
-              <button onClick={onReplyClick} className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>
-                Reply
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TeamContactsPanel({ teams, canManage, onUpdateTeamPhone, c }) {
-  const [query, setQuery] = useState("");
-  const filtered = query.trim() ? teams.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase())) : teams;
-  return (
-    <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Player contacts</div>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search club name..."
-        className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none mb-3" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-      <div className="space-y-2 max-h-72 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <div className="font-body text-xs" style={{ color: c.textFaint }}>No clubs match "{query}".</div>
-        ) : filtered.map((t) => (
-          <TeamContactRow key={t.id} team={t} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TeamContactRow({ team, canManage, onUpdateTeamPhone, c }) {
-  const [editing, setEditing] = useState(false);
-  const [phone, setPhone] = useState(team.phone || "");
-  useEffect(() => { setPhone(team.phone || ""); }, [team.phone]);
-  // Admins get a business-toned greeting that identifies the league up front,
-  // since they're usually reaching out cold; other viewers (fellow joined
-  // players) get a peer-to-peer line instead.
-  const message = canManage
-    ? `Hi ${team.name}, this is weAfrica admin Saul — reaching out about your matches.`
-    : `Hi ${team.name}, let's set up our matchday.`;
-  if (editing) {
-    return (
-      <div className="flex items-center gap-2 font-body text-sm">
-        <span className="flex-1 truncate">{team.name}</span>
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" type="tel" className="w-40 rounded font-mono text-xs px-2 py-1 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
-        <button onClick={() => { onUpdateTeamPhone(team.id, team.league_id, phone.trim()); setEditing(false); }} style={{ color: c.greenText }} className="p-1"><Check size={15} /></button>
-        <button onClick={() => setEditing(false)} style={{ color: c.textFaint }} className="p-1"><X size={15} /></button>
-      </div>
-    );
-  }
-  return (
-    <div onClick={() => setEditing(true)} className="flex items-center gap-2 font-body text-sm cursor-pointer">
-      <span className="flex-1 truncate">{team.name}{team.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : ""}</span>
-      {team.phone ? <span className="font-mono text-xs" style={{ color: c.textDim }}>{team.phone}</span> : <span className="font-mono text-xs" style={{ color: c.textFaint }}>Add number</span>}
-      {team.phone && (
-        <span onClick={(e) => e.stopPropagation()}>
-          <WhatsAppLink phone={team.phone} text={message} c={c} />
-        </span>
-      )}
-      <Settings2 size={12} className="shrink-0" style={{ color: c.textFaint }} />
-    </div>
-  );
-}
-
-// What a regular joined player sees on the Fixtures tab instead of the full
-// all-teams list (that stays admin-only, since that's the view used to
-// record scores). Just their own club's next unplayed match, plus a
-// WhatsApp icon to line up the game with the opponent — mirrors the "Up
-// next" card on Home but scoped to this one league.
-function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
-  if (myTeam.eliminated) {
-    return (
-      <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
-        {myTeam.name} has been eliminated from this league.
-      </div>
-    );
-  }
-
-  const fixture = nextFixtureForTeam(league, myTeam.id);
-  if (!fixture) {
-    return (
-      <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
-        No upcoming match scheduled for {myTeam.name} right now.
-      </div>
-    );
-  }
-
-  const isHome = fixture.home_team_id === myTeam.id;
-  const opponentId = isHome ? fixture.away_team_id : fixture.home_team_id;
-  const opponent = league.teams.find((t) => t.id === opponentId);
-
-  // A knockout tie's second leg shares the same round/stage and the same
-  // two clubs (home/away flipped) — if one exists, both legs already carry
-  // the same shared due_at (see knockoutRoundFixtures). fixture.starts_at
-  // is the real recorded start moment; only reconstruct it from due_at for
-  // older fixtures created before that column existed.
-  const siblingLeg = fixture.leg ? league.fixtures.find((f) => f.id !== fixture.id && f.round === fixture.round && f.stage === fixture.stage
-    && ((f.home_team_id === fixture.home_team_id && f.away_team_id === fixture.away_team_id)
-      || (f.home_team_id === fixture.away_team_id && f.away_team_id === fixture.home_team_id))) : null;
-  const twoLegged = !!siblingLeg;
-  const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-  const tieStartAt = !twoLegged ? null : fixture.starts_at ? new Date(fixture.starts_at) : new Date(new Date(fixture.due_at).getTime() - tieWindowMs);
-  const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-
-  return (
-    <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your next match</div>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {opponent?.name || "TBD"}</div>
-          <div className="font-mono text-xs mt-1" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textDim }}>
-            {isHome ? "Home" : "Away"} · Matchday {fixture.round}
-            {isFixtureLocked(fixture, league)
-              ? " · Expired"
-              : twoLegged
-              ? ` · ${fmtDate(tieStartAt)} → ${fmtDate(fixture.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`
-              : fixture.due_at ? ` · Due ${fmtDate(fixture.due_at)}` : ""}
-          </div>
-        </div>
-        {canSeePhones && opponent?.phone && (
-          <WhatsAppCallLink phone={opponent.phone}
-            text={`Hi, it's ${myTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`} c={c} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// A single search box: type your eFootball username, get your group standing
-// or knockout opponent back — no need to know a matchday number or dig through
-// tabs. Works for anyone with a registered club, joined or not.
-function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, groupStageFixtures, canSeePhones, c }) {
-  const [query, setQuery] = useState("");
-  const [result, setResult] = useState(null);
-
-  const search = () => {
-    const name = query.trim();
-    if (!name) return;
-    const team = league.teams.find((t) => t.name.trim().toLowerCase() === name.toLowerCase());
-    if (!team) { setResult({ notFound: true, reason: `No club registered under "${name}" in this league.` }); return; }
-
-    if (inGroupStage) {
-      const groupTeams = league.teams.filter((t) => t.group_number === team.group_number);
-      const groupFx = groupStageFixtures.filter((f) => groupTeams.some((gt) => gt.id === f.home_team_id));
-      const standings = computeStandings(groupTeams, groupFx, league).map((r, i) => ({ ...r, rank: i + 1 }));
-      const myRow = standings.find((r) => r.id === team.id);
-      const nextFixture = groupFx.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
-        .sort((a, b) => a.round - b.round)[0];
-      setResult({ kind: "group", team, groupNumber: team.group_number, standings, myRow, nextFixture, allTeams: league.teams });
-      return;
-    }
-
-    if (inKnockoutBracket) {
-      const maxRound = Math.max(...stageFixtures.map((f) => f.round), 0);
-      const myFixtures = stageFixtures.filter((f) => f.round === maxRound && (f.home_team_id === team.id || f.away_team_id === team.id))
-        .sort((a, b) => a.leg - b.leg);
-      const fallback = myFixtures.length ? null : stageFixtures.filter((f) => f.home_team_id === team.id || f.away_team_id === team.id).sort((a, b) => b.round - a.round)[0];
-      setResult({ kind: "knockout", team, myFixtures: myFixtures.length ? myFixtures : (fallback ? [fallback] : []), isCurrentRound: myFixtures.length > 0, allTeams: league.teams });
-      return;
-    }
-
-    // Survivor-format table lookup. Rank must be computed against the same
-    // pool advanceSurvivor actually cuts from — active teams only — or an
-    // already-eliminated club (which has zero fixtures in the current stage)
-    // can tie its way to a deceptively "safe" looking rank near the top.
-    if (team.eliminated) {
-      setResult({ kind: "table", team, eliminated: true, standings: [], myRow: null, nextFixture: null, allTeams: league.teams });
-      return;
-    }
-    const activeTeams = league.teams.filter((t) => !t.eliminated);
-    const standings = computeStandings(activeTeams, stageFixtures, league).map((r, i) => ({ ...r, rank: i + 1 }));
-    const myRow = standings.find((r) => r.id === team.id);
-    const nextFixture = stageFixtures.filter((f) => !f.played && f.away_team_id !== null && (f.home_team_id === team.id || f.away_team_id === team.id))
-      .sort((a, b) => a.round - b.round)[0];
-    setResult({ kind: "table", team, standings, myRow, nextFixture, allTeams: league.teams });
-  };
-
-  const opponentOf = (fixture, team, allTeams) => {
-    if (!fixture) return null;
-    if (fixture.away_team_id === null) return { bye: true };
-    const opponentId = fixture.home_team_id === team.id ? fixture.away_team_id : fixture.home_team_id;
-    const opponent = allTeams.find((t) => t.id === opponentId);
-    const isHome = fixture.home_team_id === team.id;
-    return { opponent, isHome };
-  };
-
-  return (
-    <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find yourself</div>
-      <div className="flex flex-col sm:flex-row gap-2">
-        <input list="find-yourself-datalist" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()}
-          placeholder="Your eFootball username" className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <datalist id="find-yourself-datalist">{league.teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
-        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
-      </div>
-
-      {result && (result.notFound ? (
-        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>{result.reason}</div>
-      ) : result.kind === "group" ? (
-        <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-          <div className="font-semibold mb-1">{result.team.name} <span className="font-mono text-xs font-normal" style={{ color: c.textFaint }}>· {groupLabel(result.groupNumber)}</span></div>
-          {result.myRow && (
-            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>
-              {result.myRow.rank}{result.myRow.rank === 1 ? "st" : result.myRow.rank === 2 ? "nd" : result.myRow.rank === 3 ? "rd" : "th"} in group ·
-              {" "}{result.myRow.pts} pts · {result.myRow.w}W {result.myRow.d}D {result.myRow.l}L · GD {result.myRow.gd > 0 ? `+${result.myRow.gd}` : result.myRow.gd}
-            </div>
-          )}
-          {(() => {
-            const opp = opponentOf(result.nextFixture, result.team, result.allTeams);
-            if (!opp) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>No matches left to play in the group stage.</div>;
-            if (opp.bye) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>Automatic advance this round (bye).</div>;
-            return (
-              <div>
-                <div className="font-mono text-xs" style={{ color: c.textDim }}>
-                  Next: <span style={{ color: c.text }}>{opp.opponent?.name}</span> ({opp.isHome ? "Home" : "Away"}) · Due {fmtDate(result.nextFixture.due_at)}
-                </div>
-                {canSeePhones && (
-                  opp.opponent?.phone ? (
-                    <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
-                    </div>
-                  ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      ) : result.kind === "knockout" ? (
-        <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-          <div className="font-semibold mb-1">
-            {result.team.name}
-            {result.team.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : ""}
-          </div>
-          {!result.myFixtures?.length ? (
-            <div className="font-mono text-xs" style={{ color: c.textFaint }}>No knockout fixture found yet.</div>
-          ) : (() => {
-            const opp = opponentOf(result.myFixtures[0], result.team, result.allTeams);
-            if (opp.bye) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>Automatic advance this round (bye).</div>;
-            const twoLegged = result.myFixtures.length > 1;
-            const agg = (teamId) => result.myFixtures.reduce((sum, f) => sum + (f.home_team_id === teamId ? f.home_score : f.away_score), 0);
-            // Two-legged (home & away) ties share one due_at across both legs
-            // (see knockoutRoundFixtures) — reconstruct the tie's start moment
-            // by subtracting the double-length window back off that shared
-            // deadline, so this shows one "start → expiry (N days)" range
-            // instead of a due date repeated on every leg. Matches the same
-            // pattern used in KnockoutFixturesList and OpponentFinder.
-            const allPlayed = result.myFixtures.every((f) => f.played);
-            const f0 = result.myFixtures[0];
-            const tieWindowMs = twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-            const tieStartAt = !twoLegged ? null : f0.starts_at ? new Date(f0.starts_at) : new Date(new Date(f0.due_at).getTime() - tieWindowMs);
-            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-            const tieExpired = twoLegged && !allPlayed && isFixtureLocked(f0, league);
-            return (
-              <div>
-                <div className="font-mono text-xs" style={{ color: c.textDim }}>
-                  Round {result.myFixtures[0].round} vs <span style={{ color: c.text }}>{opp.opponent?.name}</span>
-                  {twoLegged ? " (home & away)" : ` (${opp.isHome ? "Home" : "Away"})`}
-                </div>
-                {twoLegged && !allPlayed && (
-                  <div className="font-mono text-xs mt-1" style={{ color: tieExpired ? c.red : c.textDim }}>
-                    {tieExpired
-                      ? "Expired"
-                      : `${fmtDate(tieStartAt)} → ${fmtDate(f0.due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
-                  </div>
-                )}
-                {twoLegged && (
-                  <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
-                    Aggregate: {result.team.name} {agg(result.team.id)} – {agg(opp.opponent.id)} {opp.opponent.name}
-                  </div>
-                )}
-                {result.myFixtures.map((f) => (
-                  <div key={f.id} className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
-                    {twoLegged ? `Leg ${f.leg} (${f.home_team_id === result.team.id ? "Home" : "Away"}): ` : ""}
-                    {f.played
-                      ? `${f.home_score} – ${f.away_score}`
-                      : isFixtureLocked(f, league) ? <span style={{ color: c.red }}>Expired — loss, conceded 4</span>
-                      : twoLegged ? "" // shared start–expiry window already shown once, above
-                      : `Due by ${fmtDate(f.due_at)}`}
-                  </div>
-                ))}
-                {canSeePhones && (
-                  opp.opponent?.phone ? (
-                    <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.myFixtures[0].round)}`} c={c} />
-                    </div>
-                  ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      ) : (
-        <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-          <div className="font-semibold mb-1">
-            {result.team.name}
-            {result.eliminated ? <span className="font-mono text-[10px] ml-1.5" style={{ color: c.red }}>OUT</span> : ""}
-          </div>
-          {result.eliminated ? (
-            <div className="font-mono text-xs" style={{ color: c.textFaint }}>{result.team.name} has been eliminated from this league.</div>
-          ) : (<>
-          {result.myRow && (
-            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>
-              {result.myRow.rank}{result.myRow.rank === 1 ? "st" : result.myRow.rank === 2 ? "nd" : result.myRow.rank === 3 ? "rd" : "th"} in the table ·
-              {" "}{result.myRow.pts} pts · {result.myRow.w}W {result.myRow.d}D {result.myRow.l}L · GD {result.myRow.gd > 0 ? `+${result.myRow.gd}` : result.myRow.gd}
-            </div>
-          )}
-          {(() => {
-            const opp = opponentOf(result.nextFixture, result.team, result.allTeams);
-            if (!opp) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>No upcoming fixtures found.</div>;
-            if (opp.bye) return <div className="font-mono text-xs" style={{ color: c.textFaint }}>Automatic advance this round (bye).</div>;
-            return (
-              <div>
-                <div className="font-mono text-xs" style={{ color: c.textDim }}>
-                  Next: <span style={{ color: c.text }}>{opp.opponent?.name}</span> ({opp.isHome ? "Home" : "Away"}) · Due {fmtDate(result.nextFixture.due_at)}
-                </div>
-                {canSeePhones && (
-                  opp.opponent?.phone ? (
-                    <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
-                        text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
-                    </div>
-                  ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
-                )}
-              </div>
-            );
-          })()}
-          </>)}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, c }) {
-  const [matchday, setMatchday] = useState("");
-  const [teamQuery, setTeamQuery] = useState("");
-  const [result, setResult] = useState(null);
-  const [scores, setScores] = useState({}); // fixture id -> { h, a }
-  const [pensScores, setPensScores] = useState({}); // fixture id -> { ph, pa } — only used for a level final
-  const [saveState, setSaveState] = useState({}); // fixture id -> "idle" | "saving" | "saved"
-  const [photos, setPhotos] = useState({}); // fixture id -> File, admin's optional photo proof
-  const photoInputRef = useRef(null);
-  const [photoTargetId, setPhotoTargetId] = useState(null);
-
-  const search = () => {
-    const md = Number(matchday);
-    if (!md || md < 1 || md > totalRounds) { setResult({ notFound: true, reason: `Enter a matchday between 1 and ${totalRounds}.` }); return; }
-    const team = teams.find((t) => t.name.trim().toLowerCase() === teamQuery.trim().toLowerCase());
-    if (!team) { setResult({ notFound: true, reason: "No club with that exact name — pick one from the suggestions." }); return; }
-    const legs = fixtures.filter((f) => f.round === md && (f.home_team_id === team.id || f.away_team_id === team.id))
-      .sort((x, y) => x.leg - y.leg);
-    if (legs.length === 0) { setResult({ notFound: true, reason: `${team.name} has no fixture on matchday ${md} in the current stage.` }); return; }
-
-    const anyExpired = legs.some((f) => isFixtureLocked(f, league));
-    if (anyExpired && !canManage) {
-      setResult({ notFound: true, reason: `This match passed its deadline without a result — both clubs received a loss. It's no longer viewable.` });
-      return;
-    }
-
-    const opponentId = legs[0].home_team_id === team.id ? legs[0].away_team_id : legs[0].home_team_id;
-    const opponent = opponentId ? teams.find((t) => t.id === opponentId) : null;
-    setScores(Object.fromEntries(legs.map((f) => [f.id, { h: f.home_score, a: f.away_score }])));
-    setPensScores(Object.fromEntries(legs.map((f) => [f.id, { ph: f.pens_home ?? "", pa: f.pens_away ?? "" }])));
-    setSaveState({});
-    setResult({ legs, team, opponent, bye: opponentId === null, expired: anyExpired, twoLegged: legs.length > 1 });
-  };
-
-  const save = async (fixture) => {
-    if (!photos[fixture.id]) return;
-    const { h, a } = scores[fixture.id] || { h: 0, a: 0 };
-    const needsPens = isFinalFixture(fixture, league) && Number(h) === Number(a);
-    const { ph, pa } = pensScores[fixture.id] || { ph: "", pa: "" };
-    if (needsPens && (ph === "" || pa === "" || Number(ph) === Number(pa))) return;
-    setSaveState((s) => ({ ...s, [fixture.id]: "saving" }));
-    await onRecordResult(fixture, h, a, photos[fixture.id] || null, needsPens ? Number(ph) : null, needsPens ? Number(pa) : null);
-    setPhotos((p) => ({ ...p, [fixture.id]: null }));
-    setSaveState((s) => ({ ...s, [fixture.id]: "saved" }));
-    setResult((r) => r && ({ ...r, legs: r.legs.map((f) => (f.id === fixture.id ? { ...f, played: true, home_score: h, away_score: a, pens_home: needsPens ? Number(ph) : null, pens_away: needsPens ? Number(pa) : null } : f)) }));
-  };
-
-  const aggregate = (legs, teamId) => legs.reduce((sum, f) => sum + (f.home_team_id === teamId ? f.home_score : f.away_score), 0);
-
-  return (
-    <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
-      <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0] || null; if (photoTargetId) setPhotos((p) => ({ ...p, [photoTargetId]: f })); }} />
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
-      <div className="flex flex-col sm:flex-row gap-2">
-        <input type="number" min={1} max={totalRounds} value={matchday} onChange={(e) => setMatchday(e.target.value)} placeholder="Matchday #"
-          className="w-full sm:w-32 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Your club name"
-          className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <datalist id="team-names-datalist">{teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
-        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
-      </div>
-
-      {result && (result.notFound ? (
-        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>{result.reason}</div>
-      ) : result.bye ? (
-        <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>{result.team.name} has a bye this round — automatic advance.</div>
-      ) : (
-        <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
-          <div className="font-semibold">{result.opponent.name} <span className="font-mono text-xs font-normal" style={{ color: c.textFaint }}>({result.twoLegged ? "Home & away" : (result.legs[0].home_team_id === result.team.id ? "Home" : "Away")})</span></div>
-
-          {(() => {
-            const allPlayed = result.legs.every((f) => f.played);
-            const level = allPlayed && aggregate(result.legs, result.team.id) === aggregate(result.legs, result.opponent.id);
-            const isFinalTie = level && isFinalRoundFixtures(fixtures.filter((f) => f.round === result.legs[0].round));
-            // Two-legged ties share one due_at across both legs (see
-            // knockoutRoundFixtures), so both the player and the admin see
-            // the full "start → expiry" window here, not just the cutoff.
-            // legs[0].starts_at is the real recorded start moment; only
-            // reconstruct it from due_at for older fixtures created before
-            // that column existed.
-            const tieWindowMs = result.twoLegged ? KNOCKOUT_TIE_WINDOW_MS : 0;
-            const tieStartAt = !result.twoLegged ? null : result.legs[0].starts_at ? new Date(result.legs[0].starts_at) : new Date(new Date(result.legs[0].due_at).getTime() - tieWindowMs);
-            const tieWindowDays = tieWindowMs / ONE_DAY_MS;
-            if (!result.twoLegged && !level) return null;
-            return (
-              <div className="font-mono text-xs mt-1" style={{ color: c.textDim }}>
-                {result.twoLegged && !allPlayed && (
-                  <div>
-                    {isFixtureLocked(result.legs[0], league)
-                      ? <span style={{ color: c.red }}>Expired</span>
-                      : `${fmtDate(tieStartAt)} → ${fmtDate(result.legs[0].due_at)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
-                  </div>
-                )}
-                {result.twoLegged && <>Aggregate: {result.team.name} {aggregate(result.legs, result.team.id)} – {aggregate(result.legs, result.opponent.id)} {result.opponent.name}</>}
-                {level && (isFinalTie
-                  ? <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
-                  : <span style={{ color: c.greenText }}> · level on aggregate — both clubs advance</span>)}
-              </div>
-            );
-          })()}
-
-          {canSeePhones ? (
-            result.opponent.phone ? (
-              <div className="mt-1.5">
-                <WhatsAppCallLink phone={result.opponent.phone} iconOnly
-                  text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(Number(matchday))}`} c={c} />
-              </div>
-            ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
-          ) : (
-            <div className="font-mono text-xs mt-1" style={{ color: c.red }}>Contact hidden — your club is eliminated.</div>
-          )}
-
-          {result.legs.map((fixture) => {
-            const isHome = fixture.home_team_id === result.team.id;
-            const homeTeam = isHome ? result.team : result.opponent;
-            const awayTeam = isHome ? result.opponent : result.team;
-            const sc = scores[fixture.id] || { h: 0, a: 0 };
-            const st = saveState[fixture.id] || "idle";
-            const pensSc = pensScores[fixture.id] || { ph: "", pa: "" };
-            const needsPens = isFinalFixture(fixture, league) && Number(sc.h) === Number(sc.a);
-            const pensReady = !needsPens || (pensSc.ph !== "" && pensSc.pa !== "" && Number(pensSc.ph) !== Number(pensSc.pa));
-            return (
-              <div key={fixture.id} className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
-                <div className="font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>
-                  {result.twoLegged ? `Leg ${fixture.leg}` : "Result"}
-                  {fixture.played
-                    ? ` — ${fixture.home_score} – ${fixture.away_score}${fixture.pens_home != null ? ` (pens ${fixture.pens_home}-${fixture.pens_away})` : ""}`
-                    : isFixtureLocked(fixture, league) ? " — expired, loss, conceded 4"
-                    : result.twoLegged ? "" // shared start–expiry window already shown once, above
-                    : ` — due ${fmtDate(fixture.due_at)}`}
-                </div>
-                {canManage && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam.name} <span style={{ color: c.textFaint }}>(Home)</span></div>
-                      <input type="number" min={0} value={sc.h} onChange={(e) => setScores((s) => ({ ...s, [fixture.id]: { ...sc, h: Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
-                    </div>
-                    <span className="self-end pb-1.5" style={{ color: c.textFaint }}>–</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam.name} <span style={{ color: c.textFaint }}>(Away)</span></div>
-                      <input type="number" min={0} value={sc.a} onChange={(e) => setScores((s) => ({ ...s, [fixture.id]: { ...sc, a: Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
-                    </div>
-                    {needsPens && (
-                      <>
-                        <div className="w-16 min-w-0">
-                          <div className="font-body text-[10px] truncate mb-1" style={{ color: c.red }}>Pens (H)</div>
-                          <input type="number" min={0} value={pensSc.ph} onChange={(e) => setPensScores((s) => ({ ...s, [fixture.id]: { ...pensSc, ph: e.target.value === "" ? "" : Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
-                        </div>
-                        <span className="self-end pb-1.5" style={{ color: c.textFaint }}>–</span>
-                        <div className="w-16 min-w-0">
-                          <div className="font-body text-[10px] truncate mb-1" style={{ color: c.red }}>Pens (A)</div>
-                          <input type="number" min={0} value={pensSc.pa} onChange={(e) => setPensScores((s) => ({ ...s, [fixture.id]: { ...pensSc, pa: e.target.value === "" ? "" : Number(e.target.value) } }))} className="w-full text-center rounded font-mono px-1 py-1.5 outline-none" style={{ background: c.surface, color: c.text }} />
-                        </div>
-                      </>
-                    )}
-                    <button onClick={() => { setPhotoTargetId(fixture.id); photoInputRef.current?.click(); }}
-                      title={photos[fixture.id] ? photos[fixture.id].name : "Attach photo proof (required)"}
-                      className="self-end shrink-0 w-9 h-9 flex items-center justify-center rounded-full"
-                      style={photos[fixture.id] ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-                      <Camera size={14} />
-                    </button>
-                    <button onClick={() => save(fixture)} disabled={st === "saving" || !photos[fixture.id] || !pensReady}
-                      title={!photos[fixture.id] ? "Attach a photo proof to save" : !pensReady ? "Enter a decisive penalty score" : undefined}
-                      className="self-end font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0 flex items-center gap-1"
-                      style={{ background: st === "saved" ? c.greenSoft : c.accent, color: st === "saved" ? c.greenText : c.accentText, opacity: (st === "saving" || !photos[fixture.id] || !pensReady) ? 0.5 : 1 }}>
-                      {st === "saved" ? (<><Check size={13} /> Saved</>) : st === "saving" ? "Saving…" : "Save"}
-                    </button>
-                  </div>
-                )}
-                {!canManage && joined && !fixture.played && !isFixtureLocked(fixture, league) && (() => {
-                  const submission = getSubmission?.(fixture.id);
-                  return submission?.status === "pending" ? (
-                    <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
-                      <Clock size={11} /> Result pending admin review
-                    </span>
-                  ) : (
-                    <button onClick={() => onOpenSubmitResult(fixture, homeTeam, awayTeam, submission?.status === "rejected" ? submission : null)}
-                      className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5"
-                      style={submission?.status === "rejected" ? { background: c.redSoft, color: c.red } : { background: c.accent, color: c.accentText }}>
-                      <Camera size={13} /> {submission?.status === "rejected" ? "Result rejected — resubmit" : "Submit result"}
-                    </button>
-                  );
-                })()}
-              </div>
-            );
-          })}
-        </div>
-      ))}
     </div>
   );
 }
