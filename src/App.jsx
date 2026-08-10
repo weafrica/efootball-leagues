@@ -6663,6 +6663,21 @@ export function MemberAvatar({ url, username, size = 32, c }) {
   );
 }
 
+// Shared emoji medal for a numeric rank — used by the standings, ladder and
+// leaderboard tables, and by PlayerProfileModal below, so the top-3 styling
+// can never drift between screens the way it did when each one kept its own
+// copy (Standings' copy had gone stale and always rendered null). Returns
+// null for rank > 3 — callers fall back to "#rank" text themselves.
+export function medalFor(rank) {
+  return rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+}
+
+// Solid hex per medal tier, for the ring drawn around a top-3 player's
+// avatar in PlayerProfileModal — fixed colors (not theme-derived) so gold
+// reads as gold in both light and dark mode, matching how medal emoji
+// already look regardless of theme.
+const MEDAL_RING_COLOR = { "🥇": "#FFD700", "🥈": "#C0C0C0", "🥉": "#CD7F32" };
+
 // A simple read-only popup showing one player's photo and stats — reused by
 // the Leaderboard and Ladder screens so tapping any row (not just your own)
 // shows who they are and how they're doing. `stats` is a plain list of
@@ -6673,7 +6688,22 @@ export function MemberAvatar({ url, username, size = 32, c }) {
 // row object the list itself was built from), so opening it costs nothing
 // beyond the avatar image, which already goes through MemberAvatar's
 // egress-safe proxying.
-export function PlayerProfileModal({ username, avatarUrl, rank, medal, isMe, stats, onClose, c }) {
+//
+// The medal is derived from `rank` right here rather than taken as a prop —
+// callers used to compute their own copy and pass it in, which is how
+// Standings ended up always passing null (its copy silently went stale).
+// One source of truth now; callers just pass the rank they already have.
+export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, onClose, c }) {
+  const medal = rank != null ? medalFor(rank) : null;
+  const ringColor = medal ? MEDAL_RING_COLOR[medal] : null;
+  // Computed up front instead of spread inline into the avatar wrapper's
+  // style — a top-3 player gets a colored ring with a little breathing room
+  // between it and the photo; everyone else gets no ring at all (no need to
+  // fake one in a neutral color, since "no medal" is itself meaningful).
+  const avatarRingStyle = ringColor
+    ? { padding: 3, borderRadius: "9999px", border: `2px solid ${ringColor}` }
+    : { padding: 3 };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()}>
@@ -6681,7 +6711,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, medal, isMe, sta
           <button aria-label="Close" onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
         </div>
         <div className="flex flex-col items-center text-center -mt-2 mb-4">
-          <div className="mb-2"><MemberAvatar url={avatarUrl} username={username} size={72} c={c} /></div>
+          <div className="mb-2" style={avatarRingStyle}><MemberAvatar url={avatarUrl} username={username} size={72} c={c} /></div>
           <div className="font-extrabold text-lg leading-tight">{username}{isMe ? " (you)" : ""}</div>
           {rank != null && (
             <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{medal ? `${medal} ` : ""}Rank #{rank}</div>
@@ -8775,7 +8805,6 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
           avatarUrl={avatarByTeamId ? avatarByTeamId[profileRow.id] : null}
           isMe={!!myTeamId && profileRow.id === myTeamId}
           rank={profileRow.rank}
-          medal={null}
           stats={[
             { label: "Played", value: profileRow.p },
             { label: "Points", value: profileRow.pts },

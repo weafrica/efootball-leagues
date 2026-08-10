@@ -3,7 +3,7 @@ import { ArrowLeft, Trophy, Search, History, ChevronDown, Check } from "lucide-r
 import {
   fmtDate, MemberAvatar, PlayerProfileModal, fixturePlayedDate, seasonAnchor, seasonBounds,
   currentSeason, computeGlobalLeaderboard, goalExtremes, rankLeaderboard,
-  GoalExtremesBar, LEADERBOARD_MIN_PLAYED_FOR_WINRATE,
+  GoalExtremesBar, LEADERBOARD_MIN_PLAYED_FOR_WINRATE, medalFor,
 } from "./App.jsx";
 
 // Split out of App.jsx: the platform-wide Leaderboard is only opened by a
@@ -171,13 +171,11 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
     if (metric === "goals") return `${r.gf} scored · ${r.gd >= 0 ? "+" : ""}${r.gd} GD`;
     return `${r.w}W ${r.d}D ${r.l}L · ${r.p} played`;
   };
-  const medal = (rank) => (rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null);
-
   const row = (r) => (
     <div key={r.userId} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
       className="flex items-center gap-3 rounded-lg px-4 py-2.5 cursor-pointer"
       style={{ background: session && r.userId === session.user.id ? c.surfaceHover : c.surface, border: session && r.userId === session.user.id ? `1px solid ${c.accent}` : "1px solid transparent" }}>
-      <span className="w-6 text-center font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{medal(r.rank) || `#${r.rank}`}</span>
+      <span className="w-6 text-center font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{medalFor(r.rank) || `#${r.rank}`}</span>
       <MemberAvatar url={r.userId ? avatarByUserId.get(r.userId) : null} username={r.name} size={28} c={c} />
       <div className="min-w-0 flex-1">
         <div className="font-body text-sm truncate">{r.name}{session && r.userId === session.user.id ? " (you)" : ""}</div>
@@ -270,7 +268,6 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
           avatarUrl={profileRow.userId ? avatarByUserId.get(profileRow.userId) : null}
           isMe={session && profileRow.userId === session.user.id}
           rank={profileRow.rank}
-          medal={medal(profileRow.rank)}
           stats={[
             { label: "Played", value: profileRow.p },
             { label: "Win rate", value: `${Math.round(profileRow.winRate * 100)}%` },

@@ -323,7 +323,6 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
           avatarUrl={avatarByUserId.get(profileRow.user_id)}
           isMe={session && profileRow.user_id === session.user.id}
           rank={profileRow.rank_position}
-          medal={profileRow.rank_position === 1 ? "🥇" : profileRow.rank_position === 2 ? "🥈" : profileRow.rank_position === 3 ? "🥉" : null}
           stats={[
             { label: "Points", value: profileRow.points },
             { label: "W · D · L", value: `${profileRow.wins} · ${profileRow.draws} · ${profileRow.losses}` },
