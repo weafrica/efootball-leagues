@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { ArrowLeft, Calendar, Layers, Trophy, Zap } from "lucide-react";
 import {
   DEFAULT_ROUND_PERIOD_HOURS, ENTRY_FEE_MAX, ENTRY_FEE_MIN,
-  FORMATS, ONE_DAY_MS, formatRand, toDatetimeLocalValue,
+  FORMATS, ONE_DAY_MS, formatRand, toDatetimeLocalValue, weekendWindow,
 } from "./App.jsx";
 
 // Split out of App.jsx: the "create a new league" form is only ever opened
@@ -47,10 +47,10 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
 
   // Weekend League is a shortcut, not a separate field: whether a league
   // shows up in the homepage's Weekend League spotlight is (and stays)
-  // fully derived from its starts_at falling on the coming Fri–Sun, plus
+  // fully derived from its starts_at falling on the coming Friâ€“Sun, plus
   // created_by_admin. This just fills the date pickers with a sensible
   // Saturday-noon kickoff so admins don't have to work the date out by
-  // hand, and confirms the result live under the fields — so the state
+  // hand, and confirms the result live under the fields â€” so the state
   // driving eligibility and the state telling the admin about it can never
   // drift apart.
   const [wkStart, wkEnd] = weekendWindow();
@@ -84,7 +84,7 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
     <div className="pt-10">
       <button onClick={onCancel} className="flex items-center gap-1.5 font-body text-sm mb-6" style={{ color: c.textDim }}><ArrowLeft size={15} /> Back</button>
       <h1 className="text-3xl font-extrabold uppercase tracking-tight mb-1">New league</h1>
-      <p className="font-body mb-6 text-sm" style={{ color: c.textDim }}>Fixtures are generated automatically based on the format you pick. Each match gets a set number of hours to be played once it opens — configurable below.</p>
+      <p className="font-body mb-6 text-sm" style={{ color: c.textDim }}>Fixtures are generated automatically based on the format you pick. Each match gets a set number of hours to be played once it opens â€” configurable below.</p>
 
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>League name</label>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Friday Night eFootball Cup" className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-5" style={inputStyle} />
@@ -105,12 +105,12 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
             ))}
           </div>
           <div className="font-mono text-xs mt-1.5" style={{ color: c.textFaint }}>
-            Cash league members choose their own entry fee ({formatRand(ENTRY_FEE_MIN)}–{formatRand(ENTRY_FEE_MAX)}) and upload proof of payment when they join — you review and approve or reject each one.
+            Cash league members choose their own entry fee ({formatRand(ENTRY_FEE_MIN)}â€“{formatRand(ENTRY_FEE_MAX)}) and upload proof of payment when they join â€” you review and approve or reject each one.
           </div>
         </div>
       )}
 
-      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Description <span style={{ color: c.textFaint }}>(optional — rules, prize, payment details, WhatsApp group link, etc.)</span></label>
+      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Description <span style={{ color: c.textFaint }}>(optional â€” rules, prize, payment details, WhatsApp group link, etc.)</span></label>
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={leagueType === "cash" ? "e.g. Pay to EFT: Acc 12345678, Bank ABC. Winner takes the pot." : "e.g. Winner takes the pot. Join the WhatsApp group: ..."} className="w-full border rounded-lg px-4 py-2.5 font-body outline-none resize-none mb-5" style={inputStyle} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1.5">
@@ -137,7 +137,7 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
         </div>
       )}
       {datesOutOfOrder && (
-        <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Start date must be on or after entry closes — otherwise the league would kick off before anyone's finished joining.</div>
+        <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Start date must be on or after entry closes â€” otherwise the league would kick off before anyone's finished joining.</div>
       )}
       {!datesOutOfOrder && <div className="mb-1.5" />}
 
@@ -214,8 +214,8 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
           </div>
           <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>
             {knockoutLegs === 2
-              ? "Each tie is played twice — once at each club's home. Aggregate score decides the winner; a level aggregate sends both clubs through to the next round. The final is always a single decisive match, with penalties if it's level."
-              : "Each tie is a single, decisive match. A draw goes to penalties — but only in the final; earlier rounds send both clubs through instead."}
+              ? "Each tie is played twice â€” once at each club's home. Aggregate score decides the winner; a level aggregate sends both clubs through to the next round. The final is always a single decisive match, with penalties if it's level."
+              : "Each tie is a single, decisive match. A draw goes to penalties â€” but only in the final; earlier rounds send both clubs through instead."}
           </div>
         </div>
       )}
@@ -235,22 +235,22 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
           </div>
           <div className="font-body text-xs" style={{ color: groupsTooFewTeams ? c.red : c.textFaint }}>
             {groupsTooFewTeams
-              ? `Need at least 4 clubs to form groups — add more clubs or leave the list blank for open registration.`
+              ? `Need at least 4 clubs to form groups â€” add more clubs or leave the list blank for open registration.`
               : teamNames.length > 0
-              ? `${teamNames.length} clubs ÷ ~${groupSize} per group → ${Math.max(2, Math.round(teamNames.length / groupSize))} group${Math.max(2, Math.round(teamNames.length / groupSize)) === 1 ? "" : "s"} · top ${qualifiersPerGroup} from each advance to a single-elimination knockout.`
-              : `Groups of about ${groupSize} players each — the exact number of groups is worked out once clubs have joined. Top ${qualifiersPerGroup} from each group advance to a single-elimination knockout.`}
+              ? `${teamNames.length} clubs Ã· ~${groupSize} per group â†’ ${Math.max(2, Math.round(teamNames.length / groupSize))} group${Math.max(2, Math.round(teamNames.length / groupSize)) === 1 ? "" : "s"} Â· top ${qualifiersPerGroup} from each advance to a single-elimination knockout.`
+              : `Groups of about ${groupSize} players each â€” the exact number of groups is worked out once clubs have joined. Top ${qualifiersPerGroup} from each group advance to a single-elimination knockout.`}
           </div>
         </div>
       )}
 
-      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Clubs <span style={{ color: c.textFaint }}>(optional — leave blank for open registration)</span></label>
+      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Clubs <span style={{ color: c.textFaint }}>(optional â€” leave blank for open registration)</span></label>
       <textarea value={teamsText} onChange={(e) => setTeamsText(e.target.value)} rows={8} placeholder={"Leave blank for open registration, or pre-list usernames:\nNdosi_123\nAsonele2k\nAshozi_10\nTheAnimal5"} className="w-full border rounded-lg px-4 py-2.5 font-body outline-none resize-none" style={inputStyle} />
       <div className="font-mono text-xs mt-1.5" style={{ color: (teamNameDupes.length || teamNameMultiWord.length) ? c.red : c.textFaint }}>
         {teamNameDupes.length > 0
-          ? `Duplicate name${teamNameDupes.length === 1 ? "" : "s"}: ${teamNameDupes.join(", ")} — each club needs a unique username.`
+          ? `Duplicate name${teamNameDupes.length === 1 ? "" : "s"}: ${teamNameDupes.join(", ")} â€” each club needs a unique username.`
           : teamNameMultiWord.length > 0
-          ? `Usernames must be one word — fix: ${teamNameMultiWord.join(", ")}`
-          : teamNames.length === 0 ? "Open registration — fixtures generate once you start the league." : `${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed — review and remove any before you start the league, then fixtures generate.`}
+          ? `Usernames must be one word â€” fix: ${teamNameMultiWord.join(", ")}`
+          : teamNames.length === 0 ? "Open registration â€” fixtures generate once you start the league." : `${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed â€” review and remove any before you start the league, then fixtures generate.`}
       </div>
 
       <button disabled={!canCreate} onClick={submit} className="mt-6 w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full" style={canCreate ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
