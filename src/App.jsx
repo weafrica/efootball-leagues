@@ -2847,10 +2847,32 @@ export default function App() {
 
   const signOut = async () => { await supabase.auth.signOut(); clearAllAuthStorage(); setView("home"); };
 
+  // This is the single source of truth for every league across the whole
+  // signed-in app (Home, league lists, LeagueDetail, achievements, admin
+  // screens) — unlike the guest bundle, `leagues`/`teams`/`fixtures`/
+  // `members` are genuinely read from almost everywhere in this file and
+  // are bounded in size by roster/fixture count anyway, so those stay
+  // `*` here — narrowing them would be high risk for very little payoff.
+  //
+  // comments, comment_likes, result_submissions, and league_reactions are
+  // different: they're unbounded, ever-growing history (every reply, every
+  // like, every submitted result with its proof reference) that compounds
+  // over a league's lifetime, and they're consumed in far fewer places —
+  // traced through splitCommentsByRoot/CommentsSection/CommentNode/
+  // CommentRow (comments + comment_likes), resultEscalationReason/
+  // approveResult/rejectResult/respondToResultSubmission (result_submissions),
+  // and LeagueReactionBar (league_reactions). Narrowed to exactly the
+  // fields those consumers read.
   const loadLeagues = useCallback(async () => {
     const { data, error } = await supabase
       .from("leagues")
-      .select("*, teams(*), fixtures(*), members(*), comments(*, comment_likes(*)), result_submissions(*), league_reactions(*)")
+      .select(
+        "*, teams(*), fixtures(*), members(*), " +
+        "comments(id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, " +
+          "comment_likes(id, user_id, reaction)), " +
+        "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+        "league_reactions(id, user_id, reaction)"
+      )
       .order("created_at", { ascending: false });
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
