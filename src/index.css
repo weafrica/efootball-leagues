@@ -151,3 +151,33 @@ html, body {
   100% { opacity: 0; transform: translate(-50%, -50%) scale(2.1); }
 }
 .referee-impact-ring { animation: referee-impact-ring 500ms ease-out 260ms both; }
+
+/* PlayerProfileModal — tapping a club/user row now pops open a rated
+   player card instead of a plain sheet. card-pop-in is the one-shot open
+   animation on the card itself (small overshoot so it feels like it lands
+   with a bit of weight); card-shine is a diagonal light sweep that plays
+   once on open for gold/silver/bronze cards only, like a pack reveal;
+   card-tier-glow is a slow pulsing ring around the avatar for those same
+   medal tiers, using --badge-glow (set inline per tier) the same way
+   achievement-glow above does. stat-tile-in staggers each stat tile in via
+   animation-delay set per-tile in App.jsx, so the grid reveals left to
+   right / top to bottom rather than appearing all at once. */
+@keyframes card-pop-in {
+  0% { opacity: 0; transform: scale(0.9) translateY(10px); }
+  60% { opacity: 1; transform: scale(1.015) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes card-shine {
+  0% { background-position: -40% -40%; opacity: 0; }
+  15% { opacity: 1; }
+  100% { background-position: 140% 140%; opacity: 0; }
+}
+.animate-card-shine { animation: card-shine 1.3s ease-out 1 both; }
+@keyframes card-tier-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)55, 0 0 10px 0 var(--badge-glow, #FFD700)33; }
+  50% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)aa, 0 0 20px 3px var(--badge-glow, #FFD700)66; }
+}
+@keyframes stat-tile-in {
+  0% { opacity: 0; transform: translateY(6px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}

@@ -6672,57 +6672,147 @@ export function medalFor(rank) {
   return rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
 }
 
-// Solid hex per medal tier, for the ring drawn around a top-3 player's
-// avatar in PlayerProfileModal — fixed colors (not theme-derived) so gold
-// reads as gold in both light and dark mode, matching how medal emoji
-// already look regardless of theme.
-const MEDAL_RING_COLOR = { "🥇": "#FFD700", "🥈": "#C0C0C0", "🥉": "#CD7F32" };
+// Rating-card tier for a rank — turns the plain "top 3 get a ring" idea into
+// a small FIFA/eFootball-style card system so PlayerProfileModal reads as a
+// player card reveal rather than a settings sheet. Colors are fixed hex (not
+// theme-derived) for the medal tiers so gold/silver/bronze read correctly in
+// both light and dark mode; the two non-medal tiers fall back to the app's
+// own accent color so they still look native to whichever theme is active.
+const CARD_TIERS = {
+  gold: { label: "🥇 GOLD CARD", ring: "#FFD700" },
+  silver: { label: "🥈 SILVER CARD", ring: "#C0C0C0" },
+  bronze: { label: "🥉 BRONZE CARD", ring: "#CD7F32" },
+};
+function tierFor(rank, c) {
+  if (rank === 1) return { key: "gold", ...CARD_TIERS.gold };
+  if (rank === 2) return { key: "silver", ...CARD_TIERS.silver };
+  if (rank === 3) return { key: "bronze", ...CARD_TIERS.bronze };
+  if (rank != null && rank <= 10) return { key: "rated", label: "⭐ IN FORM", ring: c.accent };
+  return { key: "standard", label: "SQUAD PLAYER", ring: c.accent };
+}
 
-// A simple read-only popup showing one player's photo and stats — reused by
-// the Leaderboard and Ladder screens so tapping any row (not just your own)
-// shows who they are and how they're doing. `stats` is a plain list of
-// {label, value} pairs the caller has already computed, so this component
-// stays completely agnostic to whether it's showing leaderboard fields
-// (W/D/L, goals) or ladder fields (points, rank) — no extra data fetching
-// happens here, it only ever renders what's already in memory (the same
-// row object the list itself was built from), so opening it costs nothing
-// beyond the avatar image, which already goes through MemberAvatar's
-// egress-safe proxying.
+// Splits a stat value into a numeric part (for count-up animation) plus any
+// fixed prefix/suffix around it — "+3" animates the 3 and keeps the "+",
+// "84%" animates the 84 and keeps the "%". Multi-number strings like
+// "3 · 1 · 2" (W · D · L) don't match, so those stay static; animating three
+// numbers ticking independently inside one string would read as noise, not
+// a game stat reveal.
+function parseNumericStat(raw) {
+  const str = String(raw);
+  const m = str.match(/^([+-]?)(\d+)([^\d]*)$/);
+  if (!m) return null;
+  return { prefix: m[1], number: parseInt(m[2], 10), suffix: m[3] };
+}
+
+// Counts up from 0 to `target` on mount (ease-out), optionally after a
+// stagger delay — gives each stat tile its own little "reveal" instead of
+// all numbers just appearing at once. Returns `target` unchanged (no
+// animation) when target is null, i.e. the stat wasn't numeric.
+function useCountUp(target, { duration = 700, delay = 0 } = {}) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target == null) return;
+    let raf = null;
+    const timer = setTimeout(() => {
+      let startTs = null;
+      const step = (ts) => {
+        if (startTs === null) startTs = ts;
+        const progress = Math.min((ts - startTs) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setValue(Math.round(target * eased));
+        if (progress < 1) raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    }, delay);
+    return () => { clearTimeout(timer); if (raf) cancelAnimationFrame(raf); };
+  }, [target, duration, delay]);
+  return target == null ? null : value;
+}
+
+// One stat tile on the player card — a plain number ticks up from 0 and the
+// tile itself fades/slides in on a per-index stagger, so the stat grid reads
+// as a reveal rather than a table dump.
+function StatTile({ label, value, index, c, ring }) {
+  const parsed = parseNumericStat(value);
+  const animated = useCountUp(parsed ? parsed.number : null, { duration: 650, delay: 200 + index * 70 });
+  const display = parsed ? `${parsed.prefix}${animated}${parsed.suffix}` : value;
+  return (
+    <div className="rounded-xl px-3 py-2.5 text-center relative overflow-hidden"
+      style={{ background: c.surface, animation: "stat-tile-in 0.4s ease backwards", animationDelay: `${120 + index * 60}ms` }}>
+      <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: ring, opacity: 0.7 }} />
+      <div className="font-mono text-base font-bold tabular-nums">{display}</div>
+      <div className="font-mono text-[10px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>{label}</div>
+    </div>
+  );
+}
+
+// A read-only popup showing one player's photo and stats, styled as an
+// eFootball-style rated player card — reused by the Leaderboard, Ladder and
+// Standings screens so tapping any row (not just your own) feels like
+// pulling a card rather than opening a settings sheet. `stats` is a plain
+// list of {label, value} pairs the caller has already computed, so this
+// component stays completely agnostic to whether it's showing leaderboard
+// fields (W/D/L, goals) or ladder fields (points, rank) — no extra data
+// fetching happens here, it only ever renders what's already in memory (the
+// same row object the list itself was built from), so opening it costs
+// nothing beyond the avatar image, which already goes through
+// MemberAvatar's egress-safe proxying.
 //
-// The medal is derived from `rank` right here rather than taken as a prop —
-// callers used to compute their own copy and pass it in, which is how
-// Standings ended up always passing null (its copy silently went stale).
-// One source of truth now; callers just pass the rank they already have.
+// The tier (and medal) is derived from `rank` right here rather than taken
+// as a prop — callers used to compute their own medal copy and pass it in,
+// which is how Standings ended up always passing null (its copy silently
+// went stale). One source of truth now; callers just pass the rank they
+// already have.
 export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, onClose, c }) {
-  const medal = rank != null ? medalFor(rank) : null;
-  const ringColor = medal ? MEDAL_RING_COLOR[medal] : null;
-  // Computed up front instead of spread inline into the avatar wrapper's
-  // style — a top-3 player gets a colored ring with a little breathing room
-  // between it and the photo; everyone else gets no ring at all (no need to
-  // fake one in a neutral color, since "no medal" is itself meaningful).
-  const avatarRingStyle = ringColor
-    ? { padding: 3, borderRadius: "9999px", border: `2px solid ${ringColor}` }
-    : { padding: 3 };
+  const tier = tierFor(rank, c);
+  const isMedal = tier.key === "gold" || tier.key === "silver" || tier.key === "bronze";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div
+        className="relative w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 overflow-hidden"
+        style={{
+          background: c.bg, color: c.text, border: `1.5px solid ${tier.ring}`,
+          boxShadow: isMedal ? `0 0 0 1px ${tier.ring}33, 0 14px 40px ${tier.ring}26` : `0 12px 32px rgba(0,0,0,0.35)`,
+          animation: "card-pop-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Tier-tinted wash across the whole card — subtle for the rated/
+            squad tiers, more present for medal cards. */}
+        <div className="absolute inset-0 pointer-events-none" style={{ background: `linear-gradient(135deg, ${tier.ring}${isMedal ? "26" : "12"}, transparent 60%)` }} />
+        {/* Pack-opening light sweep, medal tiers only, plays once on open. */}
+        {isMedal && (
+          <div className="absolute inset-0 pointer-events-none animate-card-shine"
+            style={{ background: `linear-gradient(115deg, transparent 30%, ${tier.ring}40 48%, transparent 66%)`, backgroundSize: "250% 250%" }} />
+        )}
+
+        <div className="relative flex items-center justify-between mb-1">
+          <span className="font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-2 py-1 rounded-full"
+            style={{ color: isMedal ? tier.ring : c.accent, background: isMedal ? `${tier.ring}1F` : c.surface }}>
+            {tier.label}
+          </span>
           <button aria-label="Close" onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surface }}><X size={14} /></button>
         </div>
-        <div className="flex flex-col items-center text-center -mt-2 mb-4">
-          <div className="mb-2" style={avatarRingStyle}><MemberAvatar url={avatarUrl} username={username} size={72} c={c} /></div>
-          <div className="font-extrabold text-lg leading-tight">{username}{isMe ? " (you)" : ""}</div>
-          {rank != null && (
-            <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{medal ? `${medal} ` : ""}Rank #{rank}</div>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {stats.map((s) => (
-            <div key={s.label} className="rounded-xl px-3 py-2.5 text-center" style={{ background: c.surface }}>
-              <div className="font-mono text-base font-bold">{s.value}</div>
-              <div className="font-mono text-[10px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>{s.label}</div>
+
+        <div className="relative flex flex-col items-center text-center mt-1 mb-4">
+          <div className="relative mb-2">
+            <div style={{ padding: 3, borderRadius: "9999px", border: `2px solid ${tier.ring}`, ...(isMedal ? { animation: "card-tier-glow 2.2s ease-in-out infinite", "--badge-glow": tier.ring } : {}) }}>
+              <MemberAvatar url={avatarUrl} username={username} size={72} c={c} />
             </div>
+            {rank != null && (
+              <div className="absolute -bottom-1 -right-1 min-w-[26px] h-[26px] px-1 rounded-full flex items-center justify-center font-mono text-[11px] font-extrabold border-2"
+                style={{ background: c.bg, borderColor: tier.ring, color: tier.ring }}>
+                #{rank}
+              </div>
+            )}
+          </div>
+          <div className="font-extrabold text-lg leading-tight">{username}{isMe ? " (you)" : ""}</div>
+        </div>
+
+        <div className="relative grid grid-cols-2 gap-2">
+          {stats.map((s, i) => (
+            <StatTile key={s.label} label={s.label} value={s.value} index={i} c={c} ring={tier.ring} />
           ))}
         </div>
       </div>
