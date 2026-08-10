@@ -2862,21 +2862,67 @@ export default function App() {
   // CommentRow (comments + comment_likes), resultEscalationReason/
   // approveResult/rejectResult/respondToResultSubmission (result_submissions),
   // and LeagueReactionBar (league_reactions). Narrowed to exactly the
-  // fields those consumers read.
+  // fields those consumers read. comments also carries league_id (not read
+  // by any renderer) purely so toggleCommentReaction/deleteComment — which
+  // only ever receive a bare comment, not its parent league — can resolve
+  // which single league to refresh below without a full reload.
+  const LEAGUE_SELECT =
+    "*, teams(*), fixtures(*), members(*), " +
+    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, " +
+      "comment_likes(id, user_id, reaction)), " +
+    "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+    "league_reactions(id, user_id, reaction)";
+
   const loadLeagues = useCallback(async () => {
     const { data, error } = await supabase
       .from("leagues")
-      .select(
-        "*, teams(*), fixtures(*), members(*), " +
-        "comments(id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, " +
-          "comment_likes(id, user_id, reaction)), " +
-        "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
-        "league_reactions(id, user_id, reaction)"
-      )
+      .select(LEAGUE_SELECT)
       .order("created_at", { ascending: false });
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
   }, [showToast]);
+
+  // Every mutation used to follow itself with a full loadLeagues() — a
+  // re-fetch of every league on the whole platform (every team, fixture,
+  // member, comment, like, result, reaction) just to reflect one comment
+  // getting liked or one result getting recorded. That cost scaled with
+  // total platform content AND with how often anyone did anything.
+  // refreshLeague/refreshLeagues below re-fetch only the specific league(s)
+  // a given action actually touched, using the exact same LEAGUE_SELECT
+  // shape, and merge the result(s) into local state by id — so the "server
+  // is the source of truth, just re-fetch" safety property every call site
+  // already relied on is unchanged, only the scope of what gets re-fetched.
+  // Doubles as the merge path for a brand-new league (createLeague): a
+  // league whose id isn't in local state yet gets appended, not just
+  // replaced, so callers don't need a separate "add" case.
+  const mergeLeaguesById = useCallback((rows) => {
+    setLeagues((prev) => {
+      const base = prev || [];
+      const byId = new Map(base.map((l) => [l.id, l]));
+      rows.forEach((row) => byId.set(row.id, row));
+      // Preserve the same order loadLeagues would produce (newest created
+      // first) rather than however Map iteration/insertion happens to land.
+      return [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    });
+  }, []);
+
+  const refreshLeague = useCallback(async (leagueId) => {
+    if (!leagueId) return;
+    const { data, error } = await supabase.from("leagues").select(LEAGUE_SELECT).eq("id", leagueId).maybeSingle();
+    if (error) { showToast("Couldn't refresh the league — try reloading."); return; }
+    if (!data) { setLeagues((prev) => (prev || []).filter((l) => l.id !== leagueId)); return; } // deleted/no longer visible
+    mergeLeaguesById([data]);
+  }, [showToast, mergeLeaguesById]);
+
+  const refreshLeagues = useCallback(async (leagueIds) => {
+    const ids = [...new Set((leagueIds || []).filter(Boolean))];
+    if (ids.length === 0) return;
+    const { data, error } = await supabase.from("leagues").select(LEAGUE_SELECT).in("id", ids);
+    if (error) { showToast("Couldn't refresh leagues — try reloading."); return; }
+    mergeLeaguesById(data || []);
+  }, [showToast, mergeLeaguesById]);
+
+
 
   // Public setting (no auth required to read — guests need it too, see
   // PublicHome's own copy of this query), so this loads regardless of
@@ -3861,7 +3907,7 @@ export default function App() {
         await postComment(league, body, null, null, null, true);
       }
 
-      await loadLeagues();
+      await refreshLeagues(targets.map(({ league }) => league.id));
       const updatedCount = updatedIds.size;
       const where = announcedLeagueNames.length === 1 ? ` in "${announcedLeagueNames[0]}"` : ` across ${announcedLeagueNames.length} leagues`;
       if (updatedCount < allIds.length) {
@@ -3871,7 +3917,7 @@ export default function App() {
       showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show on a match past its deadline.`);
     })();
     return () => { cancelled = true; };
-  }, [leagues, session, isAdmin, loadLeagues, showToast]);
+  }, [leagues, session, isAdmin, refreshLeagues, showToast]);
 
 
   const myTeam = (league) => {
@@ -3951,7 +3997,7 @@ export default function App() {
       showToast("League created — open for registration. Players can join, then you can start it.");
     }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     setActiveLeagueId(league.id);
     setView("league");
   };
@@ -3981,7 +4027,7 @@ export default function App() {
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
     if (startsInFinal) await supabase.from("leagues").update({ final_stage_started: true }).eq("id", league.id);
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(`League started — ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
     } finally {
       stageActionInFlight.current.delete(key);
@@ -4046,7 +4092,7 @@ export default function App() {
       .update({ current_stage: 2, final_stage_started: true }).eq("id", league.id);
     if (updErr) { showToast(`Couldn't update league: ${updErr.message}`); return; }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(`Knockout stage started — ${qualifiers.length} clubs through.`);
   };
 
@@ -4102,7 +4148,7 @@ export default function App() {
       team_id: match ? match.id : null,
     });
     if (error) { showToast("Couldn't join — you may already be a member."); return; }
-    await loadLeagues();
+    await refreshLeague(leagueId);
     showToast(match ? `Joined — you're playing as ${match.name}.` : "Joined as a spectator — your username isn't on this league's team list.");
     } finally {
       joinInFlight.current.delete(leagueId);
@@ -4173,7 +4219,7 @@ export default function App() {
     });
     if (error) { showToast("Couldn't submit registration — you may already be a member."); return false; }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(`Registration submitted — ${formatRand(feeNum)} pending admin approval.`);
     return true;
   };
@@ -4194,7 +4240,7 @@ export default function App() {
     }).eq("id", member.id);
     if (error) { showToast(`Couldn't resubmit: ${error.message}`); return false; }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(`Resubmitted — ${formatRand(feeNum)} pending admin approval.`);
     return true;
   };
@@ -4221,7 +4267,7 @@ export default function App() {
       payment_status: status, payment_reviewed_at: new Date().toISOString(), payment_reviewed_by: session.user.id,
     }).eq("id", member.id);
     if (error) { showToast(`Couldn't update payment status: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(member.league_id);
     showToast(status === "approved" ? `Payment approved — ${member.display_name} is confirmed.` : `Payment marked as rejected for ${member.display_name}.`);
   };
 
@@ -4412,7 +4458,7 @@ export default function App() {
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
     await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
-    await loadLeagues();
+    await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", fixture.id);
     showToast(outcome ? `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName} — ${outcome}` : `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
@@ -4445,7 +4491,7 @@ export default function App() {
       else showToast(`Couldn't submit result: ${error.message}`);
       return false;
     }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast("Result submitted — pending admin approval.");
     return true;
   };
@@ -4512,7 +4558,7 @@ export default function App() {
       }
     }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", submission.fixture_id);
     showToast(outcome ? `Result approved — posted to comments as ${submission.submitted_by_username} — ${outcome}` : `Result approved — posted to comments as ${submission.submitted_by_username}.`);
@@ -4553,7 +4599,7 @@ export default function App() {
         null, null, photoUrl, true,
       );
 
-      await loadLeagues();
+      await refreshLeague(league.id);
       showToast("Result rejected — posted to comments.");
     });
   };
@@ -4603,7 +4649,7 @@ export default function App() {
         null, null, photoUrl, true,
       );
 
-      await loadLeagues();
+      await refreshLeague(league.id);
       showToast(accept ? "Result confirmed — posted to comments." : "Result disputed — they'll need to resubmit.");
     };
 
@@ -4703,7 +4749,7 @@ export default function App() {
     const fixtureRows = knockoutRoundFixtures(league.id, winners, bracketStage, maxRound + 1, new Date(), fresh.knockout_legs || 1, roundPeriodMs(fresh), 1, isWeekendLeague(league));
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
-    await loadLeagues();
+    await refreshLeague(league.id);
     const eliminatedTiesCount = bothEliminatedIds.length / 2;
     showToast(eliminatedTiesCount > 0
       ? `Round ${maxRound + 1} created. ${bothEliminatedIds.length} club${bothEliminatedIds.length === 1 ? "" : "s"} eliminated — no-show on both sides in ${eliminatedTiesCount} tie${eliminatedTiesCount === 1 ? "" : "s"}.`
@@ -4760,7 +4806,7 @@ export default function App() {
       .update({ current_stage: nextStage, final_stage_started: goingFinal }).eq("id", league.id);
     if (updErr) { showToast(`Couldn't update league: ${updErr.message}`); return; }
 
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(goingFinal ? `Final stage started — ${remainingIds.length} clubs remain.` : `Stage ${nextStage} started — ${remainingIds.length} clubs remain.`);
   };
 
@@ -4779,10 +4825,10 @@ export default function App() {
     }
   };
 
-  const updateTeamPhone = async (teamId, phone) => {
+  const updateTeamPhone = async (teamId, leagueId, phone) => {
     const { error } = await supabase.from("teams").update({ phone }).eq("id", teamId);
     if (error) { showToast("Couldn't save number."); return; }
-    await loadLeagues();
+    await refreshLeague(leagueId);
   };
 
   const removeTeam = (team) => {
@@ -4796,7 +4842,7 @@ export default function App() {
       await supabase.from("members").delete().eq("team_id", team.id);
       const { error } = await supabase.from("teams").delete().eq("id", team.id);
       if (error) { showToast(`Couldn't remove club: ${error.message}`); return; }
-      await loadLeagues();
+      await refreshLeague(team.league_id);
       showToast(`${team.name} removed from the league.`);
     });
   };
@@ -4821,7 +4867,7 @@ export default function App() {
         await supabase.from("teams").delete().eq("id", team.id);
       }
       if (activeLeagueId === league.id) { setView("home"); setActiveLeagueId(null); }
-      await loadLeagues();
+      await refreshLeague(league.id);
       showToast(`You left ${league.name}.`);
     });
   };
@@ -4840,14 +4886,14 @@ export default function App() {
     const pub = { publicUrl };
     const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast("League photo updated.");
   };
 
   const updateLeagueDescription = async (league, text) => {
     const { error } = await supabase.from("leagues").update({ description: text || null }).eq("id", league.id);
     if (error) { showToast(`Couldn't save description: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast("Description updated.");
   };
 
@@ -4860,7 +4906,7 @@ export default function App() {
       .update({ entry_closes_at: new Date(entryClosesAt).toISOString(), starts_at: new Date(startsAt).toISOString() })
       .eq("id", league.id);
     if (error) { showToast(`Couldn't save dates: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast("League dates updated.");
   };
 
@@ -4872,7 +4918,7 @@ export default function App() {
   const updateLeagueRoundPeriod = async (league, hours) => {
     const { error } = await supabase.from("leagues").update({ round_period_hours: hours }).eq("id", league.id);
     if (error) { showToast(`Couldn't save match period: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast("Match due-date period updated.");
   };
 
@@ -4884,7 +4930,7 @@ export default function App() {
     const { error } = await supabase.from("leagues")
       .update({ group_stage_due_at: dueAt ? new Date(dueAt).toISOString() : null }).eq("id", league.id);
     if (error) { showToast(`Couldn't save the group stage due date: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(dueAt ? "Group stage due date updated." : "Group stage due date cleared.");
   };
 
@@ -4898,7 +4944,7 @@ export default function App() {
   const updateLeagueMemberMessage = async (league, text) => {
     const { error } = await supabase.from("leagues").update({ wa_message_template: text || null }).eq("id", league.id);
     if (error) { showToast(`Couldn't save the member message: ${error.message}`); return; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     showToast(text ? "Member message updated — used for every WhatsApp nudge in this league from now on." : "Member message cleared — back to the default auto message.");
   };
 
@@ -4997,7 +5043,7 @@ export default function App() {
       voice_url, voice_duration,
     });
     if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
-    await loadLeagues();
+    await refreshLeague(league.id);
     return true;
   };
 
@@ -5011,7 +5057,7 @@ export default function App() {
     ], async () => {
       const { error } = await supabase.from("comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
-      await loadLeagues();
+      await refreshLeague(comment.league_id);
       showToast(comment.parent_comment_id ? "Reply deleted." : "Comment deleted.");
     });
   };
@@ -5037,7 +5083,7 @@ export default function App() {
       const { error } = await supabase.from("comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction });
       if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
     }
-    await loadLeagues();
+    await refreshLeague(comment.league_id);
     return true;
   };
 
@@ -5058,7 +5104,7 @@ export default function App() {
       const { error } = await supabase.from("league_reactions").insert({ league_id: league.id, user_id: session.user.id, reaction });
       if (error) { showToast(`Couldn't react: ${error.message}`); return false; }
     }
-    await loadLeagues();
+    await refreshLeague(league.id);
     return true;
   };
 
@@ -5088,7 +5134,7 @@ export default function App() {
       if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
       setView("home");
       setActiveLeagueId(null);
-      await loadLeagues();
+      setLeagues((prev) => (prev || []).filter((l) => l.id !== league.id)); // already gone server-side — no need to refetch
       showToast("League deleted.");
     });
   };
@@ -11850,7 +11896,7 @@ function TeamContactRow({ team, canManage, onUpdateTeamPhone, c }) {
       <div className="flex items-center gap-2 font-body text-sm">
         <span className="flex-1 truncate">{team.name}</span>
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" type="tel" className="w-40 rounded font-mono text-xs px-2 py-1 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
-        <button onClick={() => { onUpdateTeamPhone(team.id, phone.trim()); setEditing(false); }} style={{ color: c.greenText }} className="p-1"><Check size={15} /></button>
+        <button onClick={() => { onUpdateTeamPhone(team.id, team.league_id, phone.trim()); setEditing(false); }} style={{ color: c.greenText }} className="p-1"><Check size={15} /></button>
         <button onClick={() => setEditing(false)} style={{ color: c.textFaint }} className="p-1"><X size={15} /></button>
       </div>
     );
