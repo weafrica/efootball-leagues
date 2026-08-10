@@ -8656,9 +8656,10 @@ function leagueGoalExtremes(standings, league) {
   return goalExtremes(named);
 }
 
-export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, c }) {
+export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, session, myTeamId, c }) {
   const [query, setQuery] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
+  const [profileRow, setProfileRow] = useState(null); // the standings row currently shown in PlayerProfileModal, or null
   const q = query.trim().toLowerCase();
   const ranked = standings.map((r, i) => ({ ...r, rank: i + 1 }));
   const filtered = q ? ranked.filter((r) => r.name.toLowerCase().includes(q)) : ranked;
@@ -8741,7 +8742,8 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
               ) : filtered.map((r) => {
                 const atRisk = cutoffRank !== null && r.rank >= cutoffRank && !r.eliminated;
                 return (
-                  <tr key={r.id} className="border-b" style={{ borderColor: c.border, opacity: r.eliminated ? 0.4 : 1, height: STANDINGS_ROW_HEIGHT, background: atRisk ? c.redSoft : "transparent" }}>
+                  <tr key={r.id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
+                    className="border-b cursor-pointer" style={{ borderColor: c.border, opacity: r.eliminated ? 0.4 : 1, height: STANDINGS_ROW_HEIGHT, background: atRisk ? c.redSoft : (myTeamId && r.id === myTeamId ? c.surfaceHover : "transparent") }}>
                     <td className="py-2.5 pl-2 relative"><span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: atRisk ? c.red : zoneFor(r.rank - 1) }} /><span style={{ color: c.textFaint }}>{r.rank}</span></td>
                     <td className="py-2.5 font-body font-medium">
                       <div className="flex items-center gap-2">
@@ -8765,6 +8767,26 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
       </div>
       {scrolls && (
         <div className="font-mono text-[10px] text-center mt-2" style={{ color: c.textFaint }}>Scroll for more — showing {STANDINGS_VISIBLE_ROWS} of {filtered.length}</div>
+      )}
+
+      {profileRow && (
+        <PlayerProfileModal
+          username={profileRow.name}
+          avatarUrl={avatarByTeamId ? avatarByTeamId[profileRow.id] : null}
+          isMe={!!myTeamId && profileRow.id === myTeamId}
+          rank={profileRow.rank}
+          medal={null}
+          stats={[
+            { label: "Played", value: profileRow.p },
+            { label: "Points", value: profileRow.pts },
+            { label: "W · D · L", value: `${profileRow.w} · ${profileRow.d} · ${profileRow.l}` },
+            { label: "Goal diff", value: `${profileRow.gd >= 0 ? "+" : ""}${profileRow.gd}` },
+            { label: "Goals for", value: profileRow.gf },
+            { label: "Goals against", value: profileRow.ga },
+          ]}
+          onClose={() => setProfileRow(null)}
+          c={c}
+        />
       )}
     </div>
   );
@@ -9043,7 +9065,7 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
   );
 }
 
-export function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
+export function GroupTables({ league, groupStageFixtures, avatarByTeamId, session, myTeamId, c }) {
   const groupsCount = league.groups_count || 0;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);
 
@@ -9065,7 +9087,7 @@ export function GroupTables({ league, groupStageFixtures, avatarByTeamId, c }) {
                 <span className="normal-case font-body text-[11px]" style={{ color: c.greenText }}>· top {Math.min(qualifiers, n)} advance</span>
               )}
             </div>
-            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} c={c} />
+            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeamId} c={c} />
           </div>
         );
       })}

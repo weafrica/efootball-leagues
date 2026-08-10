@@ -323,8 +323,8 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
       {tab === "table" && (
         <div>
           {inGroupStage
-            ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} avatarByTeamId={avatarByTeamId} c={c} />
-            : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} avatarByTeamId={avatarByTeamId} c={c} />}
+            ? <GroupTables league={league} groupStageFixtures={groupStageFixtures} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeam?.id} c={c} />
+            : <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={stageFixtures} isSurvivor={isSurvivor} league={league} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeam?.id} c={c} />}
           <CommentsSection league={league} session={session} canComment={joined || canManage}
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as matches are played."
