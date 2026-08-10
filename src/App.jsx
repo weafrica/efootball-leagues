@@ -5416,9 +5416,29 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         weekendOverride: settingsRes.data?.weekend_league_override ?? null,
       };
       setGuestData(nextGuestData);
-      try {
-        sessionStorage.setItem(GUEST_DATA_CACHE_KEY, JSON.stringify({ data: nextGuestData, ts: Date.now() }));
-      } catch { /* storage full/unavailable — not worth failing the page over */ }
+      // Only cache a bundle where every query actually succeeded. A 400/RLS
+      // error on any one of these (e.g. a view missing a column the code
+      // asks for) resolves as { data: null, error: {...} }, not a thrown
+      // rejection — so Promise.all still "succeeds" and nextGuestData
+      // silently gets [] for that slice via the `|| []` above. Caching that
+      // would freeze the broken empty state in sessionStorage for
+      // GUEST_DATA_CACHE_MS on every reload, masking the real error behind
+      // what looks like a fast, working page. Skipping the cache write here
+      // means a real failure is visible (and re-fetched) on every reload
+      // instead of being locked in.
+      const anyErrored = [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes]
+        .some((res) => res.error);
+      if (anyErrored) {
+        if (process.env.NODE_ENV !== "production") {
+          console.error("Guest data fetch had errors, not caching:",
+            [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes]
+              .map((res) => res.error).filter(Boolean));
+        }
+      } else {
+        try {
+          sessionStorage.setItem(GUEST_DATA_CACHE_KEY, JSON.stringify({ data: nextGuestData, ts: Date.now() }));
+        } catch { /* storage full/unavailable — not worth failing the page over */ }
+      }
     })();
     return () => { cancelled = true; };
   }, []);
