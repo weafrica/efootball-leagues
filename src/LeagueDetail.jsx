@@ -834,7 +834,14 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
   // Admin-only correction for a posted result line — only offered on the
   // actual auto-posted scoreline row itself (not on chat replies underneath
   // it), and only from the Results tab (canEditResults).
-  const canEditThis = canEditResults && !cm.pending && isResultComment(cm.body, cm.is_result);
+  const isResultRow = !cm.pending && isResultComment(cm.body, cm.is_result);
+  const canEditThis = canEditResults && isResultRow;
+  // Quick "I have a question about this result" contact button to the league
+  // admin — offered to anyone viewing a result row who ISN'T themselves the
+  // admin (canEditResults doubles as "am I the admin" here, since it's only
+  // ever true on the Results tab). Renders nothing if the league has no
+  // creator_phone on file (older leagues created before that field existed).
+  const queryWhatsAppText = `Hi, I have a question about this result in "${league.name}": ${cm.body} Could you take a look?`;
   // Only results posted after fixture_id was added carry a link back to the
   // actual match — those get real score inputs that update the fixture (and
   // so the table). Older posts fall back to editing just the displayed text.
@@ -950,6 +957,9 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
                 className="transition-colors" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
                 <Volume2 size={11} />
               </button>
+            )}
+            {isResultRow && !canEditResults && league.creator_phone && (
+              <WhatsAppLink phone={league.creator_phone} text={queryWhatsAppText} iconOnly c={c} />
             )}
             {canEditThis && !editing && (
               <button onClick={startEdit} title="Edit result"
