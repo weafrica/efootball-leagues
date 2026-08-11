@@ -27,7 +27,7 @@ import {
 // App.jsx the same way Shop/Terms/Rules already are.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -365,6 +365,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
       {tab === "members" && (
         <div>
           {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
+          {canManage && <OrganizerContactEditor league={league} onUpdateCreatorPhone={onUpdateCreatorPhone} c={c} />}
           {canManage && league.members.some((m) => isWaReminderActive(m)) && (
             <div className="flex justify-end mb-2">
               <button onClick={() => onClearAllWaReminders(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
@@ -1082,6 +1083,41 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Admin-only fill-in for the organizer's own WhatsApp number, stored on
+// league.creator_phone. Leagues created before this field existed (or before
+// the creator had a phone on their profile) have it blank, which silently
+// hides the "message the admin" WhatsApp icon on Results rows (see
+// CommentRow) — this lets an admin set it retroactively so older leagues get
+// that icon too, no different from any other team's contact row.
+function OrganizerContactEditor({ league, onUpdateCreatorPhone, c }) {
+  const [editing, setEditing] = useState(false);
+  const [phone, setPhone] = useState(league.creator_phone || "");
+  useEffect(() => { setPhone(league.creator_phone || ""); }, [league.creator_phone]);
+  return (
+    <div className="rounded-xl p-4 border mb-3" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Organizer contact</div>
+      {editing ? (
+        <div className="flex items-center gap-2 font-body text-sm">
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" type="tel" autoFocus
+            className="flex-1 rounded-lg font-mono text-xs px-2 py-1.5 outline-none" style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+          <button onClick={() => { onUpdateCreatorPhone(league, phone.trim()); setEditing(false); }} style={{ color: c.greenText }} className="p-1"><Check size={15} /></button>
+          <button onClick={() => setEditing(false)} style={{ color: c.textFaint }} className="p-1"><X size={15} /></button>
+        </div>
+      ) : (
+        <div onClick={() => setEditing(true)} className="flex items-center gap-2 font-body text-sm cursor-pointer">
+          <span className="flex-1" style={{ color: c.textDim }}>
+            Number opponents WhatsApp you on from a result they have a question about.
+          </span>
+          {league.creator_phone
+            ? <span className="font-mono text-xs shrink-0" style={{ color: c.textDim }}>{league.creator_phone}</span>
+            : <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>Add number</span>}
+          <Settings2 size={12} className="shrink-0" style={{ color: c.textFaint }} />
+        </div>
+      )}
     </div>
   );
 }

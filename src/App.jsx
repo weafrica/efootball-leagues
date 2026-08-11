@@ -4882,6 +4882,20 @@ export default function App() {
   // entry-close and kickoff dates back — plans change, a WhatsApp group is
   // slow to fill, whatever. Both are required, same as at creation, so a
   // league can never end up with one set and the other blank.
+  // Admin fill-in for leagues created before creator_phone existed (or before
+  // the creator had a phone on their profile) — without this, the "message
+  // the admin about this result" WhatsApp icon on the Results tab has no
+  // number to link to and just stays hidden (see CommentRow in
+  // LeagueDetail.jsx). Setting it here retroactively turns that icon on for
+  // older leagues with no other code change needed.
+  const updateLeagueCreatorPhone = async (league, phone) => {
+    const trimmed = (phone || "").trim();
+    const { error } = await supabase.from("leagues").update({ creator_phone: trimmed || null }).eq("id", league.id);
+    if (error) { showToast(`Couldn't save number: ${error.message}`); return; }
+    await refreshLeague(league.id);
+    showToast(trimmed ? "Organizer WhatsApp number updated." : "Organizer WhatsApp number cleared.");
+  };
+
   const updateLeagueSchedule = async (league, { entryClosesAt, startsAt }) => {
     const { error } = await supabase.from("leagues")
       .update({ entry_closes_at: new Date(entryClosesAt).toISOString(), starts_at: new Date(startsAt).toISOString() })
@@ -5273,7 +5287,7 @@ export default function App() {
                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
+                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
