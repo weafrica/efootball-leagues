@@ -9451,7 +9451,16 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
 }
 
 function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
-  const played = l.fixtures.filter((f) => f.played).length;
+  // Ladder Cup never writes to `fixtures` — it plays entirely through
+  // `ladder_cup_matches` (see ensureLadderCupEntry / initiateLadderCupMatch
+  // in App.jsx). Every count below that used to read straight off
+  // l.fixtures needs a ladder_cup-aware branch, or the card reads as
+  // permanently unstarted ("Open") no matter how many matches have been
+  // played, since l.fixtures.length is always 0 for this format.
+  const isLadderCup = l.format === "ladder_cup";
+  const ladderMatches = isLadderCup ? (l.ladder_cup_matches || []) : [];
+  const ladderPlayedCount = ladderMatches.filter((m) => m.finalized_at).length;
+  const played = isLadderCup ? ladderPlayedCount : l.fixtures.filter((f) => f.played).length;
   const paymentStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
   const isCash = l.league_type === "cash";
   const canSeePool = canManageLeague(l) || paymentStatus === "approved";
@@ -9495,7 +9504,16 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
         <div className="absolute top-1.5 right-1.5">
           <LeagueReactionBar league={l} session={session} onToggle={onToggleLeagueReaction} c={c} compact />
         </div>
-        {l.fixtures.length === 0 ? (
+        {isLadderCup ? (
+          // No fixed match count to show a progress bar against — Ladder
+          // Cup is either waiting on its first club, or already live (it
+          // has no separate start step; see LadderCupPendingPanel).
+          l.teams.length === 0 ? (
+            <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Open</span>
+          ) : (
+            <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Live</span>
+          )
+        ) : l.fixtures.length === 0 ? (
           <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Open</span>
         ) : (
           <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: c.bg + "55" }}>
@@ -9512,7 +9530,9 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
 
         <div className="flex items-center gap-1 mt-2 font-mono text-[9px]" style={{ color: c.textDim }}>
           <Shield size={9} /> {l.teams.length}
-          {l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
+          {isLadderCup
+            ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
+            : l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
         </div>
 
         {isCash && canSeePool && (
