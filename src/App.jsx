@@ -4213,14 +4213,17 @@ export default function App() {
     return !(t && t.eliminated);
   };
   // "Entry closed" covers two independent reasons: the admin set a manual
-  // entry_closes_at cutoff (any format), or — new here — this is a
-  // ladder_cup league whose own hard cutoff has already passed. Extending
-  // this single function (rather than adding a parallel check) means the
-  // fix reaches every place that already gates on it: the Join button's
-  // visibility on LeagueCard, Home's isJoinable sort, and both join
-  // handlers below.
+  // entry_closes_at cutoff (any format other than ladder_cup), or this is a
+  // ladder_cup league whose own hard cutoff has already passed. Survival
+  // Ladder Cup has no separate entry-close date of its own — clubs can join
+  // right up until the ladder's weekly cutoff — so entry_closes_at is
+  // deliberately ignored for that format even if an old row still has one
+  // set. Extending this single function (rather than adding a parallel
+  // check) means the fix reaches every place that already gates on it: the
+  // Join button's visibility on LeagueCard, Home's isJoinable sort, and
+  // both join handlers below.
   const entryClosed = (league) =>
-    (league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
+    (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
     || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
   // Persists which group each team landed in. Supabase doesn't support per-row
@@ -4238,7 +4241,11 @@ export default function App() {
     const { name, teamNames, format, survivor, groups, knockoutLegs, ladderCupCutoffAt, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
     const insertPayload = {
       name, created_by: session.user.id, format,
-      entry_closes_at: entryClosesAt, starts_at: startsAt,
+      // Survival Ladder Cup has no entry-close date of its own — clubs join
+      // until the ladder's own cutoff, not a separate registration window —
+      // so entry_closes_at is always stored as null for this format,
+      // regardless of what CreateLeague happened to pass in.
+      entry_closes_at: format === "ladder_cup" ? null : entryClosesAt, starts_at: startsAt,
       description: description || null,
       round_period_hours: roundPeriodHours || DEFAULT_ROUND_PERIOD_HOURS,
       // Drives the guest homepage's Weekend League spotlight — only leagues
@@ -5582,8 +5589,15 @@ export default function App() {
   };
 
   const updateLeagueSchedule = async (league, { entryClosesAt, startsAt }) => {
+    // Survival Ladder Cup never has an entry-close date (see entryClosed
+    // above) — LeagueScheduleLine doesn't even offer the field for this
+    // format, so entryClosesAt arrives empty here and is kept null rather
+    // than parsed into an invalid date.
     const { error } = await supabase.from("leagues")
-      .update({ entry_closes_at: new Date(entryClosesAt).toISOString(), starts_at: new Date(startsAt).toISOString() })
+      .update({
+        entry_closes_at: league.format === "ladder_cup" ? null : new Date(entryClosesAt).toISOString(),
+        starts_at: new Date(startsAt).toISOString(),
+      })
       .eq("id", league.id);
     if (error) { showToast(`Couldn't save dates: ${error.message}`); return; }
     await refreshLeague(league.id);
@@ -10029,6 +10043,12 @@ export function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
 // change after the league already exists, without needing to delete and
 // recreate it. Mirrors LeagueDescriptionBlock's edit-in-place pattern.
 export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRoundPeriod, c }) {
+  // Survival Ladder Cup has no entry-close date of its own — clubs join
+  // until the ladder's own weekly cutoff (shown separately in
+  // LadderCupPendingPanel), not a generic registration window — so this
+  // field is hidden and unrequired for that format. See entryClosed in
+  // App.jsx for the matching join-gating logic.
+  const isLadderCup = league.format === "ladder_cup";
   const [editing, setEditing] = useState(false);
   const [entryClosesAt, setEntryClosesAt] = useState(toDatetimeLocalValue(league.entry_closes_at));
   const [startsAt, setStartsAt] = useState(toDatetimeLocalValue(league.starts_at));
@@ -10046,11 +10066,11 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
     setRoundPeriodHours(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS);
   }, [league.entry_closes_at, league.starts_at, league.round_period_hours]);
 
-  const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
+  const datesOutOfOrder = !isLadderCup && entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
   const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
 
   const save = async () => {
-    if (!entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)) return;
+    if ((!isLadderCup && !entryClosesAt) || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)) return;
     setSaving(true);
     await onUpdateSchedule(league, { entryClosesAt, startsAt });
     const newPeriod = Number(roundPeriodHours);
@@ -10064,16 +10084,21 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
   if (editing) {
     return (
       <div className="mt-2 rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1.5">
-          <div>
-            <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>Entry closes</label>
-            <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
-          </div>
+        <div className={`grid grid-cols-1 ${isLadderCup ? "" : "sm:grid-cols-2"} gap-3 mb-1.5`}>
+          {!isLadderCup && (
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>Entry closes</label>
+              <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
+            </div>
+          )}
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-wider mb-1.5" style={{ color: c.textDim }}>League starts</label>
             <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={inputStyle} />
           </div>
         </div>
+        {isLadderCup && (
+          <div className="font-mono text-[11px] mb-2" style={{ color: c.textFaint }}>Clubs can join anytime — Survival Ladder Cup has no entry-close date, only its own weekly cutoff.</div>
+        )}
         {datesOutOfOrder && (
           <div className="font-mono text-[11px] mb-2" style={{ color: c.red }}>Start date must be on or after entry closes.</div>
         )}
@@ -10093,7 +10118,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
         <div className="flex items-center gap-2 justify-end">
           <button onClick={() => { setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at)); setStartsAt(toDatetimeLocalValue(league.starts_at)); setRoundPeriodHours(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS); setEditing(false); }}
             className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
-          <button onClick={save} disabled={saving || !entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !entryClosesAt || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid) ? 0.6 : 1 }}>
+          <button onClick={save} disabled={saving || (!isLadderCup && !entryClosesAt) || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || (!isLadderCup && !entryClosesAt) || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid) ? 0.6 : 1 }}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -10104,7 +10129,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
   return (
     <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 mt-1">
       <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: c.textFaint }}>
-        <Clock size={11} /> Entry closes {fmtDate(league.entry_closes_at)} · Starts {fmtDate(league.starts_at)}
+        <Clock size={11} /> {isLadderCup ? `Open for joining · Starts ${fmtDate(league.starts_at)}` : `Entry closes ${fmtDate(league.entry_closes_at)} · Starts ${fmtDate(league.starts_at)}`}
       </div>
       {canManage && (
         <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"

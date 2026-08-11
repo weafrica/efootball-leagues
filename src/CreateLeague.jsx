@@ -41,10 +41,14 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const survivorValid = format !== "survivor" || (matchesPerStage >= 1 && eliminationPercent >= 1 && eliminationPercent <= 99 && targetCount >= 2);
   const groupsValid = format !== "groups_knockout" || (groupSize >= 2 && qualifiersPerGroup >= 1 && qualifiersPerGroup <= groupSize && (teamNames.length === 0 || teamNames.length >= 4));
   const groupsTooFewTeams = format === "groups_knockout" && teamNames.length > 0 && teamNames.length < 4;
-  const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
+  // Survival Ladder Cup has no entry-close date of its own — clubs join
+  // until the ladder's own weekly cutoff, set below — so the generic
+  // entry-closes field is hidden and unrequired for this format.
+  const isLadderCup = format === "ladder_cup";
+  const datesOutOfOrder = !isLadderCup && entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
   const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
   const ladderCupValid = format !== "ladder_cup" || !!ladderCupCutoffAt;
-  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && ladderCupValid && entryClosesAt && startsAt && !datesOutOfOrder && roundPeriodValid;
+  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && ladderCupValid && (isLadderCup || entryClosesAt) && startsAt && !datesOutOfOrder && roundPeriodValid;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
   // Weekend League is a shortcut, not a separate field: whether a league
@@ -82,7 +86,7 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       groups: format === "groups_knockout" ? { groupSize: Number(groupSize), qualifiersPerGroup: Number(qualifiersPerGroup) } : null,
       knockoutLegs: (format === "knockout" || format === "groups_knockout") ? Number(knockoutLegs) : 1,
       ladderCupCutoffAt: format === "ladder_cup" ? new Date(ladderCupCutoffAt).toISOString() : null,
-      entryClosesAt: new Date(entryClosesAt).toISOString(),
+      entryClosesAt: format === "ladder_cup" ? null : new Date(entryClosesAt).toISOString(),
       startsAt: new Date(startsAt).toISOString(),
       roundPeriodHours: Number(roundPeriodHours),
       description: description.trim(),
@@ -123,16 +127,21 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Description <span style={{ color: c.textFaint }}>(optional — rules, prize, payment details, WhatsApp group link, etc.)</span></label>
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={leagueType === "cash" ? "e.g. Pay to EFT: Acc 12345678, Bank ABC. Winner takes the pot." : "e.g. Winner takes the pot. Join the WhatsApp group: ..."} className="w-full border rounded-lg px-4 py-2.5 font-body outline-none resize-none mb-5" style={inputStyle} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1.5">
-        <div>
-          <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Entry closes</label>
-          <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
-        </div>
+      <div className={`grid grid-cols-1 ${isLadderCup ? "" : "sm:grid-cols-2"} gap-3 mb-1.5`}>
+        {!isLadderCup && (
+          <div>
+            <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Entry closes</label>
+            <input type="datetime-local" value={entryClosesAt} onChange={(e) => setEntryClosesAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
+          </div>
+        )}
         <div>
           <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>League starts</label>
           <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
         </div>
       </div>
+      {isLadderCup && (
+        <div className="font-mono text-xs mb-1.5" style={{ color: c.textFaint }}>Survival Ladder Cup has no entry-close date — clubs can join anytime until the ladder's own weekly cutoff, set below.</div>
+      )}
       {isAdmin && (
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           <button onClick={setWeekendLeagueDates} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full transition-transform active:scale-95"
