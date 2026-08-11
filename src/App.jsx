@@ -50,7 +50,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // range the DB CHECK constraint enforces. rankLadderCupStandings/
 // getOpponentPool stay imported where they're actually consumed
 // (LeagueDetail.jsx) rather than duplicated here.
-import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim } from "./formats/ladderCup.js";
+import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -3978,6 +3978,80 @@ export default function App() {
     })();
   }, [activeLeague, refreshLeague]);
 
+  // Step 13: hard-cutoff finalization. Same lazy-check-on-read shape as
+  // the second-life expiry above — fires once per league, the first time
+  // it's the active one after hasLadderCupCutoffPassed is true and
+  // ladder_cup_finalized_at is still null. No separate scheduled job:
+  // every write path already refuses to touch a ladder_cup league once
+  // its cutoff has passed (see hasLadderCupCutoffPassed call sites above),
+  // so nothing on the board can change between the deadline and whenever
+  // someone next opens the league — running this on read rather than on a
+  // timer costs nothing.
+  //
+  // crownChampion only reads club_id/pts/gd/toughest_opponent_beaten_pts/
+  // status off each entry, so this maps straight off the raw rows rather
+  // than the fuller ladderCupEntryFromRow round-trip (that one's for
+  // callers that write a match/claim result back). finalizeAtCutoff's
+  // finalizedMatches/finalizedClaims aren't used to change anything — per
+  // its own doc comment they never undo points already applied — they're
+  // purely to tell players how many in-flight matches/claims got cut off,
+  // via the same postComment announcement a normal result gets.
+  const finalizedLadderCupCutoffChecked = useRef(new Set());
+  useEffect(() => {
+    if (!activeLeague || activeLeague.format !== "ladder_cup") return;
+    if (activeLeague.ladder_cup_finalized_at) return;
+    if (!hasLadderCupCutoffPassed(activeLeague.ladder_cup_cutoff_at)) return;
+    if (finalizedLadderCupCutoffChecked.current.has(activeLeague.id)) return;
+    finalizedLadderCupCutoffChecked.current.add(activeLeague.id);
+    (async () => {
+      const rows = activeLeague.ladder_cup_entries || [];
+      const mapped = rows.map((r) => ({
+        club_id: r.team_id, pts: r.pts, gd: r.gd,
+        toughest_opponent_beaten_pts: r.toughest_opponent_beaten_pts, status: r.status,
+      }));
+      const champion = crownChampion(mapped);
+      const matches = activeLeague.ladder_cup_matches || [];
+      const claims = activeLeague.ladder_cup_walkover_claims || [];
+      const { finalizedMatches, finalizedClaims } = finalizeAtCutoff({
+        matches, walkoverClaims: claims, cutoff: activeLeague.ladder_cup_cutoff_at,
+      });
+      const droppedMatches = matches.length - finalizedMatches.length;
+      const droppedClaims = claims.length - finalizedClaims.length;
+
+      const finalizedAt = new Date().toISOString();
+      const { error: leagueErr } = await supabase.from("leagues")
+        .update({ ladder_cup_finalized_at: finalizedAt, ladder_cup_champion_team_id: champion?.club_id ?? null })
+        .eq("id", activeLeague.id);
+      if (leagueErr) {
+        showToast(`Couldn't finalize the Ladder Cup: ${leagueErr.message}`);
+        finalizedLadderCupCutoffChecked.current.delete(activeLeague.id); // let a later read retry
+        return;
+      }
+
+      if (champion) {
+        const champRow = rows.find((r) => r.team_id === champion.club_id);
+        if (champRow) {
+          await supabase.from("ladder_cup_entries")
+            .update({ status: "champion", updated_at: finalizedAt }).eq("id", champRow.id);
+        }
+      }
+
+      const teamsById = Object.fromEntries((activeLeague.teams || []).map((t) => [t.id, t]));
+      const championName = champion ? (teamsById[champion.club_id]?.name || "Unknown club") : null;
+      let announcement = championName
+        ? `Ladder Cup cutoff reached — ${championName} crowned champion with ${champion.pts} pts.`
+        : "Ladder Cup cutoff reached — no eligible champion (every club was eliminated).";
+      const droppedBits = [
+        droppedMatches > 0 && `${droppedMatches} match${droppedMatches === 1 ? "" : "es"} still in progress`,
+        droppedClaims > 0 && `${droppedClaims} walkover claim${droppedClaims === 1 ? "" : "s"} not yet approved`,
+      ].filter(Boolean);
+      if (droppedBits.length > 0) announcement += ` ${droppedBits.join(" and ")} didn't count.`;
+      await postComment(activeLeague, announcement, null, null, null, false, null, null);
+
+      await refreshLeague(activeLeague.id);
+    })();
+  }, [activeLeague, refreshLeague, showToast]);
+
   // Picks up the intent set by tapping an "Up next" card on Home (see
   // pendingLogFixtureId above) once activeLeague's fixtures/teams are
   // actually available, and opens the same SubmitResultModal the manual
@@ -4308,6 +4382,7 @@ export default function App() {
 
   const initiateLadderCupMatch = async (league, myTeamId, opponentTeamId) => {
     if (!myTeamId || !opponentTeamId) return;
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new matches."); return; }
     // Belt-and-suspenders against a double-tap creating two rows for the
     // same pairing before refreshLeague's response lands — the DB has no
     // unique constraint on this table (a rematch after a finalized result
@@ -4331,6 +4406,7 @@ export default function App() {
   // rejected there too; checking client-side just gives a clean message
   // instead of a raw constraint-violation error.
   const setLadderCupMatchLength = async (league, match, minutes) => {
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this match no longer counts."); return; }
     if (!isValidMatchLength(minutes)) { showToast("Match length has to be 6–15 minutes."); return; }
     const { error } = await supabase.from("ladder_cup_matches")
       .update({ match_length_minutes: minutes }).eq("id", match.id);
@@ -4401,6 +4477,7 @@ export default function App() {
   // filter, so a rematch (a legitimate new pairing per initiateLadderCupMatch's
   // own comment) becomes challengeable again immediately.
   const recordLadderCupMatchResult = async (league, match, { homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this result can't be logged."); return false; }
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return false; }
 
     let winnerSide, decidedBy;
@@ -4487,6 +4564,7 @@ export default function App() {
   // declineOrExpireSecondLife is the same call the lazy-expiry effect uses.
   const respondLadderCupSecondLife = async (league, teamId, accept) => {
     if (!league || !teamId) return;
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — second life offers are closed."); return; }
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
     if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
@@ -4512,6 +4590,7 @@ export default function App() {
   // from a shown-opponent row and getOpponentPool shows at most 5.
   const messageLadderCupWalkoverOpponent = async (league, myTeamId, opponentTeamId) => {
     if (!myTeamId || !opponentTeamId) return;
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new walkover claims."); return; }
     const claim = createWalkoverClaim(myTeamId, opponentTeamId);
     const { error } = await supabase.from("ladder_cup_walkover_claims").insert({
       league_id: league.id, claimant_team_id: myTeamId, target_team_id: opponentTeamId,
@@ -4529,6 +4608,7 @@ export default function App() {
   // is re-checked here (not just trusted from the button being shown) since
   // the 24h window could've lapsed between render and tap.
   const submitLadderCupWalkoverClaim = async (league, claimRow, file) => {
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this claim no longer counts."); return; }
     if (!file) { showToast("Attach a screenshot before submitting the claim."); return; }
     if (!isWalkoverClaimable(claimRow)) { showToast("Not claimable yet — still inside the 24h wait."); return; }
 
@@ -4558,6 +4638,7 @@ export default function App() {
   // comment above) so it's bumped here, the one place a walkover win is
   // actually recorded.
   const approveLadderCupWalkoverClaim = async (league, claimRow) => {
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this claim can no longer be approved."); return; }
     try {
       approveWalkoverClaim(claimRow);
     } catch (err) {

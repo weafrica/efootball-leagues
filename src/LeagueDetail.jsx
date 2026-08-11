@@ -50,6 +50,30 @@ const LADDER_CUP_STATUS_LABEL = {
   eliminated: "Eliminated", champion: "Champion",
 };
 
+// Step 13: shown once App.jsx's lazy finalize-on-read effect has set
+// ladder_cup_finalized_at (see hasLadderCupCutoffPassed/crownChampion in
+// formats/ladderCup.js). finalized_at, not champion_team_id, is the flag
+// checked at the call site below — a null champion is a legitimate
+// outcome (every club eliminated before the cutoff), not "not finalized
+// yet".
+function LadderCupFinalizedBanner({ league, c }) {
+  const champion = league.ladder_cup_champion_team_id
+    ? (league.teams || []).find((t) => t.id === league.ladder_cup_champion_team_id)
+    : null;
+  return (
+    <div className="rounded-lg p-3 mt-3 flex items-center gap-2.5" style={{ background: "rgba(217,164,6,0.12)" }}>
+      <Trophy size={16} style={{ color: "#B8860B" }} />
+      <div className="font-body text-sm" style={{ color: c.text }}>
+        {champion ? (
+          <><span className="font-bold">{champion.name}</span> crowned Ladder Cup champion at the cutoff.</>
+        ) : (
+          "Ladder Cup finalized at the cutoff — no eligible champion, every club was eliminated."
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Small icon + count for each nonzero badge counter on a raw
 // ladder_cup_entries row. Column names come straight from the migration
 // (badge_heater_tier/giant_slayer/bounty_hunter/walkover are running
@@ -490,7 +514,9 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
         {league.ladder_cup_cutoff_at && (
           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
         )}
-        {myTeam ? (
+        {league.ladder_cup_finalized_at ? (
+          <LadderCupFinalizedBanner league={league} c={c} />
+        ) : myTeam ? (
           <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife}
             onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
         ) : (
@@ -498,7 +524,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
         )}
       </div>
 
-      {canManage && (
+      {canManage && !league.ladder_cup_finalized_at && (
         <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
       )}
 

@@ -30,6 +30,10 @@
 // substitution counts. The engine now covers the full ruleset. STEP 10
 // added resolveMatchWinner, the validation gate a submitted scoreline goes
 // through before it's trusted enough to feed to recordLadderCupWin.
+// STEP 13 added hasLadderCupCutoffPassed, the one predicate every write
+// path (App.jsx) now checks before touching a ladder_cup league — nothing
+// here actually fires on a timer; see App.jsx's lazy-check-on-read effect
+// for what calls finalizeAtCutoff/crownChampion once the deadline's past.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -379,6 +383,22 @@ export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
 export function crownChampion(entries) {
   const ranked = rankLadderCupStandings(entries.filter((e) => e.status !== "eliminated"));
   return ranked[0] || null;
+}
+
+/**
+ * Step 13: the single predicate that decides whether a league is still
+ * "live" for write purposes. `cutoff` is a league's `ladder_cup_cutoff_at`
+ * (nullable — leagues created before a cutoff was required, or mid-setup,
+ * never block). Shared by every ladder_cup write path in App.jsx
+ * (initiating a match, setting its length, logging a result, messaging or
+ * submitting/approving a walkover claim, responding to a second-life
+ * offer) so "the cup is over" means the same thing everywhere, and by the
+ * lazy finalize-on-read effect that decides whether it's time to run
+ * finalizeAtCutoff/crownChampion at all.
+ */
+export function hasLadderCupCutoffPassed(cutoff, now = new Date()) {
+  if (!cutoff) return false;
+  return new Date(cutoff).getTime() <= now.getTime();
 }
 
 // ---------------------------------------------------------------------------

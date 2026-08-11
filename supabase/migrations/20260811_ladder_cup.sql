@@ -90,3 +90,15 @@ alter table leagues
   add column if not exists ladder_cup_cutoff_at timestamptz;
   -- Set to the Sunday 10PM UTC+2 deadline when a ladder_cup league is created.
   -- FORMATS entry uses kind: 'ladder_cup' — see LADDER_CUP_INTEGRATION.md.
+
+-- 5. Cutoff finalization state (step 13)
+-- Set together, once, by the lazy finalize-on-read check in App.jsx the
+-- first time anyone opens the league after ladder_cup_cutoff_at has
+-- passed. ladder_cup_finalized_at being non-null is what every write path
+-- (see hasLadderCupCutoffPassed in ladderCup.js) and the standings screen
+-- treat as "this cup is over" — champion_team_id can legitimately be null
+-- (every club eliminated before the deadline), so finalized_at, not
+-- champion_team_id, is the flag to check.
+alter table leagues
+  add column if not exists ladder_cup_finalized_at timestamptz,
+  add column if not exists ladder_cup_champion_team_id uuid references teams(id);
