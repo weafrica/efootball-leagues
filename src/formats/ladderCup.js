@@ -27,7 +27,9 @@
 // byes. STEP 3 added walkover claims. STEP 4 added cutoff finalization
 // and the full tiebreaker chain. STEP 5 added the remaining MATCH FLOW
 // mechanics: random home-team assignment, match length validation, and
-// substitution counts. The engine now covers the full ruleset.
+// substitution counts. The engine now covers the full ruleset. STEP 10
+// added resolveMatchWinner, the validation gate a submitted scoreline goes
+// through before it's trusted enough to feed to recordLadderCupWin.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -410,4 +412,49 @@ export function substitutionsAllowed(decidedBy) {
   return decidedBy === "extra_time" || decidedBy === "penalties"
     ? R.BASE_SUBSTITUTIONS + R.EXTRA_TIME_SUBSTITUTIONS
     : R.BASE_SUBSTITUTIONS;
+}
+
+// ---------------------------------------------------------------------------
+// Step 10: result logging
+// ---------------------------------------------------------------------------
+
+/**
+ * Given a submitted scoreline, works out which side won and validates that
+ * the scores are actually consistent with reaching that stage — you can't
+ * be "decided by regulation" on a level scoreline, and you can't reach
+ * extra time or penalties unless the stage before it was level. This is
+ * the one gate between "whatever a player typed into a form" and
+ * recordLadderCupWin, which trusts winner/loser completely and just
+ * applies points — so everything that could make a result nonsensical has
+ * to be caught here first.
+ *
+ * Doesn't touch entries or points itself. Returns { winnerSide: "home" |
+ * "away" }; throws an Error with a message safe to show the user directly
+ * on anything inconsistent.
+ *
+ * @param {object} p
+ * @param {number} p.homeGoals - regulation-time goals
+ * @param {number} p.awayGoals - regulation-time goals
+ * @param {number} [p.extraTimeHomeGoals]
+ * @param {number} [p.extraTimeAwayGoals]
+ * @param {number|null} [p.pensHome]
+ * @param {number|null} [p.pensAway]
+ */
+export function resolveMatchWinner({
+  homeGoals, awayGoals, extraTimeHomeGoals = 0, extraTimeAwayGoals = 0,
+  pensHome = null, pensAway = null,
+}) {
+  if (homeGoals !== awayGoals) {
+    return { winnerSide: homeGoals > awayGoals ? "home" : "away", decidedBy: "regulation" };
+  }
+  if (extraTimeHomeGoals !== extraTimeAwayGoals) {
+    return { winnerSide: extraTimeHomeGoals > extraTimeAwayGoals ? "home" : "away", decidedBy: "extra_time" };
+  }
+  if (pensHome == null || pensAway == null) {
+    throw new Error("Match finished level — add an extra time or penalty shootout score.");
+  }
+  if (pensHome === pensAway) {
+    throw new Error("Penalties can't be level too — someone has to win.");
+  }
+  return { winnerSide: pensHome > pensAway ? "home" : "away", decidedBy: "penalties" };
 }

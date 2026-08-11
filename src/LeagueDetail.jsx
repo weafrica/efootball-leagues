@@ -166,12 +166,14 @@ function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
   );
 }
 
-// One row per opponent in the current ladder-points band. Three states per
+// One row per opponent in the current ladder-points band. Four states per
 // row: no match yet (Challenge button), a match exists but the length
 // hasn't been picked (home team sees the picker, away team sees a waiting
-// note — either side can cancel from here), or the length's set (ready to
-// play; result logging is step 10, not this screen).
-function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLength, onCancel, c }) {
+// note — either side can cancel from here), the length's set (ready to
+// play — Log result opens the step 10 scoreline form), or it's mid-submit.
+// Either side can log the result — first one to submit wins, same
+// self-report model as the rest of Ladder Cup's match flow.
+function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLength, onCancel, onOpenResult, c }) {
   const [busy, setBusy] = useState(false);
   const iAmHome = match && match.home_team_id === myTeamId;
 
@@ -203,9 +205,10 @@ function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLeng
           </button>
         )}
         {match && match.match_length_minutes != null && (
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide px-2 py-1.5 rounded flex items-center gap-1" style={{ background: c.greenSoft, color: c.greenText }}>
-            <Check size={11} /> Ready · {match.match_length_minutes}m
-          </span>
+          <button onClick={() => onOpenResult(match)}
+            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>
+            <Trophy size={13} /> Log result · {match.match_length_minutes}m
+          </button>
         )}
         {match && match.match_length_minutes == null && (
           <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}>
@@ -225,13 +228,58 @@ function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLeng
   );
 }
 
+// Step 11: the 24h accept/decline prompt a club sees the moment its status
+// flips to pending_second_life (right after its first loss, via applyLoss
+// in the engine). Either button ends the window immediately — there's
+// nothing else to decide once you've picked, so no confirmation step here
+// beyond the buttons themselves. If nobody responds, the lazy expiry check
+// in App.jsx converts it to eliminated on the next time this league loads,
+// same outcome as tapping Decline.
+function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
+  const [busy, setBusy] = useState(null); // "accept" | "decline" | null — which button is in flight
+
+  const act = async (accept) => {
+    setBusy(accept ? "accept" : "decline");
+    await (accept ? onAccept() : onDecline());
+    setBusy(null);
+  };
+
+  return (
+    <div className="rounded-xl p-4 border mt-3" style={{ background: "rgba(217,164,6,0.08)", borderColor: "#B8860B" }}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <Heart size={15} style={{ color: "#B8860B" }} />
+        <div className="font-body font-bold text-sm" style={{ color: "#B8860B" }}>Second life offer</div>
+      </div>
+      <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
+        That loss would normally end your run — but you've still got your one re-entry. Accept to rejoin the ladder at
+        &minus;{LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} points, or decline and you're out for good.
+      </div>
+      {entryRow.second_life_expires_at && (
+        <div className="font-mono text-[10px] uppercase tracking-wide mb-3 flex items-center gap-1" style={{ color: c.textFaint }}>
+          <Clock size={10} /> Decide by {fmtDate(entryRow.second_life_expires_at)} SAST — no response counts as decline
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button disabled={busy != null} onClick={() => act(true)}
+          className="flex-1 font-body text-xs font-semibold px-3 py-2.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+          {busy === "accept" ? "Saving…" : `Accept (−${LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} pts)`}
+        </button>
+        <button disabled={busy != null} onClick={() => act(false)}
+          className="flex-1 font-body text-xs font-semibold px-3 py-2.5 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+          {busy === "decline" ? "Saving…" : "Decline"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // The "who can I play" screen (Step 9). No accept/decline step here — a
 // tap on Challenge immediately assigns home/away and creates the match row;
 // the ±10-and-widening band in getOpponentPool is what stands in for
 // matchmaking consent. Refreshes automatically off the live `league` prop,
 // same as the standings table, so logging any result elsewhere in the app
 // widens/narrows this club's slate without a separate re-fetch.
-function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
+function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, c }) {
   // Hooks stay unconditional (called every render, same order) — the
   // eliminated/pending-second-life/no-entry short-circuits below happen
   // after both useMemo calls, not before, so React never sees a different
@@ -247,7 +295,8 @@ function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLen
     return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>You've been eliminated from this cup — no more challenges to send.</div>;
   }
   if (myStatus === "pending_second_life") {
-    return <div className="font-body text-xs mt-3" style={{ color: "#B8860B" }}>Decide on your second life offer before challenging anyone else.</div>;
+    return <LadderCupSecondLifeOffer entryRow={myEntry._row}
+      onAccept={() => onRespondSecondLife(true)} onDecline={() => onRespondSecondLife(false)} c={c} />;
   }
 
   const matches = league.ladder_cup_matches || [];
@@ -264,7 +313,7 @@ function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLen
     <div className="mt-3 space-y-1.5">
       {opponents.map((op) => (
         <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} match={matchWith(op.club_id)}
-          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} c={c} />
+          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} onOpenResult={onOpenResult} c={c} />
       ))}
     </div>
   );
@@ -275,7 +324,7 @@ function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLen
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
-function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
+function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, c }) {
   return (
     <div>
       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
@@ -287,7 +336,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
         )}
         {myTeam ? (
-          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} c={c} />
+          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife} c={c} />
         ) : (
           <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
         )}
@@ -335,7 +384,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
   );
 }
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupSecondLife, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -476,7 +525,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
         <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} onLeave={onLeave}
           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
-          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} c={c} />
+          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife} c={c} />
       ) : notStarted ? (
         <div>
           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>

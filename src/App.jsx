@@ -50,7 +50,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // range the DB CHECK constraint enforces. rankLadderCupStandings/
 // getOpponentPool stay imported where they're actually consumed
 // (LeagueDetail.jsx) rather than duplicated here.
-import { assignHomeTeam, isValidMatchLength } from "./formats/ladderCup.js";
+import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -2403,6 +2403,129 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
   );
 }
 
+// Step 10: logs a played (non-walkover) Ladder Cup match result. No
+// separate "confirm" step the way the platform-wide Ladder's friendly
+// challenges have — recordLadderCupMatchResult below applies it straight
+// to the standings the moment either side submits, same as the rest of
+// this format has worked since step 9 (a challenge is live the instant
+// it's created, no accept/decline). Extra time and penalty scores only
+// show once the stage before them is level, and decidedBy itself isn't a
+// manual choice — resolveMatchWinner derives it from whichever scoreline
+// actually broke the tie, so there's nothing for the scoreline and the
+// stage label to disagree about.
+function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c }) {
+  const [h, setH] = useState(0);
+  const [a, setA] = useState(0);
+  const [eth, setEth] = useState(0);
+  const [eta, setEta] = useState(0);
+  const [ph, setPh] = useState("");
+  const [pa, setPa] = useState("");
+  const [file, setFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const regulationLevel = Number(h) === Number(a);
+  const extraTimeLevel = Number(eth) === Number(eta);
+  const needsPens = regulationLevel && extraTimeLevel;
+  const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
+
+  const submit = async () => {
+    if (!file || saving || !pensReady) return;
+    setSaving(true);
+    await onSubmit({
+      homeGoals: Number(h), awayGoals: Number(a),
+      extraTimeHomeGoals: Number(eth), extraTimeAwayGoals: Number(eta),
+      pensHome: needsPens ? Number(ph) : null, pensAway: needsPens ? Number(pa) : null,
+      file,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <Trophy size={18} style={{ color: c.accent }} />
+            <h2 className="text-xl font-extrabold uppercase tracking-tight">Log result</h2>
+          </div>
+          <button aria-label="Cancel" onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+        </div>
+        <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (home) vs {awayTeam?.name || "Away"}</div>
+
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex-1 min-w-0">
+            <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"}</div>
+            <input type="number" min={0} value={h} onChange={(e) => setH(Number(e.target.value))}
+              className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+          </div>
+          <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"}</div>
+            <input type="number" min={0} value={a} onChange={(e) => setA(Number(e.target.value))}
+              className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+          </div>
+        </div>
+
+        {regulationLevel && (
+          <div className="mb-4">
+            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — extra time score</div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (ET)</div>
+                <input type="number" min={0} value={eth} onChange={(e) => setEth(Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (ET)</div>
+                <input type="number" min={0} value={eta} onChange={(e) => setEta(Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {needsPens && (
+          <div className="mb-4">
+            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>Still level after extra time — penalties</div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (pens)</div>
+                <input type="number" min={0} value={ph} onChange={(e) => setPh(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <div className="flex-1 min-w-0">
+                <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (pens)</div>
+                <input type="number" min={0} value={pa} onChange={(e) => setPa(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
+              </div>
+            </div>
+            {ph !== "" && pa !== "" && Number(ph) === Number(pa) && (
+              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too — someone has to win.</div>
+            )}
+          </div>
+        )}
+
+        <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Photo proof (required)</label>
+        <label className="flex items-center gap-2 border border-dashed rounded-lg px-4 py-3 mb-1 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
+          <Camera size={15} style={{ color: c.textFaint }} />
+          {file ? file.name : "Upload a screenshot of the final scoreboard"}
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
+        <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
+          This posts straight to the ladder — points, streaks, and elimination update immediately, no admin review.
+        </div>
+
+        <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
+          style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
+          {saving ? "Saving…" : "Log result"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Comments render in many independent components scattered across the
 // challenge board and league pages, but the browser can only speak one
 // utterance at a time — so "which comment is currently being read aloud"
@@ -2727,6 +2850,7 @@ export default function App() {
   // resultModal for it and clears itself.
   const [pendingLogFixtureId, setPendingLogFixtureId] = useState(null);
   const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } — logging a score for an accepted challenge
+  const [ladderCupResultModal, setLadderCupResultModal] = useState(null); // { league, match } — step 10, logging a Ladder Cup match result
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
@@ -3830,6 +3954,30 @@ export default function App() {
   const activeLeague = useMemo(() => (leagues || []).find((l) => l.id === activeLeagueId) || null, [leagues, activeLeagueId]);
   const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
 
+  // Step 13 will add a proper scheduled job for the hard cutoff; second-life
+  // offers get their lazy check here in the meantime (per the integration
+  // notes: "call on read, or on a cron"). Runs whenever a ladder_cup league
+  // becomes the active one — if any entry's 24h window has lapsed with no
+  // response, it converts straight to eliminated, same outcome as an
+  // explicit decline. Guarded with a ref so a re-render (or refreshLeague
+  // picking up its own write) doesn't re-fire the same expiry twice.
+  const expiredLadderCupOffersChecked = useRef(new Set());
+  useEffect(() => {
+    if (!activeLeague || activeLeague.format !== "ladder_cup") return;
+    if (expiredLadderCupOffersChecked.current.has(activeLeague.id)) return;
+    const now = new Date();
+    const stale = (activeLeague.ladder_cup_entries || []).filter((r) =>
+      r.status === "pending_second_life" && r.second_life_expires_at && new Date(r.second_life_expires_at) <= now);
+    if (stale.length === 0) return;
+    expiredLadderCupOffersChecked.current.add(activeLeague.id);
+    (async () => {
+      const { error } = await supabase.from("ladder_cup_entries")
+        .update({ status: "eliminated", second_life_offered_at: null, second_life_expires_at: null, updated_at: now.toISOString() })
+        .in("id", stale.map((r) => r.id));
+      if (!error) await refreshLeague(activeLeague.id);
+    })();
+  }, [activeLeague, refreshLeague]);
+
   // Picks up the intent set by tapping an "Up next" card on Home (see
   // pendingLogFixtureId above) once activeLeague's fixtures/teams are
   // actually available, and opens the same SubmitResultModal the manual
@@ -4201,6 +4349,156 @@ export default function App() {
     if (error) { showToast(`Couldn't cancel the match: ${error.message}`); return; }
     await refreshLeague(league.id);
     showToast("Match cancelled.");
+  };
+
+  // Full round-trip conversion between a raw ladder_cup_entries row and the
+  // pure engine's entry shape. The standings table's own mapper
+  // (toLadderCupEngineEntries in LeagueDetail.jsx) only carries the handful
+  // of fields rendering needs — recordLadderCupWin needs the complete
+  // shape (w/l/streak/status/second-life state/badge counts), so this is a
+  // separate, fuller mapper living next to the handler that actually
+  // writes results back. badge_walkover isn't part of the round trip —
+  // recordLadderCupWin never touches it, that's step 12's column.
+  const ladderCupEntryFromRow = (row, clubName) => ({
+    club_id: row.team_id,
+    club_name: clubName,
+    pts: row.pts, w: row.w, l: row.l, gd: row.gd, streak: row.streak,
+    status: row.status,
+    second_life_used: row.second_life_used,
+    second_life_offer: row.second_life_offered_at
+      ? { offered_at: row.second_life_offered_at, expires_at: row.second_life_expires_at }
+      : null,
+    toughest_opponent_beaten_pts: row.toughest_opponent_beaten_pts,
+    badge_counts: {
+      heater_wins: row.badge_heater_tier,
+      giant_slayer: row.badge_giant_slayer,
+      second_life: row.badge_second_life,
+      bounty_hunter: row.badge_bounty_hunter,
+    },
+  });
+  const ladderCupRowPatchFromEntry = (entry) => ({
+    pts: entry.pts, w: entry.w, l: entry.l, gd: entry.gd, streak: entry.streak,
+    status: entry.status,
+    second_life_used: entry.second_life_used,
+    second_life_offered_at: entry.second_life_offer?.offered_at ?? null,
+    second_life_expires_at: entry.second_life_offer?.expires_at ?? null,
+    toughest_opponent_beaten_pts: entry.toughest_opponent_beaten_pts,
+    badge_heater_tier: entry.badge_counts.heater_wins,
+    badge_giant_slayer: entry.badge_counts.giant_slayer,
+    badge_second_life: entry.badge_counts.second_life,
+    badge_bounty_hunter: entry.badge_counts.bounty_hunter,
+    updated_at: new Date().toISOString(),
+  });
+
+  // Step 10: result logging. `match` already has its length set (that's
+  // the only way LadderCupOpponentRow shows the "Log result" button in the
+  // first place) — this resolves the winner from the submitted scoreline,
+  // uploads the mandatory proof photo, applies the win/loss to both
+  // ladder_cup_entries rows via the engine, and marks the match finalized.
+  // recordLadderCupWin is what can flip the loser to pending_second_life
+  // or eliminated; nothing here decides that itself. Once finalized_at is
+  // set the match drops out of the live opponent board's `!m.finalized_at`
+  // filter, so a rematch (a legitimate new pairing per initiateLadderCupMatch's
+  // own comment) becomes challengeable again immediately.
+  const recordLadderCupMatchResult = async (league, match, { homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
+    if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return false; }
+
+    let winnerSide, decidedBy;
+    try {
+      ({ winnerSide, decidedBy } = resolveMatchWinner({ homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway }));
+    } catch (err) {
+      showToast(err.message);
+      return false;
+    }
+
+    const winnerTeamId = winnerSide === "home" ? match.home_team_id : match.away_team_id;
+    const loserTeamId = winnerSide === "home" ? match.away_team_id : match.home_team_id;
+    const winnerGoals = winnerSide === "home" ? homeGoals : awayGoals;
+    const loserGoals = winnerSide === "home" ? awayGoals : homeGoals;
+    const extraTimeGoalsWinner = winnerSide === "home" ? extraTimeHomeGoals : extraTimeAwayGoals;
+    const extraTimeGoalsLoser = winnerSide === "home" ? extraTimeAwayGoals : extraTimeHomeGoals;
+
+    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+    const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
+    const winnerRow = rowsById[winnerTeamId];
+    const loserRow = rowsById[loserTeamId];
+    if (!winnerRow || !loserRow) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
+
+    const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
+    const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${session.user.id}/${match.id}-${Date.now()}.${ext}`;
+    let proofUrl;
+    try {
+      proofUrl = await uploadToBlob("result-proofs", path, compressed);
+    } catch (uploadErr) {
+      showToast(`Couldn't upload photo: ${uploadErr.message}`);
+      return false;
+    }
+
+    const mapped = (league.ladder_cup_entries || []).map((r) => ladderCupEntryFromRow(r, teamsById[r.team_id]?.name || "Unknown club"));
+    const standingsBeforeMatch = rankLadderCupStandings(mapped);
+    const winnerEntry = ladderCupEntryFromRow(winnerRow, teamsById[winnerTeamId]?.name || "Unknown club");
+    const loserEntry = ladderCupEntryFromRow(loserRow, teamsById[loserTeamId]?.name || "Unknown club");
+
+    const { winner, loser } = recordLadderCupWin({
+      winner: winnerEntry, loser: loserEntry, standingsBeforeMatch,
+      winnerGoals, loserGoals, decidedBy, extraTimeGoalsWinner, extraTimeGoalsLoser,
+    });
+
+    const { error: matchErr } = await supabase.from("ladder_cup_matches").update({
+      home_goals: homeGoals, away_goals: awayGoals,
+      extra_time_home_goals: decidedBy === "regulation" ? null : extraTimeHomeGoals,
+      extra_time_away_goals: decidedBy === "regulation" ? null : extraTimeAwayGoals,
+      penalties_home: decidedBy === "penalties" ? pensHome : null,
+      penalties_away: decidedBy === "penalties" ? pensAway : null,
+      decided_by: decidedBy, is_walkover: false, winner_team_id: winnerTeamId, proof_url: proofUrl,
+      finalized_at: new Date().toISOString(),
+    }).eq("id", match.id);
+    if (matchErr) { showToast(`Couldn't save the match result: ${matchErr.message}`); return false; }
+
+    const [{ error: winnerErr }, { error: loserErr }] = await Promise.all([
+      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(winner)).eq("id", winnerRow.id),
+      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(loser)).eq("id", loserRow.id),
+    ]);
+    if (winnerErr || loserErr) showToast("Result saved, but the ladder standings couldn't be fully updated — check permissions.");
+
+    const homeName = teamsById[match.home_team_id]?.name || "Home";
+    const awayName = teamsById[match.away_team_id]?.name || "Away";
+    let scoreLine = `${homeName} ${homeGoals} – ${awayGoals} ${awayName}`;
+    if (decidedBy === "extra_time") scoreLine += ` (aet ${extraTimeHomeGoals}-${extraTimeAwayGoals})`;
+    if (decidedBy === "penalties") scoreLine += ` (pens ${pensHome}-${pensAway})`;
+    await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, proofUrl, true, null, null);
+
+    await refreshLeague(league.id);
+    showToast(loser.status === "eliminated"
+      ? `Result saved — ${teamsById[loserTeamId]?.name || "they"} are eliminated.`
+      : loser.status === "pending_second_life"
+      ? `Result saved — ${teamsById[loserTeamId]?.name || "they"} have 24h to accept a second life.`
+      : "Result saved.");
+    return true;
+  };
+
+  // Step 11: second-life accept/decline. Either action ends the 24h window
+  // immediately — accept re-enters the ladder at -6 points (floored at 0,
+  // per acceptSecondLife), decline is final elimination, same outcome the
+  // lazy expiry effect above applies automatically if the window lapses
+  // with no response. `accept` false covers both an explicit decline and
+  // (as far as this function's concerned) is indistinguishable from one —
+  // declineOrExpireSecondLife is the same call the lazy-expiry effect uses.
+  const respondLadderCupSecondLife = async (league, teamId, accept) => {
+    if (!league || !teamId) return;
+    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+    const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
+    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+    if (row.status !== "pending_second_life") return;
+
+    const entry = ladderCupEntryFromRow(row, teamsById[teamId]?.name || "Unknown club");
+    const updated = accept ? acceptSecondLife(entry) : declineOrExpireSecondLife(entry);
+
+    const { error } = await supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(updated)).eq("id", row.id);
+    if (error) { showToast(`Couldn't save your decision: ${error.message}`); return; }
+    await refreshLeague(league.id);
+    showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
   };
 
   const joinLeague = async (leagueId) => {
@@ -5413,6 +5711,8 @@ export default function App() {
                 onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
                 onSetLadderCupMatchLength={(match, minutes) => setLadderCupMatchLength(activeLeague, match, minutes)}
                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
+                onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}
+                onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
@@ -5464,6 +5764,16 @@ export default function App() {
         <SubmitResultModal league={resultModal.league} fixture={resultModal.fixture} homeTeam={resultModal.homeTeam} awayTeam={resultModal.awayTeam} existing={resultModal.existing}
           onCancel={() => setResultModal(null)} onSubmit={handleResultModalSubmit} c={c} />
       )}
+      {ladderCupResultModal && (() => {
+        const { league, match } = ladderCupResultModal;
+        const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+        return (
+          <LadderCupResultModal match={match} homeTeam={teamsById[match.home_team_id]} awayTeam={teamsById[match.away_team_id]}
+            onCancel={() => setLadderCupResultModal(null)}
+            onSubmit={async (result) => { const ok = await recordLadderCupMatchResult(league, match, result); if (ok) setLadderCupResultModal(null); }}
+            c={c} />
+        );
+      })()}
       {challengeResultModal && (() => {
         const { kind, challenge: ch } = challengeResultModal;
         const iAmFirst = kind === "open" ? ch.creator_id === session.user.id : ch.challenger_id === session.user.id;
