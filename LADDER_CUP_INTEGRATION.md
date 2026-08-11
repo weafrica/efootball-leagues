@@ -1,15 +1,16 @@
-# Survival Ladder Cup — integration notes (steps 1–2)
+# Survival Ladder Cup — integration notes (steps 1–3)
 
-**Step 1** shipped scoring + elimination/second-life. **Step 2** (this
-update) adds opponent matching. Walkover claims and cutoff finalization
-are still separate steps — not built yet, not referenced below.
+**Step 1** shipped scoring + elimination/second-life. **Step 2** added
+opponent matching. **Step 3** (this update) adds walkover claims. Cutoff
+finalization is the remaining step — not built yet, not referenced below.
 
-- `src/formats/ladderCup.js` — same file as step 1, with `getOpponentPool`
-  appended at the bottom. Pure functions, no React/Supabase imports.
-  Smoke-tested: band widening, no-bye-when-empty, closest-first ordering
-  all check out.
-- `supabase/migrations/20260811_ladder_cup.sql` — unchanged from step 1.
-  Matching runs live off `ladder_cup_entries.pts`/`.status`, no new table.
+- `src/formats/ladderCup.js` — same file as before, with the walkover
+  claim functions appended at the bottom. Smoke-tested: 24h gate enforced,
+  base-3-only scoring even mid-heater-streak, no-show loser runs through
+  the same loss/second-life path as a real defeat.
+- `supabase/migrations/20260811_ladder_cup.sql` — adds
+  `ladder_cup_walkover_claims`. `ladder_cup_entries`/`ladder_cup_matches`
+  unchanged from step 1.
 
 ## 1. Register the format
 
@@ -63,9 +64,37 @@ that's the whole mechanism, no extra state to track. An empty result means
 there's genuinely no one in range yet; show a "waiting for opponents"
 state rather than treating it as an error.
 
+## 4. Walkover claims (step 3)
+
+```js
+import { createWalkoverClaim, isWalkoverClaimable, submitWalkoverClaim, approveWalkoverClaim, recordLadderCupWin } from "./formats/ladderCup.js";
+
+// Player messages an opponent from the opponent slate:
+const claim = createWalkoverClaim(myClubId, targetClubId);
+// persist to ladder_cup_walkover_claims (status: "messaged")
+
+// 24h later, player submits with a screenshot — UI should only show the
+// claim button once isWalkoverClaimable(claim) is true:
+const submitted = submitWalkoverClaim(claim, proofUrl);
+// persist (status: "pending_review")
+
+// Admin approves:
+const approved = approveWalkoverClaim(submitted);
+// then apply it as a real result, same path as any logged match:
+const standingsBefore = rankLadderCupStandings(entries);
+const { winner, loser } = recordLadderCupWin({
+  winner: claimantEntry, loser: targetEntry, standingsBeforeMatch: standingsBefore,
+  isWalkover: true, winnerGoals: 0, loserGoals: 0,
+});
+```
+
+Enforce "up to 5 concurrent claims, one per shown opponent slot" in the UI
+layer by checking against `getOpponentPool(myEntry, allEntries)` before
+letting a new claim start — the DB only blocks a duplicate claim against
+the same target, not the 5-slot cap overall.
+
 ## What's coming next (not in this step)
 
-- Walkover claims (message → 24h wait → claim with proof → admin review)
 - Hard cutoff finalization + the full 3-level tiebreaker (points → GD →
   toughest opponent beaten) — `rankLadderCupStandings` here only sorts by
   points, since matching/scoring don't need the rest yet

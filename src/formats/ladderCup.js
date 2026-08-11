@@ -24,7 +24,8 @@
 //
 // STEP 2 added opponent matching (below, at the bottom of the file) — the
 // ±10 ladder-points band that widens until it finds live opponents, no
-// byes. Still not in this file: walkover claims, cutoff finalization.
+// byes. STEP 3 added walkover claims. Still not in this file: cutoff
+// finalization.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -37,6 +38,8 @@ export const LADDER_CUP_RULES = {
   BAND_START: 10,             // opponent matching starts at ±10 ladder points
   BAND_STEP: 5,                // widens ±15, ±20, ±25... no ceiling
   SHOWN_OPPONENTS: 5,          // always show up to 5 live opponents
+  WALKOVER_WAIT_HOURS: 24,     // must message + wait this long before claiming
+  MAX_CONCURRENT_WALKOVER_CLAIMS: 5, // one per shown opponent slot
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
@@ -273,4 +276,58 @@ export function getOpponentPool(entry, allEntries) {
   return pool
     .sort((a, b) => Math.abs(a.pts - entry.pts) - Math.abs(b.pts - entry.pts))
     .slice(0, R.SHOWN_OPPONENTS);
+}
+
+// ---------------------------------------------------------------------------
+// Walkover claims (step 3)
+// ---------------------------------------------------------------------------
+
+/** @typedef {"messaged"|"pending_review"|"approved"|"rejected"} WalkoverClaimStatus */
+
+/**
+ * Message opponent once, then wait 24h before a walkover can be claimed.
+ * Caller must enforce MAX_CONCURRENT_WALKOVER_CLAIMS (one per shown
+ * opponent slot) before creating another — this function doesn't see the
+ * claimant's other open claims, only the one it's creating.
+ */
+export function createWalkoverClaim(claimantClubId, targetClubId, now = new Date()) {
+  const claimableAt = new Date(now.getTime() + LADDER_CUP_RULES.WALKOVER_WAIT_HOURS * 60 * 60 * 1000);
+  return {
+    claimant_club_id: claimantClubId,
+    target_club_id: targetClubId,
+    messaged_at: now.toISOString(),
+    claimable_at: claimableAt.toISOString(),
+    status: /** @type {WalkoverClaimStatus} */ ("messaged"),
+    proof_url: null,
+  };
+}
+
+export function isWalkoverClaimable(claim, now = new Date()) {
+  return claim.status === "messaged" && new Date(claim.claimable_at) <= now;
+}
+
+/** Submits the claim with screenshot proof once the 24h wait has passed — moves it into admin review. */
+export function submitWalkoverClaim(claim, proofUrl, now = new Date()) {
+  if (!isWalkoverClaimable(claim, now)) {
+    throw new Error("Walkover not claimable yet — still inside the 24h wait.");
+  }
+  return { ...claim, status: "pending_review", proof_url: proofUrl };
+}
+
+/**
+ * Admin approves a pending claim. This only flips the claim's status — the
+ * caller still needs to call recordLadderCupWin({ isWalkover: true, ... })
+ * with the claimant as winner and target as loser to actually apply the
+ * base-3-points win and run the target through the loss/second-life path
+ * ("No-show opponent: counts as a LOSS, triggers their Second Life
+ * eligibility same as an actual defeat").
+ */
+export function approveWalkoverClaim(claim) {
+  if (claim.status !== "pending_review") throw new Error("Claim isn't pending review.");
+  return { ...claim, status: "approved" };
+}
+
+export function rejectWalkoverClaim(claim) {
+  if (claim.status !== "pending_review") throw new Error("Claim isn't pending review.");
+  return { ...claim, status: "rejected" };
 }
