@@ -1,15 +1,15 @@
-# Survival Ladder Cup — integration notes (step 1 of 3)
+# Survival Ladder Cup — integration notes (steps 1–2)
 
-This step ships **scoring + elimination/second-life only**. Opponent
-matching, walkover claims, and cutoff finalization are separate steps —
-not built yet, not referenced below.
+**Step 1** shipped scoring + elimination/second-life. **Step 2** (this
+update) adds opponent matching. Walkover claims and cutoff finalization
+are still separate steps — not built yet, not referenced below.
 
-- `src/formats/ladderCup.js` — the engine slice. Pure functions, no
-  React/Supabase imports. Smoke-tested: scoring breakdown, second-life
-  accept/re-loss all check out against the ruleset.
-- `supabase/migrations/20260811_ladder_cup.sql` — `ladder_cup_entries` +
-  `ladder_cup_matches` only. Adjust FK names if your `leagues`/`teams`
-  columns differ before running.
+- `src/formats/ladderCup.js` — same file as step 1, with `getOpponentPool`
+  appended at the bottom. Pure functions, no React/Supabase imports.
+  Smoke-tested: band widening, no-bye-when-empty, closest-first ordering
+  all check out.
+- `supabase/migrations/20260811_ladder_cup.sql` — unchanged from step 1.
+  Matching runs live off `ladder_cup_entries.pts`/`.status`, no new table.
 
 ## 1. Register the format
 
@@ -49,9 +49,22 @@ Second-life accept/decline UI just needs two buttons calling
 `acceptSecondLife(entry)` / `declineOrExpireSecondLife(entry)` and writing
 the result back.
 
+## 3. Opponent slate (step 2)
+
+```js
+import { getOpponentPool } from "./formats/ladderCup.js";
+
+const opponents = getOpponentPool(myEntry, allEntries); // up to 5, closest points first
+```
+
+Call it wherever the "who can I challenge" screen renders, and again
+after any result is logged (played or walkover) to refresh the slate —
+that's the whole mechanism, no extra state to track. An empty result means
+there's genuinely no one in range yet; show a "waiting for opponents"
+state rather than treating it as an error.
+
 ## What's coming next (not in this step)
 
-- Opponent matching (±10 band, widens ±15/±20/…, always show 5, no byes)
 - Walkover claims (message → 24h wait → claim with proof → admin review)
 - Hard cutoff finalization + the full 3-level tiebreaker (points → GD →
   toughest opponent beaten) — `rankLadderCupStandings` here only sorts by

@@ -21,6 +21,10 @@
 //   { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup",
 //     desc: "Ranked ladder, one elimination life each. Most points by the Sunday cutoff wins.",
 //     available: true }
+//
+// STEP 2 added opponent matching (below, at the bottom of the file) — the
+// ±10 ladder-points band that widens until it finds live opponents, no
+// byes. Still not in this file: walkover claims, cutoff finalization.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,6 +34,9 @@ export const LADDER_CUP_RULES = {
   SECOND_LIFE_WINDOW_HOURS: 24,
   SECOND_LIFE_DEDUCTION: 6,   // points deducted on re-entry, floored at 0
   HEATER_STREAK_START: 3,     // heater bonus kicks in at a 3-win streak
+  BAND_START: 10,             // opponent matching starts at ±10 ladder points
+  BAND_STEP: 5,                // widens ±15, ±20, ±25... no ceiling
+  SHOWN_OPPONENTS: 5,          // always show up to 5 live opponents
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
@@ -235,4 +242,35 @@ export function expireStaleSecondLifeOffers(entries, now = new Date()) {
     }
     return e;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Opponent matching (step 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Expanding-band opponent search: ±10 ladder points, widening by ±5 with no
+ * ceiling until the pool isn't thin anymore. Only "active" clubs (not the
+ * entry itself, not eliminated, not mid-second-life-decision) are eligible.
+ * Returns up to SHOWN_OPPONENTS, closest-in-points first. Empty result means
+ * "wait for the pool to widen" — there are no byes.
+ *
+ * Re-run this after any result is logged (played or walkover) — that's the
+ * "logging a result refreshes your opponent slate" rule; it's just calling
+ * this again with fresh entries, not a separate mechanism.
+ */
+export function getOpponentPool(entry, allEntries) {
+  const R = LADDER_CUP_RULES;
+  const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
+  if (eligible.length === 0) return [];
+
+  let band = R.BAND_START;
+  let pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
+  while (pool.length < R.SHOWN_OPPONENTS && pool.length < eligible.length) {
+    band += R.BAND_STEP;
+    pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
+  }
+  return pool
+    .sort((a, b) => Math.abs(a.pts - entry.pts) - Math.abs(b.pts - entry.pts))
+    .slice(0, R.SHOWN_OPPONENTS);
 }
