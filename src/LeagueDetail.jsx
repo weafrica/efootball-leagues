@@ -846,8 +846,15 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
   // actual match — those get real score inputs that update the fixture (and
   // so the table). Older posts fall back to editing just the displayed text.
   const linkedFixture = cm.fixture_id ? (league.fixtures || []).find((f) => f.id === cm.fixture_id) : null;
-  const homeTeamName = linkedFixture ? (league.teams.find((t) => t.id === linkedFixture.home_team_id)?.name || "Home") : null;
-  const awayTeamName = linkedFixture ? (league.teams.find((t) => t.id === linkedFixture.away_team_id)?.name || "Away") : null;
+  const homeTeam = linkedFixture ? league.teams.find((t) => t.id === linkedFixture.home_team_id) : null;
+  const awayTeam = linkedFixture ? league.teams.find((t) => t.id === linkedFixture.away_team_id) : null;
+  const homeTeamName = homeTeam?.name || (linkedFixture ? "Home" : null);
+  const awayTeamName = awayTeam?.name || (linkedFixture ? "Away" : null);
+  // Ready message an admin can fire off to either club straight from the
+  // result row — one for each side, only available on fixture-linked
+  // results since that's the only case we reliably know both teams.
+  const adminQueryText = (teamName) =>
+    `Hi ${teamName}, quick check on your result — Matchday ${linkedFixture?.round}: ${homeTeamName} ${linkedFixture?.home_score} – ${linkedFixture?.away_score} ${awayTeamName}. Everything look right on your end?`;
 
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(cm.body || "");
@@ -960,6 +967,14 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
             )}
             {isResultRow && !canEditResults && league.creator_phone && (
               <WhatsAppLink phone={league.creator_phone} text={queryWhatsAppText} iconOnly c={c} />
+            )}
+            {isResultRow && canEditResults && linkedFixture && (
+              <>
+                <WhatsAppLink phone={homeTeam?.phone} text={adminQueryText(homeTeamName)} iconOnly
+                  title={`Message ${homeTeamName}`} c={c} />
+                <WhatsAppLink phone={awayTeam?.phone} text={adminQueryText(awayTeamName)} iconOnly
+                  title={`Message ${awayTeamName}`} c={c} />
+              </>
             )}
             {canEditThis && !editing && (
               <button onClick={startEdit} title="Edit result"

@@ -1908,12 +1908,12 @@ export function firstMatchdayNote(round) {
 // iconOnly, renders as a plain round icon button and drops the text label —
 // used in fixtures where we show the WhatsApp entry point but not the raw
 // number itself.
-export function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
+export function WhatsAppLink({ phone, text, label, iconOnly, onClick, title, c }) {
   const href = waLink(phone, text);
   if (!href) return null;
   if (iconOnly) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp" onClick={onClick}
+      <a href={href} target="_blank" rel="noopener noreferrer" title={title || "Message on WhatsApp"} onClick={onClick}
         className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0"
         style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
         <MessageCircle size={14} />
@@ -1921,7 +1921,7 @@ export function WhatsAppLink({ phone, text, label, iconOnly, onClick, c }) {
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp" onClick={onClick}
+    <a href={href} target="_blank" rel="noopener noreferrer" title={title || "Message on WhatsApp"} onClick={onClick}
       className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
       style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
       <MessageCircle size={11} /> {label || "WhatsApp"}
