@@ -5036,8 +5036,13 @@ export default function App() {
   const editComment = async (comment, league, newBody) => {
     const trimmed = newBody.trim();
     if (!trimmed) return false;
-    const { error } = await supabase.from("comments").update({ body: trimmed }).eq("id", comment.id);
+    // .select().maybeSingle() is deliberate: Supabase RLS blocks a row
+    // silently — an update whose WHERE clause the policy filters out still
+    // comes back with no error, just 0 rows affected. Without asking for
+    // the row back we'd show "Result updated" even when nothing changed.
+    const { data, error } = await supabase.from("comments").update({ body: trimmed }).eq("id", comment.id).select().maybeSingle();
     if (error) { showToast(`Couldn't update result: ${error.message}`); return false; }
+    if (!data) { showToast("Couldn't update — you don't have permission to edit this result (check the comments UPDATE policy in Supabase)."); return false; }
     await refreshLeague(league.id);
     showToast("Result updated.");
     return true;
