@@ -4032,12 +4032,29 @@ export default function App() {
       const droppedClaims = claims.length - finalizedClaims.length;
 
       const finalizedAt = new Date().toISOString();
-      const { error: leagueErr } = await supabase.from("leagues")
+      // Bug fix: guard the write with `.is("ladder_cup_finalized_at", null)`
+      // and `.select()` so this only ever succeeds for whichever client
+      // gets there first — if two people open a lapsed league around the
+      // same moment, both pass the client-side `!activeLeague.
+      // ladder_cup_finalized_at` check above before either write lands.
+      // Without the condition both would "win" and both would post the
+      // champion announcement below. `data` comes back empty (no error)
+      // for whoever loses the race — that client just refreshes and
+      // picks up the real winner's result instead of redoing the work.
+      const { data: wonRace, error: leagueErr } = await supabase.from("leagues")
         .update({ ladder_cup_finalized_at: finalizedAt, ladder_cup_champion_team_id: champion?.club_id ?? null })
-        .eq("id", activeLeague.id);
+        .eq("id", activeLeague.id)
+        .is("ladder_cup_finalized_at", null)
+        .select("id");
       if (leagueErr) {
         showToast(`Couldn't finalize the Ladder Cup: ${leagueErr.message}`);
         finalizedLadderCupCutoffChecked.current.delete(activeLeague.id); // let a later read retry
+        return;
+      }
+      if (!wonRace || wonRace.length === 0) {
+        // Someone else's read already finalized this league between our
+        // check above and this write — nothing left for us to do.
+        await refreshLeague(activeLeague.id);
         return;
       }
 
