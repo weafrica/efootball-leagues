@@ -27,7 +27,7 @@ import {
 // App.jsx the same way Shop/Terms/Rules already are.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -329,7 +329,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as matches are played."
             canEditResults={canManage}
-            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
       )}
 
@@ -453,7 +453,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
 const COMMENT_PAGE_SIZE = 6;
 const MAX_INDENT_DEPTH = 4;
 
-function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
+function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count
@@ -602,7 +602,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit
         <div className="space-y-3 mb-3">
           {visibleRoots.map((cm) => (
             <CommentNode key={cm.id} comment={cm} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={0} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={0} />
           ))}
         </div>
       )}
@@ -684,7 +684,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit
 // underneath it, no matter how deep. Each node owns its own "reply box
 // open?" / "replies expanded?" state independently of its siblings and
 // ancestors.
-function CommentNode({ comment, league, session, canComment, onPost, onDelete, onEdit, canEditResults = false, onToggleReaction, c, depth }) {
+function CommentNode({ comment, league, session, canComment, onPost, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, c, depth }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [repliesShown, setRepliesShown] = useState(false);
   const [replyText, setReplyText] = useState("");
@@ -730,7 +730,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
   return (
     <div className={comment.pending ? "opacity-60" : "comment-pop-in"}>
       <CommentRow comment={comment} league={league} session={session} canComment={canComment}
-        onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
+        onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
         onReplyClick={canReply ? () => setReplyOpen((v) => !v) : null} />
 
       {children.length > 0 && (
@@ -746,7 +746,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
         <div className="mt-2 space-y-2 pl-3 border-l" style={{ marginLeft: indent, borderColor: c.border }}>
           {children.map((r) => (
             <CommentNode key={r.id} comment={r} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onEdit={onEdit} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -818,7 +818,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
 // go (fast un-react, same as the old single-emoji like). To switch to a
 // different emoji, remove yours first, then pick again — keeps the whole
 // thing usable with touch, not just hover.
-function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit, canEditResults = false, onToggleReaction, onReplyClick, c, isReply = false }) {
+function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, onReplyClick, c, isReply = false }) {
   const isOwn = session && cm.user_id === session.user.id;
   const isManager = cm.user_id === league.created_by;
   const realReactions = cm.comment_likes || [];
@@ -835,17 +835,44 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
   // actual auto-posted scoreline row itself (not on chat replies underneath
   // it), and only from the Results tab (canEditResults).
   const canEditThis = canEditResults && !cm.pending && isResultComment(cm.body, cm.is_result);
+  // Only results posted after fixture_id was added carry a link back to the
+  // actual match — those get real score inputs that update the fixture (and
+  // so the table). Older posts fall back to editing just the displayed text.
+  const linkedFixture = cm.fixture_id ? (league.fixtures || []).find((f) => f.id === cm.fixture_id) : null;
+  const homeTeamName = linkedFixture ? (league.teams.find((t) => t.id === linkedFixture.home_team_id)?.name || "Home") : null;
+  const awayTeamName = linkedFixture ? (league.teams.find((t) => t.id === linkedFixture.away_team_id)?.name || "Away") : null;
+
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(cm.body || "");
+  const [editHomeScore, setEditHomeScore] = useState("");
+  const [editAwayScore, setEditAwayScore] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
-  const startEdit = () => { setEditText(cm.body || ""); setEditing(true); };
+  const startEdit = () => {
+    setEditText(cm.body || "");
+    if (linkedFixture) {
+      setEditHomeScore(linkedFixture.home_score ?? "");
+      setEditAwayScore(linkedFixture.away_score ?? "");
+    }
+    setEditing(true);
+  };
   const saveEdit = async () => {
-    const trimmed = editText.trim();
-    if (!trimmed || savingEdit) return;
-    setSavingEdit(true);
-    const ok = await onEdit(cm, league, trimmed);
-    setSavingEdit(false);
-    if (ok) setEditing(false);
+    if (savingEdit) return;
+    if (linkedFixture) {
+      const homeNum = parseInt(editHomeScore, 10);
+      const awayNum = parseInt(editAwayScore, 10);
+      if (!Number.isInteger(homeNum) || !Number.isInteger(awayNum) || homeNum < 0 || awayNum < 0) return;
+      setSavingEdit(true);
+      const ok = await onEditResult(cm, league, linkedFixture, homeNum, awayNum);
+      setSavingEdit(false);
+      if (ok) setEditing(false);
+    } else {
+      const trimmed = editText.trim();
+      if (!trimmed) return;
+      setSavingEdit(true);
+      const ok = await onEdit(cm, league, trimmed);
+      setSavingEdit(false);
+      if (ok) setEditing(false);
+    }
   };
 
   const myRealReaction = session ? (realReactions.find((l) => l.user_id === session.user.id)?.reaction || null) : null;
@@ -940,13 +967,35 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
         </div>
         {editing ? (
           <div className="mt-1.5">
-            <textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={2} autoFocus
-              className="w-full rounded-lg px-2.5 py-1.5 font-body text-sm outline-none resize-none"
-              style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+            {linkedFixture ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{homeTeamName}</span>
+                <input type="number" min="0" inputMode="numeric" value={editHomeScore} autoFocus
+                  onChange={(e) => setEditHomeScore(e.target.value)}
+                  className="w-14 rounded-lg px-2 py-1 font-mono text-sm text-center outline-none"
+                  style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+                <span className="font-body text-xs" style={{ color: c.textFaint }}>–</span>
+                <input type="number" min="0" inputMode="numeric" value={editAwayScore}
+                  onChange={(e) => setEditAwayScore(e.target.value)}
+                  className="w-14 rounded-lg px-2 py-1 font-mono text-sm text-center outline-none"
+                  style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+                <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{awayTeamName}</span>
+              </div>
+            ) : (
+              <>
+                <textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={2} autoFocus
+                  className="w-full rounded-lg px-2.5 py-1.5 font-body text-sm outline-none resize-none"
+                  style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+                <div className="font-mono text-[10px] mt-1" style={{ color: c.textFaint }}>
+                  This result predates score-linked editing — this only changes the posted text, not the table.
+                </div>
+              </>
+            )}
             <div className="flex items-center gap-2 mt-1.5">
-              <button onClick={saveEdit} disabled={savingEdit || !editText.trim()}
+              <button onClick={saveEdit}
+                disabled={savingEdit || (linkedFixture ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())}
                 className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || !editText.trim()) ? 0.5 : 1 }}>
+                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || (linkedFixture ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())) ? 0.5 : 1 }}>
                 {savingEdit ? "Saving…" : "Save"}
               </button>
               <button onClick={() => setEditing(false)} disabled={savingEdit}

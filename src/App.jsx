@@ -4438,7 +4438,7 @@ export default function App() {
     await applyKnockoutElimination(league, fixture, homeScore, awayScore, pensHome, pensAway);
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
-    await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true);
+    await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true, null, fixture.id);
     await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", fixture.id);
@@ -4534,7 +4534,7 @@ export default function App() {
         await postComment(
           league,
           `Photo proof for ${submission.submitted_by_username}'s approved result — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
-          null, null, photoUrl, true,
+          null, null, photoUrl, true, null, fixture?.id || null,
         );
       }
     }
@@ -4627,7 +4627,7 @@ export default function App() {
         accept
           ? `Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName} (confirmed by opponent)`
           : `${submission.submitted_by_username}'s result was disputed by their opponent — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
-        null, null, photoUrl, true,
+        null, null, photoUrl, true, null, accept ? (fixture?.id || null) : null,
       );
 
       await refreshLeague(league.id);
@@ -4983,7 +4983,7 @@ export default function App() {
   // re-uploading it).
   // voiceClip is { blob, duration } from useVoiceRecorder — optional, same
   // as the photo, and stands alone fine (a voice-only comment with no text).
-  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null) => {
+  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null, fixtureId = null) => {
     const trimmed = (body || "").trim();
     if (!trimmed && !file && !photoUrl && !voiceClip) return;
     const username = profile?.efootball_username || session.user.email;
@@ -5021,7 +5021,7 @@ export default function App() {
     const { error } = await supabase.from("comments").insert({
       league_id: league.id, user_id: session.user.id, username, body: trimmed,
       parent_comment_id: parentComment?.id || null, photo_url, is_result: isResult,
-      voice_url, voice_duration,
+      voice_url, voice_duration, fixture_id: fixtureId,
     });
     if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await refreshLeague(league.id);
@@ -5045,6 +5045,41 @@ export default function App() {
     if (!data) { showToast("Couldn't update — you don't have permission to edit this result (check the comments UPDATE policy in Supabase)."); return false; }
     await refreshLeague(league.id);
     showToast("Result updated.");
+    return true;
+  };
+
+  // Admin correction for a posted result that's linked to a real fixture
+  // (comment.fixture_id — only set on results posted after the fixture_id
+  // column was added; see supabase-edit-results-followup.sql). Unlike
+  // editComment above, this actually rewrites the fixture's home_score/
+  // away_score (so standings/knockout progress move too), re-runs the same
+  // knockout-elimination and ladder-outcome side effects recordResult does,
+  // then regenerates the comment text from the new score so the two never
+  // drift apart.
+  const editResultForFixture = async (comment, league, fixture, homeScore, awayScore) => {
+    if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0) {
+      showToast("Enter a valid score for both teams.");
+      return false;
+    }
+    const { data: fxData, error: fxError } = await supabase.from("fixtures")
+      .update({ home_score: homeScore, away_score: awayScore })
+      .eq("id", fixture.id).select().maybeSingle();
+    if (fxError) { showToast(`Couldn't update the match score: ${fxError.message}`); return false; }
+    if (!fxData) { showToast("Couldn't update — you don't have permission to edit this fixture (check the fixtures UPDATE policy in Supabase)."); return false; }
+
+    await applyKnockoutElimination(league, fixture, homeScore, awayScore, fixture.pens_home, fixture.pens_away);
+
+    const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
+    const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
+    const newBody = `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`;
+    const { data: cmData, error: cmError } = await supabase.from("comments").update({ body: newBody }).eq("id", comment.id).select().maybeSingle();
+    if (cmError) showToast(`Score saved, but couldn't update the posted text: ${cmError.message}`);
+    else if (!cmData) showToast("Score saved, but you don't have permission to edit the posted text (check the comments UPDATE policy).");
+
+    await refreshLeague(league.id);
+    await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
+    const outcome = await describeLadderOutcome("fixture", fixture.id);
+    if (!cmError && cmData) showToast(outcome ? `Result updated — ${outcome}` : "Result updated — table refreshed.");
     return true;
   };
 
@@ -5244,7 +5279,7 @@ export default function App() {
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
                 onRespondToResultSubmission={respondToResultSubmission}
-                onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onToggleReaction={toggleCommentReaction}
+                onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onEditResult={editResultForFixture} onToggleReaction={toggleCommentReaction}
                 onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} c={c} />
               </Suspense>
             )}
