@@ -4031,21 +4031,22 @@ export default function App() {
       const droppedMatches = matches.length - finalizedMatches.length;
       const droppedClaims = claims.length - finalizedClaims.length;
 
-      const finalizedAt = new Date().toISOString();
-      // Bug fix: guard the write with `.is("ladder_cup_finalized_at", null)`
-      // and `.select()` so this only ever succeeds for whichever client
-      // gets there first — if two people open a lapsed league around the
-      // same moment, both pass the client-side `!activeLeague.
-      // ladder_cup_finalized_at` check above before either write lands.
-      // Without the condition both would "win" and both would post the
-      // champion announcement below. `data` comes back empty (no error)
-      // for whoever loses the race — that client just refreshes and
-      // picks up the real winner's result instead of redoing the work.
-      const { data: wonRace, error: leagueErr } = await supabase.from("leagues")
-        .update({ ladder_cup_finalized_at: finalizedAt, ladder_cup_champion_team_id: champion?.club_id ?? null })
-        .eq("id", activeLeague.id)
-        .is("ladder_cup_finalized_at", null)
-        .select("id");
+      // Bug fix: this write used to go straight to `leagues` from
+      // whichever member's browser got here first — but the RLS UPDATE
+      // policy on `leagues` only allows the league's creator or an admin
+      // to write to it, so a regular member's browser would silently
+      // fail here (no error, `wonRace` just empty) and the league would
+      // stay stuck unfinalized until an admin happened to open it. Routed
+      // through a SECURITY DEFINER RPC (see finalize-ladder-cup-rpc.sql)
+      // that any signed-in user can call, but which can only ever perform
+      // this exact narrow update — nothing else on `leagues` is opened up.
+      // The RPC's own WHERE clause (format = 'ladder_cup', cutoff passed,
+      // not already finalized) does the same "first one here wins" race
+      // guard the old `.is("ladder_cup_finalized_at", null)` did.
+      const { data: wonRace, error: leagueErr } = await supabase.rpc("finalize_ladder_cup", {
+        p_league_id: activeLeague.id,
+        p_champion_team_id: champion?.club_id ?? null,
+      });
       if (leagueErr) {
         showToast(`Couldn't finalize the Ladder Cup: ${leagueErr.message}`);
         finalizedLadderCupCutoffChecked.current.delete(activeLeague.id); // let a later read retry
@@ -4057,6 +4058,11 @@ export default function App() {
         await refreshLeague(activeLeague.id);
         return;
       }
+      // The RPC sets this server-side (now()) rather than us passing a
+      // client-side timestamp — read it back off the returned row so the
+      // champion-row write below stays consistent with what's actually
+      // stored on `leagues`.
+      const finalizedAt = wonRace[0].ladder_cup_finalized_at;
 
       if (champion) {
         const champRow = rows.find((r) => r.team_id === champion.club_id);
