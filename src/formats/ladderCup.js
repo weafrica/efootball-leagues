@@ -24,8 +24,10 @@
 //
 // STEP 2 added opponent matching (below, at the bottom of the file) — the
 // ±10 ladder-points band that widens until it finds live opponents, no
-// byes. STEP 3 added walkover claims. Still not in this file: cutoff
-// finalization.
+// byes. STEP 3 added walkover claims. STEP 4 added cutoff finalization
+// and the full tiebreaker chain. STEP 5 added the remaining MATCH FLOW
+// mechanics: random home-team assignment, match length validation, and
+// substitution counts. The engine now covers the full ruleset.
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,6 +50,10 @@ export const LADDER_CUP_RULES = {
   // toward goal difference? Penalties never do, that's settled. Regulation
   // always does. This flag is the one switch to flip once that's decided.
   COUNT_EXTRA_TIME_IN_GD: false,
+  MATCH_LENGTH_MIN_MINUTES: 6,  // home team's choice, per half
+  MATCH_LENGTH_MAX_MINUTES: 15,
+  BASE_SUBSTITUTIONS: 6,
+  EXTRA_TIME_SUBSTITUTIONS: 1,  // additional sub allowed only if the match reaches extra time
 };
 
 // ---------------------------------------------------------------------------
@@ -371,4 +377,37 @@ export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
 export function crownChampion(entries) {
   const ranked = rankLadderCupStandings(entries.filter((e) => e.status !== "eliminated"));
   return ranked[0] || null;
+}
+
+// ---------------------------------------------------------------------------
+// Match setup (step 5): home-team assignment, match length, substitutions
+// ---------------------------------------------------------------------------
+
+/**
+ * "System randomly assigns home team per fixture." Pass a custom `rng`
+ * (returning a float in [0,1)) for deterministic tests — defaults to
+ * Math.random for real use.
+ */
+export function assignHomeTeam(clubAId, clubBId, rng = Math.random) {
+  return rng() < 0.5 ? { home: clubAId, away: clubBId } : { home: clubBId, away: clubAId };
+}
+
+/** Home team picks the match length: 6–15 minutes per half. */
+export function isValidMatchLength(minutes) {
+  return Number.isInteger(minutes)
+    && minutes >= LADDER_CUP_RULES.MATCH_LENGTH_MIN_MINUTES
+    && minutes <= LADDER_CUP_RULES.MATCH_LENGTH_MAX_MINUTES;
+}
+
+/**
+ * 6 substitutions per match, +1 (7 total) if it goes to extra time.
+ * Penalties don't grant a further increase — the extra sub is for reaching
+ * extra time, not for reaching penalties specifically (which only happens
+ * after extra time anyway).
+ */
+export function substitutionsAllowed(decidedBy) {
+  const R = LADDER_CUP_RULES;
+  return decidedBy === "extra_time" || decidedBy === "penalties"
+    ? R.BASE_SUBSTITUTIONS + R.EXTRA_TIME_SUBSTITUTIONS
+    : R.BASE_SUBSTITUTIONS;
 }

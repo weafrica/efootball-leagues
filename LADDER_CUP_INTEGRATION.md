@@ -1,19 +1,25 @@
-# Survival Ladder Cup — integration notes (all 4 steps)
+# Survival Ladder Cup — integration notes (all 5 steps — full ruleset covered)
 
 **Step 1** shipped scoring + elimination/second-life. **Step 2** added
-opponent matching. **Step 3** added walkover claims. **Step 4** (this
-update) adds hard-cutoff finalization and the full tiebreaker chain — the
-whole ruleset is now covered.
+opponent matching. **Step 3** added walkover claims. **Step 4** added
+cutoff finalization and the full tiebreaker chain. **Step 5** (this
+update) adds the remaining MATCH FLOW mechanics: random home-team
+assignment, match length validation, and substitution counts. Every rule
+in the original ruleset now has a corresponding engine function.
 
-- `src/formats/ladderCup.js` — `rankLadderCupStandings` now sorts by the
-  full chain (points → GD → toughest opponent beaten) instead of points
-  only, plus `finalizeAtCutoff` and `crownChampion` appended at the
-  bottom. Smoke-tested: 4-way tiebreak resolves correctly, a high-points
-  eliminated club can't be crowned, mid-match/still-in-claim-window
-  entries get correctly dropped at cutoff.
-- `supabase/migrations/20260811_ladder_cup.sql` — unchanged from step 3.
-  Finalization reads `finalized_at` on matches and `approved_at`/
-  `claimable_at` on claims, both already present.
+- `src/formats/ladderCup.js` — `assignHomeTeam`, `isValidMatchLength`,
+  `substitutionsAllowed` appended at the bottom. Smoke-tested: home
+  assignment is ~50/50 over 2000 trials, length validation is exact at
+  the 6/15 boundaries and rejects non-integers, sub count is 6 normally
+  and 7 once extra time is reached (penalties don't add a further sub —
+  they only happen after extra time, so the +1 already applies).
+- `supabase/migrations/20260811_ladder_cup.sql` — adds
+  `match_length_minutes` to `ladder_cup_matches` (was reserved in the
+  comments since step 1, now actually a column) with a matching CHECK
+  constraint as a backstop to the app-side validator. Includes an `ALTER
+  TABLE ... ADD COLUMN IF NOT EXISTS` for anyone who already ran an
+  earlier version of this migration, since `CREATE TABLE IF NOT EXISTS`
+  won't retroactively add a column to a table that already exists.
 
 ## 1. Register the format
 
@@ -122,8 +128,25 @@ each league's cutoff, or lazily on read once `now >= cutoff`. Either way,
 all week — it's the same full-tiebreaker ordering used here, so there's no
 separate "final standings" code path to keep in sync.
 
-## What's coming next (not in this step)
+## 6. Match setup (step 5)
 
-- Match length field (6–15 min, home team's choice) — no scoring effect,
-  just needs a form field + column whenever it's added. The one item left
-  from the original "STILL OPEN" list that isn't a full engine step.
+```js
+import { assignHomeTeam, isValidMatchLength, substitutionsAllowed } from "./formats/ladderCup.js";
+
+const { home, away } = assignHomeTeam(clubAId, clubBId); // random each fixture
+
+// when the home team submits their chosen length:
+if (!isValidMatchLength(chosenMinutes)) { /* reject, show 6–15 range */ }
+
+// display-only, e.g. in the match/result UI:
+const subsAllowed = substitutionsAllowed(decidedBy); // 6, or 7 once it reaches extra time
+```
+
+## What's coming next
+
+Nothing left in the ruleset itself — every rule now has an engine
+function. What remains is wiring these into the actual UI (FORMATS entry
+in `App.jsx`, a Ladder Cup result-logging flow, a standings screen). None
+of that changes the engine; it's plumbing existing screens (like
+`LeagueDetail.jsx`'s result modal) to call the functions above instead of
+the round-robin/knockout logic they call today.
