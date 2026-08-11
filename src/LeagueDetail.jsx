@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
   ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download,
-  LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2, Trash2,
-  Trophy, Users, Volume2, X, XCircle,
+  Flame, Heart, LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2,
+  Swords, Target, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
+import { rankLadderCupStandings, getOpponentPool, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
   KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
@@ -19,22 +20,262 @@ import {
   timeAgo, useCommentSpeakingId, useVoiceRecorder, usesCustomMessage,
 } from "./App.jsx";
 
+const RulesModal = lazy(() => import("./Rules.jsx"));
+
 // Split out of App.jsx (was the last ~1,555 lines of it): the full league
 // detail screen (standings, fixtures, comments, payments, admin controls)
 // is only ever rendered once a signed-in user taps into a specific league —
 // never on the guest/login page — so it doesn't need to be in the bundle
 // everyone downloads just to see the sign-in screen. Lazy-loaded from
 // App.jsx the same way Shop/Terms/Rules already are.
-const RulesModal = lazy(() => import("./Rules.jsx"));
+// Ladder Cup's DB rows (ladder_cup_entries: team_id, pts, w, l, gd, streak,
+// status, badge_* flat columns) don't share a shape with the pure engine's
+// entry type (club_id, badge_counts.{...}) — rankLadderCupStandings only
+// ever reads club_id/pts/gd/toughest_opponent_beaten_pts, so this adapter
+// is deliberately minimal rather than a full round-trip mapping. Badge
+// counts are read straight off the raw row in the table below instead.
+function toLadderCupEngineEntries(league) {
+  const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+  return (league.ladder_cup_entries || []).map((row) => ({
+    club_id: row.team_id,
+    club_name: teamsById[row.team_id]?.name || "Unknown club",
+    pts: row.pts, gd: row.gd,
+    toughest_opponent_beaten_pts: row.toughest_opponent_beaten_pts,
+    _row: row,
+  }));
+}
 
-// Holding screen for Ladder Cup leagues until the standings (Step 8) and
-// challenge/opponent board (Step 9) land. Ladder Cup has no "Start league &
-// generate fixtures" step — a club is live on the ladder the instant it
-// registers (see ensureLadderCupEntry in App.jsx) — so this intentionally
-// doesn't try to reuse the fixtures-based registration screen; it just
-// tracks who's registered and, for cash leagues, payment review, same as
-// every other format already does.
-function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+const LADDER_CUP_STATUS_LABEL = {
+  active: "Active", pending_second_life: "Second life pending",
+  eliminated: "Eliminated", champion: "Champion",
+};
+
+// Small icon + count for each nonzero badge counter on a raw
+// ladder_cup_entries row. Column names come straight from the migration
+// (badge_heater_tier/giant_slayer/bounty_hunter/walkover are running
+// counts, badge_second_life is a one-time boolean) — displayed as-is, no
+// invented tiering beyond what's actually tracked.
+function LadderCupBadgeRow({ row, c }) {
+  const badges = [
+    row.badge_heater_tier > 0 && { icon: Flame, label: `Heater ×${row.badge_heater_tier}` },
+    row.badge_giant_slayer > 0 && { icon: Swords, label: `Giant Slayer ×${row.badge_giant_slayer}` },
+    row.badge_bounty_hunter > 0 && { icon: Target, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
+    row.badge_walkover > 0 && { icon: Zap, label: `Walkover ×${row.badge_walkover}` },
+    row.badge_second_life && { icon: Heart, label: "Used Second Life" },
+  ].filter(Boolean);
+  if (badges.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 mt-0.5">
+      {badges.map(({ icon: Icon, label }, i) => (
+        <span key={i} title={label} className="flex items-center justify-center w-5 h-5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.accent }}>
+          <Icon size={11} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The standings table itself — points/GD/streak/status/badges, ranked with
+// the engine's own tiebreaker chain (points, then GD, then toughest
+// opponent beaten) rather than re-deriving an ordering here.
+function LadderCupStandingsTable({ league, c }) {
+  const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
+  const standings = useMemo(() => rankLadderCupStandings(mapped), [mapped]);
+
+  if (standings.length === 0) {
+    return <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>;
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
+      <table className="w-full font-mono text-sm min-w-[560px]">
+        <thead>
+          <tr className="text-[11px] uppercase tracking-wider border-b" style={{ color: c.textFaint, borderColor: c.border, background: c.bg }}>
+            <th className="text-left py-2 pl-2 font-medium">#</th>
+            <th className="text-left py-2 font-medium">Club</th>
+            <th className="text-center py-2 font-medium">W</th>
+            <th className="text-center py-2 font-medium">L</th>
+            <th className="text-center py-2 font-medium">GD</th>
+            <th className="text-center py-2 font-medium">Streak</th>
+            <th className="text-center py-2 pr-2 font-medium">Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standings.map((r) => {
+            const row = r._row;
+            const eliminated = row.status === "eliminated";
+            return (
+              <tr key={r.club_id} className="border-b align-top" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1 }}>
+                <td className="py-2.5 pl-2 relative">
+                  <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: r.rank_position === 1 && !eliminated ? c.accent : "transparent" }} />
+                  <span style={{ color: c.textFaint }}>{r.rank_position}</span>
+                </td>
+                <td className="py-2.5 font-body font-medium">
+                  <div className="flex items-center gap-1.5">
+                    {row.status === "champion" && <Crown size={13} style={{ color: c.accent }} />}
+                    <span className="truncate">{r.club_name}</span>
+                  </div>
+                  <div className="font-mono text-[10px] mt-0.5" style={{ color: row.status === "eliminated" ? c.red : row.status === "pending_second_life" ? "#B8860B" : row.status === "champion" ? c.accent : c.textFaint }}>
+                    {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
+                  </div>
+                  <LadderCupBadgeRow row={row} c={c} />
+                </td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w}</td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>
+                  {row.streak >= 3 ? <span className="inline-flex items-center gap-0.5" style={{ color: c.accent }}><Flame size={11} />{row.streak}</span> : row.streak}
+                </td>
+                <td className="text-center py-2.5 pr-2 font-bold">{r.pts}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+// Match length picker for the home team — inline row of 6..15, not a
+// modal, since it's a single tap and the row it lives in already has all
+// the context (who the match is against). Mirrors isValidMatchLength's own
+// bounds (LADDER_CUP_RULES.MATCH_LENGTH_{MIN,MAX}_MINUTES) rather than
+// hardcoding 6/15 a second time.
+function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
+  const [saving, setSaving] = useState(false);
+  const options = [];
+  for (let m = LADDER_CUP_RULES.MATCH_LENGTH_MIN_MINUTES; m <= LADDER_CUP_RULES.MATCH_LENGTH_MAX_MINUTES; m++) options.push(m);
+  const pick = async (minutes) => {
+    setSaving(true);
+    await onSetLength(match, minutes);
+    setSaving(false);
+  };
+  return (
+    <div className="mt-2">
+      <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.accent }}>You're home — pick match length (min/half)</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((m) => (
+          <button key={m} disabled={saving} onClick={() => pick(m)}
+            className="font-mono text-xs font-semibold w-8 h-8 rounded-lg" style={{ background: c.surfaceHover, color: c.text }}>
+            {m}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// One row per opponent in the current ladder-points band. Three states per
+// row: no match yet (Challenge button), a match exists but the length
+// hasn't been picked (home team sees the picker, away team sees a waiting
+// note — either side can cancel from here), or the length's set (ready to
+// play; result logging is step 10, not this screen).
+function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLength, onCancel, c }) {
+  const [busy, setBusy] = useState(false);
+  const iAmHome = match && match.home_team_id === myTeamId;
+
+  const challenge = async () => {
+    setBusy(true);
+    await onInitiate(opponent.club_id);
+    setBusy(false);
+  };
+  const cancel = async () => {
+    setBusy(true);
+    await onCancel(match);
+    setBusy(false);
+  };
+
+  return (
+    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
+          {opponent.club_name[0]?.toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-body text-sm font-semibold truncate">{opponent.club_name}</div>
+          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.pts} pts</div>
+        </div>
+        {!match && (
+          <button onClick={challenge} disabled={busy}
+            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+            <Swords size={13} /> Challenge
+          </button>
+        )}
+        {match && match.match_length_minutes != null && (
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide px-2 py-1.5 rounded flex items-center gap-1" style={{ background: c.greenSoft, color: c.greenText }}>
+            <Check size={11} /> Ready · {match.match_length_minutes}m
+          </span>
+        )}
+        {match && match.match_length_minutes == null && (
+          <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}>
+            <X size={13} />
+          </button>
+        )}
+      </div>
+      {match && match.match_length_minutes == null && iAmHome && (
+        <LadderCupMatchLengthPicker match={match} onSetLength={onSetLength} c={c} />
+      )}
+      {match && match.match_length_minutes == null && !iAmHome && (
+        <div className="font-mono text-[10px] uppercase tracking-wide mt-2 flex items-center gap-1" style={{ color: c.textFaint }}>
+          <Clock size={10} /> {opponent.club_name} is home — waiting on their match length
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The "who can I play" screen (Step 9). No accept/decline step here — a
+// tap on Challenge immediately assigns home/away and creates the match row;
+// the ±10-and-widening band in getOpponentPool is what stands in for
+// matchmaking consent. Refreshes automatically off the live `league` prop,
+// same as the standings table, so logging any result elsewhere in the app
+// widens/narrows this club's slate without a separate re-fetch.
+function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
+  // Hooks stay unconditional (called every render, same order) — the
+  // eliminated/pending-second-life/no-entry short-circuits below happen
+  // after both useMemo calls, not before, so React never sees a different
+  // hook count between renders.
+  const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
+  const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
+  const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
+
+  if (!myEntry) return null; // not a registered club in this league — nothing to challenge with
+
+  const myStatus = myEntry._row.status;
+  if (myStatus === "eliminated") {
+    return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>You've been eliminated from this cup — no more challenges to send.</div>;
+  }
+  if (myStatus === "pending_second_life") {
+    return <div className="font-body text-xs mt-3" style={{ color: "#B8860B" }}>Decide on your second life offer before challenging anyone else.</div>;
+  }
+
+  const matches = league.ladder_cup_matches || [];
+  const matchWith = (opponentClubId) => matches.find((m) =>
+    !m.finalized_at &&
+    ((m.home_team_id === myTeam.id && m.away_team_id === opponentClubId) ||
+     (m.away_team_id === myTeam.id && m.home_team_id === opponentClubId)));
+
+  if (opponents.length === 0) {
+    return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>No one's in range to challenge yet — check back as more clubs join or results come in.</div>;
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      {opponents.map((op) => (
+        <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} match={matchWith(op.club_id)}
+          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} c={c} />
+      ))}
+    </div>
+  );
+}
+
+// Ladder Cup has no "Start league & generate fixtures" step — a club is
+// live on the ladder the instant it registers (see ensureLadderCupEntry in
+// App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
+// registration screen; it just tracks who's registered and, for cash
+// leagues, payment review, same as every other format already does.
+function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
   return (
     <div>
       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
@@ -45,8 +286,18 @@ function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTe
         {league.ladder_cup_cutoff_at && (
           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
         )}
-        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Standings and the challenge board are coming soon — for now this page just tracks registration and payments.</div>
+        {myTeam ? (
+          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} c={c} />
+        ) : (
+          <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
+        )}
       </div>
+
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
+      <div className="mb-5">
+        <LadderCupStandingsTable league={league} c={c} />
+      </div>
+
       {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
         <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
           <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
@@ -84,7 +335,7 @@ function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTe
   );
 }
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -222,9 +473,10 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
       {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
 
       {isLadderCup ? (
-        <LadderCupPendingPanel league={league} canManage={canManage} session={session} onLeave={onLeave}
+        <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} onLeave={onLeave}
           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
-          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
+          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} c={c} />
       ) : notStarted ? (
         <div>
           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
