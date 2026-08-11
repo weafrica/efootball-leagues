@@ -2849,7 +2849,7 @@ export default function App() {
   // which single league to refresh below without a full reload.
   const LEAGUE_SELECT =
     "*, teams(*), fixtures(*), members(*), " +
-    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, " +
+    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
       "comment_likes(id, user_id, reaction)), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
     "league_reactions(id, user_id, reaction)";
