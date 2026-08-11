@@ -1,16 +1,19 @@
-# Survival Ladder Cup — integration notes (steps 1–3)
+# Survival Ladder Cup — integration notes (all 4 steps)
 
 **Step 1** shipped scoring + elimination/second-life. **Step 2** added
-opponent matching. **Step 3** (this update) adds walkover claims. Cutoff
-finalization is the remaining step — not built yet, not referenced below.
+opponent matching. **Step 3** added walkover claims. **Step 4** (this
+update) adds hard-cutoff finalization and the full tiebreaker chain — the
+whole ruleset is now covered.
 
-- `src/formats/ladderCup.js` — same file as before, with the walkover
-  claim functions appended at the bottom. Smoke-tested: 24h gate enforced,
-  base-3-only scoring even mid-heater-streak, no-show loser runs through
-  the same loss/second-life path as a real defeat.
-- `supabase/migrations/20260811_ladder_cup.sql` — adds
-  `ladder_cup_walkover_claims`. `ladder_cup_entries`/`ladder_cup_matches`
-  unchanged from step 1.
+- `src/formats/ladderCup.js` — `rankLadderCupStandings` now sorts by the
+  full chain (points → GD → toughest opponent beaten) instead of points
+  only, plus `finalizeAtCutoff` and `crownChampion` appended at the
+  bottom. Smoke-tested: 4-way tiebreak resolves correctly, a high-points
+  eliminated club can't be crowned, mid-match/still-in-claim-window
+  entries get correctly dropped at cutoff.
+- `supabase/migrations/20260811_ladder_cup.sql` — unchanged from step 3.
+  Finalization reads `finalized_at` on matches and `approved_at`/
+  `claimable_at` on claims, both already present.
 
 ## 1. Register the format
 
@@ -93,10 +96,34 @@ layer by checking against `getOpponentPool(myEntry, allEntries)` before
 letting a new claim start — the DB only blocks a duplicate claim against
 the same target, not the 5-slot cap overall.
 
+## 5. Cutoff finalization (step 4)
+
+At the league's `ladder_cup_cutoff_at` (Sunday 10PM UTC+2 — set at league
+creation, see the `leagues` column added in step 1):
+
+```js
+import { finalizeAtCutoff, crownChampion, rankLadderCupStandings } from "./formats/ladderCup.js";
+
+const { finalizedMatches, finalizedClaims } = finalizeAtCutoff({
+  matches: allLadderCupMatches, walkoverClaims: allWalkoverClaims, cutoff: league.ladder_cup_cutoff_at,
+});
+// finalizedMatches/finalizedClaims are what actually counted — anything
+// mid-match or still inside its 24h claim window at the deadline is
+// dropped from these lists (their points were never applied to entries in
+// the first place, since recordLadderCupWin only runs on a completed
+// result — this function is for reporting/audit, not undoing).
+
+const champion = crownChampion(entries); // most points among non-eliminated clubs, tiebreaker chain resolves ties
+```
+
+Run this off a scheduled job (Supabase cron / edge function) that fires at
+each league's cutoff, or lazily on read once `now >= cutoff`. Either way,
+`rankLadderCupStandings(entries)` is what renders the live standings table
+all week — it's the same full-tiebreaker ordering used here, so there's no
+separate "final standings" code path to keep in sync.
+
 ## What's coming next (not in this step)
 
-- Hard cutoff finalization + the full 3-level tiebreaker (points → GD →
-  toughest opponent beaten) — `rankLadderCupStandings` here only sorts by
-  points, since matching/scoring don't need the rest yet
 - Match length field (6–15 min, home team's choice) — no scoring effect,
-  just needs a form field + column whenever it's added
+  just needs a form field + column whenever it's added. The one item left
+  from the original "STILL OPEN" list that isn't a full engine step.

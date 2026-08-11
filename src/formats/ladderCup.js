@@ -83,13 +83,19 @@ export function createLadderCupEntry(clubId, clubName) {
 // ---------------------------------------------------------------------------
 
 /**
- * Sorts by points only for now. The full 3-level tiebreaker chain (GD,
- * toughest opponent beaten) is a later step — this is enough to support
- * "ranked above you" and "#1 in the standings" checks for scoring, which
- * only need a points ordering, not the final-cutoff tiebreak.
+ * Sorts by the full tiebreaker chain: points, then goal difference
+ * (regulation-time only — see COUNT_EXTRA_TIME_IN_GD), then toughest
+ * opponent beaten (that opponent's points at the moment of the win). This
+ * is the same ordering used for in-week "ranked above you" / "#1" scoring
+ * checks and for crowning the champion at cutoff — the ruleset defines one
+ * tiebreaker chain, not two.
  */
 export function rankLadderCupStandings(entries) {
-  const sorted = [...entries].sort((a, b) => b.pts - a.pts);
+  const sorted = [...entries].sort((a, b) =>
+    b.pts - a.pts ||
+    b.gd - a.gd ||
+    b.toughest_opponent_beaten_pts - a.toughest_opponent_beaten_pts
+  );
   return sorted.map((e, i) => ({ ...e, rank_position: i + 1 }));
 }
 
@@ -330,4 +336,39 @@ export function approveWalkoverClaim(claim) {
 export function rejectWalkoverClaim(claim) {
   if (claim.status !== "pending_review") throw new Error("Claim isn't pending review.");
   return { ...claim, status: "rejected" };
+}
+
+// ---------------------------------------------------------------------------
+// Hard cutoff & finalization (step 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Filters out anything not finalized by the Sunday 10PM (UTC+2) cutoff:
+ * matches still mid-play, and walkover claims still inside their 24h
+ * window (whether or not they've been submitted for review — if they
+ * weren't approved before the cutoff, they don't count).
+ *
+ * "Anything not finalized by then (mid-match, or a walkover claim still in
+ * its 24h window) does not count" — this doesn't undo points already on
+ * the board from earlier, finalized results; it only tells the caller
+ * which in-flight matches/claims to discard rather than rushing them
+ * through after the deadline.
+ */
+export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
+  const cutoffTime = new Date(cutoff).getTime();
+  const finalizedMatches = matches.filter((m) => m.finalized_at && new Date(m.finalized_at).getTime() <= cutoffTime);
+  const finalizedClaims = walkoverClaims.filter((c) => c.status === "approved" && new Date(c.approved_at || c.claimable_at).getTime() <= cutoffTime);
+  return { finalizedMatches, finalizedClaims };
+}
+
+/**
+ * Final champion = most points at cutoff, tiebreaker chain resolves any
+ * tie. No draws exist in this format, so the chain is always decisive.
+ * Eliminated clubs (including anyone who declined/timed out their second
+ * life) are excluded — only clubs still "active" or "champion" at cutoff
+ * can win.
+ */
+export function crownChampion(entries) {
+  const ranked = rankLadderCupStandings(entries.filter((e) => e.status !== "eliminated"));
+  return ranked[0] || null;
 }
