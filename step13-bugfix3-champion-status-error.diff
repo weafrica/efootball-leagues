@@ -1,0 +1,24 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 1dcb987..ac37f8a 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4061,8 +4061,18 @@ export default function App() {
+       if (champion) {
+         const champRow = rows.find((r) => r.team_id === champion.club_id);
+         if (champRow) {
+-          await supabase.from("ladder_cup_entries")
++          // Bug fix: this write was previously unchecked — a failure here
++          // left leagues.ladder_cup_champion_team_id (and the finalized
++          // banner that reads it) correct while the standings table's
++          // crown icon (which reads this row's own `status`) silently
++          // never appeared, with no error surfaced anywhere. Now it at
++          // least tells the person who finalized the cup that the two
++          // views are out of sync, so it can be manually corrected.
++          const { error: champErr } = await supabase.from("ladder_cup_entries")
+             .update({ status: "champion", updated_at: finalizedAt }).eq("id", champRow.id);
++          if (champErr) {
++            showToast(`Champion crowned, but their ladder status couldn't be updated: ${champErr.message}`);
++          }
+         }
+       }
+ 

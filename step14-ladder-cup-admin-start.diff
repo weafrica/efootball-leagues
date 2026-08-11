@@ -1,0 +1,120 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index e6dfd38..bcb4cec 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4222,9 +4222,12 @@ export default function App() {
+   // check) means the fix reaches every place that already gates on it: the
+   // Join button's visibility on LeagueCard, Home's isJoinable sort, and
+   // both join handlers below.
++  // ladder_cup_started_at is the admin-triggered "Start League" lock (see
++  // startLadderCupLeague below) — same effect as the cutoff passing
++  // (registration closes) but settable early, on the admin's own timing.
+   const entryClosed = (league) =>
+     (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
+-    || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
++    || (league.format === "ladder_cup" && (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at) || !!league.ladder_cup_started_at));
+ 
+   // Persists which group each team landed in. Supabase doesn't support per-row
+   // bulk updates with different values in one call, so we fire them in parallel.
+@@ -5628,6 +5631,28 @@ export default function App() {
+     showToast(dueAt ? "Group stage due date updated." : "Group stage due date cleared.");
+   };
+ 
++  // Admin-triggered "Start League" for Survival Ladder Cup. Ladder Cup has
++  // no fixtures to generate (see generateFixtures — that's for the other
++  // formats only) and clubs are already live on the ladder the moment they
++  // join, so starting it doesn't create anything; it just locks the roster
++  // early by stamping ladder_cup_started_at, which entryClosed() then
++  // treats the same as the hard cutoff having passed.
++  const startLadderCupLeague = async (league) => {
++    const key = `start-ladder-${league.id}`;
++    if (stageActionInFlight.current.has(key)) return;
++    stageActionInFlight.current.add(key);
++    try {
++      if (league.teams.length < 2) { showToast("Need at least 2 registered clubs to start the league."); return; }
++      const { error } = await supabase.from("leagues")
++        .update({ ladder_cup_started_at: new Date().toISOString() }).eq("id", league.id);
++      if (error) { showToast(`Couldn't start the league: ${error.message}`); return; }
++      await refreshLeague(league.id);
++      showToast(`League started — registration is locked with ${league.teams.length} clubs on the ladder.`);
++    } finally {
++      stageActionInFlight.current.delete(key);
++    }
++  };
++
+   // Overrides the auto-generated WhatsApp nudge text (see adminStatusMessage)
+   // for every member's WA icon in this league. Persists on the league row —
+   // once set, every member gets this exact wording (with {name} swapped in
+@@ -5986,7 +6011,7 @@ export default function App() {
+                 onBack={goBack} onJoin={() => startJoin(activeLeague.id)}
+                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
+                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
+-                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
++                onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onStartLadderCup={startLadderCupLeague} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
+                 onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
+                 onSetLadderCupMatchLength={(match, minutes) => setLadderCupMatchLength(activeLeague, match, minutes)}
+                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
+@@ -10129,7 +10154,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
+   return (
+     <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 mt-1">
+       <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: c.textFaint }}>
+-        <Clock size={11} /> {isLadderCup ? `Open for joining · Starts ${fmtDate(league.starts_at)}` : `Entry closes ${fmtDate(league.entry_closes_at)} · Starts ${fmtDate(league.starts_at)}`}
++        <Clock size={11} /> {isLadderCup ? `${league.ladder_cup_started_at ? "Started" : "Open for joining"} · Starts ${fmtDate(league.starts_at)}` : `Entry closes ${fmtDate(league.entry_closes_at)} · Starts ${fmtDate(league.starts_at)}`}
+       </div>
+       {canManage && (
+         <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index 51ee293..d1d5c96 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -502,18 +502,30 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
+ // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
+ // registration screen; it just tracks who's registered and, for cash
+ // leagues, payment review, same as every other format already does.
+-function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, c }) {
++function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
++  // Clubs are already live on the ladder the moment they join (no fixtures
++  // to generate here, unlike the other formats) — Start League doesn't
++  // begin play, it just locks the roster early instead of waiting for the
++  // weekly cutoff. See startLadderCupLeague in App.jsx.
++  const started = !!league.ladder_cup_started_at;
+   return (
+     <div>
+       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+         <div className="font-body font-bold text-base mb-1">Survival Ladder Cup</div>
+         <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
+-          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · live on the ladder as soon as they join, no separate start step.
++          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · {started ? "registration locked, ladder is live." : "live on the ladder as soon as they join."}
+         </div>
+         {league.ladder_cup_cutoff_at && (
+           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
+         )}
++        {canManage && !started && !league.ladder_cup_finalized_at && (
++          <button disabled={league.teams.length < 2} onClick={() => onStartLadderCup(league)}
++            className="mt-3 font-body text-sm font-semibold px-4 py-2.5 rounded-full"
++            style={league.teams.length >= 2 ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
++            Start League
++          </button>
++        )}
+         {league.ladder_cup_finalized_at ? (
+           <LadderCupFinalizedBanner league={league} c={c} />
+         ) : myTeam ? (
+@@ -570,7 +582,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
+   );
+ }
+ 
+-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
++export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+   const [tab, setTab] = useState("table");
+   const [descOpen, setDescOpen] = useState(false);
+   const [rulesOpen, setRulesOpen] = useState(false);
+@@ -713,7 +725,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
+           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
+           onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife}
+           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
+-          onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} c={c} />
++          onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
+       ) : notStarted ? (
+         <div>
+           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>

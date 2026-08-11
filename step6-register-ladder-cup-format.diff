@@ -1,0 +1,23 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 8a84070..f9307db 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -265,6 +265,18 @@ export const FORMATS = [
+   { id: "knockout", label: "Knockout", kind: "knockout", desc: "Single elimination. Lose and you're out.", available: true },
+   { id: "survivor", label: "Survivor", kind: "round_robin", desc: "Play a set number of matches, cut the bottom %, repeat until a target number remain, then finish with a round robin.", available: true },
+   { id: "groups_knockout", label: "Groups + Knockout", kind: "groups_knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
++  // Own `kind` (not "round_robin") so it doesn't interact with the
++  // one-active-fun-league-per-kind join lock the other formats share —
++  // ladder cup's challenge-based flow is different enough that stacking
++  // it against round robin/survivor activity doesn't make sense.
++  // available: false until Step 7 (CreateLeague wiring) lands — CreateLeague.jsx
++  // already renders every FORMATS entry as a selectable button gated by
++  // `available` ("Coming soon" badge + disabled otherwise), so leaving this
++  // true now would let someone create a ladder_cup league with none of its
++  // config (cutoff date, etc.) and no ladder-cup-aware fixture generation,
++  // silently falling through to the default round-robin fixture path instead.
++  // Flip to true in Step 7 once creation actually builds ladder_cup_entries.
++  { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup", desc: "Ranked ladder, one elimination life each. Most points by the Sunday cutoff wins.", available: false },
+ ];
+ const FORMAT_KIND_LABELS = { round_robin: "round robin / survivor" };
+ 

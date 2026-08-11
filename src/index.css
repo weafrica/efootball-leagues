@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  margin: 0;
+  /* Stops the browser's elastic "rubber-band" bounce when swiping past the
+     left/right edge on mobile — that bounce is what was revealing a white
+     sliver of the blank page underneath the app's own themed background. */
+  overscroll-behavior-x: none;
+  /* Guards against any element accidentally wider than the viewport
+     creating real horizontal scroll (as opposed to just the bounce). */
+  overflow-x: hidden;
+}
+
+.font-body { font-family: 'Work Sans', sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+.font-display { font-family: 'Barlow Condensed', 'Oswald', sans-serif; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes matchday-flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; }
+  20%, 22%, 24%, 55% { opacity: 0.35; }
+}
+.animate-flicker { animation: matchday-flicker 2.4s infinite; }
+
+/* Two long-missing definitions — animate-pulse-dot and animate-glow-drift
+   are both referenced from App.jsx (the "Live" status dot on hero/banner
+   sections, and the ambient blurred glow behind them) but were never
+   actually defined here, so both have been silently inert this whole
+   time. Neither JSX usage pairs the class with a second static element,
+   so both are written to stay visible through their whole cycle (breathe
+   between two non-zero states) rather than fade to fully invisible —
+   otherwise the "live" dot would blink out to nothing each cycle instead
+   of reading as a steady pulse. */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+.animate-pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+@keyframes glow-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+  50% { transform: translate(-16px, 12px) scale(1.12); opacity: 1; }
+}
+.animate-glow-drift { animation: glow-drift 7s ease-in-out infinite; }
+
+/* Small decorative "product" glyphs on the shop banner — bob up and down
+   while pulsing a glow, each icon offset with its own animation-delay so
+   they don't all move in lockstep. */
+@keyframes product-bump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes product-glow {
+  0%, 100% { opacity: 0.55; filter: drop-shadow(0 0 2px currentColor); }
+  50% { opacity: 1; filter: drop-shadow(0 0 7px currentColor) drop-shadow(0 0 14px currentColor); }
+}
+.animate-product-float { animation: product-bump 2.4s ease-in-out infinite, product-glow 2.4s ease-in-out infinite; }
+
+/* Real product picks floating on the guest login page's shop banner — a
+   bigger bob (with a little rotation wobble, so the hexagon reads as
+   "alive" rather than just sliding up and down) plus its own glow pulse
+   on the ring around the product photo. Two independent badges use
+   staggered animation-delay so they never move in lockstep. */
+@keyframes pick-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-10px) rotate(3deg); }
+}
+@keyframes pick-ring-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--pick-ring, #D4A017)55, 0 0 10px 0 var(--pick-ring, #D4A017)33; }
+  50% { box-shadow: 0 0 0 1px var(--pick-ring, #D4A017)aa, 0 0 22px 4px var(--pick-ring, #D4A017)66; }
+}
+.animate-pick-bob { animation: pick-bob 3.2s ease-in-out infinite; }
+.animate-pick-ring { animation: pick-ring-glow 3.2s ease-in-out infinite; }
+
+/* Soft pulsing ring glow for earned gold/platinum achievement badges — same
+   reasoning as the ladder pick ring glow above: a little "alive" flourish
+   in the badge's own color that reads as rarity without needing a second
+   image asset per tier. */
+@keyframes achievement-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)55, 0 0 8px 0 var(--badge-glow, #FFD700)33; }
+  50% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)aa, 0 0 16px 3px var(--badge-glow, #FFD700)66; }
+}
+.animate-achievement-glow { animation: achievement-glow 2.6s ease-in-out infinite; }
+
+/* Hexagon crop for the floating product photos — an "exciting" shape vs. a
+   plain square/circle, still just CSS so no extra image assets needed. */
+.hex-clip { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%); }
+
+/* The referee notification mascot — replaces the old plain-text toast.
+   Slides in from off-screen right to dead center, holds while her message
+   is visible, then slides back out to the left. Uses calc() on top of the
+   -50%/-50% centering translate so the same rule works at any screen size. */
+@keyframes referee-in {
+  0% { transform: translate(calc(-50% + 100vw), -50%) scale(0.85); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.04); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+@keyframes referee-out {
+  0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(calc(-50% - 100vw), -50%) scale(0.85); opacity: 0; }
+}
+
+/* Soft, pulsing spotlight glow behind the referee's photo — reads as a
+   stadium spotlight rather than a flat drop-shadow. Sits behind the image
+   (lower z-index) and is purely decorative/pointer-events-none. */
+@keyframes referee-glow-pulse {
+  0%, 100% { opacity: 0.35; transform: translate(-50%, -50%) scale(0.92); }
+  50% { opacity: 0.6; transform: translate(-50%, -50%) scale(1.05); }
+}
+.referee-spotlight { animation: referee-glow-pulse 2.6s ease-in-out infinite; }
+
+/* A subtle idle sway on the mascot photo itself while her notification
+   holds on screen, so she doesn't read as a frozen still for the ~2s the
+   message is up. Runs on the <img> independently of the parent's
+   slide-in/out transform, so the two never fight each other. */
+@keyframes referee-idle-sway {
+  0%, 100% { transform: translateY(0) rotate(-0.6deg); }
+  50% { transform: translateY(-4px) rotate(0.6deg); }
+}
+.referee-idle-sway { animation: referee-idle-sway 2.8s ease-in-out infinite; }
+
+/* The message bubble pops in a beat after the mascot herself slides into
+   place, instead of arriving rigidly locked to her slide — small delay
+   plus a slight overshoot gives it its own bit of life. Runs once on
+   mount (the component doesn't remount between the in/hold/out phases),
+   so it never replays mid-read. */
+@keyframes referee-bubble-pop {
+  0% { opacity: 0; transform: scale(0.7) translateY(8px); }
+  70% { opacity: 1; transform: scale(1.05) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.referee-bubble-pop { animation: referee-bubble-pop 320ms ease-out 260ms both; }
+
+/* A soft vignette behind the whole scene while she's on screen — darkens
+   whatever content is underneath just enough that she and her message pop
+   against a busy page, without ever blocking taps (pointer-events-none,
+   applied from the wrapper in App.jsx). Fades in/out in step with her own
+   slide animation. */
+@keyframes referee-vignette-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes referee-vignette-out { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* A quick expanding-ring "impact" burst timed to the bubble's pop-in —
+   like a HUD confirm chime rendered visually. One-shot, same reasoning
+   as referee-bubble-pop about not replaying mid-read. */
+@keyframes referee-impact-ring {
+  0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.3); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.1); }
+}
+.referee-impact-ring { animation: referee-impact-ring 500ms ease-out 260ms both; }
+
+/* PlayerProfileModal — tapping a club/user row now pops open a rated
+   player card instead of a plain sheet. card-pop-in is the one-shot open
+   animation on the card itself (small overshoot so it feels like it lands
+   with a bit of weight); card-shine is a diagonal light sweep that plays
+   once on open for gold/silver/bronze cards only, like a pack reveal;
+   card-tier-glow is a slow pulsing ring around the avatar for those same
+   medal tiers, using --badge-glow (set inline per tier) the same way
+   achievement-glow above does. stat-tile-in staggers each stat tile in via
+   animation-delay set per-tile in App.jsx, so the grid reveals left to
+   right / top to bottom rather than appearing all at once. */
+@keyframes card-pop-in {
+  0% { opacity: 0; transform: scale(0.9) translateY(10px); }
+  60% { opacity: 1; transform: scale(1.015) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes card-shine {
+  0% { background-position: -40% -40%; opacity: 0; }
+  15% { opacity: 1; }
+  100% { background-position: 140% 140%; opacity: 0; }
+}
+.animate-card-shine { animation: card-shine 1.3s ease-out 1 both; }
+@keyframes card-tier-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)55, 0 0 10px 0 var(--badge-glow, #FFD700)33; }
+  50% { box-shadow: 0 0 0 1px var(--badge-glow, #FFD700)aa, 0 0 20px 3px var(--badge-glow, #FFD700)66; }
+}
+@keyframes stat-tile-in {
+  0% { opacity: 0; transform: translateY(6px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}

@@ -1,0 +1,24 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index cf99520..3c13c52 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -4001,6 +4001,19 @@ export default function App() {
+     if (!activeLeague || activeLeague.format !== "ladder_cup") return;
+     if (activeLeague.ladder_cup_finalized_at) return;
+     if (!hasLadderCupCutoffPassed(activeLeague.ladder_cup_cutoff_at)) return;
++    // Bug fix: don't crown a champion off a snapshot that still has a
++    // lapsed-but-not-yet-converted second-life offer sitting in it — the
++    // expiry effect above hasn't necessarily finished writing
++    // `eliminated` for it yet (both effects fire off the same render's
++    // `activeLeague`), and crownChampion only excludes `eliminated`
++    // entries, so a stale `pending_second_life` row would still count as
++    // live. Skip this pass without marking it checked; once the expiry
++    // effect's write lands and refreshLeague pulls the corrected
++    // statuses, activeLeague changes and this effect runs again — that
++    // next pass is the one that actually finalizes.
++    const hasUnresolvedSecondLifeOffers = (activeLeague.ladder_cup_entries || []).some((r) =>
++      r.status === "pending_second_life" && r.second_life_expires_at && new Date(r.second_life_expires_at) <= new Date());
++    if (hasUnresolvedSecondLifeOffers) return;
+     if (finalizedLadderCupCutoffChecked.current.has(activeLeague.id)) return;
+     finalizedLadderCupCutoffChecked.current.add(activeLeague.id);
+     (async () => {

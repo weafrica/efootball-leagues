@@ -1,0 +1,435 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 61ae572..48ce8ef 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -50,7 +50,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
+ // range the DB CHECK constraint enforces. rankLadderCupStandings/
+ // getOpponentPool stay imported where they're actually consumed
+ // (LeagueDetail.jsx) rather than duplicated here.
+-import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife } from "./formats/ladderCup.js";
++import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim } from "./formats/ladderCup.js";
+ import {
+   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
+   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
+@@ -3004,7 +3004,7 @@ export default function App() {
+   // only ever receive a bare comment, not its parent league — can resolve
+   // which single league to refresh below without a full reload.
+   const LEAGUE_SELECT =
+-    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
++    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
+     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
+       "comment_likes(id, user_id, reaction)), " +
+     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+@@ -4501,6 +4501,127 @@ export default function App() {
+     showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
+   };
+ 
++  // Step 12: walkover claims (message → 24h wait → claim with screenshot →
++  // admin review). "Message opponent" is a purely local bookkeeping step —
++  // the actual message happens outside the app (WhatsApp) — createWalkoverClaim
++  // just computes claimable_at, 24h out. The DB's partial unique index on
++  // (claimant_team_id, target_team_id) for status in (messaged, pending_review)
++  // is what actually blocks a second open claim against the same target;
++  // 23505 here means one's already in flight. The "up to 5 concurrent claims"
++  // cap from the ruleset falls out for free since this is only ever called
++  // from a shown-opponent row and getOpponentPool shows at most 5.
++  const messageLadderCupWalkoverOpponent = async (league, myTeamId, opponentTeamId) => {
++    if (!myTeamId || !opponentTeamId) return;
++    const claim = createWalkoverClaim(myTeamId, opponentTeamId);
++    const { error } = await supabase.from("ladder_cup_walkover_claims").insert({
++      league_id: league.id, claimant_team_id: myTeamId, target_team_id: opponentTeamId,
++      messaged_at: claim.messaged_at, claimable_at: claim.claimable_at, status: claim.status,
++    });
++    if (error) {
++      showToast(error.code === "23505" ? "You've already got an open walkover claim against them." : `Couldn't start the claim: ${error.message}`);
++      return;
++    }
++    await refreshLeague(league.id);
++    showToast("Opponent messaged — claimable in 24h if they still haven't played.");
++  };
++
++  // Screenshot proof is mandatory, same as a played result. isWalkoverClaimable
++  // is re-checked here (not just trusted from the button being shown) since
++  // the 24h window could've lapsed between render and tap.
++  const submitLadderCupWalkoverClaim = async (league, claimRow, file) => {
++    if (!file) { showToast("Attach a screenshot before submitting the claim."); return; }
++    if (!isWalkoverClaimable(claimRow)) { showToast("Not claimable yet — still inside the 24h wait."); return; }
++
++    const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
++    const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
++    const path = `${session.user.id}/walkover-${claimRow.id}-${Date.now()}.${ext}`;
++    let proofUrl;
++    try {
++      proofUrl = await uploadToBlob("result-proofs", path, compressed);
++    } catch (uploadErr) {
++      showToast(`Couldn't upload screenshot: ${uploadErr.message}`);
++      return;
++    }
++
++    const { error } = await supabase.from("ladder_cup_walkover_claims")
++      .update({ status: "pending_review", proof_url: proofUrl }).eq("id", claimRow.id);
++    if (error) { showToast(`Couldn't submit the claim: ${error.message}`); return; }
++    await refreshLeague(league.id);
++    showToast("Walkover claim submitted — waiting on admin review.");
++  };
++
++  // Admin approval: flips the claim, then applies the walkover exactly the
++  // way LADDER_CUP_INTEGRATION.md's own sample does — recordLadderCupWin
++  // with isWalkover: true, base 3pts only, and the target goes through the
++  // same loss/second-life path a played defeat would. badge_walkover isn't
++  // part of recordLadderCupWin's round trip (see ladderCupRowPatchFromEntry's
++  // comment above) so it's bumped here, the one place a walkover win is
++  // actually recorded.
++  const approveLadderCupWalkoverClaim = async (league, claimRow) => {
++    try {
++      approveWalkoverClaim(claimRow);
++    } catch (err) {
++      showToast(err.message);
++      return;
++    }
++
++    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
++    const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
++    const winnerRow = rowsById[claimRow.claimant_team_id];
++    const loserRow = rowsById[claimRow.target_team_id];
++    if (!winnerRow || !loserRow) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return; }
++
++    const mapped = (league.ladder_cup_entries || []).map((r) => ladderCupEntryFromRow(r, teamsById[r.team_id]?.name || "Unknown club"));
++    const standingsBeforeMatch = rankLadderCupStandings(mapped);
++    const winnerEntry = ladderCupEntryFromRow(winnerRow, teamsById[claimRow.claimant_team_id]?.name || "Unknown club");
++    const loserEntry = ladderCupEntryFromRow(loserRow, teamsById[claimRow.target_team_id]?.name || "Unknown club");
++
++    const { winner, loser } = recordLadderCupWin({
++      winner: winnerEntry, loser: loserEntry, standingsBeforeMatch, isWalkover: true, winnerGoals: 0, loserGoals: 0,
++    });
++
++    const { error: claimErr } = await supabase.from("ladder_cup_walkover_claims").update({
++      status: "approved", approved_at: new Date().toISOString(), reviewed_by: session.user.id,
++    }).eq("id", claimRow.id);
++    if (claimErr) { showToast(`Couldn't approve the claim: ${claimErr.message}`); return; }
++
++    const [{ error: winnerErr }, { error: loserErr }] = await Promise.all([
++      supabase.from("ladder_cup_entries").update({
++        ...ladderCupRowPatchFromEntry(winner), badge_walkover: winnerRow.badge_walkover + 1,
++      }).eq("id", winnerRow.id),
++      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(loser)).eq("id", loserRow.id),
++    ]);
++    if (winnerErr || loserErr) showToast("Claim approved, but the ladder standings couldn't be fully updated — check permissions.");
++
++    const winnerName = teamsById[claimRow.claimant_team_id]?.name || "A club";
++    const loserName = teamsById[claimRow.target_team_id]?.name || "their opponent";
++    await postComment(league, `Ladder Cup — walkover win for ${winnerName} over ${loserName}`, null, null, claimRow.proof_url, true, null, null);
++
++    await refreshLeague(league.id);
++    showToast("Walkover approved — result applied to the ladder.");
++  };
++
++  const applyLadderCupWalkoverRejection = async (league, claimRow) => {
++    try {
++      rejectWalkoverClaim(claimRow);
++    } catch (err) {
++      showToast(err.message);
++      return;
++    }
++    const { error } = await supabase.from("ladder_cup_walkover_claims")
++      .update({ status: "rejected", reviewed_by: session.user.id }).eq("id", claimRow.id);
++    if (error) { showToast(`Couldn't reject the claim: ${error.message}`); return; }
++    await refreshLeague(league.id);
++    showToast("Walkover claim rejected.");
++  };
++
++  const rejectLadderCupWalkoverClaim = (league, claimRow) => {
++    requestConfirm([
++      "Reject this walkover claim? The claimant stays as-is and the target keeps their spot on the ladder.",
++      "Are you sure? This can't be undone once confirmed.",
++    ], () => applyLadderCupWalkoverRejection(league, claimRow));
++  };
++
+   const joinLeague = async (leagueId) => {
+     if (joinInFlight.current.has(leagueId)) return;
+     joinInFlight.current.add(leagueId);
+@@ -5713,6 +5834,10 @@ export default function App() {
+                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
+                 onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}
+                 onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
++                onMessageLadderCupWalkoverOpponent={(opponentTeamId) => messageLadderCupWalkoverOpponent(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
++                onSubmitLadderCupWalkoverClaim={(claim, file) => submitLadderCupWalkoverClaim(activeLeague, claim, file)}
++                onApproveLadderCupWalkoverClaim={(claim) => approveLadderCupWalkoverClaim(activeLeague, claim)}
++                onRejectLadderCupWalkoverClaim={(claim) => rejectLadderCupWalkoverClaim(activeLeague, claim)}
+                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
+                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
+                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index c15c011..3f52ffb 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -1,11 +1,11 @@
+ import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
+ import {
+-  ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download,
++  ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download, Eye,
+   Flame, Heart, LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2,
+-  Swords, Target, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
++  Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
+ } from "lucide-react";
+ import { toProxiedUrl } from "./utils/mediaUrl";
+-import { rankLadderCupStandings, getOpponentPool, LADDER_CUP_RULES } from "./formats/ladderCup.js";
++import { rankLadderCupStandings, getOpponentPool, isWalkoverClaimable, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+ import {
+   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
+   KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+@@ -166,14 +166,106 @@ function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
+   );
+ }
+ 
++// Step 12: the walkover track running alongside (not instead of) the
++// Challenge/match flow above. "Message opponent" is a bookkeeping click —
++// the actual message happens outside the app (WhatsApp) — that starts the
++// 24h wait. Once it's passed, Claim opens the screenshot form inline;
++// submitting sends it to the admin review queue below. A rejected claim
++// can be re-messaged (the DB's unique index only blocks a second OPEN
++// claim, not a rejected one), same "try again" path a declined second
++// life doesn't get but a walkover claim does, since a reviewer might've
++// rejected it over a bad screenshot rather than a bad claim.
++function LadderCupWalkoverClaimSection({ opponentName, claim, onMessage, onSubmitClaim, c }) {
++  const [busy, setBusy] = useState(false);
++  const [claiming, setClaiming] = useState(false);
++  const [file, setFile] = useState(null);
++
++  const message = async () => {
++    setBusy(true);
++    await onMessage();
++    setBusy(false);
++  };
++  const submit = async () => {
++    if (!file) return;
++    setBusy(true);
++    await onSubmitClaim(claim, file);
++    setBusy(false);
++    setClaiming(false);
++    setFile(null);
++  };
++
++  if (!claim || claim.status === "rejected") {
++    return (
++      <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
++        {claim?.status === "rejected" && (
++          <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.red }}>Previous walkover claim rejected</div>
++        )}
++        <button onClick={message} disabled={busy} className="flex items-center gap-1.5 font-mono text-[11px]" style={{ color: c.textFaint }}>
++          <MessageCircle size={11} /> {claim ? "Message opponent again" : "No response? Message them for a walkover"}
++        </button>
++      </div>
++    );
++  }
++
++  if (claim.status === "pending_review") {
++    return (
++      <div className="mt-2 pt-2 border-t font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ borderColor: c.border, color: c.textFaint }}>
++        <Clock size={10} /> Walkover claim submitted — awaiting admin review
++      </div>
++    );
++  }
++
++  // status === "messaged": either still inside the 24h wait, or claimable now.
++  const claimable = isWalkoverClaimable(claim);
++  if (!claimable) {
++    return (
++      <div className="mt-2 pt-2 border-t font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ borderColor: c.border, color: c.textFaint }}>
++        <Clock size={10} /> {opponentName} messaged — claimable {fmtDate(claim.claimable_at)} SAST if they still haven't played
++      </div>
++    );
++  }
++
++  if (!claiming) {
++    return (
++      <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
++        <button onClick={() => setClaiming(true)} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold" style={{ color: "#B8860B" }}>
++          <Zap size={11} /> 24h wait's up — claim walkover
++        </button>
++      </div>
++    );
++  }
++
++  return (
++    <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
++      <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-2 mb-1.5 cursor-pointer font-body text-xs" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
++        <Camera size={13} style={{ color: c.textFaint }} />
++        {file ? file.name : "Upload a screenshot showing they never played"}
++        <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
++      </label>
++      <div className="flex gap-2">
++        <button disabled={!file || busy} onClick={submit} className="flex-1 font-body text-xs font-semibold px-3 py-2 rounded-full"
++          style={file && !busy ? { background: "#B8860B", color: "#fff" } : { background: c.surfaceHover, color: c.textFaint }}>
++          {busy ? "Submitting…" : "Submit claim"}
++        </button>
++        <button disabled={busy} onClick={() => { setClaiming(false); setFile(null); }} className="font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
++          Cancel
++        </button>
++      </div>
++    </div>
++  );
++}
++
+ // One row per opponent in the current ladder-points band. Four states per
+ // row: no match yet (Challenge button), a match exists but the length
+ // hasn't been picked (home team sees the picker, away team sees a waiting
+ // note — either side can cancel from here), the length's set (ready to
+ // play — Log result opens the step 10 scoreline form), or it's mid-submit.
+ // Either side can log the result — first one to submit wins, same
+-// self-report model as the rest of Ladder Cup's match flow.
+-function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLength, onCancel, onOpenResult, c }) {
++// self-report model as the rest of Ladder Cup's match flow. The walkover
++// track (LadderCupWalkoverClaimSection) runs independently underneath —
++// messaging for a walkover doesn't require a Challenge to exist first,
++// since the whole point is an opponent who won't engage at all.
++function LadderCupOpponentRow({ opponent, myTeamId, match, walkoverClaim, onInitiate, onSetLength, onCancel, onOpenResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+   const [busy, setBusy] = useState(false);
+   const iAmHome = match && match.home_team_id === myTeamId;
+ 
+@@ -224,6 +316,9 @@ function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLeng
+           <Clock size={10} /> {opponent.club_name} is home — waiting on their match length
+         </div>
+       )}
++      <LadderCupWalkoverClaimSection opponentName={opponent.club_name} claim={walkoverClaim}
++        onMessage={() => onMessageWalkover(opponent.club_id)}
++        onSubmitClaim={onSubmitWalkoverClaim} c={c} />
+     </div>
+   );
+ }
+@@ -279,7 +374,7 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
+ // matchmaking consent. Refreshes automatically off the live `league` prop,
+ // same as the standings table, so logging any result elsewhere in the app
+ // widens/narrows this club's slate without a separate re-fetch.
+-function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, c }) {
++function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+   // Hooks stay unconditional (called every render, same order) — the
+   // eliminated/pending-second-life/no-entry short-circuits below happen
+   // after both useMemo calls, not before, so React never sees a different
+@@ -305,6 +400,21 @@ function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLen
+     ((m.home_team_id === myTeam.id && m.away_team_id === opponentClubId) ||
+      (m.away_team_id === myTeam.id && m.home_team_id === opponentClubId)));
+ 
++  // Most relevant open walkover claim against a given opponent: an
++  // in-flight one (messaged/pending_review) always wins; otherwise the
++  // latest rejected one, so LadderCupWalkoverClaimSection can offer
++  // "message them again". Approved claims are skipped here — by the time
++  // one's approved the target's status has moved on (eliminated or back
++  // in via second life), so it's no longer "the" claim against them; a
++  // fresh one is what a new message would create anyway.
++  const claims = league.ladder_cup_walkover_claims || [];
++  const walkoverClaimWith = (opponentClubId) => {
++    const against = claims.filter((cl) => cl.claimant_team_id === myTeam.id && cl.target_team_id === opponentClubId);
++    return against.find((cl) => cl.status === "messaged" || cl.status === "pending_review")
++      || [...against].filter((cl) => cl.status === "rejected").sort((a, b) => new Date(b.messaged_at) - new Date(a.messaged_at))[0]
++      || null;
++  };
++
+   if (opponents.length === 0) {
+     return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>No one's in range to challenge yet — check back as more clubs join or results come in.</div>;
+   }
+@@ -313,18 +423,63 @@ function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLen
+     <div className="mt-3 space-y-1.5">
+       {opponents.map((op) => (
+         <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} match={matchWith(op.club_id)}
+-          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} onOpenResult={onOpenResult} c={c} />
++          walkoverClaim={walkoverClaimWith(op.club_id)}
++          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} onOpenResult={onOpenResult}
++          onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
+       ))}
+     </div>
+   );
+ }
+ 
++// Step 12's admin queue: every league-wide claim sitting at pending_review,
++// regardless of which club's slate it came from — a claim can outlive its
++// original opponent-row (the claimant's band can move on before an admin
++// gets to it), so this reads straight off league.ladder_cup_walkover_claims
++// rather than anything derived from a particular viewer's opponent pool.
++// Same approve/reject shape as PendingResultsPanel, but claims aren't tied
++// to a fixture, so this builds its own rows instead of reusing that panel.
++function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }) {
++  const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
++  if (claims.length === 0) return null;
++  return (
++    <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
++      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
++        <Zap size={13} /> {claims.length} walkover claim{claims.length === 1 ? "" : "s"} awaiting review
++      </div>
++      <div className="space-y-2">
++        {claims.map((cl) => {
++          const claimant = teamsById[cl.claimant_team_id];
++          const target = teamsById[cl.target_team_id];
++          return (
++            <div key={cl.id} className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
++              <div className="font-body text-sm">{claimant?.name || "Unknown club"} claims a walkover over {target?.name || "Unknown club"}</div>
++              <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Messaged {fmtDate(cl.messaged_at)} SAST · claimable since {fmtDate(cl.claimable_at)} SAST</div>
++              <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
++                <button onClick={() => window.open(cl.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5" style={{ borderColor: c.borderStrong }}>
++                  <Eye size={12} /> View screenshot
++                </button>
++                <button onClick={() => onApprove(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.greenSoft, color: c.greenText }}>
++                  <ThumbsUp size={12} /> Approve
++                </button>
++                <button onClick={() => onReject(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.redSoft, color: c.red }}>
++                  <ThumbsDown size={12} /> Reject
++                </button>
++              </div>
++            </div>
++          );
++        })}
++      </div>
++    </div>
++  );
++}
++
+ // Ladder Cup has no "Start league & generate fixtures" step — a club is
+ // live on the ladder the instant it registers (see ensureLadderCupEntry in
+ // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
+ // registration screen; it just tracks who's registered and, for cash
+ // leagues, payment review, same as every other format already does.
+-function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, c }) {
++function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, c }) {
++  const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
+   return (
+     <div>
+       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+@@ -336,12 +491,17 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
+           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
+         )}
+         {myTeam ? (
+-          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife} c={c} />
++          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife}
++            onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
+         ) : (
+           <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
+         )}
+       </div>
+ 
++      {canManage && (
++        <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
++      )}
++
+       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
+       <div className="mb-5">
+         <LadderCupStandingsTable league={league} c={c} />
+@@ -384,7 +544,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
+   );
+ }
+ 
+-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupSecondLife, avatarByTeamId, c }) {
++export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+   const [tab, setTab] = useState("table");
+   const [descOpen, setDescOpen] = useState(false);
+   const [rulesOpen, setRulesOpen] = useState(false);
+@@ -525,7 +685,9 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
+         <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} onLeave={onLeave}
+           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
+           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
+-          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife} c={c} />
++          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife}
++          onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
++          onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} c={c} />
+       ) : notStarted ? (
+         <div>
+           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>

@@ -1,0 +1,31 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index a16b1df..56b39e5 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3004,7 +3004,7 @@ export default function App() {
+   // only ever receive a bare comment, not its parent league — can resolve
+   // which single league to refresh below without a full reload.
+   const LEAGUE_SELECT =
+-    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
++    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
+     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
+       "comment_likes(id, user_id, reaction)), " +
+     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+@@ -4338,7 +4338,7 @@ export default function App() {
+     // admin's browser already had — a stale copy here can both cut the
+     // wrong clubs from the group stage and seed the knockout bracket wrong.
+     const { data: fresh, error: freshErr } = await supabase
+-      .from("leagues").select("format, groups_count, group_stage_due_at, group_qualifiers, knockout_legs, round_period_hours, teams(*), fixtures(*)").eq("id", league.id).single();
++      .from("leagues").select("format, groups_count, group_stage_due_at, group_qualifiers, knockout_legs, round_period_hours, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
+     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+ 
+     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
+@@ -5424,7 +5424,7 @@ export default function App() {
+     // against it can eliminate a club that had actually won its match —
+     // it just hadn't shown up on this screen yet.
+     const { data: fresh, error: freshErr } = await supabase
+-      .from("leagues").select("current_stage, final_stage_started, teams(*), fixtures(*)").eq("id", league.id).single();
++      .from("leagues").select("current_stage, final_stage_started, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
+     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+ 
+     const currentStage = fresh.current_stage;

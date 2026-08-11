@@ -1,0 +1,301 @@
+diff --git a/src/App.jsx b/src/App.jsx
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -44,6 +44,13 @@
+ // also needs it.)
+ const LadderPage = lazy(() => import("./Ladder.jsx"));
+ import { pickBestVoice } from "./utils/pickBestVoice";
++// Step 9 (opponent slate + challenge flow) is the first place App.jsx
++// itself needs the pure engine — assignHomeTeam decides who's home the
++// instant a match is set up, isValidMatchLength backstops the same 6–15
++// range the DB CHECK constraint enforces. rankLadderCupStandings/
++// getOpponentPool stay imported where they're actually consumed
++// (LeagueDetail.jsx) rather than duplicated here.
++import { assignHomeTeam, isValidMatchLength } from "./formats/ladderCup.js";
+ import {
+   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
+   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
+@@ -2873,7 +2880,7 @@
+   // only ever receive a bare comment, not its parent league — can resolve
+   // which single league to refresh below without a full reload.
+   const LEAGUE_SELECT =
+-    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), " +
++    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
+     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
+       "comment_likes(id, user_id, reaction)), " +
+     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+@@ -4138,6 +4145,64 @@
+     }
+   };
+ 
++  // Step 9: opponent slate + challenge flow. Tapping an opponent on the
++  // board doesn't create a "pending" invite the way the platform-wide
++  // Ladder's `challenges` table does — Ladder Cup has no accept/decline
++  // step (see the ruleset: matching is by ladder-points band, not mutual
++  // consent) — so this goes straight to a `ladder_cup_matches` row with
++  // home/away already decided. That row IS the "challenge is live" state;
++  // there's no separate table for it.
++  const ladderCupPendingMatchWith = (league, myTeamId, opponentTeamId) =>
++    (league.ladder_cup_matches || []).find((m) =>
++      !m.finalized_at &&
++      ((m.home_team_id === myTeamId && m.away_team_id === opponentTeamId) ||
++       (m.away_team_id === myTeamId && m.home_team_id === opponentTeamId)));
++
++  const initiateLadderCupMatch = async (league, myTeamId, opponentTeamId) => {
++    if (!myTeamId || !opponentTeamId) return;
++    // Belt-and-suspenders against a double-tap creating two rows for the
++    // same pairing before refreshLeague's response lands — the DB has no
++    // unique constraint on this table (a rematch after a finalized result
++    // is legitimate), so the check has to happen here.
++    if (ladderCupPendingMatchWith(league, myTeamId, opponentTeamId)) {
++      showToast("You've already got a match set up with them.");
++      return;
++    }
++    const { home, away } = assignHomeTeam(myTeamId, opponentTeamId);
++    const { error } = await supabase.from("ladder_cup_matches")
++      .insert({ league_id: league.id, home_team_id: home, away_team_id: away });
++    if (error) { showToast(`Couldn't set up the match: ${error.message}`); return; }
++    await refreshLeague(league.id);
++    showToast(home === myTeamId
++      ? "You're home — pick your match length to lock it in."
++      : "Challenge sent — waiting on them to pick a match length.");
++  };
++
++  // Home team's choice, 6–15 minutes per half — isValidMatchLength mirrors
++  // the DB CHECK constraint exactly, so a rejection here would've been
++  // rejected there too; checking client-side just gives a clean message
++  // instead of a raw constraint-violation error.
++  const setLadderCupMatchLength = async (league, match, minutes) => {
++    if (!isValidMatchLength(minutes)) { showToast("Match length has to be 6–15 minutes."); return; }
++    const { error } = await supabase.from("ladder_cup_matches")
++      .update({ match_length_minutes: minutes }).eq("id", match.id);
++    if (error) { showToast(`Couldn't set match length: ${error.message}`); return; }
++    await refreshLeague(league.id);
++    showToast(`Match length set — ${minutes} min a side. Go play it.`);
++  };
++
++  // Either side can back out of a match that hasn't had its length set yet
++  // (no result exists to protect at that point — recordLadderCupWin only
++  // ever runs on a completed result, so nothing on the standings depends
++  // on this row). Once a length's set the row stays as-is; result logging
++  // (step 10) is what moves it forward from there.
++  const cancelLadderCupMatch = async (league, match) => {
++    const { error } = await supabase.from("ladder_cup_matches").delete().eq("id", match.id);
++    if (error) { showToast(`Couldn't cancel the match: ${error.message}`); return; }
++    await refreshLeague(league.id);
++    showToast("Match cancelled.");
++  };
++
+   const joinLeague = async (leagueId) => {
+     if (joinInFlight.current.has(leagueId)) return;
+     joinInFlight.current.add(leagueId);
+@@ -5345,6 +5410,9 @@
+                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
+                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
+                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
++                onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
++                onSetLadderCupMatchLength={(match, minutes) => setLadderCupMatchLength(activeLeague, match, minutes)}
++                onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
+                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
+                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
+                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -5,7 +5,7 @@
+   Swords, Target, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
+ } from "lucide-react";
+ import { toProxiedUrl } from "./utils/mediaUrl";
+-import { rankLadderCupStandings } from "./formats/ladderCup.js";
++import { rankLadderCupStandings, getOpponentPool, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+ import {
+   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
+   KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+@@ -137,13 +137,145 @@
+ }
+ 
+ 
+-// challenge/opponent board (Step 9) land. Ladder Cup has no "Start league &
+-// generate fixtures" step — a club is live on the ladder the instant it
+-// registers (see ensureLadderCupEntry in App.jsx) — so this intentionally
+-// doesn't try to reuse the fixtures-based registration screen; it just
+-// tracks who's registered and, for cash leagues, payment review, same as
+-// every other format already does.
+-function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
++// Match length picker for the home team — inline row of 6..15, not a
++// modal, since it's a single tap and the row it lives in already has all
++// the context (who the match is against). Mirrors isValidMatchLength's own
++// bounds (LADDER_CUP_RULES.MATCH_LENGTH_{MIN,MAX}_MINUTES) rather than
++// hardcoding 6/15 a second time.
++function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
++  const [saving, setSaving] = useState(false);
++  const options = [];
++  for (let m = LADDER_CUP_RULES.MATCH_LENGTH_MIN_MINUTES; m <= LADDER_CUP_RULES.MATCH_LENGTH_MAX_MINUTES; m++) options.push(m);
++  const pick = async (minutes) => {
++    setSaving(true);
++    await onSetLength(match, minutes);
++    setSaving(false);
++  };
++  return (
++    <div className="mt-2">
++      <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.accent }}>You're home — pick match length (min/half)</div>
++      <div className="flex flex-wrap gap-1.5">
++        {options.map((m) => (
++          <button key={m} disabled={saving} onClick={() => pick(m)}
++            className="font-mono text-xs font-semibold w-8 h-8 rounded-lg" style={{ background: c.surfaceHover, color: c.text }}>
++            {m}
++          </button>
++        ))}
++      </div>
++    </div>
++  );
++}
++
++// One row per opponent in the current ladder-points band. Three states per
++// row: no match yet (Challenge button), a match exists but the length
++// hasn't been picked (home team sees the picker, away team sees a waiting
++// note — either side can cancel from here), or the length's set (ready to
++// play; result logging is step 10, not this screen).
++function LadderCupOpponentRow({ opponent, myTeamId, match, onInitiate, onSetLength, onCancel, c }) {
++  const [busy, setBusy] = useState(false);
++  const iAmHome = match && match.home_team_id === myTeamId;
++
++  const challenge = async () => {
++    setBusy(true);
++    await onInitiate(opponent.club_id);
++    setBusy(false);
++  };
++  const cancel = async () => {
++    setBusy(true);
++    await onCancel(match);
++    setBusy(false);
++  };
++
++  return (
++    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
++      <div className="flex items-center gap-3">
++        <div className="w-8 h-8 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
++          {opponent.club_name[0]?.toUpperCase()}
++        </div>
++        <div className="flex-1 min-w-0">
++          <div className="font-body text-sm font-semibold truncate">{opponent.club_name}</div>
++          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.pts} pts</div>
++        </div>
++        {!match && (
++          <button onClick={challenge} disabled={busy}
++            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
++            <Swords size={13} /> Challenge
++          </button>
++        )}
++        {match && match.match_length_minutes != null && (
++          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide px-2 py-1.5 rounded flex items-center gap-1" style={{ background: c.greenSoft, color: c.greenText }}>
++            <Check size={11} /> Ready · {match.match_length_minutes}m
++          </span>
++        )}
++        {match && match.match_length_minutes == null && (
++          <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}>
++            <X size={13} />
++          </button>
++        )}
++      </div>
++      {match && match.match_length_minutes == null && iAmHome && (
++        <LadderCupMatchLengthPicker match={match} onSetLength={onSetLength} c={c} />
++      )}
++      {match && match.match_length_minutes == null && !iAmHome && (
++        <div className="font-mono text-[10px] uppercase tracking-wide mt-2 flex items-center gap-1" style={{ color: c.textFaint }}>
++          <Clock size={10} /> {opponent.club_name} is home — waiting on their match length
++        </div>
++      )}
++    </div>
++  );
++}
++
++// The "who can I play" screen (Step 9). No accept/decline step here — a
++// tap on Challenge immediately assigns home/away and creates the match row;
++// the ±10-and-widening band in getOpponentPool is what stands in for
++// matchmaking consent. Refreshes automatically off the live `league` prop,
++// same as the standings table, so logging any result elsewhere in the app
++// widens/narrows this club's slate without a separate re-fetch.
++function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
++  // Hooks stay unconditional (called every render, same order) — the
++  // eliminated/pending-second-life/no-entry short-circuits below happen
++  // after both useMemo calls, not before, so React never sees a different
++  // hook count between renders.
++  const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
++  const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
++  const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
++
++  if (!myEntry) return null; // not a registered club in this league — nothing to challenge with
++
++  const myStatus = myEntry._row.status;
++  if (myStatus === "eliminated") {
++    return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>You've been eliminated from this cup — no more challenges to send.</div>;
++  }
++  if (myStatus === "pending_second_life") {
++    return <div className="font-body text-xs mt-3" style={{ color: "#B8860B" }}>Decide on your second life offer before challenging anyone else.</div>;
++  }
++
++  const matches = league.ladder_cup_matches || [];
++  const matchWith = (opponentClubId) => matches.find((m) =>
++    !m.finalized_at &&
++    ((m.home_team_id === myTeam.id && m.away_team_id === opponentClubId) ||
++     (m.away_team_id === myTeam.id && m.home_team_id === opponentClubId)));
++
++  if (opponents.length === 0) {
++    return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>No one's in range to challenge yet — check back as more clubs join or results come in.</div>;
++  }
++
++  return (
++    <div className="mt-3 space-y-1.5">
++      {opponents.map((op) => (
++        <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} match={matchWith(op.club_id)}
++          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} c={c} />
++      ))}
++    </div>
++  );
++}
++
++// Ladder Cup has no "Start league & generate fixtures" step — a club is
++// live on the ladder the instant it registers (see ensureLadderCupEntry in
++// App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
++// registration screen; it just tracks who's registered and, for cash
++// leagues, payment review, same as every other format already does.
++function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, c }) {
+   return (
+     <div>
+       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+@@ -154,7 +286,11 @@
+         {league.ladder_cup_cutoff_at && (
+           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
+         )}
+-        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>The challenge board (who you can play next) is coming soon — for now, log results wherever your league admin coordinates them.</div>
++        {myTeam ? (
++          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} c={c} />
++        ) : (
++          <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
++        )}
+       </div>
+ 
+       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
+@@ -199,7 +335,7 @@
+   );
+ }
+ 
+-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
++export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, avatarByTeamId, c }) {
+   const [tab, setTab] = useState("table");
+   const [descOpen, setDescOpen] = useState(false);
+   const [rulesOpen, setRulesOpen] = useState(false);
+@@ -337,9 +473,10 @@
+       {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
+ 
+       {isLadderCup ? (
+-        <LadderCupPendingPanel league={league} canManage={canManage} session={session} onLeave={onLeave}
++        <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} onLeave={onLeave}
+           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
+-          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
++          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
++          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} c={c} />
+       ) : notStarted ? (
+         <div>
+           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>

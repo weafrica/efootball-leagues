@@ -1,0 +1,377 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 8a84070..d7a038a 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -265,6 +265,16 @@ export const FORMATS = [
+   { id: "knockout", label: "Knockout", kind: "knockout", desc: "Single elimination. Lose and you're out.", available: true },
+   { id: "survivor", label: "Survivor", kind: "round_robin", desc: "Play a set number of matches, cut the bottom %, repeat until a target number remain, then finish with a round robin.", available: true },
+   { id: "groups_knockout", label: "Groups + Knockout", kind: "groups_knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
++  // Own `kind` (not "round_robin") so it doesn't interact with the
++  // one-active-fun-league-per-kind join lock the other formats share —
++  // ladder cup's challenge-based flow is different enough that stacking
++  // it against round robin/survivor activity doesn't make sense.
++  // Step 7: CreateLeague now has a cutoff picker and league/join creation
++  // builds ladder_cup_entries rows (see createLeague/ensureLadderCupEntry
++  // below), so this is selectable. Standings (Step 8) and the challenge
++  // board (Step 9) still aren't wired up — LeagueDetail shows a holding
++  // panel (LadderCupPendingPanel) for ladder_cup leagues until then.
++  { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup", desc: "Ranked ladder, one elimination life each. Most points by the Sunday cutoff wins.", available: true },
+ ];
+ const FORMAT_KIND_LABELS = { round_robin: "round robin / survivor" };
+ 
+@@ -1815,6 +1825,21 @@ function addPausableDuration(startDate, durationMs, isWeekend) {
+   return cursor;
+ }
+ 
++// Ladder Cup's weekly cutoff defaults to the *upcoming* Sunday 10PM SAST
++// (Africa/Johannesburg, UTC+2 fixed, no DST — same rule as fmtDate/
++// isWeekendPauseHour above: always SAST wall-clock, never the visitor's own
++// device timezone). Used by CreateLeague to prefill the cutoff picker for a
++// new ladder_cup league; admins can still override it. Mirrors
++// nextSastHourBoundary's technique but also walks to the right day, not
++// just the right hour.
++export function nextSundayCutoffSAST(now = new Date()) {
++  const sastNow = new Date(now.getTime() + SAST_OFFSET_MS);
++  const day = sastNow.getUTCDay(); // 0 Sun .. 6 Sat, in SAST wall-clock terms
++  const daysToSunday = day === 0 ? 0 : 7 - day;
++  const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate() + daysToSunday, 22, 0, 0, 0) - SAST_OFFSET_MS);
++  return candidate >= now ? candidate : new Date(candidate.getTime() + 7 * ONE_DAY_MS);
++}
++
+ // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
+ // <input type="datetime-local"> expects, in the browser's local time — the
+ // exact inverse of how CreateLeague turns that same input's value back into
+@@ -2848,7 +2873,7 @@ export default function App() {
+   // only ever receive a bare comment, not its parent league — can resolve
+   // which single league to refresh below without a full reload.
+   const LEAGUE_SELECT =
+-    "*, teams(*), fixtures(*), members(*), " +
++    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), " +
+     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
+       "comment_likes(id, user_id, reaction)), " +
+     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+@@ -3926,7 +3951,7 @@ export default function App() {
+   };
+ 
+   const createLeague = async (input) => {
+-    const { name, teamNames, format, survivor, groups, knockoutLegs, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
++    const { name, teamNames, format, survivor, groups, knockoutLegs, ladderCupCutoffAt, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
+     const insertPayload = {
+       name, created_by: session.user.id, format,
+       entry_closes_at: entryClosesAt, starts_at: startsAt,
+@@ -3960,22 +3985,36 @@ export default function App() {
+       // (when the admin clicks "Start league") with the real count.
+       insertPayload.groups_count = teamNames.length >= 2 ? Math.max(2, Math.round(teamNames.length / groups.groupSize)) : 2;
+     }
++    if (format === "ladder_cup") {
++      insertPayload.ladder_cup_cutoff_at = ladderCupCutoffAt;
++    }
+ 
+     const { data: league, error } = await supabase.from("leagues").insert(insertPayload).select().single();
+     if (error) { showToast(`Couldn't create league: ${error.message}`); return; }
+ 
+-    // Pre-listed clubs are added as registered teams, but fixtures are NOT
+-    // generated yet — the league stays open for registration so the admin
+-    // gets a chance to remove any club (pre-listed or self-joined) before
+-    // starting. Starting/generating fixtures happens via generateFixtures,
+-    // triggered by the "Start league & generate fixtures" button.
++    // Pre-listed clubs are added as registered teams. For every other
++    // format, fixtures are NOT generated yet — the league stays open for
++    // registration so the admin gets a chance to remove any club before
++    // starting, and "Start league & generate fixtures" does that later.
++    // Ladder Cup has no such start step: a club is live on the ladder (i.e.
++    // has a ladder_cup_entries row) the instant it's registered, whether
++    // pre-listed here or self-joined later — see ensureLadderCupEntry.
+     if (teamNames.length >= 2) {
+-      const { error: teamErr } = await supabase.from("teams")
++      const { data: newTeams, error: teamErr } = await supabase.from("teams")
+         .insert(teamNames.map((n) => ({ league_id: league.id, name: n }))).select();
+       if (teamErr) { showToast(`Couldn't add clubs: ${teamErr.message}`); return; }
+-      showToast(`League created — ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed. Review the list, then start the league when ready.`);
++      if (format === "ladder_cup") {
++        const { error: entryErr } = await supabase.from("ladder_cup_entries")
++          .insert(newTeams.map((t) => ({ league_id: league.id, team_id: t.id })));
++        if (entryErr) showToast(`Clubs added, but their ladder entries failed to set up: ${entryErr.message}. Contact support.`);
++      }
++      showToast(format === "ladder_cup"
++        ? `League created — ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed and live on the ladder now. More clubs can join until entry closes.`
++        : `League created — ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed. Review the list, then start the league when ready.`);
+     } else {
+-      showToast("League created — open for registration. Players can join, then you can start it.");
++      showToast(format === "ladder_cup"
++        ? "League created — open for registration. Clubs are live on the ladder the moment they join."
++        : "League created — open for registration. Players can join, then you can start it.");
+     }
+ 
+     await refreshLeague(league.id);
+@@ -4083,6 +4122,22 @@ export default function App() {
+   // the insert twice before the button's derived `disabled` state catches
+   // up, which can duplicate a whole round of fixtures.
+   const stageActionInFlight = useRef(new Set());
++  // Ladder Cup has no separate "start the league" step (unlike the
++  // fixtures-based formats) — a club is live in the ladder the moment its
++  // `teams` row exists, whether that happened via a pre-listed club at
++  // creation (see createLeague) or a fresh self-join here. Called right
++  // after a brand-new team row is inserted; a no-op for every other format.
++  // 23505 (unique(league_id, team_id) already exists) is swallowed rather
++  // than surfaced — it just means the entry was already set up, which can
++  // legitimately happen on a retried request after a network hiccup.
++  const ensureLadderCupEntry = async (league, teamId) => {
++    if (league.format !== "ladder_cup" || !teamId) return;
++    const { error } = await supabase.from("ladder_cup_entries").insert({ league_id: league.id, team_id: teamId });
++    if (error && error.code !== "23505") {
++      showToast(`Club registered, but its ladder entry failed to set up: ${error.message}. Contact the league admin.`);
++    }
++  };
++
+   const joinLeague = async (leagueId) => {
+     if (joinInFlight.current.has(leagueId)) return;
+     joinInFlight.current.add(leagueId);
+@@ -4121,6 +4176,7 @@ export default function App() {
+         return;
+       }
+       match = newTeam;
++      await ensureLadderCupEntry(league, match.id);
+     }
+ 
+     const { error } = await supabase.from("members").insert({
+@@ -4171,6 +4227,7 @@ export default function App() {
+       }
+       return { error: true };
+     }
++    await ensureLadderCupEntry(league, newTeam.id);
+     return { team: newTeam };
+   };
+ 
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index 938bef5..f2f1be8 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -1,10 +1,11 @@
+ import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
+ import {
+   ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download,
+-  LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2, Trash2,
+-  Trophy, Users, Volume2, X, XCircle,
++  Flame, Heart, LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2,
++  Swords, Target, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
+ } from "lucide-react";
+ import { toProxiedUrl } from "./utils/mediaUrl";
++import { rankLadderCupStandings } from "./formats/ladderCup.js";
+ import {
+   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
+   KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+@@ -19,13 +20,184 @@ import {
+   timeAgo, useCommentSpeakingId, useVoiceRecorder, usesCustomMessage,
+ } from "./App.jsx";
+ 
++const RulesModal = lazy(() => import("./Rules.jsx"));
++
+ // Split out of App.jsx (was the last ~1,555 lines of it): the full league
+ // detail screen (standings, fixtures, comments, payments, admin controls)
+ // is only ever rendered once a signed-in user taps into a specific league —
+ // never on the guest/login page — so it doesn't need to be in the bundle
+ // everyone downloads just to see the sign-in screen. Lazy-loaded from
+ // App.jsx the same way Shop/Terms/Rules already are.
+-const RulesModal = lazy(() => import("./Rules.jsx"));
++// Ladder Cup's DB rows (ladder_cup_entries: team_id, pts, w, l, gd, streak,
++// status, badge_* flat columns) don't share a shape with the pure engine's
++// entry type (club_id, badge_counts.{...}) — rankLadderCupStandings only
++// ever reads club_id/pts/gd/toughest_opponent_beaten_pts, so this adapter
++// is deliberately minimal rather than a full round-trip mapping. Badge
++// counts are read straight off the raw row in the table below instead.
++function toLadderCupEngineEntries(league) {
++  const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
++  return (league.ladder_cup_entries || []).map((row) => ({
++    club_id: row.team_id,
++    club_name: teamsById[row.team_id]?.name || "Unknown club",
++    pts: row.pts, gd: row.gd,
++    toughest_opponent_beaten_pts: row.toughest_opponent_beaten_pts,
++    _row: row,
++  }));
++}
++
++const LADDER_CUP_STATUS_LABEL = {
++  active: "Active", pending_second_life: "Second life pending",
++  eliminated: "Eliminated", champion: "Champion",
++};
++
++// Small icon + count for each nonzero badge counter on a raw
++// ladder_cup_entries row. Column names come straight from the migration
++// (badge_heater_tier/giant_slayer/bounty_hunter/walkover are running
++// counts, badge_second_life is a one-time boolean) — displayed as-is, no
++// invented tiering beyond what's actually tracked.
++function LadderCupBadgeRow({ row, c }) {
++  const badges = [
++    row.badge_heater_tier > 0 && { icon: Flame, label: `Heater ×${row.badge_heater_tier}` },
++    row.badge_giant_slayer > 0 && { icon: Swords, label: `Giant Slayer ×${row.badge_giant_slayer}` },
++    row.badge_bounty_hunter > 0 && { icon: Target, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
++    row.badge_walkover > 0 && { icon: Zap, label: `Walkover ×${row.badge_walkover}` },
++    row.badge_second_life && { icon: Heart, label: "Used Second Life" },
++  ].filter(Boolean);
++  if (badges.length === 0) return null;
++  return (
++    <div className="flex items-center gap-1.5 mt-0.5">
++      {badges.map(({ icon: Icon, label }, i) => (
++        <span key={i} title={label} className="flex items-center justify-center w-5 h-5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.accent }}>
++          <Icon size={11} />
++        </span>
++      ))}
++    </div>
++  );
++}
++
++// The standings table itself — points/GD/streak/status/badges, ranked with
++// the engine's own tiebreaker chain (points, then GD, then toughest
++// opponent beaten) rather than re-deriving an ordering here.
++function LadderCupStandingsTable({ league, c }) {
++  const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
++  const standings = useMemo(() => rankLadderCupStandings(mapped), [mapped]);
++
++  if (standings.length === 0) {
++    return <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>;
++  }
++
++  return (
++    <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
++      <table className="w-full font-mono text-sm min-w-[560px]">
++        <thead>
++          <tr className="text-[11px] uppercase tracking-wider border-b" style={{ color: c.textFaint, borderColor: c.border, background: c.bg }}>
++            <th className="text-left py-2 pl-2 font-medium">#</th>
++            <th className="text-left py-2 font-medium">Club</th>
++            <th className="text-center py-2 font-medium">W</th>
++            <th className="text-center py-2 font-medium">L</th>
++            <th className="text-center py-2 font-medium">GD</th>
++            <th className="text-center py-2 font-medium">Streak</th>
++            <th className="text-center py-2 pr-2 font-medium">Pts</th>
++          </tr>
++        </thead>
++        <tbody>
++          {standings.map((r) => {
++            const row = r._row;
++            const eliminated = row.status === "eliminated";
++            return (
++              <tr key={r.club_id} className="border-b align-top" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1 }}>
++                <td className="py-2.5 pl-2 relative">
++                  <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: r.rank_position === 1 && !eliminated ? c.accent : "transparent" }} />
++                  <span style={{ color: c.textFaint }}>{r.rank_position}</span>
++                </td>
++                <td className="py-2.5 font-body font-medium">
++                  <div className="flex items-center gap-1.5">
++                    {row.status === "champion" && <Crown size={13} style={{ color: c.accent }} />}
++                    <span className="truncate">{r.club_name}</span>
++                  </div>
++                  <div className="font-mono text-[10px] mt-0.5" style={{ color: row.status === "eliminated" ? c.red : row.status === "pending_second_life" ? "#B8860B" : row.status === "champion" ? c.accent : c.textFaint }}>
++                    {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
++                  </div>
++                  <LadderCupBadgeRow row={row} c={c} />
++                </td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w}</td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>
++                  {row.streak >= 3 ? <span className="inline-flex items-center gap-0.5" style={{ color: c.accent }}><Flame size={11} />{row.streak}</span> : row.streak}
++                </td>
++                <td className="text-center py-2.5 pr-2 font-bold">{r.pts}</td>
++              </tr>
++            );
++          })}
++        </tbody>
++      </table>
++    </div>
++  );
++}
++
++
++// challenge/opponent board (Step 9) land. Ladder Cup has no "Start league &
++// generate fixtures" step — a club is live on the ladder the instant it
++// registers (see ensureLadderCupEntry in App.jsx) — so this intentionally
++// doesn't try to reuse the fixtures-based registration screen; it just
++// tracks who's registered and, for cash leagues, payment review, same as
++// every other format already does.
++function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
++  return (
++    <div>
++      <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
++        <div className="font-body font-bold text-base mb-1">Survival Ladder Cup</div>
++        <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
++          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · live on the ladder as soon as they join, no separate start step.
++        </div>
++        {league.ladder_cup_cutoff_at && (
++          <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
++        )}
++        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>The challenge board (who you can play next) is coming soon — for now, log results wherever your league admin coordinates them.</div>
++      </div>
++
++      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
++      <div className="mb-5">
++        <LadderCupStandingsTable league={league} c={c} />
++      </div>
++
++      {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
++        <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
++          <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
++        </div>
++      )}
++      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
++      {league.teams.length === 0 ? (
++        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
++      ) : (
++        <div className="space-y-1.5">
++          {[...league.teams]
++            .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
++            .sort((a, b) => (a.m?.payment_status === "pending" ? -1 : 0) - (b.m?.payment_status === "pending" ? -1 : 0))
++            .map(({ t, m }) => (
++            m ? (
++              <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
++                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
++                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
++            ) : (
++              <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
++                <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
++                <span className="font-body text-sm flex-1">{t.name}</span>
++                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Not yet claimed</span>
++                {canManage && (
++                  <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}>
++                    <X size={14} />
++                  </button>
++                )}
++              </div>
++            )
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
+ 
+ export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
+   const [tab, setTab] = useState("table");
+@@ -66,6 +238,11 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
+   const isKnockout = league.format === "knockout";
+   const isSurvivor = league.format === "survivor";
+   const isGroupsKnockout = league.format === "groups_knockout";
++  // Ladder Cup never uses `fixtures` at all (challenge-based, not
++  // fixture-generated — see LadderCupPendingPanel below), so it gets routed
++  // out of the notStarted/started fixtures ternary entirely rather than
++  // falling into either branch and rendering something meaningless.
++  const isLadderCup = league.format === "ladder_cup";
+   const inGroupStage = isGroupsKnockout && !league.final_stage_started;
+   const inKnockoutBracket = isKnockout || (isGroupsKnockout && league.final_stage_started);
+ 
+@@ -157,9 +334,13 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
+           descOpen={descOpen} setDescOpen={setDescOpen} c={c} />
+       )}
+ 
+-      <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />
++      {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
+ 
+-      {notStarted ? (
++      {isLadderCup ? (
++        <LadderCupPendingPanel league={league} canManage={canManage} session={session} onLeave={onLeave}
++          onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
++          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
++      ) : notStarted ? (
+         <div>
+           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+             <div className="font-body font-bold text-base mb-1">Registration open</div>
