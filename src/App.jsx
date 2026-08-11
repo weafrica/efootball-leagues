@@ -4206,7 +4206,16 @@ export default function App() {
     const t = myTeam(league);
     return !(t && t.eliminated);
   };
-  const entryClosed = (league) => league.entry_closes_at && new Date(league.entry_closes_at) < new Date();
+  // "Entry closed" covers two independent reasons: the admin set a manual
+  // entry_closes_at cutoff (any format), or — new here — this is a
+  // ladder_cup league whose own hard cutoff has already passed. Extending
+  // this single function (rather than adding a parallel check) means the
+  // fix reaches every place that already gates on it: the Join button's
+  // visibility on LeagueCard, Home's isJoinable sort, and both join
+  // handlers below.
+  const entryClosed = (league) =>
+    (league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
+    || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
   // Persists which group each team landed in. Supabase doesn't support per-row
   // bulk updates with different values in one call, so we fire them in parallel.
@@ -4748,6 +4757,10 @@ export default function App() {
     joinInFlight.current.add(leagueId);
     try {
     const league = (leagues || []).find((l) => l.id === leagueId);
+    if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
+      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+      return;
+    }
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return; }
     if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
 
@@ -4840,6 +4853,10 @@ export default function App() {
   // private storage, and creates the member row with payment_status "pending" —
   // it only becomes a confirmed registration once an admin approves it.
   const joinCashLeague = async (league, fee, rawFile) => {
+    if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
+      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+      return false;
+    }
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return false; }
     if (isMemberOf(league)) { showToast("You've already joined this league."); return false; }
     if (!rawFile) { showToast("Attach your proof of payment before submitting."); return false; }
