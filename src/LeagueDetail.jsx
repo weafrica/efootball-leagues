@@ -328,6 +328,10 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
           <CommentsSection league={league} session={session} canComment={joined || canManage}
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as matches are played."
+            // canManage = this league's own creator, or a site admin (isCreator
+            // checks league.created_by against the current session, so a
+            // player or the creator of some other league never gets it here).
+            // That's exactly who should be able to edit a posted result.
             canEditResults={canManage}
             onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
