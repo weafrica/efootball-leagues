@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ArrowLeft, Calendar, Layers, Trophy, Zap } from "lucide-react";
 import {
   DEFAULT_ROUND_PERIOD_HOURS, ENTRY_FEE_MAX, ENTRY_FEE_MIN,
-  FORMATS, ONE_DAY_MS, formatRand, toDatetimeLocalValue, weekendWindow,
+  FORMATS, ONE_DAY_MS, formatRand, nextSundayCutoffSAST, toDatetimeLocalValue, weekendWindow,
 } from "./App.jsx";
 
 // Split out of App.jsx: the "create a new league" form is only ever opened
@@ -24,6 +24,7 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const [knockoutLegs, setKnockoutLegs] = useState(1);
   const [entryClosesAt, setEntryClosesAt] = useState("");
   const [startsAt, setStartsAt] = useState("");
+  const [ladderCupCutoffAt, setLadderCupCutoffAt] = useState("");
   const [roundPeriodHours, setRoundPeriodHours] = useState(DEFAULT_ROUND_PERIOD_HOURS);
   const [description, setDescription] = useState("");
 
@@ -42,7 +43,8 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   const groupsTooFewTeams = format === "groups_knockout" && teamNames.length > 0 && teamNames.length < 4;
   const datesOutOfOrder = entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
   const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
-  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && entryClosesAt && startsAt && !datesOutOfOrder && roundPeriodValid;
+  const ladderCupValid = format !== "ladder_cup" || !!ladderCupCutoffAt;
+  const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && ladderCupValid && entryClosesAt && startsAt && !datesOutOfOrder && roundPeriodValid;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
   // Weekend League is a shortcut, not a separate field: whether a league
@@ -66,12 +68,20 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   };
   const willBeWeekendLeague = isAdmin && startsAt && new Date(startsAt) >= wkStart && new Date(startsAt) <= wkEnd;
 
+  // Fills the Ladder Cup cutoff picker with the ruleset's default — the
+  // upcoming Sunday 10PM SAST — the same "quick-set, still overridable"
+  // pattern as Set as Weekend League above. Doesn't touch entryClosesAt/
+  // startsAt; those are the generic registration-window fields every format
+  // uses, separate from ladder_cup's own weekly cutoff.
+  const setDefaultLadderCupCutoff = () => setLadderCupCutoffAt(toDatetimeLocalValue(nextSundayCutoffSAST()));
+
   const submit = () => {
     onCreate({
       name: name.trim(), teamNames, format,
       survivor: format === "survivor" ? { matchesPerStage: Number(matchesPerStage), eliminationPercent: Number(eliminationPercent), targetCount: Number(targetCount), finalFormat } : null,
       groups: format === "groups_knockout" ? { groupSize: Number(groupSize), qualifiersPerGroup: Number(qualifiersPerGroup) } : null,
       knockoutLegs: (format === "knockout" || format === "groups_knockout") ? Number(knockoutLegs) : 1,
+      ladderCupCutoffAt: format === "ladder_cup" ? new Date(ladderCupCutoffAt).toISOString() : null,
       entryClosesAt: new Date(entryClosesAt).toISOString(),
       startsAt: new Date(startsAt).toISOString(),
       roundPeriodHours: Number(roundPeriodHours),
@@ -217,6 +227,25 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
               ? "Each tie is played twice — once at each club's home. Aggregate score decides the winner; a level aggregate sends both clubs through to the next round. The final is always a single decisive match, with penalties if it's level."
               : "Each tie is a single, decisive match. A draw goes to penalties — but only in the final; earlier rounds send both clubs through instead."}
           </div>
+        </div>
+      )}
+
+      {format === "ladder_cup" && (
+        <div className="rounded-lg p-4 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.textFaint }}><Layers size={12} /> Ladder Cup cutoff</div>
+          <div className="font-body text-xs mb-3" style={{ color: c.textFaint }}>
+            Standings freeze and the champion is crowned at this deadline each week — the ruleset default is Sunday 10PM SAST, but you can set any date/time.
+          </div>
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <button type="button" onClick={setDefaultLadderCupCutoff} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full transition-transform active:scale-95"
+              style={{ background: `${c.accent}1A`, color: c.accent, border: `1px dashed ${c.accent}66` }}>
+              <Calendar size={11} /> Set to this week's Sun 10PM
+            </button>
+          </div>
+          <input type="datetime-local" value={ladderCupCutoffAt} onChange={(e) => setLadderCupCutoffAt(e.target.value)} className="w-full sm:w-64 border rounded-lg px-3 py-2.5 font-mono text-sm outline-none" style={inputStyle} />
+          {!ladderCupCutoffAt && (
+            <div className="font-mono text-xs mt-1.5" style={{ color: c.red }}>Set a cutoff date/time before creating the league.</div>
+          )}
         </div>
       )}
 

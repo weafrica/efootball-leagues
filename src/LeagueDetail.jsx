@@ -27,6 +27,63 @@ import {
 // App.jsx the same way Shop/Terms/Rules already are.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
+// Holding screen for Ladder Cup leagues until the standings (Step 8) and
+// challenge/opponent board (Step 9) land. Ladder Cup has no "Start league &
+// generate fixtures" step — a club is live on the ladder the instant it
+// registers (see ensureLadderCupEntry in App.jsx) — so this intentionally
+// doesn't try to reuse the fixtures-based registration screen; it just
+// tracks who's registered and, for cash leagues, payment review, same as
+// every other format already does.
+function LadderCupPendingPanel({ league, canManage, session, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+  return (
+    <div>
+      <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
+        <div className="font-body font-bold text-base mb-1">Survival Ladder Cup</div>
+        <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
+          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · live on the ladder as soon as they join, no separate start step.
+        </div>
+        {league.ladder_cup_cutoff_at && (
+          <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
+        )}
+        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Standings and the challenge board are coming soon — for now this page just tracks registration and payments.</div>
+      </div>
+      {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
+        <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
+          <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
+        </div>
+      )}
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
+      {league.teams.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {[...league.teams]
+            .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
+            .sort((a, b) => (a.m?.payment_status === "pending" ? -1 : 0) - (b.m?.payment_status === "pending" ? -1 : 0))
+            .map(({ t, m }) => (
+            m ? (
+              <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
+                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
+                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+            ) : (
+              <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
+                <span className="font-body text-sm flex-1">{t.name}</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Not yet claimed</span>
+                {canManage && (
+                  <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}>
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
@@ -66,6 +123,11 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
   const isKnockout = league.format === "knockout";
   const isSurvivor = league.format === "survivor";
   const isGroupsKnockout = league.format === "groups_knockout";
+  // Ladder Cup never uses `fixtures` at all (challenge-based, not
+  // fixture-generated — see LadderCupPendingPanel below), so it gets routed
+  // out of the notStarted/started fixtures ternary entirely rather than
+  // falling into either branch and rendering something meaningless.
+  const isLadderCup = league.format === "ladder_cup";
   const inGroupStage = isGroupsKnockout && !league.final_stage_started;
   const inKnockoutBracket = isKnockout || (isGroupsKnockout && league.final_stage_started);
 
@@ -157,9 +219,13 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
           descOpen={descOpen} setDescOpen={setDescOpen} c={c} />
       )}
 
-      <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />
+      {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
 
-      {notStarted ? (
+      {isLadderCup ? (
+        <LadderCupPendingPanel league={league} canManage={canManage} session={session} onLeave={onLeave}
+          onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
+          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+      ) : notStarted ? (
         <div>
           <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
             <div className="font-body font-bold text-base mb-1">Registration open</div>
