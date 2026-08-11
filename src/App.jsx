@@ -50,7 +50,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // range the DB CHECK constraint enforces. rankLadderCupStandings/
 // getOpponentPool stay imported where they're actually consumed
 // (LeagueDetail.jsx) rather than duplicated here.
-import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife } from "./formats/ladderCup.js";
+import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -3004,7 +3004,7 @@ export default function App() {
   // only ever receive a bare comment, not its parent league — can resolve
   // which single league to refresh below without a full reload.
   const LEAGUE_SELECT =
-    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
+    "*, teams(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
       "comment_likes(id, user_id, reaction)), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
@@ -4501,6 +4501,127 @@ export default function App() {
     showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
   };
 
+  // Step 12: walkover claims (message → 24h wait → claim with screenshot →
+  // admin review). "Message opponent" is a purely local bookkeeping step —
+  // the actual message happens outside the app (WhatsApp) — createWalkoverClaim
+  // just computes claimable_at, 24h out. The DB's partial unique index on
+  // (claimant_team_id, target_team_id) for status in (messaged, pending_review)
+  // is what actually blocks a second open claim against the same target;
+  // 23505 here means one's already in flight. The "up to 5 concurrent claims"
+  // cap from the ruleset falls out for free since this is only ever called
+  // from a shown-opponent row and getOpponentPool shows at most 5.
+  const messageLadderCupWalkoverOpponent = async (league, myTeamId, opponentTeamId) => {
+    if (!myTeamId || !opponentTeamId) return;
+    const claim = createWalkoverClaim(myTeamId, opponentTeamId);
+    const { error } = await supabase.from("ladder_cup_walkover_claims").insert({
+      league_id: league.id, claimant_team_id: myTeamId, target_team_id: opponentTeamId,
+      messaged_at: claim.messaged_at, claimable_at: claim.claimable_at, status: claim.status,
+    });
+    if (error) {
+      showToast(error.code === "23505" ? "You've already got an open walkover claim against them." : `Couldn't start the claim: ${error.message}`);
+      return;
+    }
+    await refreshLeague(league.id);
+    showToast("Opponent messaged — claimable in 24h if they still haven't played.");
+  };
+
+  // Screenshot proof is mandatory, same as a played result. isWalkoverClaimable
+  // is re-checked here (not just trusted from the button being shown) since
+  // the 24h window could've lapsed between render and tap.
+  const submitLadderCupWalkoverClaim = async (league, claimRow, file) => {
+    if (!file) { showToast("Attach a screenshot before submitting the claim."); return; }
+    if (!isWalkoverClaimable(claimRow)) { showToast("Not claimable yet — still inside the 24h wait."); return; }
+
+    const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
+    const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${session.user.id}/walkover-${claimRow.id}-${Date.now()}.${ext}`;
+    let proofUrl;
+    try {
+      proofUrl = await uploadToBlob("result-proofs", path, compressed);
+    } catch (uploadErr) {
+      showToast(`Couldn't upload screenshot: ${uploadErr.message}`);
+      return;
+    }
+
+    const { error } = await supabase.from("ladder_cup_walkover_claims")
+      .update({ status: "pending_review", proof_url: proofUrl }).eq("id", claimRow.id);
+    if (error) { showToast(`Couldn't submit the claim: ${error.message}`); return; }
+    await refreshLeague(league.id);
+    showToast("Walkover claim submitted — waiting on admin review.");
+  };
+
+  // Admin approval: flips the claim, then applies the walkover exactly the
+  // way LADDER_CUP_INTEGRATION.md's own sample does — recordLadderCupWin
+  // with isWalkover: true, base 3pts only, and the target goes through the
+  // same loss/second-life path a played defeat would. badge_walkover isn't
+  // part of recordLadderCupWin's round trip (see ladderCupRowPatchFromEntry's
+  // comment above) so it's bumped here, the one place a walkover win is
+  // actually recorded.
+  const approveLadderCupWalkoverClaim = async (league, claimRow) => {
+    try {
+      approveWalkoverClaim(claimRow);
+    } catch (err) {
+      showToast(err.message);
+      return;
+    }
+
+    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+    const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
+    const winnerRow = rowsById[claimRow.claimant_team_id];
+    const loserRow = rowsById[claimRow.target_team_id];
+    if (!winnerRow || !loserRow) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return; }
+
+    const mapped = (league.ladder_cup_entries || []).map((r) => ladderCupEntryFromRow(r, teamsById[r.team_id]?.name || "Unknown club"));
+    const standingsBeforeMatch = rankLadderCupStandings(mapped);
+    const winnerEntry = ladderCupEntryFromRow(winnerRow, teamsById[claimRow.claimant_team_id]?.name || "Unknown club");
+    const loserEntry = ladderCupEntryFromRow(loserRow, teamsById[claimRow.target_team_id]?.name || "Unknown club");
+
+    const { winner, loser } = recordLadderCupWin({
+      winner: winnerEntry, loser: loserEntry, standingsBeforeMatch, isWalkover: true, winnerGoals: 0, loserGoals: 0,
+    });
+
+    const { error: claimErr } = await supabase.from("ladder_cup_walkover_claims").update({
+      status: "approved", approved_at: new Date().toISOString(), reviewed_by: session.user.id,
+    }).eq("id", claimRow.id);
+    if (claimErr) { showToast(`Couldn't approve the claim: ${claimErr.message}`); return; }
+
+    const [{ error: winnerErr }, { error: loserErr }] = await Promise.all([
+      supabase.from("ladder_cup_entries").update({
+        ...ladderCupRowPatchFromEntry(winner), badge_walkover: winnerRow.badge_walkover + 1,
+      }).eq("id", winnerRow.id),
+      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(loser)).eq("id", loserRow.id),
+    ]);
+    if (winnerErr || loserErr) showToast("Claim approved, but the ladder standings couldn't be fully updated — check permissions.");
+
+    const winnerName = teamsById[claimRow.claimant_team_id]?.name || "A club";
+    const loserName = teamsById[claimRow.target_team_id]?.name || "their opponent";
+    await postComment(league, `Ladder Cup — walkover win for ${winnerName} over ${loserName}`, null, null, claimRow.proof_url, true, null, null);
+
+    await refreshLeague(league.id);
+    showToast("Walkover approved — result applied to the ladder.");
+  };
+
+  const applyLadderCupWalkoverRejection = async (league, claimRow) => {
+    try {
+      rejectWalkoverClaim(claimRow);
+    } catch (err) {
+      showToast(err.message);
+      return;
+    }
+    const { error } = await supabase.from("ladder_cup_walkover_claims")
+      .update({ status: "rejected", reviewed_by: session.user.id }).eq("id", claimRow.id);
+    if (error) { showToast(`Couldn't reject the claim: ${error.message}`); return; }
+    await refreshLeague(league.id);
+    showToast("Walkover claim rejected.");
+  };
+
+  const rejectLadderCupWalkoverClaim = (league, claimRow) => {
+    requestConfirm([
+      "Reject this walkover claim? The claimant stays as-is and the target keeps their spot on the ladder.",
+      "Are you sure? This can't be undone once confirmed.",
+    ], () => applyLadderCupWalkoverRejection(league, claimRow));
+  };
+
   const joinLeague = async (leagueId) => {
     if (joinInFlight.current.has(leagueId)) return;
     joinInFlight.current.add(leagueId);
@@ -5713,6 +5834,10 @@ export default function App() {
                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
                 onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}
                 onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
+                onMessageLadderCupWalkoverOpponent={(opponentTeamId) => messageLadderCupWalkoverOpponent(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
+                onSubmitLadderCupWalkoverClaim={(claim, file) => submitLadderCupWalkoverClaim(activeLeague, claim, file)}
+                onApproveLadderCupWalkoverClaim={(claim) => approveLadderCupWalkoverClaim(activeLeague, claim)}
+                onRejectLadderCupWalkoverClaim={(claim) => rejectLadderCupWalkoverClaim(activeLeague, claim)}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}
                 onDelete={deleteLeague} onShare={shareLeague} onLeave={leaveLeague}
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
