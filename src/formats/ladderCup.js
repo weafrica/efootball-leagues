@@ -1,37 +1,35 @@
 // src/formats/ladderCup.js
 //
-// WEAFRICA SURVIVAL LADDER CUP — rules engine.
+// WEAFRICA SURVIVAL LADDER CUP — core engine, step 1 of 3.
 //
-// Pure functions only — no React, no Supabase. Everything here operates on
-// plain JS objects so it can be unit-tested standalone and called from
-// wherever the app applies a logged result (an edge function, a Supabase
-// RPC, or client code before writing back). Field names mirror the rest of
-// the codebase's format engines (`pts`, `w`, `l`, `gd`) but this format has
-// no draws, so there's no `d`.
+// This slice covers just two things: scoring a win, and the
+// elimination / second-life state machine. That's the part every other
+// piece (opponent matching, walkovers, badges, cutoff) depends on, so it's
+// the right thing to get deployed and working first.
+//
+// NOT in this file yet (coming in later steps):
+//   - opponent matching (±10 band, widening)
+//   - walkover claims (message → 24h wait → claim → admin review)
+//   - hard-cutoff finalization / crowning a champion
+//   - badge display logic beyond the raw counters recordLadderCupWin tracks
+//
+// Pure functions only — no React, no Supabase. Field names mirror the rest
+// of the codebase's format engines (`pts`, `w`, `l`, `gd`); no `d` since
+// this format has no draws.
 //
 // FORMATS registration (add to the FORMATS array in App.jsx):
 //   { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup",
-//     desc: "Ranked ladder with one elimination life each. Most points by the Sunday cutoff wins.",
+//     desc: "Ranked ladder, one elimination life each. Most points by the Sunday cutoff wins.",
 //     available: true }
-// It gets its own `kind` (not "knockout" or "round_robin") so a club active
-// in a Ladder Cup doesn't block/get blocked by unrelated formats under the
-// one-active-fun-league-per-kind join rule.
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 export const LADDER_CUP_RULES = {
-  BAND_START: 10,            // opponent matching starts at ±10 ladder points
-  BAND_STEP: 5,               // widens ±15, ±20, ±25... no ceiling
-  SHOWN_OPPONENTS: 5,         // always show up to 5 live opponents
   SECOND_LIFE_WINDOW_HOURS: 24,
   SECOND_LIFE_DEDUCTION: 6,   // points deducted on re-entry, floored at 0
-  WALKOVER_WAIT_HOURS: 24,    // must message + wait this long before claiming
-  MAX_CONCURRENT_WALKOVER_CLAIMS: 5, // one per shown opponent slot
   HEATER_STREAK_START: 3,     // heater bonus kicks in at a 3-win streak
-  HEATER_BADGE_TIERS: [3, 5, 7], // visual stack thresholds (7+ is the top tier)
-  GIANT_SLAYER_MIN_UPSETS: 2, // badge appears once you have 2+ upset wins
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
@@ -41,12 +39,6 @@ export const LADDER_CUP_RULES = {
   // always does. This flag is the one switch to flip once that's decided.
   COUNT_EXTRA_TIME_IN_GD: false,
 };
-
-// Match length is home team's choice, 6–15 minutes per half — captured on
-// the match record but has no scoring effect, so it's just a range constant
-// for form validation, not used by the engine below.
-export const MATCH_LENGTH_MIN_MINUTES = 6;
-export const MATCH_LENGTH_MAX_MINUTES = 15;
 
 // ---------------------------------------------------------------------------
 // Entry (a club's standing in one Ladder Cup league)
@@ -61,39 +53,33 @@ export function createLadderCupEntry(clubId, clubName) {
     pts: 0,
     w: 0,
     l: 0,
-    gd: 0,               // regulation-time goal difference only (see COUNT_EXTRA_TIME_IN_GD)
-    streak: 0,            // current consecutive-win streak, resets to 0 on any loss
+    gd: 0,                // regulation-time goal difference only (see COUNT_EXTRA_TIME_IN_GD)
+    streak: 0,             // current consecutive-win streak, resets to 0 on any loss
     status: /** @type {LadderCupStatus} */ ("active"),
     second_life_used: false,
     second_life_offer: null, // { offered_at, expires_at } while status === "pending_second_life"
-    toughest_opponent_beaten_pts: 0, // for tiebreaker #3
-    badges: {
-      heater_tier: 0,       // 0 = none, 1/2/3 = 3/5/7+ stack
-      giant_slayer: 0,      // count of upset wins
-      second_life: false,   // permanent single badge once re-entered
-      walkover: 0,           // count of walkover wins claimed & approved
-      bounty_hunter: 0,      // count of bounty wins
+    toughest_opponent_beaten_pts: 0, // saved for the tiebreaker step, unused until then
+    badge_counts: {
+      heater_wins: 0,     // how many wins scored a heater bonus (badge display logic comes later)
+      giant_slayer: 0,     // count of upset wins
+      second_life: false,  // permanent single badge once re-entered
+      bounty_hunter: 0,    // count of bounty wins
     },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Standings & ranking
+// Standings & ranking (needed to know who's "ranked above" and who's #1)
 // ---------------------------------------------------------------------------
 
 /**
- * Sorts entries by the tiebreaker chain and assigns rank_position.
- * Ties (equal on all three criteria) share adjacent ranks are NOT collapsed —
- * standard competition ranking (1, 2, 2, 4 style) is left to the caller if
- * wanted; this just returns a total order with rank_position = index + 1,
- * since the ruleset only defines the ordering, not display of dead heats.
+ * Sorts by points only for now. The full 3-level tiebreaker chain (GD,
+ * toughest opponent beaten) is a later step — this is enough to support
+ * "ranked above you" and "#1 in the standings" checks for scoring, which
+ * only need a points ordering, not the final-cutoff tiebreak.
  */
 export function rankLadderCupStandings(entries) {
-  const sorted = [...entries].sort((a, b) =>
-    b.pts - a.pts ||
-    b.gd - a.gd ||
-    b.toughest_opponent_beaten_pts - a.toughest_opponent_beaten_pts
-  );
+  const sorted = [...entries].sort((a, b) => b.pts - a.pts);
   return sorted.map((e, i) => ({ ...e, rank_position: i + 1 }));
 }
 
@@ -117,7 +103,7 @@ export function getBountyTargetIds(standingsBeforeMatch) {
 // ---------------------------------------------------------------------------
 
 /**
- * Computes the points a win is worth, with full breakdown for badge/UI display.
+ * Computes the points a win is worth, with full breakdown for display.
  * @param {object} p
  * @param {boolean} p.isWalkover
  * @param {boolean} p.beatHigherRank - opponent was ranked above the winner (ignored for walkovers)
@@ -135,13 +121,6 @@ export function computeWinPoints({ isWalkover, beatHigherRank, streakAfterThisWi
   const heater = streakAfterThisWin >= R.HEATER_STREAK_START ? R.HEATER_BONUS : 0;
   const bounty = isBountyTarget ? R.BOUNTY_BONUS : 0;
   return { points: base + upset + heater + bounty, breakdown: { base, upset, heater, bounty } };
-}
-
-function heaterTierForStreak(streak) {
-  const tiers = LADDER_CUP_RULES.HEATER_BADGE_TIERS;
-  let tier = 0;
-  for (let i = 0; i < tiers.length; i++) if (streak >= tiers[i]) tier = i + 1;
-  return tier; // 0 none, 1 = 3+, 2 = 5+, 3 = 7+
 }
 
 // ---------------------------------------------------------------------------
@@ -190,12 +169,11 @@ export function recordLadderCupWin({
     gd: winner.gd + gdDelta,
     streak: streakAfterThisWin,
     toughest_opponent_beaten_pts: Math.max(winner.toughest_opponent_beaten_pts, loser.pts),
-    badges: {
-      ...winner.badges,
-      heater_tier: heaterTierForStreak(streakAfterThisWin),
-      giant_slayer: winner.badges.giant_slayer + (breakdown.upset ? 1 : 0),
-      walkover: winner.badges.walkover + (isWalkover ? 1 : 0),
-      bounty_hunter: winner.badges.bounty_hunter + (breakdown.bounty ? 1 : 0),
+    badge_counts: {
+      ...winner.badge_counts,
+      heater_wins: winner.badge_counts.heater_wins + (breakdown.heater ? 1 : 0),
+      giant_slayer: winner.badge_counts.giant_slayer + (breakdown.upset ? 1 : 0),
+      bounty_hunter: winner.badge_counts.bounty_hunter + (breakdown.bounty ? 1 : 0),
     },
   };
 
@@ -210,10 +188,9 @@ export function recordLadderCupWin({
 // ---------------------------------------------------------------------------
 
 /**
- * Applies a loss (regulation defeat OR a no-show walkover loss — both go
- * through this same path). Streak always resets. If the club still has its
- * one life, they're moved into the 24h second-life decision window instead
- * of being eliminated outright; if they've already used it, this is final.
+ * Applies a loss. Streak always resets. If the club still has its one life,
+ * they're moved into the 24h second-life decision window instead of being
+ * eliminated outright; if they've already used it, this is final.
  */
 export function applyLoss(entry, now = new Date()) {
   const base = { ...entry, l: entry.l + 1, streak: 0 };
@@ -240,7 +217,7 @@ export function acceptSecondLife(entry) {
     status: "active",
     second_life_used: true,
     second_life_offer: null,
-    badges: { ...entry.badges, second_life: true },
+    badge_counts: { ...entry.badge_counts, second_life: true },
   };
 }
 
@@ -258,95 +235,4 @@ export function expireStaleSecondLifeOffers(entries, now = new Date()) {
     }
     return e;
   });
-}
-
-// ---------------------------------------------------------------------------
-// Opponent matching
-// ---------------------------------------------------------------------------
-
-/**
- * Expanding-band opponent search: ±10 ladder points, widening by ±5 with no
- * ceiling until the pool isn't thin anymore. Only "active" clubs (not the
- * entry itself, not eliminated, not mid-second-life-decision) are eligible.
- * Returns up to SHOWN_OPPONENTS, closest-in-points first. Empty result means
- * "wait for the pool to widen" — there are no byes.
- */
-export function getOpponentPool(entry, allEntries) {
-  const R = LADDER_CUP_RULES;
-  const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
-  if (eligible.length === 0) return [];
-
-  let band = R.BAND_START;
-  let pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
-  while (pool.length < R.SHOWN_OPPONENTS && pool.length < eligible.length) {
-    band += R.BAND_STEP;
-    pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
-  }
-  return pool
-    .sort((a, b) => Math.abs(a.pts - entry.pts) - Math.abs(b.pts - entry.pts))
-    .slice(0, R.SHOWN_OPPONENTS);
-}
-
-// ---------------------------------------------------------------------------
-// Walkovers
-// ---------------------------------------------------------------------------
-
-/** @typedef {"messaged"|"claimable"|"pending_review"|"approved"|"rejected"} WalkoverClaimStatus */
-
-export function createWalkoverClaim(claimantClubId, targetClubId, now = new Date()) {
-  const claimableAt = new Date(now.getTime() + LADDER_CUP_RULES.WALKOVER_WAIT_HOURS * 60 * 60 * 1000);
-  return {
-    claimant_club_id: claimantClubId,
-    target_club_id: targetClubId,
-    messaged_at: now.toISOString(),
-    claimable_at: claimableAt.toISOString(),
-    status: /** @type {WalkoverClaimStatus} */ ("messaged"),
-    proof_url: null,
-  };
-}
-
-export function isWalkoverClaimable(claim, now = new Date()) {
-  return claim.status === "messaged" && new Date(claim.claimable_at) <= now;
-}
-
-/** Caller must enforce MAX_CONCURRENT_WALKOVER_CLAIMS (one per shown opponent) before calling this. */
-export function submitWalkoverClaim(claim, proofUrl, now = new Date()) {
-  if (!isWalkoverClaimable(claim, now)) {
-    throw new Error("Walkover not claimable yet — still inside the 24h wait.");
-  }
-  return { ...claim, status: "pending_review", proof_url: proofUrl };
-}
-
-/** Admin approval turns a claim into a real result — feed this into recordLadderCupWin as a walkover win. */
-export function approveWalkoverClaim(claim) {
-  if (claim.status !== "pending_review") throw new Error("Claim isn't pending review.");
-  return { ...claim, status: "approved" };
-}
-
-export function rejectWalkoverClaim(claim) {
-  if (claim.status !== "pending_review") throw new Error("Claim isn't pending review.");
-  return { ...claim, status: "rejected" };
-}
-
-// ---------------------------------------------------------------------------
-// Hard cutoff & finalization
-// ---------------------------------------------------------------------------
-
-/**
- * Filters out anything not finalized by the Sunday 10PM (UTC+2) cutoff:
- * matches still mid-play, and walkover claims still inside their 24h window
- * (whether or not they've been submitted for review — if they weren't
- * approved before the cutoff, they don't count).
- */
-export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
-  const cutoffTime = new Date(cutoff).getTime();
-  const finalizedMatches = matches.filter((m) => m.finalized_at && new Date(m.finalized_at).getTime() <= cutoffTime);
-  const finalizedClaims = walkoverClaims.filter((c) => c.status === "approved" && new Date(c.approved_at || c.claimable_at).getTime() <= cutoffTime);
-  return { finalizedMatches, finalizedClaims };
-}
-
-/** Final champion = most points at cutoff, tiebreaker chain resolves any tie. No draws exist, so this is always decisive down to the chain. */
-export function crownChampion(entries) {
-  const ranked = rankLadderCupStandings(entries.filter((e) => e.status !== "eliminated"));
-  return ranked[0] || null;
 }
