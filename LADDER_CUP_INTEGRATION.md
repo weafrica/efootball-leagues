@@ -178,6 +178,24 @@ it now, so both places that call `recordLadderCupWin` and persist the
 result — the played-match result path and the walkover-claim approval
 path — pick it up automatically.
 
+## 8. Guaranteed ladder placement on join
+
+Every team in a `ladder_cup` league gets its `ladder_cup_entries` row from
+a database trigger (`supabase/migrations/20260814_ladder_cup_auto_entry_trigger.sql`),
+not app code — `trg_auto_ladder_cup_entry` fires `after insert on teams`
+and creates the row in the same transaction whenever the team's league is
+`format = 'ladder_cup'`. This covers every path a team can be created
+through (self-join, cash-join, admin pre-listing, claiming a pre-listed
+club) including any future one, without needing each call site to
+remember to do it.
+
+`ensureLadderCupEntry`'s RPC call in `App.jsx` still runs alongside this —
+it's now a harmless, idempotent no-op (`on conflict do nothing`) rather
+than the only thing standing between a team and a missing ladder entry.
+The lazy self-heal effect (`backfilledLadderCupEntriesChecked` in
+`App.jsx`) also stays, as a client-side catch-all for anything created
+before this trigger existed.
+
 ## What's coming next
 
 Nothing left in the ruleset itself — every rule now has an engine
