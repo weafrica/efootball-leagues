@@ -505,16 +505,17 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
 function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
   // Clubs are already live on the ladder the moment they join (no fixtures
-  // to generate here, unlike the other formats) — Start League doesn't
-  // begin play, it just locks the roster early instead of waiting for the
-  // weekly cutoff. See startLadderCupLeague in App.jsx.
+  // to generate here, unlike the other formats) — Start League is a status
+  // marker only. It does NOT close registration: clubs keep joining right
+  // up to the cutoff/finalize either way. See startLadderCupLeague in
+  // App.jsx.
   const started = !!league.ladder_cup_started_at;
   return (
     <div>
       <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
         <div className="font-body font-bold text-base mb-1">Survival Ladder Cup</div>
         <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
-          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · {started ? "registration locked, ladder is live." : "live on the ladder as soon as they join."}
+          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · {started ? "league started — clubs can still join anytime before the cutoff." : "live on the ladder as soon as they join."}
         </div>
         {league.ladder_cup_cutoff_at && (
           <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>

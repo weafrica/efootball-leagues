@@ -4222,12 +4222,13 @@ export default function App() {
   // check) means the fix reaches every place that already gates on it: the
   // Join button's visibility on LeagueCard, Home's isJoinable sort, and
   // both join handlers below.
-  // ladder_cup_started_at is the admin-triggered "Start League" lock (see
-  // startLadderCupLeague below) — same effect as the cutoff passing
-  // (registration closes) but settable early, on the admin's own timing.
+  // ladder_cup_started_at (see startLadderCupLeague below) is a status
+  // marker only — clubs keep registering right up to the cutoff/finalize,
+  // same as before the Start button existed. It intentionally does NOT
+  // factor into entryClosed.
   const entryClosed = (league) =>
     (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
-    || (league.format === "ladder_cup" && (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at) || !!league.ladder_cup_started_at));
+    || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
   // Persists which group each team landed in. Supabase doesn't support per-row
   // bulk updates with different values in one call, so we fire them in parallel.
@@ -5634,9 +5635,11 @@ export default function App() {
   // Admin-triggered "Start League" for Survival Ladder Cup. Ladder Cup has
   // no fixtures to generate (see generateFixtures — that's for the other
   // formats only) and clubs are already live on the ladder the moment they
-  // join, so starting it doesn't create anything; it just locks the roster
-  // early by stamping ladder_cup_started_at, which entryClosed() then
-  // treats the same as the hard cutoff having passed.
+  // join, so starting it doesn't create anything — it just flips a status
+  // marker (ladder_cup_started_at) so the league shows as "Started" instead
+  // of "Open for joining". Registration is NOT affected: clubs keep
+  // registering right up to the cutoff/finalize either way (see
+  // entryClosed above).
   const startLadderCupLeague = async (league) => {
     const key = `start-ladder-${league.id}`;
     if (stageActionInFlight.current.has(key)) return;
@@ -5647,11 +5650,12 @@ export default function App() {
         .update({ ladder_cup_started_at: new Date().toISOString() }).eq("id", league.id);
       if (error) { showToast(`Couldn't start the league: ${error.message}`); return; }
       await refreshLeague(league.id);
-      showToast(`League started — registration is locked with ${league.teams.length} clubs on the ladder.`);
+      showToast(`League started with ${league.teams.length} clubs on the ladder — new clubs can still join anytime before the cutoff.`);
     } finally {
       stageActionInFlight.current.delete(key);
     }
   };
+
 
   // Overrides the auto-generated WhatsApp nudge text (see adminStatusMessage)
   // for every member's WA icon in this league. Persists on the league row —
