@@ -4501,7 +4501,22 @@ export default function App() {
     // inserted.
     const { data, error } = await supabase.rpc("initiate_ladder_cup_match",
       { p_league_id: league.id, p_team_id: myTeamId, p_opponent_team_id: opponentTeamId });
-    if (error) { showToast(`Couldn't set up the match: ${error.message}`); return; }
+    if (error) {
+      // The client-side ladderCupPendingMatchWith check above is only as
+      // fresh as this league's last refreshLeague — if a match was created
+      // in a session/tab that didn't feed back into this one, the RPC's own
+      // "already set up" guard catches what the client-side check missed.
+      // Treat it the same way as if the client-side check had caught it
+      // (refresh so the row re-renders in the right state) instead of
+      // showing the raw RPC error.
+      if (/already set up/i.test(error.message)) {
+        await refreshLeague(league.id);
+        showToast("You've already got a match set up with them.");
+        return;
+      }
+      showToast(`Couldn't set up the match: ${error.message}`);
+      return;
+    }
     const home = Array.isArray(data) ? data[0]?.home_team_id : data?.home_team_id;
     await refreshLeague(league.id);
     showToast(home === myTeamId
@@ -4704,9 +4719,15 @@ export default function App() {
     if (!myTeamId || !opponentTeamId) return;
     if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new walkover claims."); return; }
     const claim = createWalkoverClaim(myTeamId, opponentTeamId);
-    const { error } = await supabase.from("ladder_cup_walkover_claims").insert({
-      league_id: league.id, claimant_team_id: myTeamId, target_team_id: opponentTeamId,
-      messaged_at: claim.messaged_at, claimable_at: claim.claimable_at, status: claim.status,
+    // Routed through the start_ladder_cup_walkover_claim RPC rather than a
+    // direct insert — same RLS-safe pattern as ensure_ladder_cup_entry and
+    // initiate_ladder_cup_match (see
+    // supabase/migrations/20260816_ladder_cup_walkover_claim_rpc.sql). The
+    // table's partial unique index still enforces "one open claim per
+    // target" server-side, so a duplicate still comes back as a 23505.
+    const { error } = await supabase.rpc("start_ladder_cup_walkover_claim", {
+      p_league_id: league.id, p_claimant_team_id: myTeamId, p_target_team_id: opponentTeamId,
+      p_messaged_at: claim.messaged_at, p_claimable_at: claim.claimable_at,
     });
     if (error) {
       showToast(error.code === "23505" ? "You've already got an open walkover claim against them." : `Couldn't start the claim: ${error.message}`);
