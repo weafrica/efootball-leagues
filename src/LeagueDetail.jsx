@@ -497,6 +497,75 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
   );
 }
 
+// The read-only, search-by-name counterpart to LadderCupOpponentBoard —
+// anyone viewing the league (not just the logged-in club) can look up a
+// specific club and see its live ladder status plus who's currently in its
+// challenge band. Mirrors OpponentFinder's "type a name, hit Find" pattern
+// used on the fixtures-based formats, but there's no matchday concept here
+// (Ladder Cup has no fixtures — see LadderCupPendingPanel below), so it
+// searches straight off the live standings/entries instead. Never shows
+// action buttons (Challenge/Log result/etc.) — those stay exclusive to
+// LadderCupOpponentBoard, which only acts on the viewer's own club.
+function LadderCupFindOpponent({ league, c }) {
+  const [teamQuery, setTeamQuery] = useState("");
+  const [result, setResult] = useState(null);
+  const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
+
+  const search = () => {
+    const team = league.teams.find((t) => t.name.trim().toLowerCase() === teamQuery.trim().toLowerCase());
+    if (!team) { setResult({ notFound: true, reason: "No club with that exact name — pick one from the suggestions." }); return; }
+    const entry = mapped.find((e) => e.club_id === team.id);
+    if (!entry) { setResult({ notFound: true, reason: `${team.name} hasn't been placed on the ladder yet.` }); return; }
+    const pool = entry.status === "active" ? getOpponentPool(entry, mapped) : [];
+    setResult({ team, entry, pool });
+  };
+
+  return (
+    <div className="rounded-xl p-4 border mb-3" style={{ background: c.surface, borderColor: c.border }}>
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Club name"
+          className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+        <datalist id="team-names-datalist">{league.teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
+        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
+      </div>
+
+      {result && (result.notFound ? (
+        <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>{result.reason}</div>
+      ) : (
+        <div className="mt-3">
+          <div className="font-body text-sm font-semibold flex items-center gap-2">
+            {result.team.name}
+            <span className="font-mono text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}>
+              {LADDER_CUP_STATUS_LABEL[result.entry.status] || result.entry.status}
+            </span>
+          </div>
+          <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{result.entry.pts} pts</div>
+
+          {result.entry.status !== "active" ? (
+            <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>
+              {result.entry.status === "eliminated" && "Eliminated — no longer challenging."}
+              {result.entry.status === "pending_second_life" && "Decided their second life offer — status updates once they respond."}
+              {result.entry.status === "champion" && "Crowned champion of this cup."}
+            </div>
+          ) : result.pool.length === 0 ? (
+            <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>No one's in range to challenge yet.</div>
+          ) : (
+            <div className="mt-2 space-y-1">
+              {result.pool.map((op) => (
+                <div key={op.club_id} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: c.surfaceHover }}>
+                  <span className="font-body text-xs">{op.club_name}</span>
+                  <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{op.pts} pts</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Ladder Cup has no "Start league & generate fixtures" step — a club is
 // live on the ladder the instant it registers (see ensureLadderCupEntry in
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
@@ -536,6 +605,8 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
           <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
         )}
       </div>
+
+      {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
 
       {canManage && !league.ladder_cup_finalized_at && (
         <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
