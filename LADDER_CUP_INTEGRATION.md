@@ -64,7 +64,7 @@ the result back.
 ```js
 import { getOpponentPool } from "./formats/ladderCup.js";
 
-const opponents = getOpponentPool(myEntry, allEntries); // up to 5, closest points first
+const opponents = getOpponentPool(myEntry, allEntries); // up to 5, closest ladder_rating first
 ```
 
 Call it wherever the "who can I challenge" screen renders, and again
@@ -141,6 +141,42 @@ if (!isValidMatchLength(chosenMinutes)) { /* reject, show 6–15 range */ }
 // display-only, e.g. in the match/result UI:
 const subsAllowed = substitutionsAllowed(decidedBy); // 6, or 7 once it reaches extra time
 ```
+
+## 7. Matchmaking rating — decoupled from pts
+
+`ladder_cup_entries.pts` (and w/l/gd/streak/badges) is the league table.
+It's unaffected by anything in this section — `rankLadderCupStandings`,
+the tiebreaker chain, and `crownChampion` all still read `pts` exactly as
+before.
+
+`ladder_rating` is a second, independent number whose only job is
+`getOpponentPool`'s band search — "the ladder" as a matchmaking tool, with
+no table of its own. Every club starts at 1000 (`RATING_START`) and moves
+with a standard Elo update (`computeEloUpdate`, K-factor 32) on every
+recorded win/loss, played or approved walkover — `recordLadderCupWin`
+computes both the pts change and the rating change in the same call, but
+they're independent outputs.
+
+```js
+import { computeEloUpdate, getOpponentPool } from "./formats/ladderCup.js";
+
+// recordLadderCupWin already does this internally and returns it on
+// winner.ladder_rating / loser.ladder_rating — shown here just to make
+// the independence from pts explicit:
+const { winnerRating, loserRating } = computeEloUpdate(winnerEntry.ladder_rating, loserEntry.ladder_rating);
+
+// same call as section 3, now banding on ladder_rating instead of pts:
+const opponents = getOpponentPool(myEntry, allEntries);
+```
+
+Migration: `supabase/migrations/20260813_ladder_cup_rating.sql` adds
+`ladder_rating integer not null default 1000` to `ladder_cup_entries`
+plus a `(league_id, ladder_rating)` index for the band search. The
+JS↔row adapters (`ladderCupEntryFromRow` / `ladderCupRowPatchFromEntry`
+in `App.jsx`, `toLadderCupEngineEntries` in `LeagueDetail.jsx`) all round-trip
+it now, so both places that call `recordLadderCupWin` and persist the
+result — the played-match result path and the walkover-claim approval
+path — pick it up automatically.
 
 ## What's coming next
 

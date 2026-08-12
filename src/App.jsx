@@ -50,7 +50,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // range the DB CHECK constraint enforces. rankLadderCupStandings/
 // getOpponentPool stay imported where they're actually consumed
 // (LeagueDetail.jsx) rather than duplicated here.
-import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed } from "./formats/ladderCup.js";
+import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -4536,6 +4536,9 @@ export default function App() {
     club_id: row.team_id,
     club_name: clubName,
     pts: row.pts, w: row.w, l: row.l, gd: row.gd, streak: row.streak,
+    // Separate from pts — see formats/ladderCup.js. Falls back to the
+    // starting rating for any row written before this column existed.
+    ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
     status: row.status,
     second_life_used: row.second_life_used,
     second_life_offer: row.second_life_offered_at
@@ -4551,6 +4554,7 @@ export default function App() {
   });
   const ladderCupRowPatchFromEntry = (entry) => ({
     pts: entry.pts, w: entry.w, l: entry.l, gd: entry.gd, streak: entry.streak,
+    ladder_rating: entry.ladder_rating,
     status: entry.status,
     second_life_used: entry.second_life_used,
     second_life_offered_at: entry.second_life_offer?.offered_at ?? null,

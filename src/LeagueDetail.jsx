@@ -34,12 +34,16 @@ const RulesModal = lazy(() => import("./Rules.jsx"));
 // ever reads club_id/pts/gd/toughest_opponent_beaten_pts, so this adapter
 // is deliberately minimal rather than a full round-trip mapping. Badge
 // counts are read straight off the raw row in the table below instead.
+// ladder_rating rides along too — it's what getOpponentPool actually bands
+// on (see formats/ladderCup.js); the league table below never reads it,
+// same way rankLadderCupStandings never reads pts's counterpart here.
 function toLadderCupEngineEntries(league) {
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   return (league.ladder_cup_entries || []).map((row) => ({
     club_id: row.team_id,
     club_name: teamsById[row.team_id]?.name || "Unknown club",
     pts: row.pts, gd: row.gd,
+    ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
     toughest_opponent_beaten_pts: row.toughest_opponent_beaten_pts,
     _row: row,
   }));
@@ -312,7 +316,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, match, walkoverClaim, onInit
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-body text-sm font-semibold truncate">{opponent.club_name}</div>
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.pts} pts</div>
+          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.ladder_rating} rating</div>
         </div>
         {!match && (
           <button onClick={challenge} disabled={busy}
@@ -394,8 +398,8 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
 
 // The "who can I play" screen (Step 9). No accept/decline step here — a
 // tap on Challenge immediately assigns home/away and creates the match row;
-// the ±10-and-widening band in getOpponentPool is what stands in for
-// matchmaking consent. Refreshes automatically off the live `league` prop,
+// the ladder_rating band (widening in getOpponentPool) is what stands in
+// for matchmaking consent. Refreshes automatically off the live `league` prop,
 // same as the standings table, so logging any result elsewhere in the app
 // widens/narrows this club's slate without a separate re-fetch.
 function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, c }) {
@@ -540,7 +544,7 @@ function LadderCupFindOpponent({ league, c }) {
               {LADDER_CUP_STATUS_LABEL[result.entry.status] || result.entry.status}
             </span>
           </div>
-          <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{result.entry.pts} pts</div>
+          <div className="font-mono text-xs mt-0.5" style={{ color: c.textFaint }}>{result.entry.ladder_rating} rating</div>
 
           {result.entry.status !== "active" ? (
             <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>
@@ -555,7 +559,7 @@ function LadderCupFindOpponent({ league, c }) {
               {result.pool.map((op) => (
                 <div key={op.club_id} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: c.surfaceHover }}>
                   <span className="font-body text-xs">{op.club_name}</span>
-                  <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{op.pts} pts</span>
+                  <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{op.ladder_rating} rating</span>
                 </div>
               ))}
             </div>

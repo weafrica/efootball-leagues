@@ -23,8 +23,9 @@
 //     available: true }
 //
 // STEP 2 added opponent matching (below, at the bottom of the file) — the
-// ±10 ladder-points band that widens until it finds live opponents, no
-// byes. STEP 3 added walkover claims. STEP 4 added cutoff finalization
+// ±100 ladder_rating band that widens until it finds live opponents, no
+// byes. ladder_rating is a separate Elo-style number, decoupled from pts —
+// see "Matchmaking rating" below. STEP 3 added walkover claims. STEP 4 added cutoff finalization
 // and the full tiebreaker chain. STEP 5 added the remaining MATCH FLOW
 // mechanics: random home-team assignment, match length validation, and
 // substitution counts. The engine now covers the full ruleset. STEP 10
@@ -43,8 +44,13 @@ export const LADDER_CUP_RULES = {
   SECOND_LIFE_WINDOW_HOURS: 24,
   SECOND_LIFE_DEDUCTION: 6,   // points deducted on re-entry, floored at 0
   HEATER_STREAK_START: 3,     // heater bonus kicks in at a 3-win streak
-  BAND_START: 10,             // opponent matching starts at ±10 ladder points
-  BAND_STEP: 5,                // widens ±15, ±20, ±25... no ceiling
+  // Opponent matching runs entirely off ladder_rating (Elo-style, below) —
+  // NOT pts. pts/standings are the league table; ladder_rating is a second,
+  // fully separate number that exists only to drive this band search.
+  RATING_START: 1000,          // every club's ladder_rating on creation
+  RATING_K_FACTOR: 32,         // standard Elo K-factor for one result
+  RATING_BAND_START: 100,      // opponent matching starts at ±100 rating
+  RATING_BAND_STEP: 50,        // widens ±150, ±200, ±250... no ceiling
   SHOWN_OPPONENTS: 5,          // always show up to 5 live opponents
   WALKOVER_WAIT_HOURS: 24,     // must message + wait this long before claiming
   MAX_CONCURRENT_WALKOVER_CLAIMS: 5, // one per shown opponent slot
@@ -77,6 +83,9 @@ export function createLadderCupEntry(clubId, clubName) {
     l: 0,
     gd: 0,                // regulation-time goal difference only (see COUNT_EXTRA_TIME_IN_GD)
     streak: 0,             // current consecutive-win streak, resets to 0 on any loss
+    // Second, independent rating — see the "Matchmaking rating" section
+    // below. Never read by rankLadderCupStandings/the league table.
+    ladder_rating: LADDER_CUP_RULES.RATING_START,
     status: /** @type {LadderCupStatus} */ ("active"),
     second_life_used: false,
     second_life_offer: null, // { offered_at, expires_at } while status === "pending_second_life"
@@ -190,12 +199,21 @@ export function recordLadderCupWin({
     gdDelta += extraTimeGoalsWinner - extraTimeGoalsLoser;
   }
 
+  // ladder_rating moves independently of pts — see computeEloUpdate below.
+  // Same call for a played result or an approved walkover: either way one
+  // club beat another, which is the only signal Elo needs.
+  const { winnerRating, loserRating } = computeEloUpdate(
+    winner.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
+    loser.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
+  );
+
   const newWinner = {
     ...winner,
     pts: winner.pts + gained,
     w: winner.w + 1,
     gd: winner.gd + gdDelta,
     streak: streakAfterThisWin,
+    ladder_rating: winnerRating,
     toughest_opponent_beaten_pts: Math.max(winner.toughest_opponent_beaten_pts, loser.pts),
     badge_counts: {
       ...winner.badge_counts,
@@ -206,7 +224,7 @@ export function recordLadderCupWin({
   };
 
   const loserAfterLoss = applyLoss(loser, now);
-  const newLoser = { ...loserAfterLoss, gd: loserAfterLoss.gd - gdDelta };
+  const newLoser = { ...loserAfterLoss, gd: loserAfterLoss.gd - gdDelta, ladder_rating: loserRating };
 
   return { winner: newWinner, loser: newLoser, winnerPointsBreakdown: breakdown };
 }
@@ -266,15 +284,51 @@ export function expireStaleSecondLifeOffers(entries, now = new Date()) {
 }
 
 // ---------------------------------------------------------------------------
+// Matchmaking rating (Elo-style) — decoupled from pts/the league table
+// ---------------------------------------------------------------------------
+//
+// The league table (pts, w/l/gd/streak, badges, rankLadderCupStandings,
+// the tiebreaker chain) is the club's actual standing in this Ladder Cup
+// and works exactly as it always has — nothing below touches it.
+//
+// ladder_rating is a second, independent number whose only job is finding
+// the next opponent (getOpponentPool). It starts every club at
+// RATING_START and moves with a standard Elo update on every recorded
+// win/loss (played or walkover), so the matching band tracks each club's
+// run of form rather than the league's own points/tiebreaker rules.
+
+/** Standard Elo expected-score for A against B, given their current ratings. */
+export function expectedScore(ratingA, ratingB) {
+  return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+}
+
+/**
+ * One Elo update for a single result. Returns the two new ratings —
+ * doesn't mutate anything, same "return new values, caller persists them"
+ * shape as the rest of this engine.
+ */
+export function computeEloUpdate(winnerRating, loserRating, kFactor = LADDER_CUP_RULES.RATING_K_FACTOR) {
+  const expectedWinner = expectedScore(winnerRating, loserRating);
+  const delta = Math.round(kFactor * (1 - expectedWinner));
+  return {
+    winnerRating: winnerRating + delta,
+    loserRating: loserRating - delta,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Opponent matching (step 2)
 // ---------------------------------------------------------------------------
 
 /**
- * Expanding-band opponent search: ±10 ladder points, widening by ±5 with no
- * ceiling until the pool isn't thin anymore. Only "active" clubs (not the
- * entry itself, not eliminated, not mid-second-life-decision) are eligible.
- * Returns up to SHOWN_OPPONENTS, closest-in-points first. Empty result means
- * "wait for the pool to widen" — there are no byes.
+ * Expanding-band opponent search: ±100 ladder_rating, widening by ±50 with
+ * no ceiling until the pool isn't thin anymore. Only "active" clubs (not
+ * the entry itself, not eliminated, not mid-second-life-decision) are
+ * eligible. Returns up to SHOWN_OPPONENTS, closest-in-rating first. Empty
+ * result means "wait for the pool to widen" — there are no byes.
+ *
+ * This is "the ladder" purely as a matchmaking tool — it has no table of
+ * its own and never influences the league table (pts/standings) above.
  *
  * Re-run this after any result is logged (played or walkover) — that's the
  * "logging a result refreshes your opponent slate" rule; it's just calling
@@ -282,17 +336,19 @@ export function expireStaleSecondLifeOffers(entries, now = new Date()) {
  */
 export function getOpponentPool(entry, allEntries) {
   const R = LADDER_CUP_RULES;
+  const myRating = entry.ladder_rating ?? R.RATING_START;
   const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
   if (eligible.length === 0) return [];
 
-  let band = R.BAND_START;
-  let pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
+  const ratingOf = (e) => e.ladder_rating ?? R.RATING_START;
+  let band = R.RATING_BAND_START;
+  let pool = eligible.filter((e) => Math.abs(ratingOf(e) - myRating) <= band);
   while (pool.length < R.SHOWN_OPPONENTS && pool.length < eligible.length) {
-    band += R.BAND_STEP;
-    pool = eligible.filter((e) => Math.abs(e.pts - entry.pts) <= band);
+    band += R.RATING_BAND_STEP;
+    pool = eligible.filter((e) => Math.abs(ratingOf(e) - myRating) <= band);
   }
   return pool
-    .sort((a, b) => Math.abs(a.pts - entry.pts) - Math.abs(b.pts - entry.pts))
+    .sort((a, b) => Math.abs(ratingOf(a) - myRating) - Math.abs(ratingOf(b) - myRating))
     .slice(0, R.SHOWN_OPPONENTS);
 }
 
