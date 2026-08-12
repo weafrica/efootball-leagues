@@ -309,7 +309,7 @@ function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
 // claim, not a rejected one), same "try again" path a declined second
 // life doesn't get but a walkover claim does, since a reviewer might've
 // rejected it over a bad screenshot rather than a bad claim.
-function LadderCupWalkoverClaimSection({ opponentName, claim, onMessage, onSubmitClaim, c }) {
+function LadderCupWalkoverClaimSection({ opponentName, opponentPhone, myTeamName, canSeePhones, claim, onMessage, onSubmitClaim, c }) {
   const [busy, setBusy] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [file, setFile] = useState(null);
@@ -327,16 +327,27 @@ function LadderCupWalkoverClaimSection({ opponentName, claim, onMessage, onSubmi
     setClaiming(false);
     setFile(null);
   };
+  // The actual walkover message happens outside the app on WhatsApp — this
+  // is that entry point, prefilled with the exact "you haven't played yet"
+  // nudge, same idea as WhatsAppCallLink elsewhere but a real chat message
+  // rather than a call prompt since there's nothing to "lock in" yet.
+  const walkoverWhatsAppLink = canSeePhones && opponentPhone && (
+    <WhatsAppLink phone={opponentPhone} iconOnly
+      text={`Hi, it's ${myTeamName || "your Ladder Cup opponent"} — we haven't played our Ladder Cup match yet. Let's sort out a time, otherwise I'll have to claim a walkover.`} c={c} />
+  );
 
   if (!claim || claim.status === "rejected") {
     return (
-      <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
-        {claim?.status === "rejected" && (
-          <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.red }}>Previous walkover claim rejected</div>
-        )}
-        <button onClick={message} disabled={busy} className="flex items-center gap-1.5 font-mono text-[11px]" style={{ color: c.textFaint }}>
-          <MessageCircle size={11} /> {claim ? "Message opponent again" : "No response? Message them for a walkover"}
-        </button>
+      <div className="mt-2 pt-2 border-t flex items-center gap-2" style={{ borderColor: c.border }}>
+        <div className="flex-1 min-w-0">
+          {claim?.status === "rejected" && (
+            <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.red }}>Previous walkover claim rejected</div>
+          )}
+          <button onClick={message} disabled={busy} className="flex items-center gap-1.5 font-mono text-[11px]" style={{ color: c.textFaint }}>
+            <MessageCircle size={11} /> {claim ? "Message opponent again" : "No response? Message them for a walkover"}
+          </button>
+        </div>
+        {walkoverWhatsAppLink}
       </div>
     );
   }
@@ -353,18 +364,20 @@ function LadderCupWalkoverClaimSection({ opponentName, claim, onMessage, onSubmi
   const claimable = isWalkoverClaimable(claim);
   if (!claimable) {
     return (
-      <div className="mt-2 pt-2 border-t font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ borderColor: c.border, color: c.textFaint }}>
-        <Clock size={10} /> {opponentName} messaged — claimable {fmtDate(claim.claimable_at)} SAST if they still haven't played
+      <div className="mt-2 pt-2 border-t font-mono text-[10px] uppercase tracking-wide flex items-center justify-between gap-2" style={{ borderColor: c.border, color: c.textFaint }}>
+        <span className="flex items-center gap-1 min-w-0"><Clock size={10} className="shrink-0" /> {opponentName} messaged — claimable {fmtDate(claim.claimable_at)} SAST if they still haven't played</span>
+        {walkoverWhatsAppLink}
       </div>
     );
   }
 
   if (!claiming) {
     return (
-      <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
+      <div className="mt-2 pt-2 border-t flex items-center justify-between gap-2" style={{ borderColor: c.border }}>
         <button onClick={() => setClaiming(true)} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold" style={{ color: "#B8860B" }}>
           <Zap size={11} /> 24h wait's up — claim walkover
         </button>
+        {walkoverWhatsAppLink}
       </div>
     );
   }
@@ -423,14 +436,17 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
         <div className="flex-1 min-w-0">
           <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
             {opponent.club_name}
-            {/* Same call-to-arrange entry point the fixture-based formats offer for
-                a scheduled opponent — shown once a match actually exists here (before
-                that there's nothing yet to arrange a time for). Silently renders
-                nothing without a number on file, same guard every other WhatsAppCallLink
-                use in this file relies on. */}
-            {match && canSeePhones && opponentPhone && (
+            {/* Same call-to-arrange entry point the fixture-based formats offer —
+                available any time a number's on file, not just once a match
+                exists, since messaging an opponent (to set up a challenge, or
+                to chase a walkover) is exactly what this icon is for. Silently
+                renders nothing without a number on file, same guard every
+                other WhatsAppCallLink use in this file relies on. */}
+            {canSeePhones && opponentPhone && (
               <WhatsAppCallLink phone={opponentPhone} iconOnly
-                text={`Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Call me when you're ready to play our Ladder Cup match — let's lock in the time ⚽🕹️`} c={c} />
+                text={match
+                  ? `Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Call me when you're ready to play our Ladder Cup match — let's lock in the time ⚽🕹️`
+                  : `Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Fancy a Ladder Cup match? Call me and let's set it up ⚽🕹️`} c={c} />
             )}
           </div>
           <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.ladder_rating} rating</div>
@@ -461,7 +477,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
           <Clock size={10} /> {opponent.club_name} is home — waiting on their match length
         </div>
       )}
-      <LadderCupWalkoverClaimSection opponentName={opponent.club_name} claim={walkoverClaim}
+      <LadderCupWalkoverClaimSection opponentName={opponent.club_name} opponentPhone={opponentPhone} myTeamName={myTeamName} canSeePhones={canSeePhones} claim={walkoverClaim}
         onMessage={() => onMessageWalkover(opponent.club_id)}
         onSubmitClaim={onSubmitWalkoverClaim} c={c} />
     </div>
