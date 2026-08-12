@@ -4846,8 +4846,19 @@ export default function App() {
         return;
       }
       match = newTeam;
-      await ensureLadderCupEntry(league, match.id);
     }
+    // Ladder Cup: every claimed-or-created team needs a ladder_cup_entries
+    // row before it shows up anywhere ladder-related (standings, Find your
+    // opponent, the opponent board). This used to only run for brand-new
+    // self-registered teams (the branch above) — a team claimed by name
+    // from a pre-listed list (the `match` branch) never got one, so a club
+    // whose creation-time bulk insert had failed (or was pre-listed before
+    // that bulk insert existed) stayed permanently un-placed the moment
+    // someone claimed it, with nothing left to trigger the self-heal
+    // backfill effect for it. ensureLadderCupEntry already no-ops for
+    // non-ladder_cup leagues and is idempotent (ON CONFLICT DO NOTHING), so
+    // it's safe to call unconditionally here for both branches.
+    if (match) await ensureLadderCupEntry(league, match.id);
 
     const { error } = await supabase.from("members").insert({
       league_id: leagueId, user_id: session.user.id,
@@ -4883,6 +4894,9 @@ export default function App() {
         showToast(`"${match.name}" is already claimed by another member in this league — contact the league admin.`);
         return { error: true };
       }
+      // See the matching comment in joinLeague — a claimed pre-listed team
+      // needs this exactly as much as a freshly created one does.
+      await ensureLadderCupEntry(league, match.id);
       return { team: match };
     }
     if (started) return { team: null };
