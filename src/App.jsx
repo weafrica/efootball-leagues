@@ -2543,7 +2543,7 @@ export default function App() {
   const loadLeagues = useCallback(async () => {
     const { data, error } = await supabase
       .from("leagues")
-      .select("*, teams(*), fixtures(*), members(*), comments(*, comment_likes(*)), result_submissions(*), league_reactions(*)")
+      .select("*, teams!teams_league_id_fkey(*), fixtures(*), members(*), comments(*, comment_likes(*)), result_submissions(*), league_reactions(*)")
       .order("created_at", { ascending: false });
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
@@ -3606,7 +3606,7 @@ export default function App() {
     // admin's browser already had — a stale copy here can both cut the
     // wrong clubs from the group stage and seed the knockout bracket wrong.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("format, groups_count, group_stage_due_at, teams(*), fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("format, groups_count, group_stage_due_at, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
@@ -4231,7 +4231,7 @@ export default function App() {
     // against it can eliminate a club that had actually won its match —
     // it just hadn't shown up on this screen yet.
     const { data: fresh, error: freshErr } = await supabase
-      .from("leagues").select("current_stage, final_stage_started, teams(*), fixtures(*)").eq("id", league.id).single();
+      .from("leagues").select("current_stage, final_stage_started, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
     if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
 
     const currentStage = fresh.current_stage;
