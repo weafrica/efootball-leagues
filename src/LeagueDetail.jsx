@@ -9,9 +9,9 @@ import { rankLadderCupStandings, getOpponentPool, isWalkoverClaimable, LADDER_CU
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
   KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
-  LeagueScheduleLine, LeagueStatusBanner, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
-  PendingResultsPanel, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
-  RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, StandingsPanel,
+  LeagueScheduleLine, LeagueStatusBanner, MemberAvatar, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
+  PendingResultsPanel, PlayerProfileModal, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
+  RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, ShareRangeModal, StandingsPanel,
   VoiceNotePlayer, VoiceRecorderButton, WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES, WhatsAppCallLink,
   WhatsAppLink, avatarColor, commentSpeech, computeStandings, findSubmissionOpponentId,
   firstMatchdayNote, fmtDate, groupLabel, isExpired, isFinalFixture, isFinalRoundFixtures,
@@ -104,10 +104,34 @@ function LadderCupBadgeRow({ row, c }) {
   );
 }
 
+const LADDER_CUP_STANDINGS_ROW_HEIGHT = 42;
+const LADDER_CUP_STANDINGS_VISIBLE_ROWS = 5;
+
+// Same shape as SHARE_STANDINGS_COLUMNS (App.jsx) but without the Draws
+// column — Ladder Cup has no draws — and with Streak added since it's the
+// one extra stat that actually matters for this format's share image.
+const LADDER_CUP_SHARE_COLUMNS = [
+  { key: "rank", label: "#", width: 64, align: "center", isRank: true },
+  { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " · OUT" : r.statusLabel ? ` · ${r.statusLabel.toUpperCase()}` : "") },
+  { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
+  { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
+  { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
+  { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
+  { key: "streak", label: "Streak", width: 96, align: "center", get: (r) => String(r.streak) },
+  { key: "pts", label: "Pts", width: 96, align: "center", bold: true, get: (r) => String(r.pts) },
+];
+
 // The standings table itself — points/GD/streak/status/badges, ranked with
 // the engine's own tiebreaker chain (points, then GD, then toughest
-// opponent beaten) rather than re-deriving an ordering here.
-function LadderCupStandingsTable({ league, c }) {
+// opponent beaten) rather than re-deriving an ordering here. Brings over
+// the normal league table's club search, avatars, click-for-profile, and
+// share/download image — the parts of StandingsPanel (App.jsx) that are
+// genuinely useful here too — while keeping the Ladder Cup-only stuff
+// (streak, badges, status label) that StandingsPanel has no concept of.
+function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
+  const [query, setQuery] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [profileRow, setProfileRow] = useState(null); // the standings row currently shown in PlayerProfileModal, or null
   const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
   const standings = useMemo(() => rankLadderCupStandings(mapped), [mapped]);
 
@@ -115,32 +139,75 @@ function LadderCupStandingsTable({ league, c }) {
     return <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>;
   }
 
+  const q = query.trim().toLowerCase();
+  const filtered = q ? standings.filter((r) => r.club_name.toLowerCase().includes(q)) : standings;
+  const scrolls = filtered.length > LADDER_CUP_STANDINGS_VISIBLE_ROWS;
+  const shareRows = standings.map((r) => ({
+    rank: r.rank_position, name: r.club_name, p: r._row.w + r._row.l, w: r._row.w, l: r._row.l,
+    gd: r.gd, streak: r._row.streak, pts: r.pts, eliminated: r._row.status === "eliminated",
+    statusLabel: r._row.status !== "active" && r._row.status !== "eliminated" ? LADDER_CUP_STATUS_LABEL[r._row.status] : null,
+  }));
+
   return (
-    <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
-      <table className="w-full font-mono text-sm min-w-[560px]">
-        <thead>
-          <tr className="text-[11px] uppercase tracking-wider border-b" style={{ color: c.textFaint, borderColor: c.border, background: c.bg }}>
-            <th className="text-left py-2 pl-2 font-medium">#</th>
-            <th className="text-left py-2 font-medium">Club</th>
-            <th className="text-center py-2 font-medium">W</th>
-            <th className="text-center py-2 font-medium">L</th>
-            <th className="text-center py-2 font-medium">GD</th>
-            <th className="text-center py-2 font-medium">Streak</th>
-            <th className="text-center py-2 pr-2 font-medium">Pts</th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((r) => {
-            const row = r._row;
-            const eliminated = row.status === "eliminated";
-            return (
-              <tr key={r.club_id} className="border-b align-top" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1 }}>
+    <div className="-mx-4 px-4">
+      <div className="flex items-center justify-between gap-3 mb-3 px-2">
+        <div className="font-mono text-xs" style={{ color: c.textFaint }}>
+          {standings.length} club{standings.length === 1 ? "" : "s"} on the ladder
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {standings.length > LADDER_CUP_STANDINGS_VISIBLE_ROWS && (
+            <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>{filtered.length} club{filtered.length === 1 ? "" : "s"}</div>
+          )}
+          <button onClick={() => setShareOpen(true)} title="Download image"
+            className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+            <Download size={13} />
+          </button>
+        </div>
+      </div>
+      {shareOpen && (
+        <ShareRangeModal onClose={() => setShareOpen(false)} kicker="Survival Ladder Cup" title={league.name}
+          subtitle={`${standings.filter((r) => r._row.status !== "eliminated").length} of ${standings.length} clubs still active`}
+          rows={shareRows} columns={LADDER_CUP_SHARE_COLUMNS} c={c} />
+      )}
+
+      <div className="relative mb-3">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a club..."
+          className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none"
+          style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
+        <div className="overflow-y-auto" style={{ maxHeight: scrolls ? LADDER_CUP_STANDINGS_ROW_HEIGHT * LADDER_CUP_STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
+        <table className="w-full font-mono text-sm min-w-[620px]">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wider border-b sticky top-0 z-10" style={{ color: c.textFaint, borderColor: c.border, background: c.bg }}>
+              <th className="text-left py-2 pl-2 font-medium">#</th>
+              <th className="text-left py-2 font-medium">Club</th>
+              <th className="text-center py-2 font-medium">P</th>
+              <th className="text-center py-2 font-medium">W</th>
+              <th className="text-center py-2 font-medium">L</th>
+              <th className="text-center py-2 font-medium">GD</th>
+              <th className="text-center py-2 font-medium">Streak</th>
+              <th className="text-center py-2 pr-2 font-medium">Pts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={8} className="py-8 text-center font-body text-sm" style={{ color: c.textFaint }}>No club matches "{query}".</td></tr>
+            ) : filtered.map((r) => {
+              const row = r._row;
+              const eliminated = row.status === "eliminated";
+              return (
+                <tr key={r.club_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
+                  className="border-b align-top cursor-pointer" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
                 <td className="py-2.5 pl-2 relative">
                   <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: r.rank_position === 1 && !eliminated ? c.accent : "transparent" }} />
                   <span style={{ color: c.textFaint }}>{r.rank_position}</span>
                 </td>
                 <td className="py-2.5 font-body font-medium">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
+                    {avatarByTeamId && <MemberAvatar url={avatarByTeamId[r.club_id]} username={r.club_name} size={20} c={c} />}
                     {row.status === "champion" && <Crown size={13} style={{ color: c.accent }} />}
                     <span className="truncate">{r.club_name}</span>
                   </div>
@@ -149,6 +216,7 @@ function LadderCupStandingsTable({ league, c }) {
                   </div>
                   <LadderCupBadgeRow row={row} c={c} />
                 </td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
@@ -157,10 +225,34 @@ function LadderCupStandingsTable({ league, c }) {
                 </td>
                 <td className="text-center py-2.5 pr-2 font-bold">{r.pts}</td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      </div>
+      {scrolls && (
+        <div className="font-mono text-[10px] text-center mt-2" style={{ color: c.textFaint }}>Scroll for more — showing {LADDER_CUP_STANDINGS_VISIBLE_ROWS} of {filtered.length}</div>
+      )}
+
+      {profileRow && (
+        <PlayerProfileModal
+          username={profileRow.club_name}
+          avatarUrl={avatarByTeamId ? avatarByTeamId[profileRow.club_id] : null}
+          isMe={!!myTeamId && profileRow.club_id === myTeamId}
+          rank={profileRow.rank_position}
+          stats={[
+            { label: "Played", value: profileRow._row.w + profileRow._row.l },
+            { label: "Points", value: profileRow.pts },
+            { label: "W · L", value: `${profileRow._row.w} · ${profileRow._row.l}` },
+            { label: "Goal diff", value: `${profileRow.gd >= 0 ? "+" : ""}${profileRow.gd}` },
+            { label: "Streak", value: profileRow._row.streak },
+            { label: "Status", value: LADDER_CUP_STATUS_LABEL[profileRow._row.status] || profileRow._row.status },
+          ]}
+          onClose={() => setProfileRow(null)}
+          c={c}
+        />
+      )}
     </div>
   );
 }
@@ -576,7 +668,7 @@ function LadderCupFindOpponent({ league, c }) {
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
-function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+function LadderCupPendingPanel({ league, canManage, session, myTeam, avatarByTeamId, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
   // Clubs are already live on the ladder the moment they join (no fixtures
   // to generate here, unlike the other formats) — Start League is a status
@@ -619,7 +711,7 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, onLeave, on
 
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
       <div className="mb-5">
-        <LadderCupStandingsTable league={league} c={c} />
+        <LadderCupStandingsTable league={league} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
       </div>
 
       {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
@@ -797,7 +889,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
       {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
 
       {isLadderCup ? (
-        <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} onLeave={onLeave}
+        <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} avatarByTeamId={avatarByTeamId} onLeave={onLeave}
           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
           onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife}
