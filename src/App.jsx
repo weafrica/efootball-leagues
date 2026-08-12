@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
-import { proxiedMediaUrl, proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
+import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
+import { uploadToBlob } from "./utils/blobUpload";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -2931,11 +2932,9 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
-      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
-      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
-      voice_url = pub.publicUrl;
+      try {
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("challenge_board_comments").insert({
@@ -3029,11 +3028,9 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
-      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
-      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
-      voice_url = pub.publicUrl;
+      try {
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("ladder_comments").insert({
@@ -3350,11 +3347,12 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 512, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, cacheControl: "31536000" });
-    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
-    const pub = { publicUrl: proxiedMediaUrl("avatars", path) };
+    let avatar_url;
+    try {
+      avatar_url = await uploadToBlob("avatars", path, file, file.type);
+    } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
     const { data, error } = await supabase.from("profiles")
-      .update({ avatar_url: pub.publicUrl }).eq("user_id", session.user.id)
+      .update({ avatar_url }).eq("user_id", session.user.id)
       .select().single();
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
     setProfile(data);
@@ -4345,10 +4343,11 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
     const ext = file.name.split(".").pop();
     const path = `${league.id}-${Date.now()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage.from("league-photos").upload(path, file, { upsert: true, cacheControl: "31536000" });
-    if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
-    const pub = { publicUrl: proxiedMediaUrl("league-photos", path) };
-    const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
+    let photo_url;
+    try {
+      photo_url = await uploadToBlob("league-photos", path, file, file.type);
+    } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+    const { error } = await supabase.from("leagues").update({ photo_url }).eq("id", league.id);
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
     await loadLeagues();
     showToast("League photo updated.");
@@ -4467,21 +4466,18 @@ export default function App() {
       const compressed = await compressImage(file, { maxDimension: 900, quality: 0.85 });
       const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-photos").upload(path, compressed, { cacheControl: "31536000" });
-      if (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
-      const pub = { publicUrl: proxiedMediaUrl("comment-photos", path) };
-      photo_url = pub.publicUrl;
+      try {
+        photo_url = await uploadToBlob("comment-photos", path, compressed, compressed.type);
+      } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
     }
     let voice_url = null;
     let voice_duration = null;
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage.from("comment-voice-notes")
-        .upload(path, voiceClip.blob, { contentType: voiceClip.blob.type || "audio/webm", cacheControl: "31536000" });
-      if (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
-      const pub = { publicUrl: proxiedMediaUrl("comment-voice-notes", path) };
-      voice_url = pub.publicUrl;
+      try {
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("comments").insert({
