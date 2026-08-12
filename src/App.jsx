@@ -3502,15 +3502,9 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
       try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
-      voice_url = pub.publicUrl;
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("challenge_board_comments").insert({
@@ -3604,15 +3598,9 @@ export default function App() {
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
       try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
-      voice_url = pub.publicUrl;
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("ladder_comments").insert({
@@ -3934,16 +3922,12 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 512, quality: 0.85 });
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `${session.user.id}-${Date.now()}.${ext}`;
-    let publicUrl;
+    let avatar_url;
     try {
-      publicUrl = await uploadToBlob("avatars", path, file);
-    } catch (err) {
-      showToast(`Couldn't upload photo: ${err.message}`);
-      return;
-    }
-    const pub = { publicUrl };
+      avatar_url = await uploadToBlob("avatars", path, file, file.type);
+    } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
     const { data, error } = await supabase.from("profiles")
-      .update({ avatar_url: pub.publicUrl }).eq("user_id", session.user.id)
+      .update({ avatar_url }).eq("user_id", session.user.id)
       .select().single();
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
     setProfile(data);
@@ -5752,15 +5736,11 @@ export default function App() {
     const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
     const ext = file.name.split(".").pop();
     const path = `${league.id}-${Date.now()}.${ext}`;
-    let publicUrl;
+    let photo_url;
     try {
-      publicUrl = await uploadToBlob("league-photos", path, file);
-    } catch (err) {
-      showToast(`Couldn't upload photo: ${err.message}`);
-      return;
-    }
-    const pub = { publicUrl };
-    const { error } = await supabase.from("leagues").update({ photo_url: pub.publicUrl }).eq("id", league.id);
+      photo_url = await uploadToBlob("league-photos", path, file, file.type);
+    } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return; }
+    const { error } = await supabase.from("leagues").update({ photo_url }).eq("id", league.id);
     if (error) { showToast(`Couldn't save photo: ${error.message}`); return; }
     await refreshLeague(league.id);
     showToast("League photo updated.");
@@ -5933,30 +5913,18 @@ export default function App() {
       const compressed = await compressImage(file, { maxDimension: 900, quality: 0.85 });
       const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
       try {
-        publicUrl = await uploadToBlob("comment-photos", path, compressed);
-      } catch (err) {
-        showToast(`Couldn't upload photo: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
-      photo_url = pub.publicUrl;
+        photo_url = await uploadToBlob("comment-photos", path, compressed, compressed.type);
+      } catch (uploadErr) { showToast(`Couldn't upload photo: ${uploadErr.message}`); return false; }
     }
     let voice_url = null;
     let voice_duration = null;
     if (voiceClip) {
       const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
       const path = `${session.user.id}/${Date.now()}.${ext}`;
-      let publicUrl;
       try {
-        publicUrl = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
-      } catch (err) {
-        showToast(`Couldn't upload voice note: ${err.message}`);
-        return false;
-      }
-      const pub = { publicUrl };
-      voice_url = pub.publicUrl;
+        voice_url = await uploadToBlob("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
       voice_duration = voiceClip.duration || null;
     }
     const { error } = await supabase.from("comments").insert({
