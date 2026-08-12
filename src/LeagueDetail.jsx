@@ -668,7 +668,8 @@ function LadderCupFindOpponent({ league, c }) {
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
-function LadderCupPendingPanel({ league, canManage, session, myTeam, avatarByTeamId, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+  const [tab, setTab] = useState("table");
   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
   // Clubs are already live on the ladder the moment they join (no fixtures
   // to generate here, unlike the other formats) — Start League is a status
@@ -703,48 +704,118 @@ function LadderCupPendingPanel({ league, canManage, session, myTeam, avatarByTea
         )}
       </div>
 
-      {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
-
-      {canManage && !league.ladder_cup_finalized_at && (
-        <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
-      )}
-
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
-      <div className="mb-5">
-        <LadderCupStandingsTable league={league} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
+      <div className="flex gap-1 mb-5 rounded-full p-1 w-fit" style={{ background: c.surface }}>
+        {[{ id: "table", label: "Table", icon: Trophy }, { id: "members", label: "Members", icon: Users }].map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-body text-xs font-semibold uppercase tracking-wide" style={tab === t.id ? { background: c.text, color: c.bg } : { color: c.textDim }}>
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
       </div>
 
-      {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
-        <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
-          <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
+      {tab === "table" ? (
+        <div>
+          {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
+
+          {canManage && !league.ladder_cup_finalized_at && (
+            <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
+          )}
+
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
+          <div className="mb-5">
+            <LadderCupStandingsTable league={league} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
+          </div>
+
+          <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
+            comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
+            emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
+            canEditResults={canManage}
+            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+
+          <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
+            comments={regularComments} heading="Discussion" allowCompose
+            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
-      )}
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
-      {league.teams.length === 0 ? (
-        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
       ) : (
-        <div className="space-y-1.5">
-          {[...league.teams]
-            .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
-            .sort((a, b) => (a.m?.payment_status === "pending" ? -1 : 0) - (b.m?.payment_status === "pending" ? -1 : 0))
-            .map(({ t, m }) => (
-            m ? (
-              <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
-                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
-                onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
-            ) : (
-              <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
-                <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
-                <span className="font-body text-sm flex-1">{t.name}</span>
-                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Not yet claimed</span>
-                {canManage && (
-                  <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}>
-                    <X size={14} />
-                  </button>
-                )}
+        <div>
+          {canManage && <MemberMessageEditor league={league} onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} c={c} />}
+          {canManage && <OrganizerContactEditor league={league} onUpdateCreatorPhone={onUpdateCreatorPhone} c={c} />}
+          {canManage && league.members.some((m) => isWaReminderActive(m)) && (
+            <div className="flex justify-end mb-2">
+              <button onClick={() => onClearAllWaReminders(league)} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
+                <X size={11} /> Clear all highlights
+              </button>
+            </div>
+          )}
+          {league.league_type === "cash" && canManage && league.members.some((m) => m.payment_status === "pending") && (
+            <div className="rounded-lg p-3 mb-3 font-body text-xs flex items-center gap-2" style={{ background: "rgba(217,164,6,0.12)", color: "#B8860B" }}>
+              <ReceiptText size={14} /> Download each member's proof of payment, then approve or reject to confirm their registration.
+            </div>
+          )}
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
+          {league.teams.length === 0 ? (
+            <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
+          ) : (() => {
+            const rows = [...league.teams]
+              .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
+              .sort((a, b) => (a.m?.payment_status === "pending" ? -1 : 0) - (b.m?.payment_status === "pending" ? -1 : 0));
+            const row = ({ t, m }) => (
+              m ? (
+                <MemberPaymentRow key={t.id} m={m} t={t} league={league} isCash={league.league_type === "cash"} canManage={canManage} allowRemove
+                  isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
+                  onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+              ) : (
+                <div key={t.id} className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>{t.name[0]?.toUpperCase()}</div>
+                  <span className="font-body text-sm flex-1">{t.name}</span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Not yet claimed</span>
+                  {canManage && (
+                    <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}>
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              )
+            );
+            // Same custom/automated WA message split the normal leagues'
+            // Members tab uses — only worth splitting once a template
+            // actually exists on the league (see usesCustomMessage).
+            if (!league.wa_message_template) {
+              return <div className="space-y-1.5 mb-5">{rows.map(row)}</div>;
+            }
+            const custom = rows.filter((r) => usesCustomMessage(r.t, league));
+            const automated = rows.filter((r) => !usesCustomMessage(r.t, league));
+            return (
+              <div className="space-y-5 mb-5">
+                <div>
+                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Custom message ({custom.length})</div>
+                  {custom.length === 0 ? (
+                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members will get the custom message right now.</div>
+                  ) : (
+                    <div className="space-y-1.5">{custom.map(row)}</div>
+                  )}
+                </div>
+                <div>
+                  <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Automated message ({automated.length})</div>
+                  {automated.length === 0 ? (
+                    <div className="font-body text-xs px-1" style={{ color: c.textFaint }}>No members are on the automated message right now.</div>
+                  ) : (
+                    <div className="space-y-1.5">{automated.map(row)}</div>
+                  )}
+                </div>
               </div>
-            )
-          ))}
+            );
+          })()}
+
+          {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
+          {myTeam && !canSeePhones && (
+            <div className="rounded-xl p-4 border font-body text-xs" style={{ borderColor: c.borderStrong, color: c.textFaint }}>
+              Player contacts are hidden because your club has been eliminated from this league.
+            </div>
+          )}
+
+          {league.league_type === "cash" && league.members.some((m) => m.payment_status === "approved") && (
+            <PrizeBreakdownPanel league={league} c={c} />
+          )}
         </div>
       )}
     </div>
@@ -889,9 +960,13 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
       {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
 
       {isLadderCup ? (
-        <LadderCupPendingPanel league={league} canManage={canManage} session={session} myTeam={myTeam} avatarByTeamId={avatarByTeamId} onLeave={onLeave}
+        <LadderCupPendingPanel league={league} canManage={canManage} canSeePhones={canSeePhones} session={session} myTeam={myTeam} myUsername={myUsername} avatarByTeamId={avatarByTeamId}
+          resultComments={resultComments} regularComments={regularComments}
+          onLeave={onLeave}
           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
-          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder}
+          onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
+          onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
+          onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction}
           onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondSecondLife={onRespondLadderCupSecondLife}
           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
