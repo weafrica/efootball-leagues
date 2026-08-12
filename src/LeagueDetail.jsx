@@ -483,7 +483,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
         {match && !resultPending && (
           <button onClick={() => onOpenResult(match)}
             className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>
-            <Trophy size={13} /> Log result{match.match_length_minutes != null ? ` · ${match.match_length_minutes}m` : ""}
+            <Trophy size={13} /> Log result
           </button>
         )}
         {resultPending && !iReported && !escalated && (
