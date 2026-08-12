@@ -45,12 +45,15 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 const LadderPage = lazy(() => import("./Ladder.jsx"));
 import { pickBestVoice } from "./utils/pickBestVoice";
 // Step 9 (opponent slate + challenge flow) is the first place App.jsx
-// itself needs the pure engine — assignHomeTeam decides who's home the
-// instant a match is set up, isValidMatchLength backstops the same 6–15
-// range the DB CHECK constraint enforces. rankLadderCupStandings/
-// getOpponentPool stay imported where they're actually consumed
-// (LeagueDetail.jsx) rather than duplicated here.
-import { assignHomeTeam, isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+// itself needs the pure engine — isValidMatchLength backstops the same
+// 6–15 range the DB CHECK constraint enforces. Home/away assignment now
+// happens server-side inside initiate_ladder_cup_match (see
+// supabase/migrations/20260815_ladder_cup_match_rpc.sql), so the pure
+// engine's assignHomeTeam isn't imported here anymore — it's still used
+// by the RPC's own logic, mirrored in SQL rather than called from JS.
+// rankLadderCupStandings/getOpponentPool stay imported where they're
+// actually consumed (LeagueDetail.jsx) rather than duplicated here.
+import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -4483,15 +4486,23 @@ export default function App() {
     // Belt-and-suspenders against a double-tap creating two rows for the
     // same pairing before refreshLeague's response lands — the DB has no
     // unique constraint on this table (a rematch after a finalized result
-    // is legitimate), so the check has to happen here.
+    // is legitimate), so the check has to happen here too (the RPC below
+    // re-checks it server-side against the race a client-only check can't
+    // close).
     if (ladderCupPendingMatchWith(league, myTeamId, opponentTeamId)) {
       showToast("You've already got a match set up with them.");
       return;
     }
-    const { home, away } = assignHomeTeam(myTeamId, opponentTeamId);
-    const { error } = await supabase.from("ladder_cup_matches")
-      .insert({ league_id: league.id, home_team_id: home, away_team_id: away });
+    // Routed through the initiate_ladder_cup_match RPC rather than a direct
+    // insert — same RLS-safe pattern as ensure_ladder_cup_entry (see
+    // supabase/migrations/20260815_ladder_cup_match_rpc.sql). Home/away is
+    // now decided inside the function, so the client's own assignHomeTeam
+    // call is gone — its result would have no bearing on what's actually
+    // inserted.
+    const { data, error } = await supabase.rpc("initiate_ladder_cup_match",
+      { p_league_id: league.id, p_team_id: myTeamId, p_opponent_team_id: opponentTeamId });
     if (error) { showToast(`Couldn't set up the match: ${error.message}`); return; }
+    const home = Array.isArray(data) ? data[0]?.home_team_id : data?.home_team_id;
     await refreshLeague(league.id);
     showToast(home === myTeamId
       ? "You're home — pick your match length to lock it in."
