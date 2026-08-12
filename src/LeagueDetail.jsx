@@ -45,6 +45,7 @@ function toLadderCupEngineEntries(league) {
     pts: row.pts, gd: row.gd,
     ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
     toughest_opponent_beaten_pts: row.toughest_opponent_beaten_pts,
+    status: row.status,
     _row: row,
   }));
 }
