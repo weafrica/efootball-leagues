@@ -3008,7 +3008,7 @@ export default function App() {
   // which single league to refresh below without a full reload.
   const LEAGUE_SELECT =
     "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
-    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, " +
+    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
       "comment_likes(id, user_id, reaction)), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
     "league_reactions(id, user_id, reaction)";
@@ -4671,7 +4671,7 @@ export default function App() {
     let scoreLine = `${homeName} ${homeGoals} – ${awayGoals} ${awayName}`;
     if (decidedBy === "extra_time") scoreLine += ` (aet ${extraTimeHomeGoals}-${extraTimeAwayGoals})`;
     if (decidedBy === "penalties") scoreLine += ` (pens ${pensHome}-${pensAway})`;
-    await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, proofUrl, true, null, null);
+    await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, proofUrl, true, null, null, match.id);
 
     await refreshLeague(league.id);
     showToast(loser.status === "eliminated"
@@ -5806,7 +5806,7 @@ export default function App() {
   // re-uploading it).
   // voiceClip is { blob, duration } from useVoiceRecorder — optional, same
   // as the photo, and stands alone fine (a voice-only comment with no text).
-  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null, fixtureId = null) => {
+  const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null, fixtureId = null, ladderCupMatchId = null) => {
     const trimmed = (body || "").trim();
     if (!trimmed && !file && !photoUrl && !voiceClip) return;
     const username = profile?.efootball_username || session.user.email;
@@ -5844,7 +5844,7 @@ export default function App() {
     const { error } = await supabase.from("comments").insert({
       league_id: league.id, user_id: session.user.id, username, body: trimmed,
       parent_comment_id: parentComment?.id || null, photo_url, is_result: isResult,
-      voice_url, voice_duration, fixture_id: fixtureId,
+      voice_url, voice_duration, fixture_id: fixtureId, ladder_cup_match_id: ladderCupMatchId,
     });
     if (error) { showToast(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await refreshLeague(league.id);
