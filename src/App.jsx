@@ -4320,8 +4320,13 @@ export default function App() {
         .insert(teamNames.map((n) => ({ league_id: league.id, name: n }))).select();
       if (teamErr) { showToast(`Couldn't add clubs: ${teamErr.message}`); return; }
       if (format === "ladder_cup") {
-        const { error: entryErr } = await supabase.from("ladder_cup_entries")
-          .insert(newTeams.map((t) => ({ league_id: league.id, team_id: t.id })));
+        // Same RLS-safe RPC as ensureLadderCupEntry — a raw bulk insert here
+        // hits the identical "new row violates row-level security policy"
+        // rejection a self-join's insert did, since it's the same table and
+        // the same missing client-side INSERT grant.
+        const results = await Promise.all(newTeams.map((t) =>
+          supabase.rpc("ensure_ladder_cup_entry", { p_league_id: league.id, p_team_id: t.id })));
+        const entryErr = results.find((r) => r.error)?.error;
         if (entryErr) showToast(`Clubs added, but their ladder entries failed to set up: ${entryErr.message}. Contact support.`);
       }
       showToast(format === "ladder_cup"
@@ -4443,13 +4448,18 @@ export default function App() {
   // `teams` row exists, whether that happened via a pre-listed club at
   // creation (see createLeague) or a fresh self-join here. Called right
   // after a brand-new team row is inserted; a no-op for every other format.
-  // 23505 (unique(league_id, team_id) already exists) is swallowed rather
-  // than surfaced — it just means the entry was already set up, which can
-  // legitimately happen on a retried request after a network hiccup.
+  // Routed through the ensure_ladder_cup_entry RPC rather than a direct
+  // table insert — regular authenticated clients don't have INSERT
+  // privileges on ladder_cup_entries (RLS rejects it: "new row violates
+  // row-level security policy"), so this needs the same SECURITY DEFINER
+  // treatment already used for the finalize write. The RPC's own
+  // ON CONFLICT DO NOTHING makes a retry (e.g. after a network hiccup, or
+  // the backfill effect re-checking a team that got an entry moments ago)
+  // a safe no-op — no error code to swallow client-side anymore.
   const ensureLadderCupEntry = async (league, teamId) => {
     if (league.format !== "ladder_cup" || !teamId) return;
-    const { error } = await supabase.from("ladder_cup_entries").insert({ league_id: league.id, team_id: teamId });
-    if (error && error.code !== "23505") {
+    const { error } = await supabase.rpc("ensure_ladder_cup_entry", { p_league_id: league.id, p_team_id: teamId });
+    if (error) {
       showToast(`Club registered, but its ladder entry failed to set up: ${error.message}. Contact the league admin.`);
     }
   };
