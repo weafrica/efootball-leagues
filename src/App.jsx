@@ -3978,7 +3978,28 @@ export default function App() {
     })();
   }, [activeLeague, refreshLeague]);
 
-  // Step 13: hard-cutoff finalization. Same lazy-check-on-read shape as
+  // Self-heal for clubs that ended up on the team list without a matching
+  // ladder_cup_entries row — e.g. this league's pre-listed clubs were added
+  // before the bulk-insert-at-creation code (see createLeague) existed, so
+  // they never got placed on the ladder. Same lazy-check-on-read shape as
+  // the two effects above: runs once per league the first time it's
+  // active, backfills every missing row via ensureLadderCupEntry (which
+  // already no-ops safely if a row exists), then refreshes so standings/
+  // the opponent board/Find your opponent all pick the clubs up immediately
+  // rather than waiting for their first match.
+  const backfilledLadderCupEntriesChecked = useRef(new Set());
+  useEffect(() => {
+    if (!activeLeague || activeLeague.format !== "ladder_cup") return;
+    if (backfilledLadderCupEntriesChecked.current.has(activeLeague.id)) return;
+    const entryTeamIds = new Set((activeLeague.ladder_cup_entries || []).map((r) => r.team_id));
+    const missing = (activeLeague.teams || []).filter((t) => !entryTeamIds.has(t.id));
+    if (missing.length === 0) return;
+    backfilledLadderCupEntriesChecked.current.add(activeLeague.id);
+    (async () => {
+      await Promise.all(missing.map((t) => ensureLadderCupEntry(activeLeague, t.id)));
+      await refreshLeague(activeLeague.id);
+    })();
+  }, [activeLeague, refreshLeague]);
   // the second-life expiry above — fires once per league, the first time
   // it's the active one after hasLadderCupCutoffPassed is true and
   // ladder_cup_finalized_at is still null. No separate scheduled job:
