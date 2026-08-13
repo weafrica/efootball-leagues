@@ -55,3 +55,18 @@ export function toProxiedUrl(url) {
   if (!PROXIED_BUCKETS.has(bucket)) return url;
   return `/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 }
+
+// Builds a proxied URL straight from a bucket + storage path, for call
+// sites that already have those two pieces separately (e.g. right after an
+// upload) instead of a full Supabase public URL to parse — same
+// /api/image proxy path toProxiedUrl above resolves to, just skipping the
+// "parse a full URL apart" step since there's nothing to parse here.
+// Buckets outside PROXIED_BUCKETS fall back to a direct Supabase public
+// URL so this still resolves to a working link either way.
+export function proxiedMediaUrl(bucket, path) {
+  if (!path) return null;
+  if (!PROXIED_BUCKETS.has(bucket)) {
+    return SUPABASE_URL ? `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}` : null;
+  }
+  return `/api/image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+}
