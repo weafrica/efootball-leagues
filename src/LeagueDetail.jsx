@@ -832,7 +832,7 @@ function LadderCupFindOpponent({ league, c }) {
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
-function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
   const [tab, setTab] = useState("table");
   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
   // Same idea as pendingWalkoverClaims just above, for Step 10's admin
@@ -904,7 +904,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
             comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
             emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
             canEditResults={canManage}
-            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
 
           <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
             comments={regularComments} heading="Discussion" allowCompose
@@ -997,7 +997,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
   );
 }
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1141,7 +1141,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
           onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment}
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
           onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
-          onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onToggleReaction={onToggleReaction}
+          onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction}
           onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife}
           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
@@ -1444,7 +1444,7 @@ export default function LeagueDetail({ league, session, isAdmin, joined, canSeeP
 const COMMENT_PAGE_SIZE = 6;
 const MAX_INDENT_DEPTH = 4;
 
-function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
+function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, onEditResult, onEditLadderCupResult, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count
@@ -1593,7 +1593,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit
         <div className="space-y-3 mb-3">
           {visibleRoots.map((cm) => (
             <CommentNode key={cm.id} comment={cm} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={0} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={0} />
           ))}
         </div>
       )}
@@ -1675,7 +1675,7 @@ function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit
 // underneath it, no matter how deep. Each node owns its own "reply box
 // open?" / "replies expanded?" state independently of its siblings and
 // ancestors.
-function CommentNode({ comment, league, session, canComment, onPost, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, c, depth }) {
+function CommentNode({ comment, league, session, canComment, onPost, onDelete, onEdit, onEditResult, onEditLadderCupResult, canEditResults = false, onToggleReaction, c, depth }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [repliesShown, setRepliesShown] = useState(false);
   const [replyText, setReplyText] = useState("");
@@ -1721,7 +1721,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
   return (
     <div className={comment.pending ? "opacity-60" : "comment-pop-in"}>
       <CommentRow comment={comment} league={league} session={session} canComment={canComment}
-        onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
+        onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} isReply={depth > 0}
         onReplyClick={canReply ? () => setReplyOpen((v) => !v) : null} />
 
       {children.length > 0 && (
@@ -1737,7 +1737,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
         <div className="mt-2 space-y-2 pl-3 border-l" style={{ marginLeft: indent, borderColor: c.border }}>
           {children.map((r) => (
             <CommentNode key={r.id} comment={r} league={league} session={session} canComment={canComment}
-              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
+              onPost={onPost} onDelete={onDelete} onEdit={onEdit} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} canEditResults={canEditResults} onToggleReaction={onToggleReaction} c={c} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -1809,7 +1809,7 @@ function CommentNode({ comment, league, session, canComment, onPost, onDelete, o
 // go (fast un-react, same as the old single-emoji like). To switch to a
 // different emoji, remove yours first, then pick again — keeps the whole
 // thing usable with touch, not just hover.
-function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit, onEditResult, canEditResults = false, onToggleReaction, onReplyClick, c, isReply = false }) {
+function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit, onEditResult, onEditLadderCupResult, canEditResults = false, onToggleReaction, onReplyClick, c, isReply = false }) {
   const isOwn = session && cm.user_id === session.user.id;
   const isManager = cm.user_id === league.created_by;
   const realReactions = cm.comment_likes || [];
@@ -1874,9 +1874,18 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
     if (linkedFixture) {
       setEditHomeScore(linkedFixture.home_score ?? "");
       setEditAwayScore(linkedFixture.away_score ?? "");
+    } else if (linkedLadderMatch) {
+      setEditHomeScore(linkedLadderMatch.home_goals ?? "");
+      setEditAwayScore(linkedLadderMatch.away_goals ?? "");
     }
     setEditing(true);
   };
+  // Ladder Cup results get real score inputs too (linkedLadderMatch), same
+  // as a linked fixture — see onEditLadderCupResult (App.jsx's
+  // editLadderCupMatchResult) for why that's a full-league recompute under
+  // the hood rather than a plain overwrite. Only a comment with neither
+  // link (predates score-linked editing entirely) falls back to the
+  // text-only onEdit path.
   const saveEdit = async () => {
     if (savingEdit) return;
     if (linkedFixture) {
@@ -1885,6 +1894,14 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
       if (!Number.isInteger(homeNum) || !Number.isInteger(awayNum) || homeNum < 0 || awayNum < 0) return;
       setSavingEdit(true);
       const ok = await onEditResult(cm, league, linkedFixture, homeNum, awayNum);
+      setSavingEdit(false);
+      if (ok) setEditing(false);
+    } else if (linkedLadderMatch) {
+      const homeNum = parseInt(editHomeScore, 10);
+      const awayNum = parseInt(editAwayScore, 10);
+      if (!Number.isInteger(homeNum) || !Number.isInteger(awayNum) || homeNum < 0 || awayNum < 0) return;
+      setSavingEdit(true);
+      const ok = await onEditLadderCupResult(cm, league, linkedLadderMatch, homeNum, awayNum);
       setSavingEdit(false);
       if (ok) setEditing(false);
     } else {
@@ -2000,7 +2017,7 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
         </div>
         {editing ? (
           <div className="mt-1.5">
-            {linkedFixture ? (
+            {(linkedFixture || linkedLadderMatch) ? (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{homeTeamName}</span>
                 <input type="number" min="0" inputMode="numeric" value={editHomeScore} autoFocus
@@ -2013,6 +2030,11 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
                   className="w-14 rounded-lg px-2 py-1 font-mono text-sm text-center outline-none"
                   style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
                 <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{awayTeamName}</span>
+                {linkedLadderMatch && (
+                  <div className="font-mono text-[10px] w-full mt-0.5" style={{ color: c.textFaint }}>
+                    Regulation-time score only — this recomputes the whole ladder (points, streaks, elimination status) from this match onward.
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -2026,9 +2048,9 @@ function CommentRow({ comment: cm, league, session, canComment, onDelete, onEdit
             )}
             <div className="flex items-center gap-2 mt-1.5">
               <button onClick={saveEdit}
-                disabled={savingEdit || (linkedFixture ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())}
+                disabled={savingEdit || ((linkedFixture || linkedLadderMatch) ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())}
                 className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || (linkedFixture ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())) ? 0.5 : 1 }}>
+                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || ((linkedFixture || linkedLadderMatch) ? (editHomeScore === "" || editAwayScore === "") : !editText.trim())) ? 0.5 : 1 }}>
                 {savingEdit ? "Saving…" : "Save"}
               </button>
               <button onClick={() => setEditing(false)} disabled={savingEdit}

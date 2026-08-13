@@ -53,7 +53,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -3024,7 +3024,7 @@ export default function App() {
   // only ever receive a bare comment, not its parent league — can resolve
   // which single league to refresh below without a full reload.
   const LEAGUE_SELECT =
-    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), " +
+    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), " +
     "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
       "comment_likes(id, user_id, reaction)), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
@@ -3978,7 +3978,16 @@ export default function App() {
       const { error } = await supabase.from("ladder_cup_entries")
         .update({ status: "eliminated", second_life_offered_at: null, second_life_expires_at: null, updated_at: now.toISOString() })
         .in("id", stale.map((r) => r.id));
-      if (!error) await refreshLeague(activeLeague.id);
+      if (!error) {
+        // Best-effort: record the lapse so a future recompute (see
+        // recomputeLadderCupLeague) can tell this was a silent expiry
+        // rather than an explicit decline — doesn't change what happened,
+        // just what a replay can reconstruct about it later.
+        await Promise.all(stale.map((r) => supabase.rpc("record_ladder_cup_second_life_response", {
+          p_entry_id: r.id, p_league_id: activeLeague.id, p_team_id: r.team_id, p_response_type: "expired",
+        })));
+        await refreshLeague(activeLeague.id);
+      }
     })();
   }, [activeLeague, refreshLeague]);
 
@@ -4854,6 +4863,17 @@ export default function App() {
 
     const ok = await applyLadderCupEntryPatch(league.id, row.id, teamId, teamId, updated, row.badge_walkover);
     if (!ok) return;
+    // Records which way this club's one-and-only second-life offer actually
+    // went (see supabase/migrations/20260821_ladder_cup_second_life_history.sql)
+    // — without this, a future correction to an earlier match couldn't tell
+    // a replay whether this club accepted or declined when it replays this
+    // loss again. Best-effort: a failure here shouldn't block the
+    // accept/decline itself, which already landed via applyLadderCupEntryPatch.
+    const { error: historyErr } = await supabase.rpc("record_ladder_cup_second_life_response", {
+      p_entry_id: row.id, p_league_id: league.id, p_team_id: teamId,
+      p_response_type: accept ? "accepted" : "declined",
+    });
+    if (historyErr) console.error("Couldn't record second-life response history:", historyErr.message);
     await refreshLeague(league.id);
     showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
   };
@@ -6039,6 +6059,205 @@ export default function App() {
     return true;
   };
 
+  // Ladder Cup's version of editResultForFixture — but a Ladder Cup result
+  // can't be corrected the same way a fixture is (overwrite the score,
+  // patch two rows). pts/gd/streak/status/badges/ladder_rating are all
+  // PATH-DEPENDENT: streak and badges depend on the order matches
+  // happened in, Elo depends on both clubs' ratings at the moment of each
+  // result, and a loss can trigger a second-life offer that ripples into
+  // everything after it. Patching the one corrected match in place risks
+  // quietly corrupting every result that came after it. So instead:
+  // replay the WHOLE league from scratch through the same pure engine
+  // (formats/ladderCup.js) every live result already goes through, with
+  // the corrected score swapped in, and rebuild every club's entry.
+  //
+  // computeLadderCupRecompute is the pure replay step (no Supabase calls,
+  // easy to reason about / test in isolation); recomputeLadderCupLeague
+  // wraps it with the bulk write; editLadderCupMatchResult is the actual
+  // onEditLadderCupResult handler wired up from LeagueDetail.
+  //
+  // Second-life accept/decline/expiry is the one piece of state this
+  // replay can't derive purely from the match/walkover event log — that's
+  // a human decision, not a computed result — so it leans on
+  // ladder_cup_second_life_offers (see
+  // supabase/migrations/20260821_ladder_cup_second_life_history.sql) to
+  // know how each club's one-and-only offer actually went. A club with no
+  // history row there (an offer resolved before that migration existed)
+  // falls back to its CURRENT second_life_used flag / status, which is a
+  // safe stand-in specifically because every club only ever gets one such
+  // offer in its lifetime — that flag alone already records how it went.
+  const computeLadderCupRecompute = (league) => {
+    const teams = league.teams || [];
+    const entryRows = league.ladder_cup_entries || [];
+    const offersByTeam = Object.fromEntries((league.ladder_cup_second_life_offers || []).map((o) => [o.team_id, o]));
+    const teamsById = Object.fromEntries(teams.map((t) => [t.id, t]));
+
+    // Every club with an entry row today gets a fresh, zeroed-out seed —
+    // clubs get an entry the moment they join (ensureLadderCupEntry),
+    // independent of whether they've played, so this is the right seed
+    // set: every possible winner/loser below already has a row here.
+    const entries = new Map(entryRows.map((r) => [r.team_id, createLadderCupEntry(r.team_id, teamsById[r.team_id]?.name || "Unknown club")]));
+
+    const events = [];
+    for (const m of (league.ladder_cup_matches || [])) {
+      if (!m.finalized_at) continue; // never confirmed, or disputed away — never happened
+      const winnerIsHome = m.winner_team_id === m.home_team_id;
+      events.push({
+        at: new Date(m.finalized_at).getTime(),
+        isWalkover: false,
+        winnerTeamId: m.winner_team_id,
+        loserTeamId: winnerIsHome ? m.away_team_id : m.home_team_id,
+        winnerGoals: winnerIsHome ? m.home_goals : m.away_goals,
+        loserGoals: winnerIsHome ? m.away_goals : m.home_goals,
+        decidedBy: m.decided_by || "regulation",
+        extraTimeGoalsWinner: winnerIsHome ? m.extra_time_home_goals : m.extra_time_away_goals,
+        extraTimeGoalsLoser: winnerIsHome ? m.extra_time_away_goals : m.extra_time_home_goals,
+      });
+    }
+    for (const c of (league.ladder_cup_walkover_claims || [])) {
+      if (c.status !== "approved" || !c.approved_at) continue;
+      events.push({
+        at: new Date(c.approved_at).getTime(),
+        isWalkover: true,
+        winnerTeamId: c.claimant_team_id, loserTeamId: c.target_team_id,
+        winnerGoals: 0, loserGoals: 0, decidedBy: "regulation",
+        extraTimeGoalsWinner: 0, extraTimeGoalsLoser: 0,
+      });
+    }
+    events.sort((a, b) => a.at - b.at);
+
+    const walkoverBadgeCount = new Map(); // team_id -> count; recordLadderCupWin doesn't touch this counter itself
+
+    for (const ev of events) {
+      const winnerEntry = entries.get(ev.winnerTeamId);
+      const loserEntry = entries.get(ev.loserTeamId);
+      // Missing club (removed from the league since?) — skip this one
+      // event rather than aborting the whole recompute.
+      if (!winnerEntry || !loserEntry) continue;
+      // A club that's still sitting on an unresolved second-life offer
+      // can't have a next match in real life — but if the corrected
+      // timeline reshuffled who won an earlier match, that's exactly the
+      // state we might be replaying into. Skip rather than feed a
+      // pending_second_life club into another result — same "can't be
+      // matched" rule the real app enforces via getOpponentPool.
+      if (winnerEntry.status === "pending_second_life" || loserEntry.status === "pending_second_life") continue;
+
+      const standingsBeforeMatch = rankLadderCupStandings([...entries.values()]);
+      const { winner, loser } = recordLadderCupWin({
+        winner: winnerEntry, loser: loserEntry, standingsBeforeMatch,
+        isWalkover: ev.isWalkover,
+        winnerGoals: ev.winnerGoals || 0, loserGoals: ev.loserGoals || 0,
+        decidedBy: ev.decidedBy, extraTimeGoalsWinner: ev.extraTimeGoalsWinner || 0, extraTimeGoalsLoser: ev.extraTimeGoalsLoser || 0,
+      });
+      entries.set(ev.winnerTeamId, winner);
+
+      let resolvedLoser = loser;
+      if (loser.status === "pending_second_life") {
+        const offer = offersByTeam[ev.loserTeamId];
+        const currentRow = entryRows.find((r) => r.team_id === ev.loserTeamId);
+        if (offer?.response_type === "accepted") {
+          resolvedLoser = acceptSecondLife(loser);
+        } else if (offer?.response_type === "declined" || offer?.response_type === "expired") {
+          resolvedLoser = declineOrExpireSecondLife(loser);
+        } else if (offer && !offer.responded_at && offer.expires_at && new Date(offer.expires_at) <= new Date()) {
+          // No recorded response, but the 24h window's already lapsed —
+          // same silent-expiry conversion the lazy-expiry effect does on
+          // read.
+          resolvedLoser = declineOrExpireSecondLife(loser);
+        } else if (!offer) {
+          // Predates the history table (see the migration comment): fall
+          // back to what the row's CURRENT state already tells us, since
+          // a club only ever gets one such offer in its lifetime.
+          if (currentRow?.second_life_used) resolvedLoser = acceptSecondLife(loser);
+          else if (currentRow?.status === "eliminated") resolvedLoser = declineOrExpireSecondLife(loser);
+          // else: no record either way and the row isn't eliminated —
+          // treat as a genuinely still-open offer, same as the real-time case below.
+        }
+        // else: a real, still-open offer — leave the club pending_second_life.
+      }
+      entries.set(ev.loserTeamId, resolvedLoser);
+
+      if (ev.isWalkover) walkoverBadgeCount.set(ev.winnerTeamId, (walkoverBadgeCount.get(ev.winnerTeamId) || 0) + 1);
+    }
+
+    return { entries, walkoverBadgeCount };
+  };
+
+  // Runs the replay above and writes the rebuilt table back in one round
+  // trip via bulk_apply_ladder_cup_entries (admin-only RPC — see
+  // supabase/migrations/20260822_ladder_cup_result_correction.sql).
+  const recomputeLadderCupLeague = async (league) => {
+    const { entries, walkoverBadgeCount } = computeLadderCupRecompute(league);
+    const entryRows = league.ladder_cup_entries || [];
+    const payload = entryRows.map((row) => {
+      const entry = entries.get(row.team_id);
+      if (!entry) return null;
+      return {
+        entry_id: row.id,
+        ...ladderCupRowPatchFromEntry(entry),
+        badge_walkover: walkoverBadgeCount.get(row.team_id) ?? row.badge_walkover ?? 0,
+      };
+    }).filter(Boolean);
+
+    const { error } = await supabase.rpc("bulk_apply_ladder_cup_entries", { p_league_id: league.id, p_entries: payload });
+    if (error) { showToast(`Score corrected, but the ladder couldn't be fully recomputed: ${error.message}`); return false; }
+    return true;
+  };
+
+  // Admin correction for a posted Ladder Cup result comment
+  // (comment.ladder_cup_match_id) — see the recompute functions above for
+  // why this can't just overwrite the one match's score. Only offered for
+  // a regulation-time correction (matches the score-box UI in
+  // LeagueDetail's CommentRow); extra time/penalties carry over unchanged
+  // from the original result unless the new regulation scoreline is level
+  // again, in which case there's nothing on record to break the tie with.
+  const editLadderCupMatchResult = async (comment, league, match, homeGoals, awayGoals) => {
+    if (!Number.isInteger(homeGoals) || !Number.isInteger(awayGoals) || homeGoals < 0 || awayGoals < 0) {
+      showToast("Enter a valid score for both teams.");
+      return false;
+    }
+    let decidedBy = match.decided_by;
+    let winnerTeamId = match.winner_team_id;
+    if (homeGoals !== awayGoals) {
+      decidedBy = "regulation";
+      winnerTeamId = homeGoals > awayGoals ? match.home_team_id : match.away_team_id;
+    } else if (match.decided_by === "regulation") {
+      showToast("That scoreline is level — this match has no extra time or penalties on record to decide it.");
+      return false;
+    }
+
+    const { error: matchErr } = await supabase.rpc("correct_ladder_cup_match_result", {
+      p_match_id: match.id, p_league_id: league.id,
+      p_home_goals: homeGoals, p_away_goals: awayGoals,
+      p_extra_time_home_goals: match.extra_time_home_goals, p_extra_time_away_goals: match.extra_time_away_goals,
+      p_penalties_home: match.penalties_home, p_penalties_away: match.penalties_away,
+      p_decided_by: decidedBy, p_winner_team_id: winnerTeamId,
+    });
+    if (matchErr) { showToast(`Couldn't correct the result: ${matchErr.message}`); return false; }
+
+    // Re-fetch rather than patching the local `league` object by hand —
+    // the recompute needs every finalized match/approved walkover claim
+    // in the league, not just this one.
+    const { data: freshLeague, error: fetchErr } = await supabase.from("leagues").select(LEAGUE_SELECT).eq("id", league.id).maybeSingle();
+    if (fetchErr || !freshLeague) { showToast("Score corrected, but couldn't reload the league to recompute standings — try refreshing."); return false; }
+    const recomputeOk = await recomputeLadderCupLeague(freshLeague);
+
+    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+    const homeName = teamsById[match.home_team_id]?.name || "Home";
+    const awayName = teamsById[match.away_team_id]?.name || "Away";
+    let scoreLine = `${homeName} ${homeGoals} – ${awayGoals} ${awayName}`;
+    if (decidedBy === "extra_time") scoreLine += ` (aet ${match.extra_time_home_goals}-${match.extra_time_away_goals})`;
+    if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
+    const { data: cmData, error: cmError } = await supabase.from("comments").update({ body: `Ladder Cup — ${scoreLine}` }).eq("id", comment.id).select().maybeSingle();
+    if (cmError) showToast(`Score saved, but couldn't update the posted text: ${cmError.message}`);
+    else if (!cmData) showToast("Score saved, but you don't have permission to edit the posted text (check the comments UPDATE policy).");
+
+    await refreshLeague(league.id);
+    if (recomputeOk && !cmError && cmData) showToast("Result corrected — the whole ladder was recomputed from scratch.");
+    else if (recomputeOk) showToast("Standings recomputed — but the posted text couldn't be updated.");
+    return true;
+  };
+
   const deleteComment = (comment, league) => {
     const replyCount = (league?.comments || []).filter((c) => c.parent_comment_id === comment.id).length;
     const noun = comment.parent_comment_id ? "reply" : replyCount > 0 ? `comment and its ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "comment";
@@ -6246,7 +6465,7 @@ export default function App() {
                 onOpenSubmitResult={(fixture, homeTeam, awayTeam, existing) => setResultModal({ league: activeLeague, fixture, homeTeam, awayTeam, existing })}
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
                 onRespondToResultSubmission={respondToResultSubmission}
-                onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onEditResult={editResultForFixture} onToggleReaction={toggleCommentReaction}
+                onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onEditResult={editResultForFixture} onEditLadderCupResult={editLadderCupMatchResult} onToggleReaction={toggleCommentReaction}
                 onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} c={c} />
               </Suspense>
             )}
