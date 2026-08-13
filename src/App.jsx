@@ -2888,6 +2888,7 @@ export default function App() {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
+  const [activityLog, setActivityLog] = useState(null); // admin-only: recent user_activity_log rows
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
   const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member — feeds the Wall of Fame
   const [teamAvatars, setTeamAvatars] = useState({}); // team_id -> avatar_url, for club photos on the Table (mirrors the guest view's version)
@@ -3138,6 +3139,16 @@ export default function App() {
     const { data, error } = await supabase.rpc("get_all_accounts");
     if (error) { showToast("Couldn't load accounts."); setAccounts([]); return; }
     setAccounts(data || []);
+  }, [showToast]);
+
+  // Admin-only — same shape as loadAccounts above: routed through a
+  // security-definer RPC (get_activity_log) rather than a direct select,
+  // so the admin check happens server-side and this table never needs a
+  // client-readable RLS policy at all.
+  const loadActivityLog = useCallback(async () => {
+    const { data, error } = await supabase.rpc("get_activity_log", { p_limit: 200 });
+    if (error) { showToast("Couldn't load the activity log."); setActivityLog([]); return; }
+    setActivityLog(data || []);
   }, [showToast]);
 
   // Admin-only — permanently deletes an account (login, profile, phone,
@@ -6413,6 +6424,7 @@ export default function App() {
         <Header view={view} setView={setView} activeLeague={activeLeague} theme={theme} toggleTheme={toggleTheme} c={c} onSignOut={signOut} userEmail={session.user.email}
           avatarUrl={profile?.avatar_url}
           onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
+          onOpenActivity={() => { setView("activity"); loadActivityLog(); }}
           onOpenChallenges={openChallengesScreen}
           challengeBadge={incomingPendingCount}
           onOpenCreate={() => setView("create")}
@@ -6422,6 +6434,8 @@ export default function App() {
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
+        ) : view === "activity" && isAdmin ? (
+          <ActivityLogPanel activityLog={activityLog} onBack={goBack} c={c} />
         ) : view === "challenges" ? (
           <Suspense fallback={<Loader c={c} />}>
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
@@ -7734,6 +7748,57 @@ function csvEscape(val) {
 // keeping, and a visible flag for any account still carrying a leftover
 // "(DUPLICATE-n)" marker from the phone-uniqueness cleanup so it's easy to see
 // who still needs to update their number.
+// Admin-only raw activity feed — step 1 of activity tracking (see
+// activityLog.js and the get_activity_log RPC). Deliberately plain: no
+// filtering or grouping yet, just the most recent 200 events, newest
+// first. Filters/search/grouping are a good "next small step" once this
+// is confirmed to be capturing the right things.
+function ActivityLogPanel({ activityLog, onBack, c }) {
+  if (activityLog === null) return <div className="pt-8"><Loader c={c} /></div>;
+
+  const formatEvent = (type) => type.replace(/_/g, " ");
+
+  return (
+    <div className="pt-8">
+      <div className="flex items-center justify-between mb-5">
+        <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
+      </div>
+
+      <div className="flex items-center gap-2 mb-1">
+        <History size={20} style={{ color: c.accent }} />
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Activity log</h1>
+      </div>
+      <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
+        Most recent {activityLog.length} event{activityLog.length === 1 ? "" : "s"}
+      </div>
+
+      {activityLog.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          No activity recorded yet.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {activityLog.map((row) => (
+            <div key={row.id} className="flex items-center justify-between border rounded-lg px-3.5 py-2.5" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="min-w-0">
+                <div className="font-body text-sm font-semibold truncate" style={{ color: c.text }}>
+                  {row.efootball_username || row.email || "Unknown user"}
+                </div>
+                <div className="font-mono text-xs capitalize" style={{ color: c.textFaint }}>
+                  {formatEvent(row.event_type)}
+                </div>
+              </div>
+              <div className="font-mono text-xs shrink-0 pl-3" style={{ color: c.textFaint }}>
+                {new Date(row.created_at).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack, c }) {
   const [query, setQuery] = useState("");
 
@@ -8118,7 +8183,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
 
-function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCreate, grabbableCount }) {
+function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenActivity, onOpenChallenges, challengeBadge, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCreate, grabbableCount }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   useEffect(() => {
@@ -8142,6 +8207,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
     { icon: Trophy, label: "Leaderboard", onClick: onOpenLeaderboard },
     { icon: MessageCircle, label: "Suggest something", onClick: onOpenSuggestion },
     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: onOpenAccounts }] : []),
+    ...(isAdmin ? [{ icon: History, label: "Activity log", onClick: onOpenActivity }] : []),
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
     { icon: LogOut, label: "Sign out", onClick: onSignOut },
   ];
