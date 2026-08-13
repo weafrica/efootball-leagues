@@ -893,8 +893,66 @@ function LadderCupFindOpponent({ league, c }) {
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
+const LADDER_CUP_WIDGET_TITLE = {
+  opponent: "Find your opponent",
+  walkover: "Walkover claims awaiting review",
+  escalated: "Escalated results awaiting review",
+  results: "Results",
+  discussion: "Discussion",
+};
+
+// A single small trigger in the quick-action row above the standings table
+// — just an icon, a label, and (for the two admin queues) a count badge.
+// The actual panel content only mounts once its trigger is tapped (see
+// openWidget in LadderCupPendingPanel), so this row stays cheap even with
+// a big Discussion thread sitting behind one of the buttons.
+function LadderCupWidgetTrigger({ icon: Icon, label, count, highlight, active, onClick, c }) {
+  return (
+    <button onClick={onClick}
+      className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full border transition-transform active:scale-95"
+      style={{
+        background: active ? c.accent : highlight ? "rgba(217,164,6,0.12)" : c.surface,
+        borderColor: active ? c.accent : highlight ? "#B8860B55" : c.border,
+        color: active ? c.accentText : highlight ? "#B8860B" : c.textDim,
+      }}>
+      <Icon size={13} />
+      {label}
+      {count > 0 && (
+        <span className="font-mono text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full"
+          style={{ background: active ? c.accentText : "#B8860B", color: active ? c.accent : "#fff" }}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// The pop-out itself — a bottom-sheet on mobile / centered dialog on
+// desktop, same chrome as ShareRangeModal and PlayerProfileModal
+// (App.jsx) so this reads as the app's one modal pattern rather than a
+// bespoke popover. Renders on top of the standings table via fixed +
+// z-50, backdrop click or the X closes it.
+function LadderCupWidgetOverlay({ title, onClose, c, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={onClose}>
+      <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.border}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 flex items-center justify-between px-5 pt-5 pb-3" style={{ background: c.bg }}>
+          <h3 className="font-body text-sm font-bold uppercase tracking-wide" style={{ color: c.text }}>{title}</h3>
+          <button aria-label="Close" onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
+        </div>
+        <div className="px-5 pb-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
+  // Which of the five small quick-action widgets (if any) is currently
+  // popped open over the standings table — see the trigger row + overlay
+  // rendered inside the "table" tab below. Only one at a time, closed by
+  // default so the table is the first thing you see.
+  const [openWidget, setOpenWidget] = useState(null);
   // The Ladder Cup gets its own permanent black/gold arena look, same as
   // the standalone Ladder does (Ladder.jsx: `const c = LADDER_THEME`) —
   // ignore the app's normal light/dark theme prop and thread LADDER_THEME
@@ -1008,55 +1066,57 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
 
       {tab === "table" ? (
         <div>
-          {/* Everything else on this tab (find opponent, admin review queues,
-              results feed, discussion) now sits as a horizontal row of
-              compact "widget" cards above the Standings table — the table
-              itself is the main, full-page content anchored at the bottom,
-              the way a dashboard lines quick-glance cards up above its
-              primary data view rather than stacking them (and burying it)
-              below. Same no-scrollbar edge-bleed swipe rail Ladder Battles'
-              Top 10 strip uses (Ladder.jsx) for a consistent feel. Each
-              card gets a fixed width + its own internal scroll cap so one
-              long list (a big claims queue, a busy Discussion) can't blow
-              out the row's height — the row scrolls sideways, each card
-              scrolls vertically within itself. */}
-          <div className="no-scrollbar flex items-start gap-3 overflow-x-auto -mx-4 px-4 pb-2 mb-6">
+          {/* Everything else on this tab (find opponent, admin review
+              queues, results feed, discussion) is now a row of small
+              trigger widgets — icon, label, and a count badge where one
+              applies. Tapping a trigger doesn't push the table down; it
+              pops the widget's full content open in an overlay on top of
+              the table, same bottom-sheet-on-mobile/centered-on-desktop
+              chrome ShareRangeModal/PlayerProfileModal already use
+              elsewhere in this app, so it reads as "the same kind of
+              popup" rather than a one-off. Closing (X, backdrop click, or
+              re-tapping the same trigger) just clears openWidget. */}
+          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto -mx-4 px-4 pb-2 mb-6">
             {!league.ladder_cup_finalized_at && (
-              <div className="shrink-0 w-72">
-                <LadderCupFindOpponent league={league} c={c} />
-              </div>
+              <LadderCupWidgetTrigger icon={Search} label="Find opponent" active={openWidget === "opponent"} onClick={() => setOpenWidget((w) => (w === "opponent" ? null : "opponent"))} c={c} />
             )}
 
             {canManage && !league.ladder_cup_finalized_at && pendingWalkoverClaims.length > 0 && (
-              <div className="shrink-0 w-72">
-                <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
-              </div>
+              <LadderCupWidgetTrigger icon={Zap} label="Walkover claims" count={pendingWalkoverClaims.length} highlight active={openWidget === "walkover"} onClick={() => setOpenWidget((w) => (w === "walkover" ? null : "walkover"))} c={c} />
             )}
 
             {canManage && !league.ladder_cup_finalized_at && escalatedResultMatches.length > 0 && (
-              <div className="shrink-0 w-72">
-                <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
-              </div>
+              <LadderCupWidgetTrigger icon={Camera} label="Escalated results" count={escalatedResultMatches.length} highlight active={openWidget === "escalated"} onClick={() => setOpenWidget((w) => (w === "escalated" ? null : "escalated"))} c={c} />
             )}
 
-            <div className="shrink-0 w-72 rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div className="p-4 max-h-80 overflow-y-auto">
+            <LadderCupWidgetTrigger icon={Trophy} label="Results" active={openWidget === "results"} onClick={() => setOpenWidget((w) => (w === "results" ? null : "results"))} c={c} />
+
+            <LadderCupWidgetTrigger icon={MessageCircle} label="Discussion" active={openWidget === "discussion"} onClick={() => setOpenWidget((w) => (w === "discussion" ? null : "discussion"))} c={c} />
+          </div>
+
+          {openWidget && (
+            <LadderCupWidgetOverlay title={LADDER_CUP_WIDGET_TITLE[openWidget]} onClose={() => setOpenWidget(null)} c={c}>
+              {openWidget === "opponent" && <LadderCupFindOpponent league={league} c={c} />}
+              {openWidget === "walkover" && (
+                <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
+              )}
+              {openWidget === "escalated" && (
+                <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
+              )}
+              {openWidget === "results" && (
                 <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
                   comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
                   emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
                   canEditResults={canManage}
                   onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
-              </div>
-            </div>
-
-            <div className="shrink-0 w-72 rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div className="p-4 max-h-80 overflow-y-auto">
+              )}
+              {openWidget === "discussion" && (
                 <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
                   comments={regularComments} heading="Discussion" allowCompose
                   onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
-              </div>
-            </div>
-          </div>
+              )}
+            </LadderCupWidgetOverlay>
+          )}
 
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.accent }}>
             <Trophy size={13} /> The Ladder
