@@ -157,7 +157,7 @@ function ladderCupTier(rating) {
 // the ladder gets a "trophy shelf" moment instead of just being row one of
 // a list. Only shown against the full, unfiltered standings (not mid-
 // search) and only once there are actually 3+ clubs to podium.
-function LadderCupPodium({ standings, avatarByTeamId, c }) {
+function LadderCupPodium({ standings, avatarByTeamId, onSelect, c }) {
   const order = [standings[1], standings[0], standings[2]];
   return (
     <div className="flex items-end justify-center gap-4 sm:gap-6 mb-5 pt-3 pb-1">
@@ -167,7 +167,7 @@ function LadderCupPodium({ standings, avatarByTeamId, c }) {
         const medal = rank === 1 ? "#FFD700" : rank === 2 ? "#C0C0C0" : "#CD7F32";
         const eliminated = r._row.status === "eliminated";
         return (
-          <div key={r.club_id} className="flex flex-col items-center" style={{ opacity: eliminated ? 0.45 : 1 }}>
+          <button key={r.club_id} onClick={() => onSelect(r)} className="flex flex-col items-center transition-transform active:scale-95" style={{ opacity: eliminated ? 0.45 : 1 }}>
             <div className="relative mb-2">
               {isFirst && (
                 <Crown size={18} className="absolute -top-6 left-1/2 -translate-x-1/2 animate-ladder-heartbeat" style={{ color: medal }} />
@@ -182,7 +182,7 @@ function LadderCupPodium({ standings, avatarByTeamId, c }) {
               style={{ height: isFirst ? 44 : rank === 2 ? 34 : 26, background: `linear-gradient(180deg, ${medal}33, ${medal}0d)`, borderTop: `2px solid ${medal}`, color: medal }}>
               {rank}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
@@ -272,7 +272,7 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
         <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
       </div>
 
-      {!q && standings.length >= 3 && <LadderCupPodium standings={standings} avatarByTeamId={avatarByTeamId} c={c} />}
+      {!q && standings.length >= 3 && <LadderCupPodium standings={standings} avatarByTeamId={avatarByTeamId} onSelect={setProfileRow} c={c} />}
 
       <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: c.border, boxShadow: "0 8px 22px -10px rgba(0,0,0,0.55)" }}>
         <div className="overflow-y-auto" style={{ maxHeight: scrolls ? LADDER_CUP_STANDINGS_ROW_HEIGHT * LADDER_CUP_STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
@@ -387,9 +387,9 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
             { label: "Streak", value: profileRow._row.streak },
             { label: "Status", value: LADDER_CUP_STATUS_LABEL[profileRow._row.status] || profileRow._row.status },
             // Cosmetic matchmaking tier (see ladderCupTier) plus the raw
-            // rating it's derived from — shown to anyone who opens this
-            // club's card (via photo, username, or table row), same as
-            // every other stat here, not just the club's own owner.
+            // rating it's derived from — visible to anyone who opens this
+            // club's card, same as every other stat here, not just the
+            // club's own owner.
             { label: "Level", value: `${ladderCupTier(profileRow._row.ladder_rating ?? 1000).label} · ${profileRow._row.ladder_rating ?? 1000}` },
           ]}
           onClose={() => setProfileRow(null)}
