@@ -82,7 +82,7 @@ function LadderCupFinalizedBanner({ league, c }) {
     );
   }
   return (
-    <div className="relative overflow-hidden rounded-xl p-4 mt-3 border text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(232,185,35,0.18), transparent 70%)", borderColor: c.accent }}>
+    <div className="relative overflow-hidden rounded-2xl p-4 mt-3 border text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(232,185,35,0.18), transparent 70%)", borderColor: c.accent }}>
       <div className="absolute inset-0 pointer-events-none animate-ladder-sweep"
         style={{ backgroundImage: `linear-gradient(135deg, transparent 40%, ${c.accent}40 50%, transparent 60%)`, backgroundSize: "250% 250%" }} />
       <div className="relative">
@@ -168,7 +168,7 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
   const standings = useMemo(() => rankLadderCupStandings(mapped), [mapped]);
 
   if (standings.length === 0) {
-    return <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>;
+    return <div className="border border-dashed rounded-2xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>;
   }
 
   const q = query.trim().toLowerCase();
@@ -204,7 +204,7 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
             <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>{filtered.length} club{filtered.length === 1 ? "" : "s"}</div>
           )}
           <button onClick={() => setShareOpen(true)} title="Download image"
-            className="w-7 h-7 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+            className="w-7 h-7 flex items-center justify-center rounded-full transition-transform active:scale-90" style={{ background: c.surfaceHover, color: c.textDim }}>
             <Download size={13} />
           </button>
         </div>
@@ -217,12 +217,12 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
 
       <div className="relative mb-3">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a club..."
-          className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none"
+          className="w-full border rounded-xl pl-9 pr-3 py-2.5 font-body text-sm outline-none"
           style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
         <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
+      <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: c.border, boxShadow: "0 8px 22px -10px rgba(0,0,0,0.55)" }}>
         <div className="overflow-y-auto" style={{ maxHeight: scrolls ? LADDER_CUP_STANDINGS_ROW_HEIGHT * LADDER_CUP_STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
         <table className="w-full font-mono text-sm min-w-[620px]">
           <thead>
@@ -258,7 +258,7 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
               }[row.status] || { color: c.textFaint, bg: "transparent", icon: Shield };
               return (
                 <tr key={r.club_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
-                  className="border-b align-top cursor-pointer" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: danger ? "rgba(200,30,58,0.06)" : myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
+                  className="border-b align-top cursor-pointer transition-colors active:brightness-125" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: danger ? "rgba(200,30,58,0.06)" : myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
                 <td className="py-2.5 pl-2 relative">
                   <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: eliminated ? "transparent" : zoneFor(r.rank_position - 1) }} />
                   {medalColor ? <Medal size={13} style={{ color: medalColor }} /> : <span style={{ color: c.textFaint }}>{r.rank_position}</span>}
@@ -495,7 +495,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
   };
 
   return (
-    <div className="relative overflow-hidden rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: match && !resultPending && !match.finalized_at ? c.borderStrong : c.border }}>
+    <div className="relative overflow-hidden rounded-2xl p-3.5 border transition-transform active:scale-[0.99]" style={{ background: c.surface, borderColor: match && !resultPending && !match.finalized_at ? c.borderStrong : c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
       {/* Ambient glow only while there's an open, unclaimed challenge slot —
           a match already logging a result or done doesn't need the "come
           fight me" pull. */}
@@ -541,7 +541,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
             score, not an invitation to log it again. */}
         {match && !resultPending && !match.finalized_at && (
           <button onClick={() => onOpenResult(match)}
-            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>
+            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
             <Trophy size={13} /> Log result{match.match_length_minutes != null ? ` · ${match.match_length_minutes}m` : ""}
           </button>
         )}
@@ -552,12 +552,12 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
         )}
         {resultPending && !iReported && !escalated && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={() => respond(true)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-            <button onClick={() => respond(false)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+            <button onClick={() => respond(true)} disabled={resolving} title="Confirm result" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform active:scale-90" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+            <button onClick={() => respond(false)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform active:scale-90" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
           </div>
         )}
         {match && match.match_length_minutes == null && (
-          <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}>
+          <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0 transition-transform active:scale-90" style={{ color: c.textFaint }}>
             <X size={13} />
           </button>
         )}
@@ -626,7 +626,7 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
   // genuinely dramatic about: a pulsing heart HUD element, a red "you're
   // down" glow, and headline-weight copy instead of a routine offer card.
   return (
-    <div className="relative overflow-hidden rounded-xl p-5 border mt-3 text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(200,30,58,0.16), transparent 70%)", borderColor: c.red }}>
+    <div className="relative overflow-hidden rounded-2xl p-5 border mt-3 text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(200,30,58,0.16), transparent 70%)", borderColor: c.red }}>
       <div className="animate-ladder-ember absolute -top-14 -right-8 w-32 h-32 rounded-full blur-3xl pointer-events-none" style={{ background: c.red, opacity: 0.3 }} />
       <div className="relative">
         <Heart size={30} className="mx-auto mb-2 animate-ladder-heartbeat" style={{ color: c.red, fill: c.red }} />
@@ -732,7 +732,7 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   if (claims.length === 0) return null;
   return (
-    <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
+    <div className="rounded-2xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Zap size={13} /> {claims.length} walkover claim{claims.length === 1 ? "" : "s"} awaiting review
       </div>
@@ -741,17 +741,17 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
           const claimant = teamsById[cl.claimant_team_id];
           const target = teamsById[cl.target_team_id];
           return (
-            <div key={cl.id} className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+            <div key={cl.id} className="rounded-xl px-4 py-2.5" style={{ background: c.surface, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
               <div className="font-body text-sm">{claimant?.name || "Unknown club"} claims a walkover over {target?.name || "Unknown club"}</div>
               <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Messaged {fmtDate(cl.messaged_at)} SAST · claimable since {fmtDate(cl.claimable_at)} SAST</div>
               <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
-                <button onClick={() => window.open(cl.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5" style={{ borderColor: c.borderStrong }}>
+                <button onClick={() => window.open(cl.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
                   <Eye size={12} /> View screenshot
                 </button>
-                <button onClick={() => onApprove(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.greenSoft, color: c.greenText }}>
+                <button onClick={() => onApprove(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
                   <ThumbsUp size={12} /> Approve
                 </button>
-                <button onClick={() => onReject(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.redSoft, color: c.red }}>
+                <button onClick={() => onReject(cl)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.redSoft, color: c.red }}>
                   <ThumbsDown size={12} /> Reject
                 </button>
               </div>
@@ -775,7 +775,7 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   if (matches.length === 0) return null;
   return (
-    <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
+    <div className="rounded-2xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Camera size={13} /> {matches.length} match result{matches.length === 1 ? "" : "s"} awaiting your review
       </div>
@@ -788,7 +788,7 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
           if (m.decided_by === "extra_time") scoreLine += ` (aet ${m.extra_time_home_goals}-${m.extra_time_away_goals})`;
           if (m.decided_by === "penalties") scoreLine += ` (pens ${m.penalties_home}-${m.penalties_away})`;
           return (
-            <div key={m.id} className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+            <div key={m.id} className="rounded-xl px-4 py-2.5" style={{ background: c.surface, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
               <div className="font-body text-sm truncate">{scoreLine}</div>
               <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>
                 Reported by {(m.result_reported_by_team_id === m.home_team_id ? home : away)?.name || "a club"} · {timeAgo(m.result_reported_at)}
@@ -797,13 +797,13 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
                 {reason === "dispute-cap" ? "Disputed too many times already — sent straight to the admin" : "Confirmation window passed — sent to the admin"}
               </div>
               <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
-                <button onClick={() => window.open(m.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5" style={{ borderColor: c.borderStrong }}>
+                <button onClick={() => window.open(m.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
                   <Eye size={12} /> View photo proof
                 </button>
-                <button onClick={() => onResolve(m, true)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.greenSoft, color: c.greenText }}>
+                <button onClick={() => onResolve(m, true)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
                   <ThumbsUp size={12} /> Approve
                 </button>
-                <button onClick={() => onResolve(m, false)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.redSoft, color: c.red }}>
+                <button onClick={() => onResolve(m, false)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.redSoft, color: c.red }}>
                   <ThumbsDown size={12} /> Reject
                 </button>
               </div>
@@ -839,13 +839,13 @@ function LadderCupFindOpponent({ league, c }) {
   };
 
   return (
-    <div className="rounded-xl p-4 border mb-3" style={{ background: c.surface, borderColor: c.border }}>
+    <div className="rounded-2xl p-4 border mb-3" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
       <div className="flex flex-col sm:flex-row gap-2">
         <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Club name"
-          className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          className="w-full border rounded-xl px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
         <datalist id="team-names-datalist">{league.teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
-        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
+        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2.5 rounded-xl shrink-0 transition-transform active:scale-95" style={{ background: c.accent, color: c.accentText }}>Find</button>
       </div>
 
       {result && (result.notFound ? (
@@ -925,8 +925,11 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
           Ladder Battles on Home, dressed up with an ambient ember glow, a
           one-shot sweep on mount, and (once you've got a club in it) a
           rank chip + life-orb strip so this reads as a ranked-mode HUD
-          rather than a plain info card. */}
-      <div className="relative overflow-hidden rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.borderStrong }}>
+          rather than a plain info card. rounded-2xl + a real drop shadow
+          (plus a faint inset top highlight) instead of a flat bordered box
+          — gives it the lifted, "floating card" depth a native app screen
+          has instead of a website panel. */}
+      <div className="relative overflow-hidden rounded-2xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.borderStrong, boxShadow: "0 12px 32px -12px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05)" }}>
         <div className="animate-ladder-ember absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl pointer-events-none" style={{ background: c.accent, opacity: 0.35 }} />
         <div className="absolute inset-0 pointer-events-none animate-ladder-sweep"
           style={{ backgroundImage: `linear-gradient(135deg, transparent 40%, ${c.accent}26 50%, transparent 60%)`, backgroundSize: "250% 250%" }} />
@@ -937,7 +940,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
               <div className="font-display font-bold text-lg uppercase tracking-wide" style={{ color: c.text }}>Survival Ladder Cup</div>
             </div>
             {myRank && (
-              <div className="shrink-0 flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-1 rounded-full border" style={{ borderColor: c.borderStrong, color: c.accent }}>
+              <div className="shrink-0 flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-1 rounded-full border" style={{ borderColor: c.borderStrong, color: c.accent, background: c.bg, boxShadow: "0 2px 6px -2px rgba(0,0,0,0.5)" }}>
                 RANK #{myRank}<span style={{ color: c.textFaint }}>/{totalClubs}</span>
               </div>
             )}
@@ -964,8 +967,8 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
           )}
           {canManage && !started && !league.ladder_cup_finalized_at && (
             <button disabled={league.teams.length < 2} onClick={() => onStartLadderCup(league)}
-              className="mt-3 font-body text-sm font-semibold px-4 py-2.5 rounded-full"
-              style={league.teams.length >= 2 ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              className="mt-3 font-body text-sm font-semibold px-4 py-2.5 rounded-full transition-transform active:scale-95"
+              style={league.teams.length >= 2 ? { background: c.accent, color: c.accentText, boxShadow: "0 4px 12px -4px rgba(232,185,35,0.5)" } : { background: c.surfaceHover, color: c.textFaint }}>
               Start League
             </button>
           )}
@@ -980,12 +983,23 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
         </div>
       </div>
 
-      <div className="flex gap-1 mb-5 rounded-full p-1 w-fit" style={{ background: c.surface }}>
-        {[{ id: "table", label: "Table", icon: Trophy }, { id: "members", label: "Members", icon: Users }].map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-body text-xs font-semibold uppercase tracking-wide" style={tab === t.id ? { background: c.text, color: c.bg } : { color: c.textDim }}>
-            <t.icon size={13} /> {t.label}
-          </button>
-        ))}
+      {/* Segmented tab control — sticky under the header (like a native
+          app's top tab bar), with a sliding pill that transforms between
+          positions instead of just recoloring the active label. grid-
+          cols-2 gives both tabs equal width so the sliding math is a flat
+          50% translate, no measuring needed. */}
+      <div className="sticky top-0 z-20 py-2 mb-5" style={{ background: `${c.bg}f2`, backdropFilter: "blur(6px)" }}>
+        <div className="relative grid grid-cols-2 rounded-full p-1" style={{ background: c.surface, boxShadow: "0 4px 14px -6px rgba(0,0,0,0.6)" }}>
+          <div className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full transition-transform duration-300 ease-out"
+            style={{ background: c.text, transform: tab === "members" ? "translateX(100%)" : "translateX(0%)" }} />
+          {[{ id: "table", label: "Table", icon: Trophy }, { id: "members", label: "Members", icon: Users }].map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className="relative z-10 flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-full font-body text-xs font-semibold uppercase tracking-wide transition-colors"
+              style={{ color: tab === t.id ? c.bg : c.textDim }}>
+              <t.icon size={13} /> {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {tab === "table" ? (
@@ -1033,7 +1047,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
           )}
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Registered clubs</div>
           {league.teams.length === 0 ? (
-            <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
+            <div className="border border-dashed rounded-2xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>No one's registered yet — share the league so players can join.</div>
           ) : (() => {
             const rows = [...league.teams]
               .map((t) => ({ t, m: league.members.find((mm) => mm.team_id === t.id) }))
@@ -1088,7 +1102,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
 
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {myTeam && !canSeePhones && (
-            <div className="rounded-xl p-4 border font-body text-xs" style={{ borderColor: c.borderStrong, color: c.textFaint }}>
+            <div className="rounded-2xl p-4 border font-body text-xs" style={{ borderColor: c.borderStrong, color: c.textFaint }}>
               Player contacts are hidden because your club has been eliminated from this league.
             </div>
           )}
