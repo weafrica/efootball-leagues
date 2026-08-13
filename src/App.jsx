@@ -4736,10 +4736,25 @@ export default function App() {
       winnerGoals, loserGoals, decidedBy, extraTimeGoalsWinner, extraTimeGoalsLoser,
     });
 
-    const { error: matchErr } = await supabase.from("ladder_cup_matches").update({
-      result_status: "confirmed", result_confirmed_at: new Date().toISOString(),
-      finalized_at: new Date().toISOString(),
-    }).eq("id", match.id);
+    // Routed through confirm_ladder_cup_match_result (RPC, security
+    // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql)
+    // instead of a direct .update() on ladder_cup_matches. The plain
+    // client update here was written assuming it'd work the same way for
+    // an admin's approve as it does for the reporting side's own confirm
+    // — but an admin resolving an *escalated* match (timeout or dispute
+    // cap, see ladderCupResultEscalationReason) is often not a member of
+    // either club, and nothing ever granted that caller write access to
+    // this row. That's why an admin's Approve silently did nothing and
+    // the match sat in the review queue forever: this update was failing
+    // exactly the way the ladder_cup_entries updates were (see
+    // 20260819's migration) — just without a visible fallback toast,
+    // since a failed match update stops the whole result from applying
+    // (never reaches the entries update or the "couldn't be fully
+    // updated" toast below it).
+    const { error: matchErr } = await supabase.rpc("confirm_ladder_cup_match_result", {
+      p_match_id: match.id, p_league_id: league.id,
+      p_team_a_id: match.home_team_id, p_team_b_id: match.away_team_id,
+    });
     if (matchErr) { showToast(`Couldn't save the match result: ${matchErr.message}`); return false; }
 
     await Promise.all([
@@ -4772,13 +4787,15 @@ export default function App() {
   // rejected. finalized_at was never set on a merely-pending result, so
   // there's nothing to unwind there — only the reported fields need
   // clearing.
-  const clearLadderCupMatchResult = async (match) => {
-    const { error } = await supabase.from("ladder_cup_matches").update({
-      home_goals: null, away_goals: null, extra_time_home_goals: null, extra_time_away_goals: null,
-      penalties_home: null, penalties_away: null, decided_by: null, winner_team_id: null, proof_url: null,
-      result_status: null, result_reported_by: null, result_reported_by_team_id: null, result_reported_at: null,
-      result_dispute_count: (match.result_dispute_count || 0) + 1,
-    }).eq("id", match.id);
+  const clearLadderCupMatchResult = async (league, match) => {
+    // Same fix as confirm_ladder_cup_match_result just above — a plain
+    // client update failed the same way for a non-participant admin
+    // rejecting an escalated match, so this goes through an RPC too. See
+    // supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql.
+    const { error } = await supabase.rpc("clear_ladder_cup_match_result", {
+      p_match_id: match.id, p_league_id: league.id,
+      p_team_a_id: match.home_team_id, p_team_b_id: match.away_team_id,
+    });
     return !error;
   };
 
@@ -4796,7 +4813,7 @@ export default function App() {
       await applyLadderCupMatchResult(league, match);
       return;
     }
-    const ok = await clearLadderCupMatchResult(match);
+    const ok = await clearLadderCupMatchResult(league, match);
     if (!ok) { showToast("Couldn't dispute the result — try refreshing."); return; }
     await refreshLeague(league.id);
     showToast("Result disputed — ask them to re-log it.");
@@ -4811,7 +4828,7 @@ export default function App() {
       await applyLadderCupMatchResult(league, match);
       return;
     }
-    const ok = await clearLadderCupMatchResult(match);
+    const ok = await clearLadderCupMatchResult(league, match);
     if (!ok) { showToast("Couldn't reject the result — try refreshing."); return; }
     await refreshLeague(league.id);
     showToast("Result rejected — they'll need to log it again.");
