@@ -139,6 +139,56 @@ function LadderCupBadgeRow({ row, c }) {
 const LADDER_CUP_STANDINGS_ROW_HEIGHT = 42;
 const LADDER_CUP_STANDINGS_VISIBLE_ROWS = 10;
 
+// Cosmetic Elo-style tier read off ladder_rating (the separate matchmaking
+// number — see formats/ladderCup.js) purely so the table has a sense of
+// "climbing the ranks" beyond the raw points column. Thresholds are
+// centered on RATING_START (1000): a club that hasn't played yet starts
+// Silver, not Bronze, so a fresh entry doesn't read as already behind.
+function ladderCupTier(rating) {
+  if (rating >= 1200) return { label: "Diamond", color: "#8FD9F5" };
+  if (rating >= 1100) return { label: "Platinum", color: "#8FE3C7" };
+  if (rating >= 1000) return { label: "Gold", color: "#FFD700" };
+  if (rating >= 900) return { label: "Silver", color: "#C0C0C0" };
+  return { label: "Bronze", color: "#CD7F32" };
+}
+
+// Top-3 podium — center-tallest #1 with a crown, #2/#3 flanking on shorter
+// pedestals — rendered above the table itself so the club actually leading
+// the ladder gets a "trophy shelf" moment instead of just being row one of
+// a list. Only shown against the full, unfiltered standings (not mid-
+// search) and only once there are actually 3+ clubs to podium.
+function LadderCupPodium({ standings, avatarByTeamId, c }) {
+  const order = [standings[1], standings[0], standings[2]];
+  return (
+    <div className="flex items-end justify-center gap-4 sm:gap-6 mb-5 pt-3 pb-1">
+      {order.map((r) => {
+        const rank = r.rank_position;
+        const isFirst = rank === 1;
+        const medal = rank === 1 ? "#FFD700" : rank === 2 ? "#C0C0C0" : "#CD7F32";
+        const eliminated = r._row.status === "eliminated";
+        return (
+          <div key={r.club_id} className="flex flex-col items-center" style={{ opacity: eliminated ? 0.45 : 1 }}>
+            <div className="relative mb-2">
+              {isFirst && (
+                <Crown size={18} className="absolute -top-6 left-1/2 -translate-x-1/2 animate-ladder-heartbeat" style={{ color: medal }} />
+              )}
+              <div className="rounded-full" style={{ boxShadow: `0 0 0 3px ${medal}, 0 0 18px -2px ${medal}` }}>
+                <MemberAvatar url={avatarByTeamId ? avatarByTeamId[r.club_id] : null} username={r.club_name} size={isFirst ? 56 : 44} c={c} />
+              </div>
+            </div>
+            <span className="font-body text-xs font-semibold truncate max-w-[84px]" style={{ color: c.text }}>{r.club_name}</span>
+            <span className="font-mono text-[10px] font-bold" style={{ color: medal }}>{r.pts} pts</span>
+            <div className="mt-1.5 w-16 rounded-t-lg flex items-start justify-center pt-1 font-display font-extrabold text-sm"
+              style={{ height: isFirst ? 44 : rank === 2 ? 34 : 26, background: `linear-gradient(180deg, ${medal}33, ${medal}0d)`, borderTop: `2px solid ${medal}`, color: medal }}>
+              {rank}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Same shape as SHARE_STANDINGS_COLUMNS (App.jsx) but without the Draws
 // column — Ladder Cup has no draws — and with Streak added since it's the
 // one extra stat that actually matters for this format's share image.
@@ -222,6 +272,8 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
         <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
       </div>
 
+      {!q && standings.length >= 3 && <LadderCupPodium standings={standings} avatarByTeamId={avatarByTeamId} c={c} />}
+
       <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: c.border, boxShadow: "0 8px 22px -10px rgba(0,0,0,0.55)" }}>
         <div className="overflow-y-auto" style={{ maxHeight: scrolls ? LADDER_CUP_STANDINGS_ROW_HEIGHT * LADDER_CUP_STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
         <table className="w-full font-mono text-sm min-w-[620px]">
@@ -250,6 +302,8 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
               // "medaling", it's out.
               const medalColor = eliminated ? null : r.rank_position === 1 ? "#FFD700" : r.rank_position === 2 ? "#C0C0C0" : r.rank_position === 3 ? "#CD7F32" : null;
                 const danger = !eliminated && zoneFor(r.rank_position - 1) === c.red;
+                const onFire = !eliminated && row.streak >= 3;
+                const tier = ladderCupTier(row.ladder_rating ?? 1000);
                 const statusChip = {
                   eliminated: { color: c.textFaint, bg: "transparent", icon: Skull },
                   pending_second_life: { color: "#B8860B", bg: "rgba(184,134,11,0.15)", icon: Heart },
@@ -258,10 +312,21 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
               }[row.status] || { color: c.textFaint, bg: "transparent", icon: Shield };
               return (
                 <tr key={r.club_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
-                  className="border-b align-top cursor-pointer transition-colors active:brightness-125" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: danger ? "rgba(200,30,58,0.06)" : myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
+                  className="border-b align-top cursor-pointer transition-colors active:brightness-125" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: danger ? "rgba(200,30,58,0.06)" : onFire ? "rgba(240,160,32,0.05)" : myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
                 <td className="py-2.5 pl-2 relative">
                   <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: eliminated ? "transparent" : zoneFor(r.rank_position - 1) }} />
-                  {medalColor ? <Medal size={13} style={{ color: medalColor }} /> : <span style={{ color: c.textFaint }}>{r.rank_position}</span>}
+                  {/* Rank read as a small filled badge instead of bare text
+                      — medal colors get a glow ring so top-3 pop out of the
+                      list at a glance, same "achievement chip" language the
+                      badge row below already uses. */}
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      background: medalColor ? `${medalColor}26` : "transparent",
+                      color: medalColor || c.textFaint,
+                      boxShadow: medalColor ? `0 0 0 1px ${medalColor}66, 0 0 8px -2px ${medalColor}` : "none",
+                    }}>
+                    {medalColor ? <Medal size={12} /> : r.rank_position}
+                  </span>
                 </td>
                 <td className="py-2.5 font-body font-medium">
                   <div className="flex items-center gap-2">
@@ -269,8 +334,18 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
                     {row.status === "champion" && <Crown size={13} style={{ color: c.accent }} />}
                     <span className="truncate">{r.club_name}</span>
                   </div>
-                  <div className="inline-flex items-center gap-1 font-mono text-[10px] mt-0.5 px-1.5 py-[1px] rounded-full" style={{ color: statusChip.color, background: statusChip.bg }}>
-                    <statusChip.icon size={9} /> {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
+                  <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                    <div className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-[1px] rounded-full" style={{ color: statusChip.color, background: statusChip.bg }}>
+                      <statusChip.icon size={9} /> {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
+                    </div>
+                    {/* Cosmetic matchmaking tier (see ladderCupTier) — a
+                        "climbing the ranks" read that moves off
+                        ladder_rating independently of the points column,
+                        so a club can be mid-table on points but visibly
+                        Gold/Platinum on form. */}
+                    <div className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-[1px] rounded-full" style={{ color: tier.color, background: `${tier.color}22` }}>
+                      {tier.label}
+                    </div>
                   </div>
                   <LadderCupBadgeRow row={row} c={c} />
                 </td>
@@ -279,9 +354,14 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>
-                  {row.streak >= 3 ? <span className="inline-flex items-center gap-0.5 animate-ladder-flame" style={{ color: "#F0A020" }}><Flame size={11} />{row.streak}</span> : row.streak}
+                  {onFire ? <span className="inline-flex items-center gap-0.5 animate-ladder-flame" style={{ color: "#F0A020" }}><Flame size={11} />{row.streak}</span> : row.streak}
                 </td>
-                <td className="text-center py-2.5 pr-2 font-display font-extrabold text-base" style={{ color: c.text }}>{r.pts}</td>
+                <td className="text-center py-2.5 pr-2 font-display font-extrabold text-base" style={{ color: medalColor || c.text }}>
+                  <span className="inline-flex items-center gap-1">
+                    {medalColor && <Trophy size={11} style={{ color: medalColor }} />}
+                    {r.pts}
+                  </span>
+                </td>
               </tr>
               );
             })}
