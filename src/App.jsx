@@ -4594,6 +4594,40 @@ export default function App() {
     updated_at: new Date().toISOString(),
   });
 
+  // Routed through apply_ladder_cup_entry_result (RPC, security definer —
+  // see supabase/migrations/20260819_ladder_cup_entry_result_rpc.sql)
+  // instead of a direct .update() on ladder_cup_entries. That table
+  // already rejects a plain client INSERT under RLS (see
+  // ensure_ladder_cup_entry's comment), and the same policy blocks these
+  // UPDATEs too — which is why confirmed results were silently failing to
+  // land on the standings table / elimination status despite the match
+  // itself finalizing fine. teamAId/teamBId are the two clubs the RPC
+  // checks caller membership against (self-serve paths) alongside
+  // leagues.created_by (admin paths).
+  // badgeWalkoverCount is passed separately (not part of entry.badge_counts,
+  // same asymmetry ladderCupRowPatchFromEntry's callers already work
+  // around — see the badge_walkover comment at the approve-claim call
+  // site below) — defaults to the row's existing count so ordinary result
+  // confirms leave it untouched.
+  const applyLadderCupEntryPatch = async (leagueId, entryId, teamAId, teamBId, entry, badgeWalkoverCount) => {
+    const { error } = await supabase.rpc("apply_ladder_cup_entry_result", {
+      p_entry_id: entryId, p_league_id: leagueId, p_team_a_id: teamAId, p_team_b_id: teamBId,
+      p_pts: entry.pts, p_w: entry.w, p_l: entry.l, p_gd: entry.gd, p_streak: entry.streak,
+      p_status: entry.status,
+      p_second_life_used: entry.second_life_used,
+      p_second_life_offered_at: entry.second_life_offer?.offered_at ?? null,
+      p_second_life_expires_at: entry.second_life_offer?.expires_at ?? null,
+      p_toughest_opponent_beaten_pts: entry.toughest_opponent_beaten_pts,
+      p_ladder_rating: entry.ladder_rating,
+      p_badge_heater_tier: entry.badge_counts.heater_wins,
+      p_badge_giant_slayer: entry.badge_counts.giant_slayer,
+      p_badge_second_life: entry.badge_counts.second_life,
+      p_badge_walkover: badgeWalkoverCount,
+      p_badge_bounty_hunter: entry.badge_counts.bounty_hunter,
+    });
+    return !error ? true : (showToast(`Result saved, but the ladder standings couldn't be fully updated: ${error.message}`), false);
+  };
+
   // Step 10: result logging — now a proper submit -> opponent
   // confirm-or-dispute -> admin-escalation pipeline, same shape every other
   // result path in this app (result_submissions, challenges,
@@ -4708,11 +4742,10 @@ export default function App() {
     }).eq("id", match.id);
     if (matchErr) { showToast(`Couldn't save the match result: ${matchErr.message}`); return false; }
 
-    const [{ error: winnerErr }, { error: loserErr }] = await Promise.all([
-      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(winner)).eq("id", winnerRow.id),
-      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(loser)).eq("id", loserRow.id),
+    await Promise.all([
+      applyLadderCupEntryPatch(league.id, winnerRow.id, winnerTeamId, loserTeamId, winner, winnerRow.badge_walkover),
+      applyLadderCupEntryPatch(league.id, loserRow.id, winnerTeamId, loserTeamId, loser, loserRow.badge_walkover),
     ]);
-    if (winnerErr || loserErr) showToast("Result saved, but the ladder standings couldn't be fully updated — check permissions.");
 
     const homeName = teamsById[match.home_team_id]?.name || "Home";
     const awayName = teamsById[match.away_team_id]?.name || "Away";
@@ -4802,8 +4835,8 @@ export default function App() {
     const entry = ladderCupEntryFromRow(row, teamsById[teamId]?.name || "Unknown club");
     const updated = accept ? acceptSecondLife(entry) : declineOrExpireSecondLife(entry);
 
-    const { error } = await supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(updated)).eq("id", row.id);
-    if (error) { showToast(`Couldn't save your decision: ${error.message}`); return; }
+    const ok = await applyLadderCupEntryPatch(league.id, row.id, teamId, teamId, updated, row.badge_walkover);
+    if (!ok) return;
     await refreshLeague(league.id);
     showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
   };
@@ -4901,13 +4934,10 @@ export default function App() {
     }).eq("id", claimRow.id);
     if (claimErr) { showToast(`Couldn't approve the claim: ${claimErr.message}`); return; }
 
-    const [{ error: winnerErr }, { error: loserErr }] = await Promise.all([
-      supabase.from("ladder_cup_entries").update({
-        ...ladderCupRowPatchFromEntry(winner), badge_walkover: winnerRow.badge_walkover + 1,
-      }).eq("id", winnerRow.id),
-      supabase.from("ladder_cup_entries").update(ladderCupRowPatchFromEntry(loser)).eq("id", loserRow.id),
+    await Promise.all([
+      applyLadderCupEntryPatch(league.id, winnerRow.id, claimRow.claimant_team_id, claimRow.target_team_id, winner, winnerRow.badge_walkover + 1),
+      applyLadderCupEntryPatch(league.id, loserRow.id, claimRow.claimant_team_id, claimRow.target_team_id, loser, loserRow.badge_walkover),
     ]);
-    if (winnerErr || loserErr) showToast("Claim approved, but the ladder standings couldn't be fully updated — check permissions.");
 
     const winnerName = teamsById[claimRow.claimant_team_id]?.name || "A club";
     const loserName = teamsById[claimRow.target_team_id]?.name || "their opponent";

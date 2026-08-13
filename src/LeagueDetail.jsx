@@ -480,11 +480,23 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
             <Swords size={13} /> Challenge
           </button>
         )}
-        {match && !resultPending && (
+        {/* match.result_status flips straight from "pending" to "confirmed"
+            once applyLadderCupMatchResult lands — resultPending alone
+            (only true while "pending") doesn't distinguish "no result
+            logged yet" from "already confirmed", so a finalized match was
+            falling through to the same Log result button as a fresh one.
+            Gate on finalized_at instead so a settled match shows its
+            score, not an invitation to log it again. */}
+        {match && !resultPending && !match.finalized_at && (
           <button onClick={() => onOpenResult(match)}
             className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>
-            <Trophy size={13} /> Log result
+            <Trophy size={13} /> Log result{match.match_length_minutes != null ? ` · ${match.match_length_minutes}m` : ""}
           </button>
+        )}
+        {match && match.finalized_at && (
+          <div className="shrink-0 font-mono text-xs font-semibold px-3 py-2" style={{ color: c.textFaint }}>
+            {myGoals} – {theirGoals}
+          </div>
         )}
         {resultPending && !iReported && !escalated && (
           <div className="flex items-center gap-1.5 shrink-0">
