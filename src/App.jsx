@@ -3318,6 +3318,7 @@ export default function App() {
       is_ladder: isLadder,
     });
     if (error) { showToast(`Couldn't send challenge: ${error.message}`); return; }
+    logActivity("challenge_sent", { opponent_username: opponent.username, is_ladder: isLadder });
     await loadChallenges();
     showToast(isLadder ? `Ladder challenge sent to ${opponent.username} — win it and their spot is yours.` : `Challenge sent to ${opponent.username}.`);
   };
@@ -3331,6 +3332,7 @@ export default function App() {
       : { status: "declined", responded_at: new Date().toISOString() };
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't respond: ${error.message}`); return; }
+    logActivity(accept ? "challenge_accepted" : "challenge_declined", { challenger_username: challenge.challenger_username, is_ladder: challenge.is_ladder });
     await loadChallenges();
     showToast(accept ? `Challenge accepted — say hi on WhatsApp.` : "Challenge declined.");
   };
@@ -3373,6 +3375,7 @@ export default function App() {
     };
     const { error } = await supabase.from("challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
+    logActivity("match_result_submitted", { context: "challenge", challenge_id: challenge.id });
 
     await loadChallenges();
     showToast("Result logged — waiting for them to confirm.");
@@ -3749,6 +3752,7 @@ export default function App() {
     };
     const { error } = await supabase.from("open_challenges").update(update).eq("id", challenge.id);
     if (error) { showToast(`Couldn't log result: ${error.message}`); return; }
+    logActivity("match_result_submitted", { context: "open_challenge", challenge_id: challenge.id });
 
     await loadOpenChallenges();
     showToast("Result logged — waiting for them to confirm.");
@@ -4351,6 +4355,7 @@ export default function App() {
 
     const { data: league, error } = await supabase.from("leagues").insert(insertPayload).select().single();
     if (error) { showToast(`Couldn't create league: ${error.message}`); return; }
+    logActivity("league_created", { league_id: league.id, league_name: league.name, format });
 
     // Pre-listed clubs are added as registered teams. For every other
     // format, fixtures are NOT generated yet — the league stays open for
@@ -4736,6 +4741,7 @@ export default function App() {
       showToast(`Couldn't log the result: ${error.message}`);
       return false;
     }
+    logActivity("match_result_submitted", { context: "ladder_cup", league_id: league.id, match_id: match.id, winner_team_id: winnerTeamId });
 
     await refreshLeague(league.id);
     showToast("Result logged — waiting for them to confirm or dispute it.");
@@ -4962,6 +4968,7 @@ export default function App() {
     const { error } = await supabase.from("ladder_cup_walkover_claims")
       .update({ status: "pending_review", proof_url: proofUrl }).eq("id", claimRow.id);
     if (error) { showToast(`Couldn't submit the claim: ${error.message}`); return; }
+    logActivity("walkover_claim_submitted", { league_id: league.id, claim_id: claimRow.id });
     await refreshLeague(league.id);
     showToast("Walkover claim submitted — waiting on admin review.");
   };
@@ -5098,6 +5105,7 @@ export default function App() {
       team_id: match ? match.id : null,
     });
     if (error) { showToast("Couldn't join — you may already be a member."); return; }
+    logActivity("league_joined", { league_id: leagueId, league_name: league.name, as_team: !!match });
     await refreshLeague(leagueId);
     showToast(match ? `Joined — you're playing as ${match.name}.` : "Joined as a spectator — your username isn't on this league's team list.");
     } finally {
@@ -5449,6 +5457,7 @@ export default function App() {
       else showToast(`Couldn't submit result: ${error.message}`);
       return false;
     }
+    logActivity("match_result_submitted", { league_id: league.id, fixture_id: fixture.id, home_score: homeScore, away_score: awayScore });
     await refreshLeague(league.id);
     showToast("Result submitted — pending admin approval.");
     return true;
