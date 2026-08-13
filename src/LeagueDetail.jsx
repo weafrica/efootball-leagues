@@ -732,7 +732,7 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   if (claims.length === 0) return null;
   return (
-    <div className="rounded-2xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
+    <div className="rounded-2xl p-4 border" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Zap size={13} /> {claims.length} walkover claim{claims.length === 1 ? "" : "s"} awaiting review
       </div>
@@ -775,7 +775,7 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   if (matches.length === 0) return null;
   return (
-    <div className="rounded-2xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
+    <div className="rounded-2xl p-4 border" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Camera size={13} /> {matches.length} match result{matches.length === 1 ? "" : "s"} awaiting your review
       </div>
@@ -839,7 +839,7 @@ function LadderCupFindOpponent({ league, c }) {
   };
 
   return (
-    <div className="rounded-2xl p-4 border mb-3" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+    <div className="rounded-2xl p-4 border" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
       <div className="flex flex-col sm:flex-row gap-2">
         <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Club name"
@@ -1004,30 +1004,48 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
 
       {tab === "table" ? (
         <div>
-          {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
+          {/* Everything else on this tab (find opponent, admin review queues,
+              results feed, discussion) now sits as a stack of compact
+              "widget" cards above the Standings table — the table itself is
+              the main, full-page content anchored at the bottom, the way a
+              dashboard puts quick-glance cards above its primary data view
+              rather than burying them under it. */}
+          <div className="space-y-4 mb-6">
+            {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
 
-          {canManage && !league.ladder_cup_finalized_at && (
-            <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
-          )}
+            {canManage && !league.ladder_cup_finalized_at && (
+              <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
+            )}
 
-          {canManage && !league.ladder_cup_finalized_at && (
-            <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
-          )}
+            {canManage && !league.ladder_cup_finalized_at && (
+              <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
+            )}
 
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Standings</div>
+            <div className="rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+              <div className="p-4">
+                <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
+                  comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
+                  emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
+                  canEditResults={canManage}
+                  onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+              <div className="p-4">
+                <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
+                  comments={regularComments} heading="Discussion" allowCompose
+                  onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
+              </div>
+            </div>
+          </div>
+
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.accent }}>
+            <Trophy size={13} /> The Ladder
+          </div>
           <div className="mb-5">
             <LadderCupStandingsTable league={league} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
           </div>
-
-          <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
-            comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
-            emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
-            canEditResults={canManage}
-            onPost={onPostComment} onDelete={onDeleteComment} onEdit={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
-
-          <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
-            comments={regularComments} heading="Discussion" allowCompose
-            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
       ) : (
         <div>
