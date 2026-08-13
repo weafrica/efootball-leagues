@@ -1,4 +1,4 @@
-// Uploads a file straight from the browser to Vercel Blob, replacing the
+﻿// Uploads a file straight from the browser to Vercel Blob, replacing the
 // old `supabase.storage.from(bucket).upload(...)` + proxiedMediaUrl(...)
 // two-step. This is the single call site every upload flow in the app
 // should use going forward for the five public buckets Blob now owns.
@@ -8,6 +8,7 @@
 // unlike the old api/image.js rewrite. Save it straight into the DB the
 // same way the old publicUrl was saved.
 import { upload } from "@vercel/blob/client";
+import { logActivity } from "../activityLog";
 
 // Must match api/blob-upload.js's ALLOWED_PREFIXES exactly (minus the
 // trailing slash) — this is the client-side half of that allow-list.
@@ -36,6 +37,17 @@ export async function uploadToBlob(bucket, path, file, contentType) {
     access: "public",
     handleUploadUrl: "/api/blob-upload",
     contentType: contentType || file.type || undefined,
+  });
+  // Every upload flow in the app funnels through here, so this is the one
+  // place that can log Blob writes for all of them without having to touch
+  // each call site (and stays accurate for any new call site added later).
+  // bytes is the size actually PUT to Blob — i.e. post-compression for
+  // images that went through compressImage first — since that's what
+  // counts against Blob storage/bandwidth, not the original camera file.
+  logActivity("blob_upload", {
+    bucket,
+    bytes: file.size ?? null,
+    content_type: contentType || file.type || null,
   });
   return blob.url;
 }
