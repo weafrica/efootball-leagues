@@ -106,7 +106,7 @@ function LadderCupBadgeRow({ row, c }) {
 }
 
 const LADDER_CUP_STANDINGS_ROW_HEIGHT = 42;
-const LADDER_CUP_STANDINGS_VISIBLE_ROWS = 5;
+const LADDER_CUP_STANDINGS_VISIBLE_ROWS = 10;
 
 // Same shape as SHARE_STANDINGS_COLUMNS (App.jsx) but without the Draws
 // column — Ladder Cup has no draws — and with Streak added since it's the
