@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
+import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
@@ -2996,7 +2997,13 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      // Step 1 of activity tracking — just sign-in/sign-out for now, more
+      // event types get added incrementally from here (see activityLog.js).
+      if (event === "SIGNED_IN") logActivity("sign_in");
+      if (event === "SIGNED_OUT") logActivity("sign_out");
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
