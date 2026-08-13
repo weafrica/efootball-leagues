@@ -901,28 +901,48 @@ const LADDER_CUP_WIDGET_TITLE = {
   discussion: "Discussion",
 };
 
-// A single small trigger in the quick-action row above the standings table
-// — just an icon, a label, and (for the two admin queues) a count badge.
-// The actual panel content only mounts once its trigger is tapped (see
-// openWidget in LadderCupPendingPanel), so this row stays cheap even with
-// a big Discussion thread sitting behind one of the buttons.
-function LadderCupWidgetTrigger({ icon: Icon, label, count, highlight, active, onClick, c }) {
+// A single quick-action tile in the row above the standings table — an
+// icon in a colored circle, a label, and a subtitle line (a count, a
+// status, or a preview). `tone` gives each widget its own look (Find
+// opponent reads gold/neutral, the two admin queues read urgent
+// gold-brown/red, Results reads green, Discussion reads a cooler neutral)
+// so the row scans as five distinct entry points rather than five copies
+// of the same pill. The actual panel content only mounts once its tile is
+// tapped (see openWidget in LadderCupPendingPanel), so this row stays
+// cheap even with a big Discussion thread sitting behind one of them.
+const LADDER_CUP_WIDGET_TONE = {
+  accent: { bg: "rgba(232,185,35,0.08)", border: "rgba(232,185,35,0.35)", circle: "rgba(232,185,35,0.18)", fg: "#E8B923" },
+  amber: { bg: "rgba(217,164,6,0.12)", border: "#B8860B55", circle: "rgba(217,164,6,0.22)", fg: "#B8860B" },
+  red: { bg: "rgba(200,30,58,0.10)", border: "rgba(200,30,58,0.4)", circle: "rgba(200,30,58,0.2)", fg: "#E0546E" },
+  green: { bg: "rgba(45,106,79,0.14)", border: "rgba(45,106,79,0.5)", circle: "rgba(45,106,79,0.28)", fg: "#7FC9A2" },
+  neutral: { bg: "rgba(245,238,220,0.05)", border: "rgba(245,238,220,0.18)", circle: "rgba(245,238,220,0.1)", fg: "#F5EEDC" },
+};
+
+function LadderCupWidgetTrigger({ icon: Icon, label, subtitle, count, tone = "neutral", active, onClick, c }) {
+  const t = LADDER_CUP_WIDGET_TONE[tone];
   return (
     <button onClick={onClick}
-      className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full border transition-transform active:scale-95"
+      className="relative shrink-0 w-36 h-[104px] flex flex-col justify-between text-left rounded-2xl border p-3 transition-transform active:scale-95"
       style={{
-        background: active ? c.accent : highlight ? "rgba(217,164,6,0.12)" : c.surface,
-        borderColor: active ? c.accent : highlight ? "#B8860B55" : c.border,
-        color: active ? c.accentText : highlight ? "#B8860B" : c.textDim,
+        background: t.bg,
+        borderColor: active ? t.fg : t.border,
+        borderWidth: active ? 2 : 1,
+        boxShadow: active ? `0 0 0 3px ${t.circle}` : "0 6px 16px -10px rgba(0,0,0,0.6)",
       }}>
-      <Icon size={13} />
-      {label}
-      {count > 0 && (
-        <span className="font-mono text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full"
-          style={{ background: active ? c.accentText : "#B8860B", color: active ? c.accent : "#fff" }}>
-          {count}
+      <div className="flex items-start justify-between">
+        <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: t.circle, color: t.fg }}>
+          <Icon size={16} />
         </span>
-      )}
+        {count > 0 && (
+          <span className="font-mono text-xs font-bold min-w-[22px] h-[22px] px-1 flex items-center justify-center rounded-full" style={{ background: t.fg, color: c.bg }}>
+            {count}
+          </span>
+        )}
+      </div>
+      <div>
+        <div className="font-body text-sm font-bold leading-tight" style={{ color: c.text }}>{label}</div>
+        {subtitle && <div className="font-mono text-[10px] uppercase tracking-wide mt-0.5 truncate" style={{ color: t.fg }}>{subtitle}</div>}
+      </div>
     </button>
   );
 }
@@ -1067,31 +1087,39 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
       {tab === "table" ? (
         <div>
           {/* Everything else on this tab (find opponent, admin review
-              queues, results feed, discussion) is now a row of small
-              trigger widgets — icon, label, and a count badge where one
-              applies. Tapping a trigger doesn't push the table down; it
-              pops the widget's full content open in an overlay on top of
-              the table, same bottom-sheet-on-mobile/centered-on-desktop
-              chrome ShareRangeModal/PlayerProfileModal already use
-              elsewhere in this app, so it reads as "the same kind of
-              popup" rather than a one-off. Closing (X, backdrop click, or
-              re-tapping the same trigger) just clears openWidget. */}
-          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto -mx-4 px-4 pb-2 mb-6">
+              queues, results feed, discussion) is a row of bigger tile-
+              style quick-action widgets — icon-in-circle, label, and a
+              subtitle line, each with its own color "tone" (see
+              LADDER_CUP_WIDGET_TONE) so the row scans as five distinct
+              entry points, not five copies of one pill. Tapping a tile
+              doesn't push the table down; it pops the widget's full
+              content open in an overlay on top of the table, same
+              bottom-sheet-on-mobile/centered-on-desktop chrome
+              ShareRangeModal/PlayerProfileModal already use elsewhere in
+              this app, so it reads as "the same kind of popup" rather
+              than a one-off. Closing (X, backdrop click, or re-tapping
+              the same tile) just clears openWidget. */}
+          <div className="no-scrollbar flex items-stretch gap-3 overflow-x-auto -mx-4 px-4 pb-2 mb-6">
             {!league.ladder_cup_finalized_at && (
-              <LadderCupWidgetTrigger icon={Search} label="Find opponent" active={openWidget === "opponent"} onClick={() => setOpenWidget((w) => (w === "opponent" ? null : "opponent"))} c={c} />
+              <LadderCupWidgetTrigger icon={Search} label="Find opponent" subtitle="Search clubs" tone="accent"
+                active={openWidget === "opponent"} onClick={() => setOpenWidget((w) => (w === "opponent" ? null : "opponent"))} c={c} />
             )}
 
             {canManage && !league.ladder_cup_finalized_at && pendingWalkoverClaims.length > 0 && (
-              <LadderCupWidgetTrigger icon={Zap} label="Walkover claims" count={pendingWalkoverClaims.length} highlight active={openWidget === "walkover"} onClick={() => setOpenWidget((w) => (w === "walkover" ? null : "walkover"))} c={c} />
+              <LadderCupWidgetTrigger icon={Zap} label="Walkovers" subtitle="Awaiting review" count={pendingWalkoverClaims.length} tone="amber"
+                active={openWidget === "walkover"} onClick={() => setOpenWidget((w) => (w === "walkover" ? null : "walkover"))} c={c} />
             )}
 
             {canManage && !league.ladder_cup_finalized_at && escalatedResultMatches.length > 0 && (
-              <LadderCupWidgetTrigger icon={Camera} label="Escalated results" count={escalatedResultMatches.length} highlight active={openWidget === "escalated"} onClick={() => setOpenWidget((w) => (w === "escalated" ? null : "escalated"))} c={c} />
+              <LadderCupWidgetTrigger icon={Camera} label="Escalated" subtitle="Awaiting review" count={escalatedResultMatches.length} tone="red"
+                active={openWidget === "escalated"} onClick={() => setOpenWidget((w) => (w === "escalated" ? null : "escalated"))} c={c} />
             )}
 
-            <LadderCupWidgetTrigger icon={Trophy} label="Results" active={openWidget === "results"} onClick={() => setOpenWidget((w) => (w === "results" ? null : "results"))} c={c} />
+            <LadderCupWidgetTrigger icon={Trophy} label="Results" subtitle={resultComments.length > 0 ? `${resultComments.length} posted` : "None yet"} tone="green"
+              active={openWidget === "results"} onClick={() => setOpenWidget((w) => (w === "results" ? null : "results"))} c={c} />
 
-            <LadderCupWidgetTrigger icon={MessageCircle} label="Discussion" active={openWidget === "discussion"} onClick={() => setOpenWidget((w) => (w === "discussion" ? null : "discussion"))} c={c} />
+            <LadderCupWidgetTrigger icon={MessageCircle} label="Discussion" subtitle={regularComments.length > 0 ? `${regularComments.length} messages` : "Say something"} tone="neutral"
+              active={openWidget === "discussion"} onClick={() => setOpenWidget((w) => (w === "discussion" ? null : "discussion"))} c={c} />
           </div>
 
           {openWidget && (
