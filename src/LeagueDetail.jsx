@@ -736,7 +736,7 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Zap size={13} /> {claims.length} walkover claim{claims.length === 1 ? "" : "s"} awaiting review
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
         {claims.map((cl) => {
           const claimant = teamsById[cl.claimant_team_id];
           const target = teamsById[cl.target_team_id];
@@ -779,7 +779,7 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
         <Camera size={13} /> {matches.length} match result{matches.length === 1 ? "" : "s"} awaiting your review
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
         {matches.map((m) => {
           const home = teamsById[m.home_team_id];
           const away = teamsById[m.away_team_id];
@@ -841,11 +841,15 @@ function LadderCupFindOpponent({ league, c }) {
   return (
     <div className="rounded-2xl p-4 border" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
-      <div className="flex flex-col sm:flex-row gap-2">
+      {/* Always stacked (no sm:flex-row) — this now lives in a fixed-width
+          compact widget card, not a full-width column, so a side-by-side
+          input+button row would cramp or overflow it regardless of
+          viewport size. */}
+      <div className="flex flex-col gap-2">
         <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Club name"
           className="w-full border rounded-xl px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
         <datalist id="team-names-datalist">{league.teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
-        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2.5 rounded-xl shrink-0 transition-transform active:scale-95" style={{ background: c.accent, color: c.accentText }}>Find</button>
+        <button onClick={search} className="w-full font-body text-sm font-semibold px-4 py-2.5 rounded-xl shrink-0 transition-transform active:scale-95" style={{ background: c.accent, color: c.accentText }}>Find</button>
       </div>
 
       {result && (result.notFound ? (
@@ -869,7 +873,7 @@ function LadderCupFindOpponent({ league, c }) {
           ) : result.pool.length === 0 ? (
             <div className="font-body text-xs mt-2" style={{ color: c.textFaint }}>No one's in range to challenge yet.</div>
           ) : (
-            <div className="mt-2 space-y-1">
+            <div className="mt-2 space-y-1 max-h-48 overflow-y-auto pr-1">
               {result.pool.map((op) => (
                 <div key={op.club_id} className="flex items-center justify-between rounded-lg px-3 py-1.5" style={{ background: c.surfaceHover }}>
                   <span className="font-body text-xs">{op.club_name}</span>
@@ -1005,24 +1009,38 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
       {tab === "table" ? (
         <div>
           {/* Everything else on this tab (find opponent, admin review queues,
-              results feed, discussion) now sits as a stack of compact
-              "widget" cards above the Standings table — the table itself is
-              the main, full-page content anchored at the bottom, the way a
-              dashboard puts quick-glance cards above its primary data view
-              rather than burying them under it. */}
-          <div className="space-y-4 mb-6">
-            {!league.ladder_cup_finalized_at && <LadderCupFindOpponent league={league} c={c} />}
-
-            {canManage && !league.ladder_cup_finalized_at && (
-              <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
+              results feed, discussion) now sits as a horizontal row of
+              compact "widget" cards above the Standings table — the table
+              itself is the main, full-page content anchored at the bottom,
+              the way a dashboard lines quick-glance cards up above its
+              primary data view rather than stacking them (and burying it)
+              below. Same no-scrollbar edge-bleed swipe rail Ladder Battles'
+              Top 10 strip uses (Ladder.jsx) for a consistent feel. Each
+              card gets a fixed width + its own internal scroll cap so one
+              long list (a big claims queue, a busy Discussion) can't blow
+              out the row's height — the row scrolls sideways, each card
+              scrolls vertically within itself. */}
+          <div className="no-scrollbar flex items-start gap-3 overflow-x-auto -mx-4 px-4 pb-2 mb-6">
+            {!league.ladder_cup_finalized_at && (
+              <div className="shrink-0 w-72">
+                <LadderCupFindOpponent league={league} c={c} />
+              </div>
             )}
 
-            {canManage && !league.ladder_cup_finalized_at && (
-              <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
+            {canManage && !league.ladder_cup_finalized_at && pendingWalkoverClaims.length > 0 && (
+              <div className="shrink-0 w-72">
+                <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
+              </div>
             )}
 
-            <div className="rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div className="p-4">
+            {canManage && !league.ladder_cup_finalized_at && escalatedResultMatches.length > 0 && (
+              <div className="shrink-0 w-72">
+                <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
+              </div>
+            )}
+
+            <div className="shrink-0 w-72 rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+              <div className="p-4 max-h-80 overflow-y-auto">
                 <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
                   comments={resultComments} heading="Results" icon={Trophy} allowCompose={false} showFindMyResults
                   emptyText="No results posted yet — they'll show up here as walkovers and matches are logged."
@@ -1031,8 +1049,8 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
               </div>
             </div>
 
-            <div className="rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div className="p-4">
+            <div className="shrink-0 w-72 rounded-2xl border overflow-hidden" style={{ background: c.surface, borderColor: c.border, boxShadow: "0 6px 18px -8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+              <div className="p-4 max-h-80 overflow-y-auto">
                 <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
                   comments={regularComments} heading="Discussion" allowCompose
                   onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
