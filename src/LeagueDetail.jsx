@@ -386,6 +386,11 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
             { label: "Goal diff", value: `${profileRow.gd >= 0 ? "+" : ""}${profileRow.gd}` },
             { label: "Streak", value: profileRow._row.streak },
             { label: "Status", value: LADDER_CUP_STATUS_LABEL[profileRow._row.status] || profileRow._row.status },
+            // Cosmetic matchmaking tier (see ladderCupTier) plus the raw
+            // rating it's derived from — shown to anyone who opens this
+            // club's card (via photo, username, or table row), same as
+            // every other stat here, not just the club's own owner.
+            { label: "Level", value: `${ladderCupTier(profileRow._row.ladder_rating ?? 1000).label} · ${profileRow._row.ladder_rating ?? 1000}` },
           ]}
           onClose={() => setProfileRow(null)}
           c={c}
