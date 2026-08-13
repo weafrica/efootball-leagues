@@ -117,7 +117,23 @@ export function rankLadderCupStandings(entries) {
     b.gd - a.gd ||
     b.toughest_opponent_beaten_pts - a.toughest_opponent_beaten_pts
   );
-  return sorted.map((e, i) => ({ ...e, rank_position: i + 1 }));
+  // Standard competition ranking ("1224"): entries tied on every tiebreaker
+  // field share the same rank_position instead of being split apart by
+  // array order. This matters most at the very start of a Ladder Cup,
+  // before anyone's played — every club is genuinely tied at 0/0/0 then,
+  // and previously got 1, 2, 3... handed out arbitrarily, which fed bogus
+  // "ranked above you" / "#1 right now" signals into isUpset and
+  // getBountyTargetIds below.
+  let rank = 0;
+  return sorted.map((e, i) => {
+    const prev = sorted[i - 1];
+    const tiedWithPrev = i > 0 &&
+      e.pts === prev.pts &&
+      e.gd === prev.gd &&
+      e.toughest_opponent_beaten_pts === prev.toughest_opponent_beaten_pts;
+    if (!tiedWithPrev) rank = i + 1;
+    return { ...e, rank_position: rank };
+  });
 }
 
 /** True if `challengerId` beating `opponentId` counts as an upset (opponent ranked above challenger). */
@@ -126,12 +142,19 @@ export function isUpset(standingsBeforeMatch, challengerId, opponentId) {
   const mine = ranks.get(challengerId);
   const theirs = ranks.get(opponentId);
   if (mine == null || theirs == null) return false;
-  return theirs < mine; // lower rank_position number = higher in the standings
+  return theirs < mine; // lower rank_position number = higher in the standings; ties (equal rank_position) never count
 }
 
-/** IDs of every club tied for #1 right now — all of them are valid bounty targets. */
+/**
+ * ID of the club currently sitting alone at #1, if there is one — the one
+ * valid bounty target. A tie for #1 (including the day-one case where no
+ * club has played yet and everyone's still 0/0/0) does NOT count: there's
+ * no genuine leader to put a bounty on until one club has actually
+ * separated itself from the pack.
+ */
 export function getBountyTargetIds(standingsBeforeMatch) {
   const leaders = standingsBeforeMatch.filter((e) => e.rank_position === 1);
+  if (leaders.length !== 1) return new Set();
   return new Set(leaders.map((e) => e.club_id));
 }
 
