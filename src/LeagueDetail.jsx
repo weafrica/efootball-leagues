@@ -19,6 +19,7 @@ import {
   isFixtureLocked, isResultComment, isWaReminderActive, isWeekendLeague, knockoutRoundFixtures,
   ladderCupResultEscalationReason, nextFixtureForTeam, resultConfirmDeadline, resultEscalationReason, splitCommentsByRoot,
   timeAgo, useCommentSpeakingId, useVoiceRecorder, usesCustomMessage,
+  ACHIEVEMENTS_DEF, computeMyProgress, teamForUserInLeague,
 } from "./App.jsx";
 
 const RulesModal = lazy(() => import("./Rules.jsx"));
@@ -115,14 +116,21 @@ const LADDER_CUP_BADGE_STYLE = {
   walkover: { icon: Zap, color: "#4EA8DE" },
   secondLife: { icon: Heart, color: "#C81E3A" },
 };
-function LadderCupBadgeRow({ row, c }) {
-  const badges = [
+// Shared source of truth for a club's earned badges — used both by the
+// compact icon-only row inline in the table and by the fuller labeled chip
+// list in PlayerProfileModal, so the two views can never drift out of sync
+// on what counts as "earned".
+function ladderCupBadges(row) {
+  return [
     row.badge_heater_tier > 0 && { ...LADDER_CUP_BADGE_STYLE.heater, label: `Heater ×${row.badge_heater_tier}`, flame: true },
     row.badge_giant_slayer > 0 && { ...LADDER_CUP_BADGE_STYLE.giantSlayer, label: `Giant Slayer ×${row.badge_giant_slayer}` },
     row.badge_bounty_hunter > 0 && { ...LADDER_CUP_BADGE_STYLE.bountyHunter, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
     row.badge_walkover > 0 && { ...LADDER_CUP_BADGE_STYLE.walkover, label: `Walkover ×${row.badge_walkover}` },
     row.badge_second_life && { ...LADDER_CUP_BADGE_STYLE.secondLife, label: "Used Second Life" },
   ].filter(Boolean);
+}
+function LadderCupBadgeRow({ row, c }) {
+  const badges = ladderCupBadges(row);
   if (badges.length === 0) return null;
   return (
     <div className="flex items-center gap-1.5 mt-0.5">
@@ -157,7 +165,7 @@ function ladderCupTier(rating) {
 // the ladder gets a "trophy shelf" moment instead of just being row one of
 // a list. Only shown against the full, unfiltered standings (not mid-
 // search) and only once there are actually 3+ clubs to podium.
-function LadderCupPodium({ standings, avatarByTeamId, onSelect, c }) {
+function LadderCupPodium({ standings, avatarByTeamId, c }) {
   const order = [standings[1], standings[0], standings[2]];
   return (
     <div className="flex items-end justify-center gap-4 sm:gap-6 mb-5 pt-3 pb-1">
@@ -167,7 +175,7 @@ function LadderCupPodium({ standings, avatarByTeamId, onSelect, c }) {
         const medal = rank === 1 ? "#FFD700" : rank === 2 ? "#C0C0C0" : "#CD7F32";
         const eliminated = r._row.status === "eliminated";
         return (
-          <button key={r.club_id} onClick={() => onSelect(r)} className="flex flex-col items-center transition-transform active:scale-95" style={{ opacity: eliminated ? 0.45 : 1 }}>
+          <div key={r.club_id} className="flex flex-col items-center" style={{ opacity: eliminated ? 0.45 : 1 }}>
             <div className="relative mb-2">
               {isFirst && (
                 <Crown size={18} className="absolute -top-6 left-1/2 -translate-x-1/2 animate-ladder-heartbeat" style={{ color: medal }} />
@@ -182,7 +190,7 @@ function LadderCupPodium({ standings, avatarByTeamId, onSelect, c }) {
               style={{ height: isFirst ? 44 : rank === 2 ? 34 : 26, background: `linear-gradient(180deg, ${medal}33, ${medal}0d)`, borderTop: `2px solid ${medal}`, color: medal }}>
               {rank}
             </div>
-          </button>
+          </div>
         );
       })}
     </div>
@@ -210,10 +218,45 @@ const LADDER_CUP_SHARE_COLUMNS = [
 // share/download image — the parts of StandingsPanel (App.jsx) that are
 // genuinely useful here too — while keeping the Ladder Cup-only stuff
 // (streak, badges, status label) that StandingsPanel has no concept of.
-function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
+function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTeamId, myTeamId, c }) {
   const [query, setQuery] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [profileRow, setProfileRow] = useState(null); // the standings row currently shown in PlayerProfileModal, or null
+
+  // The club's owner (whoever's user_id holds this team's membership row in
+  // *this* league) — needed to look up their app-wide XP/level and earned
+  // achievement badges below, neither of which live on the Ladder Cup entry
+  // itself. Falls back to null (not found) rather than throwing, since a
+  // club can in principle have no matching member row (e.g. mid-removal).
+  const profileOwnerId = useMemo(() => {
+    if (!profileRow) return null;
+    return (league.members || []).find((m) => m.team_id === profileRow.club_id)?.user_id || null;
+  }, [profileRow, league.members]);
+
+  // Same XP/level system the homepage shows for "you" (see computeMyProgress
+  // in App.jsx), just aggregated for whoever owns the clicked club instead —
+  // every match they've played across every league they've fielded a team
+  // in, not only this one. Recomputed from data already loaded client-side
+  // (the full `leagues` list), so it needs no extra fetch.
+  const profileOwnerProgress = useMemo(() => {
+    if (!profileOwnerId || !leagues) return null;
+    return computeMyProgress(leagues, (l) => teamForUserInLeague(l, profileOwnerId));
+  }, [profileOwnerId, leagues]);
+
+  // The owner's earned milestone badges (see ACHIEVEMENTS_DEF in App.jsx) —
+  // read straight from the shared, already-synced achievements table
+  // (allAchievements) rather than recomputed here, same source of truth the
+  // Wall of Fame uses for other members' badges. Anything not yet synced
+  // for that member just won't show up here either, same as there.
+  const profileOwnerBadges = useMemo(() => {
+    if (!profileOwnerId || !allAchievements) return [];
+    return allAchievements
+      .filter((a) => a.user_id === profileOwnerId)
+      .map((a) => ACHIEVEMENTS_DEF.find((d) => d.id === a.achievement_id))
+      .filter(Boolean)
+      .map((d) => ({ icon: d.icon, label: d.label, color: d.color }));
+  }, [profileOwnerId, allAchievements]);
+
   const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
   const standings = useMemo(() => rankLadderCupStandings(mapped), [mapped]);
 
@@ -272,7 +315,7 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
         <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
       </div>
 
-      {!q && standings.length >= 3 && <LadderCupPodium standings={standings} avatarByTeamId={avatarByTeamId} onSelect={setProfileRow} c={c} />}
+      {!q && standings.length >= 3 && <LadderCupPodium standings={standings} avatarByTeamId={avatarByTeamId} c={c} />}
 
       <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: c.border, boxShadow: "0 8px 22px -10px rgba(0,0,0,0.55)" }}>
         <div className="overflow-y-auto" style={{ maxHeight: scrolls ? LADDER_CUP_STANDINGS_ROW_HEIGHT * LADDER_CUP_STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
@@ -387,11 +430,17 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
             { label: "Streak", value: profileRow._row.streak },
             { label: "Status", value: LADDER_CUP_STATUS_LABEL[profileRow._row.status] || profileRow._row.status },
             // Cosmetic matchmaking tier (see ladderCupTier) plus the raw
-            // rating it's derived from — visible to anyone who opens this
-            // club's card, same as every other stat here, not just the
-            // club's own owner.
+            // rating it's derived from — shown to anyone who opens this
+            // club's card (via photo, username, or table row), same as
+            // every other stat here, not just the club's own owner.
             { label: "Level", value: `${ladderCupTier(profileRow._row.ladder_rating ?? 1000).label} · ${profileRow._row.ladder_rating ?? 1000}` },
+            // The owner's real, app-wide XP level (see computeMyProgress) —
+            // separate from the cosmetic Ladder Cup tier above: this one is
+            // earned from every match they've played in every league, not
+            // just their form in this one.
+            ...(profileOwnerProgress ? [{ label: "XP Level", value: `Lvl ${profileOwnerProgress.level} · ${profileOwnerProgress.levelTitle}` }] : []),
           ]}
+          badges={[...ladderCupBadges(profileRow._row), ...profileOwnerBadges]}
           onClose={() => setProfileRow(null)}
           c={c}
         />
@@ -1235,7 +1284,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
             <Trophy size={13} /> The Ladder
           </div>
           <div className="mb-5">
-            <LadderCupStandingsTable league={league} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
+            <LadderCupStandingsTable league={league} leagues={leagues} allAchievements={allAchievements} avatarByTeamId={avatarByTeamId} myTeamId={myTeam?.id} c={c} />
           </div>
         </div>
       ) : (
@@ -1325,7 +1374,7 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
   );
 }
 
-export default function LeagueDetail({ league, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);

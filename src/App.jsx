@@ -833,7 +833,20 @@ function levelForXp(xp) {
   return { level, xpIntoLevel: remaining, xpForNextLevel: need };
 }
 
-function computeMyProgress(leagues, myTeam) {
+// Resolves which team a given user_id owns in a given league, via that
+// league's members list — the same lookup myTeam() does for the signed-in
+// user (matched by session), just parameterized so it works for any
+// member, not only "me". Used to aggregate a club's owner's XP/level
+// across every league they've fielded a team in, not just the one whose
+// standings table you happened to click into.
+export function teamForUserInLeague(league, userId) {
+  if (!userId) return null;
+  const m = (league.members || []).find((mm) => mm.user_id === userId);
+  if (!m || !m.team_id) return null;
+  return (league.teams || []).find((t) => t.id === m.team_id) || null;
+}
+
+export function computeMyProgress(leagues, myTeam) {
   const matches = [];
   (leagues || []).forEach((l) => {
     const team = myTeam ? myTeam(l) : null;
@@ -1001,7 +1014,7 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
 // like the XP system this needs no backend table of its own and can't drift
 // out of sync. `value(ctx)` returns the player's raw progress toward
 // `target`; reaching or passing target earns the badge.
-const ACHIEVEMENTS_DEF = [
+export const ACHIEVEMENTS_DEF = [
   { id: "first_match", icon: Gamepad2, color: "#3B82F6", tier: "bronze", category: "matches", label: "First Whistle", desc: "Play your first match", target: 1, value: (ctx) => ctx.p.played },
   { id: "matches_10", icon: Calendar, color: "#3B82F6", tier: "silver", category: "matches", label: "Regular", desc: "Play 10 matches", target: 10, value: (ctx) => ctx.p.played },
   { id: "matches_50", icon: History, color: "#3B82F6", tier: "gold", category: "matches", label: "Veteran Grinder", desc: "Play 50 matches", target: 50, value: (ctx) => ctx.p.played },
@@ -6440,7 +6453,7 @@ export default function App() {
             )}
             {view === "league" && activeLeague && (
               <Suspense fallback={<Loader c={c} />}>
-              <LeagueDetail league={activeLeague} session={session} isAdmin={isAdmin} joined={isMemberOf(activeLeague)}
+              <LeagueDetail league={activeLeague} leagues={leagues} allAchievements={allAchievements} session={session} isAdmin={isAdmin} joined={isMemberOf(activeLeague)}
                 myUsername={profile?.efootball_username || session.user.email}
                 canSeePhones={canSeePhones(activeLeague)} myTeam={myTeam(activeLeague)} entryClosed={entryClosed(activeLeague)}
                 myPaymentStatus={myPaymentStatus(activeLeague)}
