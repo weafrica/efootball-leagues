@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
   ArrowLeft, Calendar, Camera, Check, Clock, CornerDownRight, Crown, Download, Eye,
-  Flame, Heart, LogOut, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2,
-  Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
+  Flame, Heart, LogOut, Medal, MessageCircle, Pencil, Phone, ReceiptText, Search, Send, Settings2,
+  Shield, Skull, Sparkles, Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { rankLadderCupStandings, getOpponentPool, isWalkoverClaimable, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
-  KnockoutFixturesList, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+  KnockoutFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
   LeagueScheduleLine, LeagueStatusBanner, MemberAvatar, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
   PendingResultsPanel, PlayerProfileModal, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
   RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, ShareRangeModal, StandingsPanel,
@@ -66,15 +66,32 @@ function LadderCupFinalizedBanner({ league, c }) {
   const champion = league.ladder_cup_champion_team_id
     ? (league.teams || []).find((t) => t.id === league.ladder_cup_champion_team_id)
     : null;
+  // Champion reveal card — glowing gold ring around a trophy, a one-shot
+  // diagonal sweep on mount (same technique as PlayerProfileModal's
+  // gold/silver/bronze card-shine), reads as the arena's "match point" HUD
+  // moment. No champion is a legitimate, plainer outcome, so it skips the
+  // glow treatment entirely rather than dressing up a non-event.
+  if (!champion) {
+    return (
+      <div className="rounded-lg p-3 mt-3 flex items-center gap-2.5 border" style={{ background: c.surfaceHover, borderColor: c.border }}>
+        <Skull size={16} style={{ color: c.textFaint }} />
+        <div className="font-body text-sm" style={{ color: c.textDim }}>
+          Ladder Cup finalized at the cutoff — no eligible champion, every club was eliminated.
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="rounded-lg p-3 mt-3 flex items-center gap-2.5" style={{ background: "rgba(217,164,6,0.12)" }}>
-      <Trophy size={16} style={{ color: "#B8860B" }} />
-      <div className="font-body text-sm" style={{ color: c.text }}>
-        {champion ? (
-          <><span className="font-bold">{champion.name}</span> crowned Ladder Cup champion at the cutoff.</>
-        ) : (
-          "Ladder Cup finalized at the cutoff — no eligible champion, every club was eliminated."
-        )}
+    <div className="relative overflow-hidden rounded-xl p-4 mt-3 border text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(232,185,35,0.18), transparent 70%)", borderColor: c.accent }}>
+      <div className="absolute inset-0 pointer-events-none animate-ladder-sweep"
+        style={{ backgroundImage: `linear-gradient(135deg, transparent 40%, ${c.accent}40 50%, transparent 60%)`, backgroundSize: "250% 250%" }} />
+      <div className="relative">
+        <div className="w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-2" style={{ background: c.accent, boxShadow: `0 0 0 1px ${c.accent}, 0 0 22px 4px ${c.accent}66` }}>
+          <Trophy size={22} style={{ color: c.accentText }} />
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.25em] mb-1" style={{ color: c.accent }}>Champion</div>
+        <div className="font-display font-extrabold text-xl uppercase tracking-wide" style={{ color: c.text }}>{champion.name}</div>
+        <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>Crowned at the cutoff — last club standing.</div>
       </div>
     </div>
   );
@@ -85,19 +102,33 @@ function LadderCupFinalizedBanner({ league, c }) {
 // (badge_heater_tier/giant_slayer/bounty_hunter/walkover are running
 // counts, badge_second_life is a one-time boolean) — displayed as-is, no
 // invented tiering beyond what's actually tracked.
+// Each badge type gets its own medal color instead of one flat accent tint
+// — a quick-scan "what kind of player is this" read, same idea as rank
+// medal colors in the standings table below. Colors pulled from the
+// LADDER_THEME palette (plus one raw gold/orange for heater/walkover,
+// matching the champion banner's gold and the app's existing "hot streak"
+// orange convention) rather than inventing a whole new palette.
+const LADDER_CUP_BADGE_STYLE = {
+  heater: { icon: Flame, color: "#F0A020" },
+  giantSlayer: { icon: Swords, color: "#8B5CF6" },
+  bountyHunter: { icon: Target, color: "#E8B923" },
+  walkover: { icon: Zap, color: "#4EA8DE" },
+  secondLife: { icon: Heart, color: "#C81E3A" },
+};
 function LadderCupBadgeRow({ row, c }) {
   const badges = [
-    row.badge_heater_tier > 0 && { icon: Flame, label: `Heater ×${row.badge_heater_tier}` },
-    row.badge_giant_slayer > 0 && { icon: Swords, label: `Giant Slayer ×${row.badge_giant_slayer}` },
-    row.badge_bounty_hunter > 0 && { icon: Target, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
-    row.badge_walkover > 0 && { icon: Zap, label: `Walkover ×${row.badge_walkover}` },
-    row.badge_second_life && { icon: Heart, label: "Used Second Life" },
+    row.badge_heater_tier > 0 && { ...LADDER_CUP_BADGE_STYLE.heater, label: `Heater ×${row.badge_heater_tier}`, flame: true },
+    row.badge_giant_slayer > 0 && { ...LADDER_CUP_BADGE_STYLE.giantSlayer, label: `Giant Slayer ×${row.badge_giant_slayer}` },
+    row.badge_bounty_hunter > 0 && { ...LADDER_CUP_BADGE_STYLE.bountyHunter, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
+    row.badge_walkover > 0 && { ...LADDER_CUP_BADGE_STYLE.walkover, label: `Walkover ×${row.badge_walkover}` },
+    row.badge_second_life && { ...LADDER_CUP_BADGE_STYLE.secondLife, label: "Used Second Life" },
   ].filter(Boolean);
   if (badges.length === 0) return null;
   return (
     <div className="flex items-center gap-1.5 mt-0.5">
-      {badges.map(({ icon: Icon, label }, i) => (
-        <span key={i} title={label} className="flex items-center justify-center w-5 h-5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.accent }}>
+      {badges.map(({ icon: Icon, label, color, flame }, i) => (
+        <span key={i} title={label} className={`flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${flame ? "animate-ladder-flame" : ""}`}
+          style={{ background: `${color}26`, color, boxShadow: `0 0 0 1px ${color}40` }}>
           <Icon size={11} />
         </span>
       ))}
@@ -212,12 +243,25 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
             ) : filtered.map((r) => {
               const row = r._row;
               const eliminated = row.status === "eliminated";
+              // Top-3 medal treatment (gold/silver/bronze), same colors
+              // PlayerProfileModal's card-tier-glow uses for its own
+              // gold/silver/bronze tiers — only while still active, since
+              // an eliminated club sitting in the top 3 on points isn't
+              // "medaling", it's out.
+              const medalColor = eliminated ? null : r.rank_position === 1 ? "#FFD700" : r.rank_position === 2 ? "#C0C0C0" : r.rank_position === 3 ? "#CD7F32" : null;
+                const danger = !eliminated && zoneFor(r.rank_position - 1) === c.red;
+                const statusChip = {
+                  eliminated: { color: c.textFaint, bg: "transparent", icon: Skull },
+                  pending_second_life: { color: "#B8860B", bg: "rgba(184,134,11,0.15)", icon: Heart },
+                  champion: { color: c.accent, bg: `${c.accent}26`, icon: Crown },
+                  active: { color: c.greenText, bg: c.greenSoft, icon: Shield },
+              }[row.status] || { color: c.textFaint, bg: "transparent", icon: Shield };
               return (
                 <tr key={r.club_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
-                  className="border-b align-top cursor-pointer" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
+                  className="border-b align-top cursor-pointer" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: danger ? "rgba(200,30,58,0.06)" : myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
                 <td className="py-2.5 pl-2 relative">
                   <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: eliminated ? "transparent" : zoneFor(r.rank_position - 1) }} />
-                  <span style={{ color: c.textFaint }}>{r.rank_position}</span>
+                  {medalColor ? <Medal size={13} style={{ color: medalColor }} /> : <span style={{ color: c.textFaint }}>{r.rank_position}</span>}
                 </td>
                 <td className="py-2.5 font-body font-medium">
                   <div className="flex items-center gap-2">
@@ -225,8 +269,8 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
                     {row.status === "champion" && <Crown size={13} style={{ color: c.accent }} />}
                     <span className="truncate">{r.club_name}</span>
                   </div>
-                  <div className="font-mono text-[10px] mt-0.5" style={{ color: row.status === "eliminated" ? c.red : row.status === "pending_second_life" ? "#B8860B" : row.status === "champion" ? c.accent : c.textFaint }}>
-                    {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
+                  <div className="inline-flex items-center gap-1 font-mono text-[10px] mt-0.5 px-1.5 py-[1px] rounded-full" style={{ color: statusChip.color, background: statusChip.bg }}>
+                    <statusChip.icon size={9} /> {LADDER_CUP_STATUS_LABEL[row.status] || row.status}
                   </div>
                   <LadderCupBadgeRow row={row} c={c} />
                 </td>
@@ -235,9 +279,9 @@ function LadderCupStandingsTable({ league, avatarByTeamId, myTeamId, c }) {
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>
-                  {row.streak >= 3 ? <span className="inline-flex items-center gap-0.5" style={{ color: c.accent }}><Flame size={11} />{row.streak}</span> : row.streak}
+                  {row.streak >= 3 ? <span className="inline-flex items-center gap-0.5 animate-ladder-flame" style={{ color: "#F0A020" }}><Flame size={11} />{row.streak}</span> : row.streak}
                 </td>
-                <td className="text-center py-2.5 pr-2 font-bold">{r.pts}</td>
+                <td className="text-center py-2.5 pr-2 font-display font-extrabold text-base" style={{ color: c.text }}>{r.pts}</td>
               </tr>
               );
             })}
@@ -451,10 +495,17 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
   };
 
   return (
-    <div className="rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: c.border }}>
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
+    <div className="relative overflow-hidden rounded-xl p-3.5 border" style={{ background: c.surface, borderColor: match && !resultPending && !match.finalized_at ? c.borderStrong : c.border }}>
+      {/* Ambient glow only while there's an open, unclaimed challenge slot —
+          a match already logging a result or done doesn't need the "come
+          fight me" pull. */}
+      {!match && <div className="animate-ladder-ember absolute -top-10 -right-6 w-24 h-24 rounded-full blur-2xl pointer-events-none" style={{ background: c.accent, opacity: 0.18 }} />}
+      <div className="relative flex items-center gap-3">
+        {/* Sword-flanked matchup header — a small crossed-swords glyph next
+            to the badge reads as "this is a matchup", not just a list row. */}
+        <div className="relative w-8 h-8 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.surfaceHover, color: c.text, boxShadow: `0 0 0 1px ${c.border}` }}>
           {opponent.club_name[0]?.toUpperCase()}
+          {!match && <Swords size={10} className="absolute -bottom-1 -right-1 rounded-full p-[3px]" style={{ background: c.bg, color: c.accent, boxShadow: `0 0 0 1px ${c.border}` }} />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
@@ -472,11 +523,12 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
                   : `Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Fancy a Ladder Cup match? Call me and let's set it up ⚽🕹️`} c={c} />
             )}
           </div>
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.ladder_rating} rating</div>
+          <span className="inline-block font-mono text-[10px] uppercase tracking-wide mt-0.5 px-1.5 py-[1px] rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}>{opponent.ladder_rating} rating</span>
         </div>
         {!match && (
           <button onClick={challenge} disabled={busy}
-            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+            className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
+            style={{ background: c.accent, color: c.accentText, boxShadow: `0 0 0 1px ${c.accent}, 0 0 14px 1px ${c.accent}55` }}>
             <Swords size={13} /> Challenge
           </button>
         )}
@@ -570,30 +622,35 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
     setBusy(null);
   };
 
+  // Signature "revive" moment of the format — the one screen worth being
+  // genuinely dramatic about: a pulsing heart HUD element, a red "you're
+  // down" glow, and headline-weight copy instead of a routine offer card.
   return (
-    <div className="rounded-xl p-4 border mt-3" style={{ background: "rgba(217,164,6,0.08)", borderColor: "#B8860B" }}>
-      <div className="flex items-center gap-2 mb-1.5">
-        <Heart size={15} style={{ color: "#B8860B" }} />
-        <div className="font-body font-bold text-sm" style={{ color: "#B8860B" }}>Second life offer</div>
-      </div>
-      <div className="font-body text-xs mb-2" style={{ color: c.textDim }}>
-        That loss would normally end your run — but you've still got your one re-entry. Accept to rejoin the ladder at
-        &minus;{LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} points, or decline and you're out for good.
-      </div>
-      {entryRow.second_life_expires_at && (
-        <div className="font-mono text-[10px] uppercase tracking-wide mb-3 flex items-center gap-1" style={{ color: c.textFaint }}>
-          <Clock size={10} /> Decide by {fmtDate(entryRow.second_life_expires_at)} SAST — no response counts as decline
+    <div className="relative overflow-hidden rounded-xl p-5 border mt-3 text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(200,30,58,0.16), transparent 70%)", borderColor: c.red }}>
+      <div className="animate-ladder-ember absolute -top-14 -right-8 w-32 h-32 rounded-full blur-3xl pointer-events-none" style={{ background: c.red, opacity: 0.3 }} />
+      <div className="relative">
+        <Heart size={30} className="mx-auto mb-2 animate-ladder-heartbeat" style={{ color: c.red, fill: c.red }} />
+        <div className="font-display font-extrabold text-lg uppercase tracking-wide" style={{ color: c.text }}>Eliminated — unless you revive</div>
+        <div className="font-body text-xs mt-2 mb-1" style={{ color: c.textDim }}>
+          That loss would normally end your run — but you've still got your one re-entry. Accept to rejoin the ladder at
+          &minus;{LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} points, or decline and you're out for good.
         </div>
-      )}
-      <div className="flex gap-2">
-        <button disabled={busy != null} onClick={() => act(true)}
-          className="flex-1 font-body text-xs font-semibold px-3 py-2.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-          {busy === "accept" ? "Saving…" : `Accept (−${LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} pts)`}
-        </button>
-        <button disabled={busy != null} onClick={() => act(false)}
-          className="flex-1 font-body text-xs font-semibold px-3 py-2.5 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
-          {busy === "decline" ? "Saving…" : "Decline"}
-        </button>
+        {entryRow.second_life_expires_at && (
+          <div className="font-mono text-[10px] uppercase tracking-wide mb-3 flex items-center justify-center gap-1" style={{ color: c.textFaint }}>
+            <Clock size={10} /> Decide by {fmtDate(entryRow.second_life_expires_at)} SAST — no response counts as decline
+          </div>
+        )}
+        <div className="flex gap-2 mt-3">
+          <button disabled={busy != null} onClick={() => act(true)}
+            className="flex-1 font-body text-sm font-bold px-3 py-3 rounded-full flex items-center justify-center gap-1.5"
+            style={{ background: c.red, color: "#fff", boxShadow: `0 0 0 1px ${c.red}, 0 0 18px 2px ${c.red}55` }}>
+            <Heart size={14} style={{ fill: "#fff" }} /> {busy === "accept" ? "Saving…" : `Revive (−${LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} pts)`}
+          </button>
+          <button disabled={busy != null} onClick={() => act(false)}
+            className="flex-1 font-body text-xs font-semibold px-3 py-3 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+            {busy === "decline" ? "Saving…" : "Decline"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -832,8 +889,22 @@ function LadderCupFindOpponent({ league, c }) {
 // App.jsx) — so this intentionally doesn't try to reuse the fixtures-based
 // registration screen; it just tracks who's registered and, for cash
 // leagues, payment review, same as every other format already does.
-function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c }) {
+function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
+  // The Ladder Cup gets its own permanent black/gold arena look, same as
+  // the standalone Ladder does (Ladder.jsx: `const c = LADDER_THEME`) —
+  // ignore the app's normal light/dark theme prop and thread LADDER_THEME
+  // through everything below instead, so the whole "game page" reads as
+  // its own mode rather than a re-skinned settings screen.
+  const c = LADDER_THEME;
+  const myEntryRow = myTeam ? (league.ladder_cup_entries || []).find((r) => r.team_id === myTeam.id) : null;
+  const myRank = myTeam ? rankLadderCupStandings(toLadderCupEngineEntries(league)).find((r) => r.club_id === myTeam.id)?.rank_position : null;
+  const totalClubs = league.teams.length;
+  // Lives: 1 to start, back to 1 on an accepted second life, 0 once
+  // eliminated — a simple HUD read of "how many chances are left", not a
+  // new rules concept (Ladder Cup is still one-elimination-with-one-
+  // second-life underneath).
+  const myLives = !myEntryRow ? null : myEntryRow.status === "eliminated" ? 0 : myEntryRow.badge_second_life ? 1 : 1;
   const pendingWalkoverClaims = (league.ladder_cup_walkover_claims || []).filter((cl) => cl.status === "pending_review");
   // Same idea as pendingWalkoverClaims just above, for Step 10's admin
   // queue: every live match whose reported result has hit its deadline or
@@ -850,29 +921,63 @@ function LadderCupPendingPanel({ league, canManage, canSeePhones, session, myTea
   const started = !!league.ladder_cup_started_at;
   return (
     <div>
-      <div className="rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.border }}>
-        <div className="font-body font-bold text-base mb-1">Survival Ladder Cup</div>
-        <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
-          {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · {started ? "league started — clubs can still join anytime before the cutoff." : "live on the ladder as soon as they join."}
+      {/* Arena HUD header — same "always dark, gold-accented" surface as
+          Ladder Battles on Home, dressed up with an ambient ember glow, a
+          one-shot sweep on mount, and (once you've got a club in it) a
+          rank chip + life-orb strip so this reads as a ranked-mode HUD
+          rather than a plain info card. */}
+      <div className="relative overflow-hidden rounded-xl p-5 border mb-5" style={{ background: c.surface, borderColor: c.borderStrong }}>
+        <div className="animate-ladder-ember absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl pointer-events-none" style={{ background: c.accent, opacity: 0.35 }} />
+        <div className="absolute inset-0 pointer-events-none animate-ladder-sweep"
+          style={{ backgroundImage: `linear-gradient(135deg, transparent 40%, ${c.accent}26 50%, transparent 60%)`, backgroundSize: "250% 250%" }} />
+        <div className="relative">
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <div className="flex items-center gap-2">
+              <Shield size={16} style={{ color: c.accent }} />
+              <div className="font-display font-bold text-lg uppercase tracking-wide" style={{ color: c.text }}>Survival Ladder Cup</div>
+            </div>
+            {myRank && (
+              <div className="shrink-0 flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-1 rounded-full border" style={{ borderColor: c.borderStrong, color: c.accent }}>
+                RANK #{myRank}<span style={{ color: c.textFaint }}>/{totalClubs}</span>
+              </div>
+            )}
+          </div>
+          <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>
+            {league.teams.length} club{league.teams.length === 1 ? "" : "s"} registered · {started ? "league started — clubs can still join anytime before the cutoff." : "live on the ladder as soon as they join."}
+          </div>
+          {league.ladder_cup_cutoff_at && (
+            <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
+          )}
+          {/* Life-orb strip — a single filled heart while you've still got
+              your run (or your second life still in the bank), an empty
+              outline once eliminated. Not a countdown of multiple lives
+              (the format only ever grants the one second life), just a HUD-
+              style "are you still in this" read at a glance. */}
+          {myLives != null && (
+            <div className="flex items-center gap-1.5 mt-2">
+              <Heart size={15} className={myLives > 0 ? "animate-ladder-heartbeat" : ""}
+                style={{ color: myLives > 0 ? c.red : c.textFaint, fill: myLives > 0 ? c.red : "transparent" }} />
+              <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: myLives > 0 ? c.textDim : c.textFaint }}>
+                {myLives > 0 ? "Still in the fight" : "Eliminated"}
+              </span>
+            </div>
+          )}
+          {canManage && !started && !league.ladder_cup_finalized_at && (
+            <button disabled={league.teams.length < 2} onClick={() => onStartLadderCup(league)}
+              className="mt-3 font-body text-sm font-semibold px-4 py-2.5 rounded-full"
+              style={league.teams.length >= 2 ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
+              Start League
+            </button>
+          )}
+          {league.ladder_cup_finalized_at ? (
+            <LadderCupFinalizedBanner league={league} c={c} />
+          ) : myTeam ? (
+            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife}
+              onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
+          ) : (
+            <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
+          )}
         </div>
-        {league.ladder_cup_cutoff_at && (
-          <div className="font-mono text-xs" style={{ color: c.textFaint }}>Cutoff: {fmtDate(league.ladder_cup_cutoff_at)} SAST</div>
-        )}
-        {canManage && !started && !league.ladder_cup_finalized_at && (
-          <button disabled={league.teams.length < 2} onClick={() => onStartLadderCup(league)}
-            className="mt-3 font-body text-sm font-semibold px-4 py-2.5 rounded-full"
-            style={league.teams.length >= 2 ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-            Start League
-          </button>
-        )}
-        {league.ladder_cup_finalized_at ? (
-          <LadderCupFinalizedBanner league={league} c={c} />
-        ) : myTeam ? (
-          <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife}
-            onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
-        ) : (
-          <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
-        )}
       </div>
 
       <div className="flex gap-1 mb-5 rounded-full p-1 w-fit" style={{ background: c.surface }}>
