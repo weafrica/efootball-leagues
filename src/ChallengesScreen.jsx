@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
   AlertTriangle, ArrowLeft, Camera, Check, Clock, CornerDownRight, History,
-  MessageCircle, Search, Send, Shuffle, Swords, Trash2, Trophy, Volume2, X,
+  MessageCircle, Pencil, Search, Send, Shuffle, Swords, Trash2, Trophy, Volume2, X,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import {
@@ -14,7 +14,7 @@ import {
 
 // Split out of App.jsx: the Challenges/Board screen (community board, open
 // challenges, 1-on-1 challenge rows and chat) is only ever rendered once a
-// signed-in user opens it from the header â€” never on the guest/login page â€”
+// signed-in user opens it from the header — never on the guest/login page —
 // so it doesn't need to be in the bundle everyone downloads just to see the
 // sign-in screen. Lazy-loaded from App.jsx the same way Shop/Terms/Rules/
 // LeagueDetail already are.
@@ -26,7 +26,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   const [sendingRandom, setSendingRandom] = useState(false);
   const [resultsQuery, setResultsQuery] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } â€” in-site chat with a matched opponent
+  const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
 
   if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
 
@@ -51,9 +51,9 @@ export default function ChallengesScreen({ session, members, challenges, openCha
     return rank(a) - rank(b) || new Date(b.created_at) - new Date(a.created_at);
   });
 
-  // My own broadcast still up for grabs, if I have one â€” only one at a time.
+  // My own broadcast still up for grabs, if I have one — only one at a time.
   const myOpenBroadcast = (openChallenges || []).find((ch) => ch.creator_id === myId && ch.status === "open");
-  // Everyone else's open broadcasts, oldest-first exception aside â€” newest first, ready to grab.
+  // Everyone else's open broadcasts, oldest-first exception aside — newest first, ready to grab.
   const grabbable = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== myId);
   // My own resolved broadcasts (sent or grabbed) worth keeping visible briefly.
   const myResolvedOpen = (openChallenges || [])
@@ -61,7 +61,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
   // Admin-only: results whose 30-minute opponent-confirm window has passed without
-  // a response â€” these move here instead of staying stuck waiting forever.
+  // a response — these move here instead of staying stuck waiting forever.
   const escalatedChallenges = isAdmin
     ? challenges.filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
     : [];
@@ -69,7 +69,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
     ? (openChallenges || []).filter((ch) => ch.result_status === "pending" && challengeResultConfirmExpired(ch))
     : [];
   // Admin-only: ladder challenges still pending after their 5-day accept
-  // window â€” these no longer auto-resolve as a walkover, so an admin picks
+  // window — these no longer auto-resolve as a walkover, so an admin picks
   // between granting the walkover or cancelling the challenge.
   const escalatedLadderAccepts = isAdmin
     ? challenges.filter((ch) => ch.is_ladder && ch.status === "pending" && ladderDaysLeft(ch.created_at, 5) === 0)
@@ -107,18 +107,20 @@ export default function ChallengesScreen({ session, members, challenges, openCha
       {isAdmin && (escalatedChallenges.length > 0 || escalatedOpenChallenges.length > 0) && (
         <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
-            <AlertTriangle size={13} /> Needs admin review â€” opponent didn't respond within the window
+            <AlertTriangle size={13} /> Needs admin review — opponent didn't respond within the window
           </div>
           <div className="flex flex-col gap-2">
             {escalatedChallenges.map((ch) => (
               <AdminEscalatedResultRow key={`ch-${ch.id}`} nameA={ch.challenger_username} nameB={ch.opponent_username}
                 scoreA={ch.challenger_score} scoreB={ch.opponent_score} reportedByUsername={ch.result_reported_by === ch.challenger_id ? ch.challenger_username : ch.opponent_username}
-                onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
+                onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)}
+                onEditScore={(a, b) => onAdminEditResult(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
             ))}
             {escalatedOpenChallenges.map((ch) => (
               <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
                 scoreA={ch.creator_score} scoreB={ch.accepted_by_score} reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
-                onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)} onViewProof={() => onViewResultProof(ch)} c={c} />
+                onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)}
+                onEditScore={(a, b) => onAdminEditResultOpen(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
             ))}
           </div>
         </div>
@@ -127,7 +129,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
       {isAdmin && escalatedLadderAccepts.length > 0 && (
         <div className="rounded-xl p-4 border mb-6" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
           <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: c.red }}>
-            <AlertTriangle size={13} /> Needs admin review â€” not accepted within 5 days
+            <AlertTriangle size={13} /> Needs admin review — not accepted within 5 days
           </div>
           <div className="flex flex-col gap-2">
             {escalatedLadderAccepts.map((ch) => (
@@ -141,26 +143,26 @@ export default function ChallengesScreen({ session, members, challenges, openCha
       <div className="rounded-xl p-4 border mb-6" style={{ background: c.surface, borderColor: c.border }}>
         <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Random challenge</div>
         <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-          Fire one challenge open to every other player â€” whoever accepts it first gets it, then it's gone for everyone else.
+          Fire one challenge open to every other player — whoever accepts it first gets it, then it's gone for everyone else.
         </div>
         {myOpenBroadcast ? (
           <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
             <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: c.accent, color: c.accentText }}><Shuffle size={14} /></div>
-            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Waiting for someone to accept your open challengeâ€¦</div>
+            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Waiting for someone to accept your open challenge…</div>
             <button onClick={() => onCancelOpen(myOpenBroadcast)} title="Cancel" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textFaint }}><X size={14} /></button>
           </div>
         ) : (
           <button onClick={fireRandom} disabled={sendingRandom}
             className="w-full flex items-center justify-center gap-2 font-body text-sm font-semibold px-3 py-2.5 rounded-lg"
             style={{ background: c.accent, color: c.accentText, opacity: sendingRandom ? 0.6 : 1 }}>
-            <Shuffle size={15} /> {sendingRandom ? "Sendingâ€¦" : "Send random challenge to everyone"}
+            <Shuffle size={15} /> {sendingRandom ? "Sending…" : "Send random challenge to everyone"}
           </button>
         )}
       </div>
 
       {grabbable.length > 0 && (
         <>
-          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Open challenges â€” grab one</div>
+          <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Open challenges — grab one</div>
           <div className="flex flex-col gap-2 mb-6">
             {grabbable.map((ch) => <OpenChallengeRow key={ch.id} challenge={ch} onAccept={onAcceptOpen} c={c} />)}
           </div>
@@ -197,7 +199,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
                   <button onClick={() => send(m)} disabled={already || sendingTo === m.user_id}
                     className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
                     style={already ? { background: c.surface, color: c.textFaint } : { background: c.accent, color: c.accentText, opacity: sendingTo === m.user_id ? 0.6 : 1 }}>
-                    {already ? "Already active" : sendingTo === m.user_id ? "Sendingâ€¦" : "Challenge"}
+                    {already ? "Already active" : sendingTo === m.user_id ? "Sending…" : "Challenge"}
                   </button>
                 </div>
               );
@@ -209,7 +211,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your challenges</div>
       {sorted.length === 0 ? (
         <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No challenges yet â€” search above for someone to challenge.
+          No challenges yet — search above for someone to challenge.
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -230,14 +232,14 @@ export default function ChallengesScreen({ session, members, challenges, openCha
         )}
       </div>
       <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
-        The last 100 logged results across Matchday â€” direct and random challenges, everyone included.
+        The last 100 logged results across Matchday — direct and random challenges, everyone included.
       </div>
 
       {recentResults === null ? (
         <Loader c={c} />
       ) : recentResults.length === 0 ? (
         <div className="border border-dashed rounded-xl p-6 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          No results logged yet â€” once someone logs a challenge score, it'll show up here for everyone.
+          No results logged yet — once someone logs a challenge score, it'll show up here for everyone.
         </div>
       ) : (
         <>
@@ -268,7 +270,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
 }
 
 // One row in the platform-wide "Community results" feed at the bottom of the
-// Challenges screen â€” every confirmed result from every member, not just the
+// Challenges screen — every confirmed result from every member, not just the
 // signed-in member's own. Winner's name is bolded, loser's dimmed, draws
 // stay neutral; rows the signed-in member played in get a subtle highlight
 // so their own results are easy to spot scrolling past everyone else's.
@@ -284,26 +286,26 @@ function OpenChallengeRow({ challenge: ch, onAccept, c }) {
       <MemberAvatar url={null} username={ch.creator_username} size={34} c={c} />
       <div className="flex-1 min-w-0">
         <div className="font-body text-sm font-semibold truncate">{ch.creator_username}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Open to anyone â€” first to accept wins it</div>
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>Open to anyone — first to accept wins it</div>
       </div>
       <button onClick={accept} disabled={accepting}
         className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
         style={{ background: c.accent, color: c.accentText, opacity: accepting ? 0.6 : 1 }}>
-        {accepting ? "Acceptingâ€¦" : "Accept"}
+        {accepting ? "Accepting…" : "Accept"}
       </button>
     </div>
   );
 }
 
 // A resolved (accepted/cancelled) broadcast, shown to whichever side is
-// looking at it â€” the creator or whoever grabbed it.
+// looking at it — the creator or whoever grabbed it.
 function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, onOpenChat, c }) {
   const [resolving, setResolving] = useState(false);
   const iAmCreator = ch.creator_id === myId;
   const counterpartUsername = iAmCreator ? ch.accepted_by_username : ch.creator_username;
   const counterpartPhone = iAmCreator ? ch.accepted_by_phone : ch.creator_phone;
 
-  // Scores are stored from the creator's perspective â€” flip for display when
+  // Scores are stored from the creator's perspective — flip for display when
   // the signed-in member is the one who accepted it.
   const myScore = iAmCreator ? ch.creator_score : ch.accepted_by_score;
   const theirScore = iAmCreator ? ch.accepted_by_score : ch.creator_score;
@@ -323,15 +325,15 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
           <div className="font-body text-sm font-semibold truncate">{counterpartUsername || "Random challenge"}</div>
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
-              Final: you {myScore} â€“ {theirScore} {counterpartUsername}
-              {ch.auto_verified && <span title="Screenshot verified automatically">Â· auto-approved</span>}
+              Final: you {myScore} – {theirScore} {counterpartUsername}
+              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
             </div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} â€“ {theirScore} them Â· waiting for confirmation</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} â€“ {theirScore} them</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
@@ -339,20 +341,20 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} â€“ {theirScore} them Â· escalated to admin for review</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
           )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted â€” say hi and set a time</div>}
+          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
           {ch.status === "cancelled" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Cancelled</div>}
         </div>
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} ðŸ”¥ Game's on! Call me when you're ready to play so we can lock in the time âš½ðŸ•¹ï¸`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} ðŸ”¥ Game's on! Call me when you're ready to play so we can lock in the time âš½ðŸ•¹ï¸`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
@@ -387,27 +389,83 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
 }
 
 // A pending challenge/open-challenge result that's blown past its 30-minute
-// opponent-confirm window, shown to admins for a manual call â€” same
+// opponent-confirm window, shown to admins for a manual call — same
 // approve/reject choice the opponent would have had, just made by an admin
 // instead since the opponent didn't act in time.
-function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, onApprove, onReject, onViewProof, c }) {
+function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, onApprove, onReject, onEditScore, onViewProof, c }) {
   const [busy, setBusy] = useState(false);
   const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+
+  // Lets an admin correct a mis-typed score before approving/rejecting —
+  // same inline number-input pattern as the league Results tab's score
+  // editor (CommentRow in LeagueDetail.jsx), just without the
+  // fixture/standings recompute that one needs, since this result hasn't
+  // been confirmed yet.
+  const [editing, setEditing] = useState(false);
+  const [editA, setEditA] = useState("");
+  const [editB, setEditB] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const startEdit = () => { setEditA(String(scoreA ?? "")); setEditB(String(scoreB ?? "")); setEditing(true); };
+  const saveEdit = async () => {
+    const a = parseInt(editA, 10);
+    const b = parseInt(editB, 10);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) return;
+    setSavingEdit(true);
+    const ok = await onEditScore(a, b);
+    setSavingEdit(false);
+    if (ok) setEditing(false);
+  };
+
   return (
     <div className="rounded-lg p-3 border flex items-center gap-3" style={{ background: c.surface, borderColor: c.border }}>
       <div className="flex-1 min-w-0">
-        <div className="font-body text-sm font-semibold truncate">{nameA} {scoreA} â€“ {scoreB} {nameB}</div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Reported by {reportedByUsername}</div>
+        {editing ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{nameA}</span>
+            <input type="number" min="0" inputMode="numeric" value={editA} autoFocus
+              onChange={(e) => setEditA(e.target.value)}
+              className="w-12 rounded-lg px-1.5 py-1 font-mono text-sm text-center outline-none"
+              style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+            <span className="font-body text-xs" style={{ color: c.textFaint }}>–</span>
+            <input type="number" min="0" inputMode="numeric" value={editB}
+              onChange={(e) => setEditB(e.target.value)}
+              className="w-12 rounded-lg px-1.5 py-1 font-mono text-sm text-center outline-none"
+              style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+            <span className="font-body text-xs truncate" style={{ color: c.textDim, maxWidth: 90 }}>{nameB}</span>
+            <div className="flex items-center gap-2 w-full mt-0.5">
+              <button onClick={saveEdit} disabled={savingEdit || editA === "" || editB === ""}
+                className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: c.accent, color: c.accentText, opacity: (savingEdit || editA === "" || editB === "") ? 0.5 : 1 }}>
+                {savingEdit ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => setEditing(false)} disabled={savingEdit}
+                className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: c.surfaceHover, color: c.textDim }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="font-body text-sm font-semibold truncate">{nameA} {scoreA} – {scoreB} {nameB}</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>Reported by {reportedByUsername}</div>
+          </>
+        )}
       </div>
-      <button onClick={onViewProof} title="View photo proof" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Camera size={14} /></button>
-      <button onClick={() => run(onApprove)} disabled={busy} title="Approve" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
-      <button onClick={() => run(onReject)} disabled={busy} title="Reject" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+      {!editing && (
+        <>
+          <button onClick={startEdit} title="Edit score" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Pencil size={14} /></button>
+          <button onClick={onViewProof} title="View photo proof" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Camera size={14} /></button>
+          <button onClick={() => run(onApprove)} disabled={busy} title="Approve" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>
+          <button onClick={() => run(onReject)} disabled={busy} title="Reject" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
+        </>
+      )}
     </div>
   );
 }
 
 // A ladder challenge whose 5-day accept window has passed with no response,
-// shown to admins for a manual call â€” either grant the challenger the
+// shown to admins for a manual call — either grant the challenger the
 // walkover (a nominal 3-0 win, same points/rank effect as any other
 // confirmed ladder win) or cancel the challenge outright with no ladder
 // effect on either side.
