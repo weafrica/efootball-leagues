@@ -12,6 +12,7 @@ import { uploadToBlob } from "./utils/blobUpload";
 // this automatically for a dynamic import()) shrinks the JS the browser
 // has to fetch and parse before the app is interactive.
 const ShopPage = lazy(() => import("./Shop.jsx"));
+const TransferMarketPage = lazy(() => import("./TransferMarket.jsx"));
 const TermsPage = lazy(() => import("./Terms.jsx"));
 // RulesModal carries its own ~500-line static rules text (league/ladder/
 // challenge reference content) that only a fraction of visitors ever open —
@@ -6549,7 +6550,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} c={c} />
             )}
             {view === "create" && (
@@ -6612,6 +6613,11 @@ export default function App() {
             {view === "shop" && (
               <Suspense fallback={<Loader c={c} />}>
                 <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin} onBack={goBack} initialProductId={shopDeepLinkProductId} />
+              </Suspense>
+            )}
+            {view === "transferMarket" && (
+              <Suspense fallback={<Loader c={c} />}>
+                <TransferMarketPage c={c} session={session} profile={profile} leagues={leagues} onBack={goBack} showToast={showToast} />
               </Suspense>
             )}
             {view === "terms" && (
@@ -8381,7 +8387,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, c }) {
   // attentionScore below reads resultEscalationReason/ladderCupResultEscalationReason,
   // which flip from null to "timeout" purely once Date.now() crosses a stored
   // deadline — with no other trigger, a league sitting open in an idle admin
@@ -8685,6 +8691,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
           <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
           <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
+          <MenuTile icon={Repeat} label="Transfers" external onClick={onOpenTransferMarket} c={c} />
         </div>
       </section>
 
