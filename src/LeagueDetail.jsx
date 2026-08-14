@@ -126,7 +126,7 @@ function ladderCupBadges(row) {
     row.badge_giant_slayer > 0 && { ...LADDER_CUP_BADGE_STYLE.giantSlayer, label: `Giant Slayer ×${row.badge_giant_slayer}` },
     row.badge_bounty_hunter > 0 && { ...LADDER_CUP_BADGE_STYLE.bountyHunter, label: `Bounty Hunter ×${row.badge_bounty_hunter}` },
     row.badge_walkover > 0 && { ...LADDER_CUP_BADGE_STYLE.walkover, label: `Walkover ×${row.badge_walkover}` },
-    row.badge_second_life && { ...LADDER_CUP_BADGE_STYLE.secondLife, label: "Used Second Life" },
+    row.badge_second_life && { ...LADDER_CUP_BADGE_STYLE.secondLife, label: `Used Second Life (−${LADDER_CUP_RULES.SECOND_LIFE_DEDUCTION} pts, floored at 0)` },
   ].filter(Boolean);
 }
 function LadderCupBadgeRow({ row, c }) {
@@ -905,7 +905,7 @@ function LadderCupWalkoverReviewPanel({ league, claims, onApprove, onReject, c }
 // shape as PendingResultsPanel/LadderCupWalkoverReviewPanel above, but
 // built from ladder_cup_matches directly rather than a fixture-linked
 // submissions list.
-function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
+function LadderCupResultReviewPanel({ league, matches, onResolve, onEditScore, c }) {
   const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
   if (matches.length === 0) return null;
   return (
@@ -914,37 +914,96 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, c }) {
         <Camera size={13} /> {matches.length} match result{matches.length === 1 ? "" : "s"} awaiting your review
       </div>
       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-        {matches.map((m) => {
-          const home = teamsById[m.home_team_id];
-          const away = teamsById[m.away_team_id];
-          const reason = ladderCupResultEscalationReason(m);
-          let scoreLine = `${home?.name || "Home"} ${m.home_goals} – ${m.away_goals} ${away?.name || "Away"}`;
-          if (m.decided_by === "extra_time") scoreLine += ` (aet ${m.extra_time_home_goals}-${m.extra_time_away_goals})`;
-          if (m.decided_by === "penalties") scoreLine += ` (pens ${m.penalties_home}-${m.penalties_away})`;
-          return (
-            <div key={m.id} className="rounded-xl px-4 py-2.5" style={{ background: c.surface, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div className="font-body text-sm truncate">{scoreLine}</div>
-              <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>
-                Reported by {(m.result_reported_by_team_id === m.home_team_id ? home : away)?.name || "a club"} · {timeAgo(m.result_reported_at)}
-              </div>
-              <div className="font-mono text-[11px] mt-0.5" style={{ color: c.red }}>
-                {reason === "dispute-cap" ? "Disputed too many times already — sent straight to the admin" : "Confirmation window passed — sent to the admin"}
-              </div>
-              <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
-                <button onClick={() => window.open(m.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
-                  <Eye size={12} /> View photo proof
-                </button>
-                <button onClick={() => onResolve(m, true)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
-                  <ThumbsUp size={12} /> Approve
-                </button>
-                <button onClick={() => onResolve(m, false)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.redSoft, color: c.red }}>
-                  <ThumbsDown size={12} /> Reject
-                </button>
-              </div>
-            </div>
-          );
-        })}
+        {matches.map((m) => (
+          <LadderCupEscalatedResultRow key={m.id} match={m} home={teamsById[m.home_team_id]} away={teamsById[m.away_team_id]}
+            onApprove={() => onResolve(m, true)} onReject={() => onResolve(m, false)}
+            onEditScore={(homeGoals, awayGoals) => onEditScore(m, homeGoals, awayGoals)} c={c} />
+        ))}
       </div>
+    </div>
+  );
+}
+
+// Split out of LadderCupResultReviewPanel above so each row can own its own
+// edit-mode state — a hook can't live inside the .map() callback directly.
+// Editing is regulation-score only, same restriction the CommentRow score
+// box already applies for a CONFIRMED result's correction (see
+// editLadderCupMatchResult in App.jsx): extra time/penalties aren't
+// editable here since a still-pending match hasn't been played out that
+// far yet to have anything on record to correct.
+function LadderCupEscalatedResultRow({ match: m, home, away, onApprove, onReject, onEditScore, c }) {
+  const reason = ladderCupResultEscalationReason(m);
+  let scoreLine = `${home?.name || "Home"} ${m.home_goals} – ${m.away_goals} ${away?.name || "Away"}`;
+  if (m.decided_by === "extra_time") scoreLine += ` (aet ${m.extra_time_home_goals}-${m.extra_time_away_goals})`;
+  if (m.decided_by === "penalties") scoreLine += ` (pens ${m.penalties_home}-${m.penalties_away})`;
+
+  const [editing, setEditing] = useState(false);
+  const [editHome, setEditHome] = useState("");
+  const [editAway, setEditAway] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const startEdit = () => { setEditHome(String(m.home_goals ?? "")); setEditAway(String(m.away_goals ?? "")); setEditing(true); };
+  const saveEdit = async () => {
+    const h = parseInt(editHome, 10);
+    const a = parseInt(editAway, 10);
+    if (!Number.isInteger(h) || !Number.isInteger(a) || h < 0 || a < 0) return;
+    setSavingEdit(true);
+    const ok = await onEditScore(h, a);
+    setSavingEdit(false);
+    if (ok) setEditing(false);
+  };
+
+  return (
+    <div className="rounded-xl px-4 py-2.5" style={{ background: c.surface, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+      {editing ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-body text-sm truncate" style={{ maxWidth: 110 }}>{home?.name || "Home"}</span>
+          <input type="number" min="0" inputMode="numeric" value={editHome} autoFocus
+            onChange={(e) => setEditHome(e.target.value)}
+            className="w-12 rounded-lg px-1.5 py-1 font-mono text-sm text-center outline-none"
+            style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+          <span className="font-body text-xs" style={{ color: c.textFaint }}>–</span>
+          <input type="number" min="0" inputMode="numeric" value={editAway}
+            onChange={(e) => setEditAway(e.target.value)}
+            className="w-12 rounded-lg px-1.5 py-1 font-mono text-sm text-center outline-none"
+            style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
+          <span className="font-body text-sm truncate" style={{ maxWidth: 110 }}>{away?.name || "Away"}</span>
+          <div className="flex items-center gap-2 w-full mt-1">
+            <button onClick={saveEdit} disabled={savingEdit || editHome === "" || editAway === ""}
+              className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition-transform active:scale-95"
+              style={{ background: c.greenSoft, color: c.greenText, opacity: (savingEdit || editHome === "" || editAway === "") ? 0.5 : 1 }}>
+              {savingEdit ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setEditing(false)} disabled={savingEdit}
+              className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="font-body text-sm truncate">{scoreLine}</div>
+          <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>
+            Reported by {(m.result_reported_by_team_id === m.home_team_id ? home : away)?.name || "a club"} · {timeAgo(m.result_reported_at)}
+          </div>
+          <div className="font-mono text-[11px] mt-0.5" style={{ color: c.red }}>
+            {reason === "dispute-cap" ? "Disputed too many times already — sent straight to the admin" : "Confirmation window passed — sent to the admin"}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
+            <button onClick={() => window.open(m.proof_url, "_blank", "noopener,noreferrer")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
+              <Eye size={12} /> View photo proof
+            </button>
+            <button onClick={startEdit} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border flex items-center gap-1.5 transition-transform active:scale-95" style={{ borderColor: c.borderStrong }}>
+              <Pencil size={12} /> Edit score
+            </button>
+            <button onClick={onApprove} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
+              <ThumbsUp size={12} /> Approve
+            </button>
+            <button onClick={onReject} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-transform active:scale-95" style={{ background: c.redSoft, color: c.red }}>
+              <ThumbsDown size={12} /> Reject
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1100,7 +1159,7 @@ function LadderCupWidgetOverlay({ title, onClose, c, children }) {
   );
 }
 
-function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
+function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
   // Which of the five small quick-action widgets (if any) is currently
   // popped open over the standings table — see the trigger row + overlay
@@ -1263,7 +1322,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
                 <LadderCupWalkoverReviewPanel league={league} claims={pendingWalkoverClaims} onApprove={onApproveWalkoverClaim} onReject={onRejectWalkoverClaim} c={c} />
               )}
               {openWidget === "escalated" && (
-                <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} c={c} />
+                <LadderCupResultReviewPanel league={league} matches={escalatedResultMatches} onResolve={onAdminResolveResult} onEditScore={onAdminEditResult} c={c} />
               )}
               {openWidget === "results" && (
                 <CommentsSection league={league} session={session} canComment={!!myTeam || canManage}
@@ -1374,7 +1433,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1519,7 +1578,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
           onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
           onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction}
-          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife}
+          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife}
           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
       ) : notStarted ? (
