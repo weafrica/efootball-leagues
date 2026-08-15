@@ -2836,6 +2836,20 @@ export function RulesButton({ label, onClick, c }) {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
+  // Supabase's onAuthStateChange fires — and hands back a brand-new session
+  // object, even when nothing about the signed-in user actually changed —
+  // on every TOKEN_REFRESHED event (roughly hourly per tab, more with
+  // several tabs open), not just real sign-in/sign-out. Any effect that
+  // lists `session` itself in its dependency array reruns on every one of
+  // those refreshes, because React compares by reference. sessionKey
+  // collapses that down to a primitive that only changes on a genuine
+  // identity transition (nobody -> user A, user A -> nobody, user A -> user
+  // B), so effects keyed on it correctly ignore token refreshes. This is
+  // what was behind loadLeagues() (and the rest of the sign-in load
+  // battery below) dominating PostgREST egress: it was re-running its full
+  // whole-platform fetch every time any open tab silently refreshed its
+  // token, not once per session as intended.
+  const sessionKey = session === undefined ? "loading" : session === null ? "signed-out" : session.user.id;
   const [profile, setProfile] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leagues, setLeagues] = useState(null);
@@ -3880,7 +3894,8 @@ export default function App() {
     if (!session) { setProfile(undefined); setLeagues(null); setIsAdmin(false); return; }
     supabase.from("profiles").select("*").eq("user_id", session.user.id).maybeSingle()
       .then(({ data }) => setProfile(data || null));
-  }, [session]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
+  }, [sessionKey]);
 
   useEffect(() => {
     if (!session || !profile) return;
@@ -3893,7 +3908,8 @@ export default function App() {
     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
     loadTeamAvatars(); // also feeds the Table's club photos
     loadAllAchievements(); // feeds the Wall of Fame
-  }, [session, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars, loadAllAchievements]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
+  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars, loadAllAchievements]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
