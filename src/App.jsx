@@ -10301,10 +10301,16 @@ function leagueGoalExtremes(standings, league) {
   return goalExtremes(named);
 }
 
-export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, session, myTeamId, c }) {
-  const [query, setQuery] = useState("");
+// externalQuery lets a parent (e.g. GroupTables, searching across every
+// group from one shared box) drive the filtering instead of this panel's
+// own search input. Pass a string (even "") to take over; leave it
+// undefined and the panel manages its own "Search a club..." box as before.
+export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, league, avatarByTeamId, session, myTeamId, c, externalQuery }) {
+  const [localQuery, setLocalQuery] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [profileRow, setProfileRow] = useState(null); // the standings row currently shown in PlayerProfileModal, or null
+  const isExternallyControlled = externalQuery !== undefined;
+  const query = isExternallyControlled ? externalQuery : localQuery;
   const q = query.trim().toLowerCase();
   const ranked = standings.map((r, i) => ({ ...r, rank: i + 1 }));
   const filtered = q ? ranked.filter((r) => r.name.toLowerCase().includes(q)) : ranked;
@@ -10362,12 +10368,14 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
 
       <GoalExtremesBar top={leagueTopScorer} least={leagueLeastScorer} c={c} />
 
-      <div className="relative mb-3">
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a club..."
-          className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none"
-          style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-      </div>
+      {!isExternallyControlled && (
+        <div className="relative mb-3">
+          <input value={localQuery} onChange={(e) => setLocalQuery(e.target.value)} placeholder="Search a club..."
+            className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none"
+            style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-xl border" style={{ borderColor: c.border }}>
         <div className="overflow-y-auto" style={{ maxHeight: scrolls ? STANDINGS_ROW_HEIGHT * STANDINGS_VISIBLE_ROWS + 34 : undefined }}>
@@ -10718,11 +10726,32 @@ export function GroupTables({ league, groupStageFixtures, avatarByTeamId, sessio
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i)
     .sort((a, b) => (a === myGroupNumber ? -1 : b === myGroupNumber ? 1 : 0));
 
+  // One search box for the whole group stage instead of one per group
+  // table — searching a club used to mean opening each group's table in
+  // turn to check it. Groups with no matching club are hidden entirely
+  // while a search is active, so the matching club's table surfaces
+  // immediately regardless of which group it's in.
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (teams) => !q || teams.some((t) => t.name.toLowerCase().includes(q));
+
   return (
     <div className="space-y-6">
+      {groupsCount > 1 && (
+        <div className="relative">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a club across all groups..."
+            className="w-full border rounded-lg pl-9 pr-3 py-2 font-body text-sm outline-none"
+            style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={c.textFaint} strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+        </div>
+      )}
+      {q && !groupNumbers.some((g) => matchesQuery(league.teams.filter((t) => t.group_number === g))) && (
+        <div className="text-center font-body text-sm py-6" style={{ color: c.textFaint }}>No club matches "{query}".</div>
+      )}
       {groupNumbers.map((g) => {
         const groupTeams = league.teams.filter((t) => t.group_number === g);
         if (groupTeams.length === 0) return null;
+        if (!matchesQuery(groupTeams)) return null;
         const groupFx = groupStageFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
         const standings = computeStandings(groupTeams, groupFx, league);
         const qualifiers = league.group_qualifiers || 0;
@@ -10736,7 +10765,8 @@ export function GroupTables({ league, groupStageFixtures, avatarByTeamId, sessio
                 <span className="normal-case font-body text-[11px]" style={{ color: c.greenText }}>· top {Math.min(qualifiers, n)} advance</span>
               )}
             </div>
-            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeamId} c={c} />
+            <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeamId} c={c}
+              externalQuery={groupsCount > 1 ? q : undefined} />
           </div>
         );
       })}
