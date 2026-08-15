@@ -96,6 +96,15 @@ export function createLadderCupEntry(clubId, clubName) {
       second_life: false,  // permanent single badge once re-entered
       bounty_hunter: 0,    // count of bounty wins
     },
+    // Step 14 (rebirth) — see the "Rebirth" section below. rebirth_count is
+    // how many times this club has come back from full elimination;
+    // past_lives is a display-only archive of each finished run's final
+    // numbers. Neither field is ever read by rankLadderCupStandings,
+    // recordLadderCupWin, or anything else that touches live standings —
+    // they exist purely so the UI can show a fallen club's history after
+    // its stats reset to zero.
+    rebirth_count: 0,
+    past_lives: [],
   };
 }
 
@@ -304,6 +313,103 @@ export function expireStaleSecondLifeOffers(entries, now = new Date()) {
     }
     return e;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Rebirth (step 14) — rejoining after full elimination
+// ---------------------------------------------------------------------------
+//
+// "Eliminated" (second life already used, or declined/expired) has always
+// been a dead end for match-making — getOpponentPool only ever considers
+// status === "active", so a fallen club silently drops out of the ladder on
+// its own the moment it's eliminated. It was never removed from the
+// standings table, though — every entry, eliminated or not, keeps showing
+// there for the record. Rebirth is the missing other half: a fully fallen
+// club can choose to rejoin. Its finished run is archived into
+// `past_lives` (display-only — see careerLadderCupTotals below; nothing in
+// this file ever sums it back into pts/w/l/gd) and its live stats reset to
+// a brand-new day-one run, same as the club's very first match.
+
+/** True once a club has exhausted every life — the only state reborn() accepts. */
+export function canRejoinLadderCup(entry) {
+  return entry.status === "eliminated";
+}
+
+/**
+ * Archives the just-ended life and resets the entry to day one: 0
+ * pts/w/l/gd/streak, a fresh (unused) second life, ladder_rating back to
+ * the starting value (so a reborn club's matchmaking isn't anchored to its
+ * old run's form), and status back to "active". rebirth_count increments
+ * so the UI can badge "2nd life", "3rd life", etc.
+ */
+export function reborn(entry, now = new Date()) {
+  if (!canRejoinLadderCup(entry)) {
+    throw new Error("Only a fully eliminated club can be reborn.");
+  }
+  const finishedLife = {
+    life_number: entry.rebirth_count + 1,
+    pts: entry.pts,
+    w: entry.w,
+    l: entry.l,
+    gd: entry.gd,
+    matches_played: entry.w + entry.l,
+    second_life_used: entry.second_life_used,
+    toughest_opponent_beaten_pts: entry.toughest_opponent_beaten_pts,
+    ladder_rating: entry.ladder_rating,
+    badge_counts: { ...entry.badge_counts },
+    ended_at: now.toISOString(),
+  };
+  return {
+    ...entry,
+    pts: 0,
+    w: 0,
+    l: 0,
+    gd: 0,
+    streak: 0,
+    status: /** @type {LadderCupStatus} */ ("active"),
+    second_life_used: false,
+    second_life_offer: null,
+    toughest_opponent_beaten_pts: 0,
+    ladder_rating: LADDER_CUP_RULES.RATING_START,
+    badge_counts: { heater_wins: 0, giant_slayer: 0, second_life: false, bounty_hunter: 0 },
+    rebirth_count: entry.rebirth_count + 1,
+    past_lives: [...(entry.past_lives || []), finishedLife],
+    reborn_at: now.toISOString(),
+  };
+}
+
+/**
+ * Career totals across every finished life plus the current one — for a
+ * club profile's "all-time" line. Purely a display aggregate; never fed
+ * back into rankLadderCupStandings or any scoring path.
+ */
+export function careerLadderCupTotals(entry) {
+  const lives = entry.past_lives || [];
+  return {
+    lives_played: lives.length + 1,
+    total_pts: lives.reduce((s, l) => s + l.pts, 0) + entry.pts,
+    total_w: lives.reduce((s, l) => s + l.w, 0) + entry.w,
+    total_l: lives.reduce((s, l) => s + l.l, 0) + entry.l,
+    total_matches: lives.reduce((s, l) => s + l.matches_played, 0) + entry.w + entry.l,
+  };
+}
+
+// A little variety so the announcement doesn't feel copy-pasted every time
+// a club comes back — all in the same "this is a big deal" register.
+const REBIRTH_ANNOUNCEMENTS = [
+  (club, life) => `🔥 RISEN FROM THE ASHES! ${club} has been REBORN into the Survival Ladder Cup — back at 0 pts, hungry for another shot. Their fallen run (${life.pts} pts, ${life.w}W-${life.l}L across ${life.matches_played} matches) is etched into the club's history forever, but the ladder ahead is a clean slate.`,
+  (club, life) => `⚡ ${club} REFUSES TO STAY DOWN. Eliminated, but never forgotten — that ${life.w}-win run stays on the record. Now they're back on the ladder at zero, ready to write a new chapter.`,
+  (club, life) => `👑 A PHOENIX MOMENT for ${club}! Struck down after ${life.matches_played} battles (${life.pts} pts, ${life.w}W-${life.l}L), they've chosen rebirth. Fresh life, fresh points — same fire.`,
+];
+
+/**
+ * One line of hype for the toast shown the instant a club is reborn.
+ * `finishedLife` is the past_lives entry reborn() just archived, so the
+ * copy can quote real numbers back at the club. Pick defaults to random;
+ * pass a fixed `pick` for deterministic tests.
+ */
+export function rebirthAnnouncement(club, finishedLife, pick = Math.floor(Math.random() * REBIRTH_ANNOUNCEMENTS.length)) {
+  return REBIRTH_ANNOUNCEMENTS[((pick % REBIRTH_ANNOUNCEMENTS.length) + REBIRTH_ANNOUNCEMENTS.length) % REBIRTH_ANNOUNCEMENTS.length](club, finishedLife);
 }
 
 // ---------------------------------------------------------------------------

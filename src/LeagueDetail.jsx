@@ -389,7 +389,25 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
                     <div className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-[1px] rounded-full" style={{ color: tier.color, background: `${tier.color}22` }}>
                       {tier.label}
                     </div>
+                    {/* Step 14 (rebirth): a club that's come back from full
+                        elimination wears that as a badge, not a footnote —
+                        it's the whole "everyone can see they were reborn"
+                        point of the feature. Shows whenever rebirth_count
+                        is > 0, active or eliminated again. */}
+                    {row.rebirth_count > 0 && (
+                      <div className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-[1px] rounded-full" title={`Reborn ${row.rebirth_count}×`} style={{ color: "#F0A020", background: "rgba(240,160,32,0.15)" }}>
+                        <Flame size={9} /> {row.rebirth_count}× reborn
+                      </div>
+                    )}
                   </div>
+                  {/* Fallen clubs stay on the table for the record — this
+                      is that record: their finished life's numbers, kept
+                      readable even once pts/w/l reset to zero on rebirth. */}
+                  {eliminated && (
+                    <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
+                      Final: {row.pts} pts · {row.w}W-{row.l}L
+                    </div>
+                  )}
                   <LadderCupBadgeRow row={row} c={c} />
                 </td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + row.l}</td>
@@ -790,13 +808,62 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, onDecline, c }) {
   );
 }
 
+// Step 14: the card a fully eliminated club sees instead of an opponent
+// board — "eliminated" no longer means the story's over, it means one
+// tap away from a fresh run. The club's finished life stays visible right
+// here (and stays on the standings table forever, greyed out — see the
+// `eliminated` row styling above) while this offers the way back in.
+// rebirth_count > 0 means this isn't the club's first time down, so the
+// copy leans into that instead of pretending it's their first rodeo.
+function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
+  const [busy, setBusy] = useState(false);
+  const pastLives = entryRow.past_lives || [];
+  const careerPts = pastLives.reduce((s, l) => s + (l.pts || 0), 0) + entryRow.pts;
+  const careerW = pastLives.reduce((s, l) => s + (l.w || 0), 0) + entryRow.w;
+  const careerL = pastLives.reduce((s, l) => s + (l.l || 0), 0) + entryRow.l;
+  const rebirthCount = entryRow.rebirth_count || 0;
+
+  const act = async () => {
+    setBusy(true);
+    await onRejoin();
+    setBusy(false);
+  };
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl p-5 border mt-3 text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(240,160,32,0.16), transparent 70%)", borderColor: "#F0A020" }}>
+      <div className="animate-ladder-ember absolute -top-14 -right-8 w-32 h-32 rounded-full blur-3xl pointer-events-none" style={{ background: "#F0A020", opacity: 0.3 }} />
+      <div className="relative">
+        <Skull size={26} className="mx-auto mb-2" style={{ color: c.textFaint }} />
+        <div className="font-display font-extrabold text-lg uppercase tracking-wide" style={{ color: c.text }}>Fallen</div>
+        <div className="font-body text-xs mt-2 mb-1" style={{ color: c.textDim }}>
+          This run ended at {entryRow.pts} pts ({entryRow.w}W-{entryRow.l}L) — that record is locked in on the table for
+          good, {rebirthCount > 0 ? "alongside every life before it." : "forever."}
+        </div>
+        {(pastLives.length > 0 || rebirthCount > 0) && (
+          <div className="font-mono text-[10px] uppercase tracking-wide mb-3" style={{ color: c.textFaint }}>
+            Career: {careerPts} pts · {careerW}W-{careerL}L across {rebirthCount + 1} {rebirthCount + 1 === 1 ? "life" : "lives"}
+          </div>
+        )}
+        <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
+          Rejoin now and {clubName} comes back at 0 pts — a clean slate, one more shot at the ladder.
+        </div>
+        <button disabled={busy} onClick={act}
+          className="w-full font-body text-sm font-bold px-3 py-3 rounded-full flex items-center justify-center gap-1.5"
+          style={{ background: "#F0A020", color: "#fff", boxShadow: "0 0 0 1px #F0A020, 0 0 18px 2px #F0A02055" }}>
+          <Flame size={14} /> {busy ? "Rising from the ashes…" : "Rejoin — Be Reborn"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // The "who can I play" screen (Step 9). No accept/decline step here — a
 // tap on Challenge immediately assigns home/away and creates the match row;
 // the ladder_rating band (widening in getOpponentPool) is what stands in
 // for matchmaking consent. Refreshes automatically off the live `league` prop,
 // same as the standings table, so logging any result elsewhere in the app
 // widens/narrows this club's slate without a separate re-fetch.
-function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, c }) {
   const teamsById = useMemo(() => Object.fromEntries((league.teams || []).map((t) => [t.id, t])), [league.teams]);
   // Hooks stay unconditional (called every render, same order) — the
   // eliminated/pending-second-life/no-entry short-circuits below happen
@@ -810,7 +877,7 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch,
 
   const myStatus = myEntry._row.status;
   if (myStatus === "eliminated") {
-    return <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>You've been eliminated from this cup — no more challenges to send.</div>;
+    return <LadderCupFallenCard entryRow={myEntry._row} clubName={myTeam.name} onRejoin={onRejoin} c={c} />;
   }
   if (myStatus === "pending_second_life") {
     return <LadderCupSecondLifeOffer entryRow={myEntry._row}
@@ -1159,7 +1226,7 @@ function LadderCupWidgetOverlay({ title, onClose, c, children }) {
   );
 }
 
-function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
+function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
   // Which of the five small quick-action widgets (if any) is currently
   // popped open over the standings table — see the trigger row + overlay
@@ -1250,7 +1317,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
           {league.ladder_cup_finalized_at ? (
             <LadderCupFinalizedBanner league={league} c={c} />
           ) : myTeam ? (
-            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife}
+            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife} onRejoin={onRejoin}
               onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
           ) : (
             <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
@@ -1433,7 +1500,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1578,7 +1645,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
           onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
           onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction}
-          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife}
+          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife} onRejoin={onRejoinLadderCup}
           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
       ) : notStarted ? (

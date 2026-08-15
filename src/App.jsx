@@ -55,7 +55,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -4690,6 +4690,10 @@ export default function App() {
       second_life: row.badge_second_life,
       bounty_hunter: row.badge_bounty_hunter,
     },
+    // Step 14 (rebirth) — display-only, see formats/ladderCup.js. Falls
+    // back for any row written before these columns existed.
+    rebirth_count: row.rebirth_count || 0,
+    past_lives: row.past_lives || [],
   });
   const ladderCupRowPatchFromEntry = (entry) => ({
     pts: entry.pts, w: entry.w, l: entry.l, gd: entry.gd, streak: entry.streak,
@@ -4980,6 +4984,47 @@ export default function App() {
     if (historyErr) console.error("Couldn't record second-life response history:", historyErr.message);
     await refreshLeague(league.id);
     showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
+  };
+
+  // Step 14: rebirth. A fully eliminated club (second life already spent,
+  // or its first offer declined/expired) never stopped showing on the
+  // standings table — it just dropped out of matchmaking, same as any
+  // other "eliminated" row. This is the missing other half: let that club
+  // choose to rejoin. reborn() (formats/ladderCup.js) archives the
+  // finished life and resets live stats to a fresh day-one run; the RPC
+  // (supabase/migrations/20260823_ladder_cup_rebirth.sql) is what actually
+  // persists it — same RLS-safe pattern as every other ladder_cup_entries
+  // write, self-serve only (no admin path; reviving your own club isn't
+  // something an admin does on your behalf). badge_walkover isn't part of
+  // the engine's badge_counts (see applyLadderCupEntryPatch's comment on
+  // that same asymmetry), so it's folded into the archived life here,
+  // straight off the row, before it's sent to the RPC.
+  const rejoinLadderCup = async (league, teamId) => {
+    if (!league || !teamId) return;
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — rebirth is closed."); return; }
+    const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+    const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
+    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+    if (row.status !== "eliminated") return;
+
+    const clubName = teamsById[teamId]?.name || "Unknown club";
+    const entry = ladderCupEntryFromRow(row, clubName);
+    let updated;
+    try {
+      updated = reborn(entry);
+    } catch (e) {
+      showToast(e.message);
+      return;
+    }
+    const finishedLife = { ...updated.past_lives[updated.past_lives.length - 1], badge_walkover: row.badge_walkover ?? 0 };
+
+    const { error } = await supabase.rpc("rebirth_ladder_cup_entry", {
+      p_entry_id: row.id, p_league_id: league.id, p_team_id: teamId, p_past_life: finishedLife,
+    });
+    if (error) { showToast(`Couldn't complete the rebirth: ${error.message}`); return; }
+
+    await refreshLeague(league.id);
+    showToast(rebirthAnnouncement(clubName, finishedLife));
   };
 
   // Step 12: walkover claims (message → 24h wait → claim with screenshot →
@@ -6576,6 +6621,7 @@ export default function App() {
                 onRespondLadderCupMatchResult={(match, accept) => respondLadderCupMatchResult(activeLeague, match, myTeam(activeLeague)?.id, accept)}
                 onAdminResolveLadderCupMatchResult={(match, approve) => adminResolveLadderCupMatchResult(activeLeague, match, approve)}
                 onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
+                onRejoinLadderCup={() => rejoinLadderCup(activeLeague, myTeam(activeLeague)?.id)}
                 onMessageLadderCupWalkoverOpponent={(opponentTeamId) => messageLadderCupWalkoverOpponent(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
                 onSubmitLadderCupWalkoverClaim={(claim, file) => submitLadderCupWalkoverClaim(activeLeague, claim, file)}
                 onApproveLadderCupWalkoverClaim={(claim) => approveLadderCupWalkoverClaim(activeLeague, claim)}
