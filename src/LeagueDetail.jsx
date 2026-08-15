@@ -1828,12 +1828,16 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
 
       {tab === "fixtures" && (
         <div className="space-y-6">
-          {inGroupStage && canManage && (
+          {/* Weekend leagues skip the full "every fixture" admin view — even
+              for the league's own manager — and just show their own
+              opponent instead, same as a regular joined player gets in a
+              normal league. See isWeekendLeague. */}
+          {inGroupStage && canManage && !isWeekendLeague(league) && (
             <GroupFixturesList league={league} groupStageFixtures={groupStageFixtures} canManage={canManage} joined={joined}
               getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
               onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
-          {(inGroupStage || inKnockoutBracket) && joined && !canManage && myTeam && (
+          {(inGroupStage || inKnockoutBracket) && joined && myTeam && (!canManage || isWeekendLeague(league)) && (
             <NextOpponentCard league={league} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
