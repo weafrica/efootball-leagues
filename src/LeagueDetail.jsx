@@ -2753,6 +2753,12 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
 
   return (
     <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+      {/* Club's group shown first, above the match itself, whenever this
+          league is in its group stage — myTeam.group_number is only ever
+          set once groups are assigned (see GroupFixturesList/GroupTables). */}
+      {myTeam.group_number != null && (
+        <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.accent }}>{groupLabel(myTeam.group_number)}</div>
+      )}
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Your next match</div>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
