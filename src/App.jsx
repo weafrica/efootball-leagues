@@ -3037,34 +3037,40 @@ export default function App() {
 
   // This is the single source of truth for every league across the whole
   // signed-in app (Home, league lists, LeagueDetail, achievements, admin
-  // screens) — unlike the guest bundle, `leagues`/`teams`/`fixtures`/
-  // `members` are genuinely read from almost everywhere in this file and
-  // are bounded in size by roster/fixture count anyway, so those stay
-  // `*` here — narrowing them would be high risk for very little payoff.
-  //
-  // comments, comment_likes, result_submissions, and league_reactions are
-  // different: they're unbounded, ever-growing history (every reply, every
-  // like, every submitted result with its proof reference) that compounds
-  // over a league's lifetime, and they're consumed in far fewer places —
-  // traced through splitCommentsByRoot/CommentsSection/CommentNode/
-  // CommentRow (comments + comment_likes), resultEscalationReason/
-  // approveResult/rejectResult/respondToResultSubmission (result_submissions),
-  // and LeagueReactionBar (league_reactions). Narrowed to exactly the
-  // fields those consumers read. comments also carries league_id (not read
-  // by any renderer) purely so toggleCommentReaction/deleteComment — which
-  // only ever receive a bare comment, not its parent league — can resolve
-  // which single league to refresh below without a full reload.
-  const LEAGUE_SELECT =
+  // screens).
+  // LEAGUE_LIST_SELECT is everything the bulk, whole-platform load
+  // (loadLeagues) needs — every field genuinely read from a Home league
+  // card or from anywhere that iterates *all* leagues (attentionScore's
+  // result_submissions check, LeagueReactionBar's compact reaction bar,
+  // computeMyUpcomingFixtures/computeMyProgress's fixtures scan), so none
+  // of those stayed narrowed further. `comments` (+ nested comment_likes)
+  // is the one collection that is genuinely detail-only — it's read
+  // exclusively by CommentNode/CommentsSection/LeagueDetail, never by
+  // anything that scans every league — and it's also the single largest,
+  // fastest-growing nested collection (unbounded free-text replies plus a
+  // nested comment_likes join), so it's the one piece split out of the
+  // bulk load and fetched lazily instead, per open league, below.
+  const LEAGUE_LIST_SELECT =
     "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), " +
-    "comments(id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
-      "comment_likes(id, user_id, reaction)), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
     "league_reactions(id, user_id, reaction)";
+
+  const LEAGUE_COMMENTS_SELECT =
+    "id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
+    "comment_likes(id, user_id, reaction)";
+
+  // Full per-league shape (LEAGUE_LIST_SELECT + comments) — used by
+  // refreshLeague/refreshLeagues below, which only ever re-fetch one or a
+  // few leagues at a time after a mutation (often a comment mutation
+  // itself), so paying for comments there is cheap and keeps them fresh
+  // without a second round trip.
+  const LEAGUE_SELECT =
+    LEAGUE_LIST_SELECT + ", comments(" + LEAGUE_COMMENTS_SELECT + ")";
 
   const loadLeagues = useCallback(async () => {
     const { data, error } = await supabase
       .from("leagues")
-      .select(LEAGUE_SELECT)
+      .select(LEAGUE_LIST_SELECT)
       .order("created_at", { ascending: false });
     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
     setLeagues(data || []);
@@ -3093,6 +3099,27 @@ export default function App() {
       return [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     });
   }, []);
+
+  // Lazily fills in `comments` for whichever league is actually open,
+  // rather than every league carrying its full comment history in memory
+  // and over the wire on every load (see LEAGUE_LIST_SELECT above). Skips
+  // the fetch if this league already has comments loaded — e.g. right
+  // after refreshLeague/refreshLeagues ran and merged them in already.
+  useEffect(() => {
+    if (!activeLeagueId) return;
+    const current = (leagues || []).find((l) => l.id === activeLeagueId);
+    if (current && current.comments) return;
+    let cancelled = false;
+    supabase
+      .from("comments")
+      .select(LEAGUE_COMMENTS_SELECT)
+      .eq("league_id", activeLeagueId)
+      .then(({ data, error }) => {
+        if (cancelled || error) return;
+        mergeLeaguesById([{ id: activeLeagueId, comments: data || [] }]);
+      });
+    return () => { cancelled = true; };
+  }, [activeLeagueId, leagues, mergeLeaguesById]);
 
   const refreshLeague = useCallback(async (leagueId) => {
     if (!leagueId) return;
