@@ -10711,7 +10711,12 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
 
 export function GroupTables({ league, groupStageFixtures, avatarByTeamId, session, myTeamId, c }) {
   const groupsCount = league.groups_count || 0;
-  const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);
+  // Show the viewer's own group's table first, then the rest of the groups
+  // in their normal order — so a club opening the group stage lands on
+  // their own standings before scrolling past every other group to find it.
+  const myGroupNumber = myTeamId != null ? league.teams.find((t) => t.id === myTeamId)?.group_number : null;
+  const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i)
+    .sort((a, b) => (a === myGroupNumber ? -1 : b === myGroupNumber ? 1 : 0));
 
   return (
     <div className="space-y-6">
