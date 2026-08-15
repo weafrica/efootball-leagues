@@ -11138,7 +11138,7 @@ export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAll
 // server-side); rejecting just leaves the fixture open for a resubmission.
 export function PendingResultsPanel({ league, submissions, onDownloadProof, onApprove, onReject, c,
   title = `${submissions.length} result${submissions.length === 1 ? "" : "s"} awaiting your review`,
-  approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false, showEscalationReason = false }) {
+  approveLabel = "Approve", rejectLabel = "Reject", showDeadline = false, showEscalationReason = false, showSubmitterWhatsApp = false }) {
   return (
     <div className="rounded-xl p-4 border mb-5" style={{ background: "rgba(217,164,6,0.08)", borderColor: c.border }}>
       <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5" style={{ color: "#B8860B" }}>
@@ -11149,6 +11149,19 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
           const fixture = league.fixtures.find((f) => f.id === s.fixture_id);
           const home = fixture ? league.teams.find((t) => t.id === fixture.home_team_id) : null;
           const away = fixture ? league.teams.find((t) => t.id === fixture.away_team_id) : null;
+          // The club that submitted this result, resolved via the member row
+          // that matches submitted_by (a user id, same as members.user_id) —
+          // result_submissions carries no team_id of its own, so this is the
+          // only path from "who submitted this" to "which club's WhatsApp".
+          const submitterMember = showSubmitterWhatsApp
+            ? (league.members || []).find((m) => m.user_id === s.submitted_by)
+            : null;
+          const submitterTeam = submitterMember
+            ? league.teams.find((t) => t.id === submitterMember.team_id)
+            : null;
+          const submitterWhatsAppText = submitterTeam
+            ? `Hi ${submitterTeam.name}, your result for${fixture ? ` Matchday ${fixture.round}:` : ""} ${home?.name || "Home"} ${s.home_score} – ${s.away_score} ${away?.name || "Away"} in "${league.name}" is with me for approval now — I'll get to it shortly.`
+            : null;
           return (
             <div key={s.id} className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
               <div className="flex items-center gap-3">
@@ -11156,7 +11169,13 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
                   {s.submitted_by_username[0]?.toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
+                    {showSubmitterWhatsApp && submitterTeam?.phone && (
+                      <WhatsAppLink phone={submitterTeam.phone} text={submitterWhatsAppText} iconOnly
+                        title={`Message ${submitterTeam.name} about this result`} c={c} />
+                    )}
+                  </div>
                   <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` · Matchday ${fixture.round}` : ""} · {timeAgo(s.created_at)}</div>
                   {showDeadline && (() => {
                     const reason = resultEscalationReason(league, s);

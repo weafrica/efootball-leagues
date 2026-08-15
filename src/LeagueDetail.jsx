@@ -1751,7 +1751,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
       {canManage && escalatedResults.length > 0 && (
         <PendingResultsPanel league={league} submissions={escalatedResults}
           title={`${escalatedResults.length} result${escalatedResults.length === 1 ? "" : "s"} needing review — opponent didn't confirm in time or disputed it repeatedly`}
-          showEscalationReason
+          showEscalationReason showSubmitterWhatsApp
           onDownloadProof={onDownloadResultProof} onApprove={onApproveResult} onReject={onRejectResult} c={c} />
       )}
 
