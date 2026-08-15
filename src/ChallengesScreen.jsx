@@ -7,7 +7,7 @@ import { supabase } from "./supabaseClient";
 import {
   ChallengeBoard, ChallengeChatModal, ChallengeRow, CommunityResultRow,
   Loader, MemberAvatar, REACTIONS, REACTION_EMOJI, RulesButton, VoiceNotePlayer,
-  VoiceRecorderButton, WhatsAppCallLink, avatarColor, challengeResultConfirmExpired,
+  VoiceRecorderButton, WhatsAppCallLink, WhatsAppLink, avatarColor, challengeResultConfirmExpired,
   challengeResultMinutesLeft, commentSpeech, ladderDaysLeft, timeAgo,
   useCommentSpeakingId, useVoiceRecorder,
 } from "./App.jsx";
@@ -20,7 +20,7 @@ import {
 // LeagueDetail already are.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
-export default function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onAdminEditResult, onAdminEditResultOpen, onAdminGrantLadderWalkover, onAdminCancelLadderChallenge, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
+export default function ChallengesScreen({ session, members, challenges, openChallenges, recentResults, boardComments, isAdmin, accounts, myUsername, onPostBoardComment, onDeleteBoardComment, onToggleBoardCommentReaction, onSendChallenge, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onOpenLogResultOpen, onConfirmResultOpen, onDisputeResultOpen, onAdminApproveResult, onAdminRejectResult, onAdminApproveResultOpen, onAdminRejectResultOpen, onAdminEditResult, onAdminEditResultOpen, onAdminGrantLadderWalkover, onAdminCancelLadderChallenge, onViewResultProof, onSendRandom, onAcceptOpen, onCancelOpen, onRemoveOpen, onBack, showToast, c }) {
   const [query, setQuery] = useState("");
   const [sendingTo, setSendingTo] = useState(null);
   const [sendingRandom, setSendingRandom] = useState(false);
@@ -59,6 +59,17 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   const myResolvedOpen = (openChallenges || [])
     .filter((ch) => ch.status !== "open" && (ch.creator_id === myId || ch.accepted_by === myId))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  // Admin-only: phone numbers for the WhatsApp icon on escalated results
+  // below, keyed by user id — sourced from the accounts list (only ever
+  // loaded/passed for an admin; see openChallengesScreen in App.jsx), never
+  // from `members`, which deliberately excludes phone numbers since every
+  // signed-in player can see that list to pick an opponent.
+  const phoneByUserId = useMemo(() => {
+    const map = {};
+    (accounts || []).forEach((a) => { if (a.phone) map[a.user_id] = a.phone; });
+    return map;
+  }, [accounts]);
 
   // Admin-only: results whose 30-minute opponent-confirm window has passed without
   // a response — these move here instead of staying stuck waiting forever.
@@ -113,12 +124,14 @@ export default function ChallengesScreen({ session, members, challenges, openCha
             {escalatedChallenges.map((ch) => (
               <AdminEscalatedResultRow key={`ch-${ch.id}`} nameA={ch.challenger_username} nameB={ch.opponent_username}
                 scoreA={ch.challenger_score} scoreB={ch.opponent_score} reportedByUsername={ch.result_reported_by === ch.challenger_id ? ch.challenger_username : ch.opponent_username}
+                reporterPhone={phoneByUserId[ch.result_reported_by]}
                 onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)}
                 onEditScore={(a, b) => onAdminEditResult(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
             ))}
             {escalatedOpenChallenges.map((ch) => (
               <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
                 scoreA={ch.creator_score} scoreB={ch.accepted_by_score} reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
+                reporterPhone={phoneByUserId[ch.result_reported_by]}
                 onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)}
                 onEditScore={(a, b) => onAdminEditResultOpen(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
             ))}
@@ -392,9 +405,10 @@ function ResolvedOpenChallengeRow({ challenge: ch, myId, myUsername, onRemove, o
 // opponent-confirm window, shown to admins for a manual call — same
 // approve/reject choice the opponent would have had, just made by an admin
 // instead since the opponent didn't act in time.
-function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, onApprove, onReject, onEditScore, onViewProof, c }) {
+function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsername, reporterPhone, onApprove, onReject, onEditScore, onViewProof, c }) {
   const [busy, setBusy] = useState(false);
   const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+  const reporterWhatsAppText = `Hi ${reportedByUsername}, your reported result — ${nameA} ${scoreA} – ${scoreB} ${nameB} — is with me for approval now. I'll get to it shortly.`;
 
   // Lets an admin correct a mis-typed score before approving/rejecting —
   // same inline number-input pattern as the league Results tab's score
@@ -454,6 +468,10 @@ function AdminEscalatedResultRow({ nameA, nameB, scoreA, scoreB, reportedByUsern
       </div>
       {!editing && (
         <>
+          {reporterPhone && (
+            <WhatsAppLink phone={reporterPhone} text={reporterWhatsAppText} iconOnly
+              title={`Message ${reportedByUsername} about this result`} c={c} />
+          )}
           <button onClick={startEdit} title="Edit score" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Pencil size={14} /></button>
           <button onClick={onViewProof} title="View photo proof" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.textFaint }}><Camera size={14} /></button>
           <button onClick={() => run(onApprove)} disabled={busy} title="Approve" className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.accent, color: c.accentText }}><Check size={14} /></button>

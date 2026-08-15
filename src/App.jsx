@@ -6545,7 +6545,13 @@ export default function App() {
   // immediately the moment `view` becomes "challenges" (see below), so
   // calling them again here just fired the same two requests twice back to
   // back on every single visit to this screen.
-  const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); };
+  // Admins get accounts (with phone numbers) loaded alongside the usual
+  // challenge data — feeds the WhatsApp icon on the escalated-results panel
+  // below, which needs a phone number for whoever reported the disputed
+  // result. Non-admins never fetch this (get_all_accounts is admin-gated
+  // server-side anyway), same privacy boundary loadChallengeMembers already
+  // draws by leaving phone off the everyone-sees-everyone member picker.
+  const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); if (isAdmin) loadAccounts(); };
   const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
 
   return (
@@ -6569,6 +6575,7 @@ export default function App() {
         ) : view === "challenges" ? (
           <Suspense fallback={<Loader c={c} />}>
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
+            accounts={isAdmin ? accounts : null}
             boardComments={boardComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
             onPostBoardComment={postBoardComment} onDeleteBoardComment={deleteBoardComment} onToggleBoardCommentReaction={toggleBoardCommentReaction}
             onSendChallenge={sendChallenge} onAccept={(ch) => respondChallenge(ch, true)} onDecline={(ch) => respondChallenge(ch, false)}
