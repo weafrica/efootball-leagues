@@ -2922,7 +2922,13 @@ export default function App() {
   const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
   const [ladderComments, setLadderComments] = useState(null); // comment wall shown on the full Ladder page
   const [ladderResults, setLadderResults] = useState(null); // last 100 confirmed ladder-challenge results, for the full Ladder page
-  const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets
+  const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets. Only ever loaded for the Ladder page itself now — see ladderTop5/myLadderRank below for the lightweight Home equivalents.
+  // Home's LadderStrip only ever renders the top 5 rows plus the viewer's
+  // own — these two replace loadLadder() there (see below), which used to
+  // poll the *entire* ladder_ranks table every 60s from Home, the busiest
+  // screen in the app, for that same handful of rows.
+  const [ladderTop5, setLadderTop5] = useState(null);
+  const [myLadderRankRow, setMyLadderRankRow] = useState(null);
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
@@ -3308,6 +3314,23 @@ export default function App() {
     setLadder(data || []);
   }, []);
 
+  // Lightweight stand-ins for the two things Home's LadderStrip actually
+  // needs — the top 5 rows and the viewer's own row — instead of the full
+  // unbounded table loadLadder above fetches. See ladderTop5/myLadderRankRow
+  // state comments for why this split exists.
+  const loadLadderTop5 = useCallback(async () => {
+    const { data, error } = await supabase.from("ladder_ranks").select("*").order("rank_position", { ascending: true }).limit(5);
+    if (error) { console.error("Couldn't load the ladder top 5:", error.message); return; }
+    setLadderTop5(data || []);
+  }, []);
+
+  const loadMyLadderRank = useCallback(async () => {
+    if (!session) { setMyLadderRankRow(null); return; }
+    const { data, error } = await supabase.from("ladder_ranks").select("*").eq("user_id", session.user.id).maybeSingle();
+    if (error) { console.error("Couldn't load your ladder rank:", error.message); return; }
+    setMyLadderRankRow(data || null);
+  }, [session]);
+
   // Every confirmed challenge/fixture/random-challenge result attempts a
   // ladder update, but it only actually lands if both players are on the
   // ladder and within 10 points of each other (see apply_ladder_result in
@@ -3348,7 +3371,13 @@ export default function App() {
       .filter((r) => (playedNoMatches && r.points === mine.points) || (r.points > mine.points && r.points - mine.points <= 10))
       .sort((a, b) => a.points - b.points);
   }, [ladder, session]);
-  const myLadderRank = useMemo(() => (ladder && session ? ladder.find((r) => r.user_id === session.user.id) : null), [ladder, session]);
+  // Used to come from the full ladder list (ladder.find(...)) — but that
+  // list is now only loaded on the Ladder page itself (see ladder state
+  // comment above), while myLadderRank is also needed on Home (the rank
+  // badge, achievement checks). myLadderRankRow is its own targeted
+  // single-row fetch, so it stays available regardless of which page is
+  // actually loading the full table.
+  const myLadderRank = myLadderRankRow;
 
   // Lets a member stop receiving new ladder challenges — e.g. if they're
   // swamped with a backlog and want a breather. Doesn't affect challenges
@@ -3360,7 +3389,8 @@ export default function App() {
     const next = !myLadderRank.challenges_paused;
     const { error } = await supabase.rpc("set_ladder_pause", { paused: next });
     if (error) { showToast(`Couldn't update pause status: ${error.message}`); return; }
-    await loadLadder();
+    await loadMyLadderRank();
+    if (view === "ladder") await loadLadder(); // keeps ladderTargets' pause filter current if the full list is on screen
     showToast(next ? "Ladder challenges paused — you won't receive new ones until you unpause." : "Ladder challenges resumed.");
   };
 
@@ -3912,12 +3942,13 @@ export default function App() {
     loadLeagues();
     loadChallenges();
     loadOpenChallenges();
-    loadLadder();
+    loadLadderTop5(); // Home's LadderStrip only — see ladderTop5 comment; the full loadLadder() is loaded on-demand by openLadderScreen instead
+    loadMyLadderRank();
     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
     loadTeamAvatars(); // also feeds the Table's club photos
     loadAllAchievements(); // feeds the Wall of Fame
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
-  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadder, loadChallengeMembers, loadTeamAvatars, loadAllAchievements]);
+  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadChallengeMembers, loadTeamAvatars, loadAllAchievements]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
@@ -3930,8 +3961,25 @@ export default function App() {
   // polled before.
   useRealtimeRefresh("challenges", loadChallenges, !!session);
 
-  useRealtimeRefresh("ladder_ranks", loadLadder, (view === "home" || view === "ladder") && !!profile);
-  useVisibilityPoll(loadLadder, 60000, (view === "home" || view === "ladder") && !!profile);
+  // Full unbounded ladder_ranks table — this used to also run continuously
+  // on Home (every 60s, plus on every realtime change from anyone's rank
+  // moving anywhere on the platform) even though Home's LadderStrip only
+  // ever renders 5-6 rows out of it. That was the single largest recurring
+  // PostgREST egress source in the app: an unbounded select("*"), polled
+  // from the busiest, most-often-open screen there is. Now scoped to the
+  // Ladder page itself, which is the only place that genuinely needs every
+  // row (the full leaderboard and the "who can I challenge" target list).
+  useRealtimeRefresh("ladder_ranks", loadLadder, view === "ladder" && !!profile);
+  useVisibilityPoll(loadLadder, 60000, view === "ladder" && !!profile);
+
+  // Home's lightweight equivalents — top 5 rows plus the viewer's own row,
+  // instead of the whole table above. myLadderRankRow (1 row) also needs to
+  // stay live everywhere it's read (Home's badge/achievements, and the
+  // Ladder page's pause toggle), not just on Home, so it isn't view-gated.
+  useRealtimeRefresh("ladder_ranks", loadLadderTop5, view === "home" && !!profile);
+  useVisibilityPoll(loadLadderTop5, 60000, view === "home" && !!profile);
+  useRealtimeRefresh("ladder_ranks", loadMyLadderRank, !!session);
+  useVisibilityPoll(loadMyLadderRank, 60000, !!session);
 
   // While the Challenges screen — or Home, where the random-challenge
   // notification banner lives — is open, poll the random-challenge pool
@@ -6651,7 +6699,7 @@ export default function App() {
                 challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
-                ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
+                ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} c={c} />
