@@ -153,22 +153,12 @@ const ENTRY_FEE_STEP = 10;
 const ENTRY_FEE_PRESETS = [10, 20, 50, 100, 150, 200];
 export const formatRand = (n) => `R${Number(n).toLocaleString("en-ZA")}`;
 
-// Small "cards accepted" indicator for the iKhokha card option — a generic
-// dual-circle motif (not the actual Mastercard/Visa trademarked artwork)
-// paired with plain text, so shoppers recognize card payment is supported
-// without us reproducing anyone's logo.
+// "Cards accepted" indicator for the card payment option — renders the
+// Mastercard/Visa logo image the site owner supplies at
+// /public/card-brands.png (drop the real file in yourself; nothing here
+// reproduces the artwork).
 function CardBrandsBadge({ c }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center" style={{ width: 22 }}>
-        <div className="w-3.5 h-3.5 rounded-full" style={{ background: "#EB5757" }} />
-        <div className="w-3.5 h-3.5 rounded-full -ml-1.5" style={{ background: "#F2A93B", mixBlendMode: "multiply" }} />
-      </div>
-      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>Mastercard</span>
-      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>·</span>
-      <span className="font-body text-[11px] italic font-bold" style={{ color: c.textFaint }}>Visa</span>
-    </div>
-  );
+  return <img src="/card-brands.png" alt="Mastercard, Visa" className="h-5 w-auto object-contain" />;
 }
 
 // WeAfrica's payment details, shown wherever someone is about to pay an
@@ -2260,18 +2250,18 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <>
               <div className="flex items-center gap-2 mb-2">
                 <CreditCard size={14} style={{ color: c.accent }} />
-                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Pay by card via iKhokha</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Pay by card</span>
               </div>
               <a href={IKHOKHA_DETAILS.payLink} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
                 style={{ background: c.accent, color: c.accentText }}>
-                <CreditCard size={13} /> Pay via iKhokha
+                <CreditCard size={13} /> Pay by card
               </a>
               <div className="mt-2">
                 <CardBrandsBadge c={c} />
               </div>
               <div className="font-body text-[10px] mt-1.5 mb-3" style={{ color: c.textFaint }}>
-                Opens iKhokha's secure checkout. Still upload your receipt or confirmation screenshot below as proof.
+                Opens a secure card checkout page. Still upload your receipt or confirmation screenshot below as proof.
               </div>
             </>
           )}

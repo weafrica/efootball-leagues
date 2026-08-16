@@ -81,22 +81,12 @@ async function payWithGateway() {
   return { success: false, reference: null };
 }
 
-// Small "cards accepted" indicator for the iKhokha card option — a generic
-// dual-circle motif (not the actual Mastercard/Visa trademarked artwork)
-// paired with plain text, so shoppers recognize card payment is supported
-// without us reproducing anyone's logo.
+// "Cards accepted" indicator for the card payment option — renders the
+// Mastercard/Visa logo image the site owner supplies at
+// /public/card-brands.png (drop the real file in yourself; nothing here
+// reproduces the artwork).
 function CardBrandsBadge({ c }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center" style={{ width: 22 }}>
-        <div className="w-3.5 h-3.5 rounded-full" style={{ background: "#EB5757" }} />
-        <div className="w-3.5 h-3.5 rounded-full -ml-1.5" style={{ background: "#F2A93B", mixBlendMode: "multiply" }} />
-      </div>
-      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>Mastercard</span>
-      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>·</span>
-      <span className="font-body text-[11px] italic font-bold" style={{ color: c.textFaint }}>Visa</span>
-    </div>
-  );
+  return <img src="/card-brands.png" alt="Mastercard, Visa" className="h-5 w-auto object-contain" />;
 }
 
 function Spinner({ c }) {
@@ -1064,7 +1054,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
     setSubmitting(false);
     if (orderErr) { showToast(`Couldn't submit order: ${orderErr.message}`); return; }
     window.open(SHOP_IKHOKHA_LINK, "_blank", "noopener,noreferrer");
-    showToast(`Order submitted — pay ${formatMoney(total)} on the iKhokha page, then we'll confirm it.`);
+    showToast(`Order submitted — pay ${formatMoney(total)} on the card checkout page, then we'll confirm it.`);
     onDone();
   };
 
@@ -1164,7 +1154,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
       {method === "ikhokha" && SHOP_IKHOKHA_LINK && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
-            You'll be taken to a secure iKhokha page to pay {formatMoney(total)} by card. Once you've paid, come back here — we'll confirm your order shortly after.
+            You'll be taken to a secure card checkout page to pay {formatMoney(total)}. Once you've paid, come back here — we'll confirm your order shortly after.
           </p>
           <CardBrandsBadge c={c} />
           <div>
@@ -1174,7 +1164,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
           </div>
           <button onClick={submitIkhokha} disabled={submitting || missingGuestName}
             className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: c.accent, color: c.accentText, opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
-            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(total)} on iKhokha`}
+            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(total)}`}
           </button>
         </div>
       )}
