@@ -776,9 +776,13 @@ export function ladderCupResultEscalationReason(match) {
 // fielded a club in — used for the "Up next" strip at the top of Home.
 // Pulled straight off each league's live fixtures (not scoped to one stage),
 // so it naturally follows the player from group stage into a knockout
-// bracket once those fixtures exist. Byes (away_team_id === null) and
-// already-played fixtures are skipped; fixtures with no due_at yet sort to
-// the end rather than falling out of the list.
+// bracket once those fixtures exist. Byes (away_team_id === null),
+// already-played fixtures, and fixtures whose confirm/due window has
+// expired are all skipped — an expired fixture isn't something the player
+// can act on anymore (it's on its way to auto-forfeit/admin review, same as
+// everywhere else expired fixtures disappear from actionable lists), so it
+// no longer earns a strip slot; fixtures with no due_at yet sort to the end
+// rather than falling out of the list.
 function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
   const rows = [];
   (leagues || []).forEach((l) => {
@@ -787,12 +791,13 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
     (l.fixtures || []).forEach((f) => {
       if (f.played || f.away_team_id === null) return;
       if (f.home_team_id !== team.id && f.away_team_id !== team.id) return;
+      if (isFixtureLocked(f, l)) return;
       const opponentId = f.home_team_id === team.id ? f.away_team_id : f.home_team_id;
       const opponent = (l.teams || []).find((t) => t.id === opponentId);
       if (!opponent) return;
       rows.push({
         fixtureId: f.id, leagueId: l.id, leagueName: l.name, team, opponent,
-        isHome: f.home_team_id === team.id, round: f.round, due_at: f.due_at, expired: isFixtureLocked(f, l),
+        isHome: f.home_team_id === team.id, round: f.round, due_at: f.due_at,
       });
     });
   });
@@ -8988,7 +8993,7 @@ function UpNextStrip({ fixtures, onOpen, c }) {
             <div className="flex items-center justify-between gap-1.5 mt-1.5">
               <div className="font-mono text-[10px] min-w-0 truncate" style={{ color: c.textDim }}>
                 {f.isHome ? "Home" : "Away"}
-                {f.expired ? <span style={{ color: c.red }}> · Expired</span> : f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+                {f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
               </div>
               {f.opponent.phone && (
                 // Stop the click from also bubbling up and opening the league —
