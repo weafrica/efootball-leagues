@@ -1622,11 +1622,15 @@ export function computeGlobalLeaderboard(leagues, bounds) {
   (leagues || []).forEach((l) => {
     const ownerByTeamId = new Map();
     (l.members || []).forEach((m) => { if (m.team_id) ownerByTeamId.set(m.team_id, m); });
+    // Defensive: same reasoning as computeMyLeagueWins/computeAllLeagueChampionships
+    // above — don't let one league row with a missing fixtures join crash
+    // this pass (and take the Leaderboard strip down with it).
+    const leagueFixtures = l.fixtures || [];
     (l.teams || []).forEach((team) => {
       const owner = ownerByTeamId.get(team.id);
       const key = owner ? `u:${owner.user_id}` : `t:${team.id}`;
       const name = owner ? owner.display_name : team.name;
-      const played = l.fixtures.filter((f) => {
+      const played = leagueFixtures.filter((f) => {
         if (!f.played || f.away_team_id === null) return false;
         if (f.home_team_id !== team.id && f.away_team_id !== team.id) return false;
         if (!bounds) return true;
@@ -10428,7 +10432,7 @@ function LadderCupCard({ league: l, joined, closed, canManageLeague, onOpen, onJ
   const playedCount = matches.filter((m) => m.finalized_at).length;
   const isFinalized = !!l.ladder_cup_finalized_at;
   const championEntry = entries.find((e) => e.status === "champion");
-  const championTeam = championEntry ? l.teams.find((t) => t.id === championEntry.team_id) : null;
+  const championTeam = championEntry ? (l.teams || []).find((t) => t.id === championEntry.team_id) : null;
   const cutoffPassed = hasLadderCupCutoffPassed(l.ladder_cup_cutoff_at);
   const cutoffDate = l.ladder_cup_cutoff_at ? new Date(l.ladder_cup_cutoff_at) : null;
   const initial = (l.name || "?").trim().charAt(0).toUpperCase();
@@ -10555,9 +10559,14 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
   // permanently unstarted ("Open") no matter how many matches have been
   // played, since l.fixtures.length is always 0 for this format.
   const isLadderCup = l.format === "ladder_cup";
+  // Defensive: a league row with a missing teams/fixtures join (see the
+  // homepage crash fixes elsewhere in this file) shouldn't take down every
+  // other card in the list — fall back to empty arrays for just this one.
+  const teams = l.teams || [];
+  const fixtures = l.fixtures || [];
   const ladderMatches = isLadderCup ? (l.ladder_cup_matches || []) : [];
   const ladderPlayedCount = ladderMatches.filter((m) => m.finalized_at).length;
-  const played = isLadderCup ? ladderPlayedCount : l.fixtures.filter((f) => f.played).length;
+  const played = isLadderCup ? ladderPlayedCount : fixtures.filter((f) => f.played).length;
   const paymentStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
   const isCash = l.league_type === "cash";
   const canSeePool = canManageLeague(l) || paymentStatus === "approved";
@@ -10567,12 +10576,12 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
   const pendingResultsCount = (l.result_submissions || []).filter((s) => s.status === "pending" && resultEscalationReason(l, s)).length
     + ladderMatches.filter((m) => ladderCupResultEscalationReason(m)).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
-  const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
-  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
+  const activeTeams = l.format === "survivor" ? teams.filter((t) => !t.eliminated) : teams;
+  const leader = computeStandings(activeTeams, fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
   const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
   const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
     : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
-  const progressPct = l.fixtures.length > 0 ? Math.round((played / l.fixtures.length) * 100) : 0;
+  const progressPct = fixtures.length > 0 ? Math.round((played / fixtures.length) * 100) : 0;
   const initial = (l.name || "?").trim().charAt(0).toUpperCase();
   const attentionCount = (isAdmin ? pendingCount : 0) + (canManageLeague(l) ? pendingResultsCount : 0);
   const needsAttention = attentionCount > 0;
@@ -10606,12 +10615,12 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
           // No fixed match count to show a progress bar against — Ladder
           // Cup is either waiting on its first club, or already live (it
           // has no separate start step; see LadderCupPendingPanel).
-          l.teams.length === 0 ? (
+          teams.length === 0 ? (
             <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Open</span>
           ) : (
             <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Live</span>
           )
-        ) : l.fixtures.length === 0 ? (
+        ) : fixtures.length === 0 ? (
           <span className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Open</span>
         ) : (
           <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: c.bg + "55" }}>
@@ -10627,10 +10636,10 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, myPay
         </div>
 
         <div className="flex items-center gap-1 mt-2 font-mono text-[9px]" style={{ color: c.textDim }}>
-          <Shield size={9} /> {l.teams.length}
+          <Shield size={9} /> {teams.length}
           {isLadderCup
             ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
-            : l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
+            : fixtures.length > 0 && <span className="ml-1">· {played}/{fixtures.length}</span>}
         </div>
 
         {isCash && canSeePool && (
