@@ -8657,9 +8657,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
     // even ones whose individual due_at happens to fall on a different day.
     const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
     const groupStageDueThisWeekend = l.format === "groups_knockout" && groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
+    // Defensive: every league fetched via LEAGUE_SELECT carries a joined
+    // fixtures array, but a null/missing join on any one row (a brand-new
+    // league mid-creation, a malformed row) would otherwise crash this
+    // reduce for the whole page instead of just skipping that league.
+    const leagueFixtures = l.fixtures || [];
     const dueFixtures = groupStageDueThisWeekend
-      ? l.fixtures.filter((f) => !f.played && f.stage === 1)
-      : l.fixtures.filter((f) => !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
+      ? leagueFixtures.filter((f) => !f.played && f.stage === 1)
+      : leagueFixtures.filter((f) => !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
     if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
     const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : groupStageDueThisWeekend ? groupStageDueDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
@@ -8693,8 +8698,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
       })),
   ].sort((a, b) => new Date(b.challenge.created_at) - new Date(a.challenge.created_at));
 
-  const totalClubs = leagues.reduce((sum, l) => sum + l.teams.length, 0);
-  const totalMatches = leagues.reduce((sum, l) => sum + l.fixtures.filter((f) => f.played).length, 0);
+  // Defensive: same reasoning as leagueFixtures above — don't let one league
+  // row with a missing teams/fixtures join crash the whole homepage.
+  const totalClubs = leagues.reduce((sum, l) => sum + (l.teams || []).length, 0);
+  const totalMatches = leagues.reduce((sum, l) => sum + (l.fixtures || []).filter((f) => f.played).length, 0);
 
   const myUpcomingFixtures = computeMyUpcomingFixtures(leagues, myTeam, 5);
   const myProgress = computeMyProgress(leagues, myTeam);
