@@ -39,6 +39,13 @@ Reference: your order number (shown after you submit)`;
 // is visible but disabled, so nothing breaks in production.
 export const SHOP_GATEWAY_ENABLED = false;
 
+// iKhokha Pay Link — a reusable link where the buyer enters the amount
+// themselves. We open it in a new tab and log the order as pending review,
+// same as the WhatsApp flow, since a static link has no automatic
+// payment-confirmation callback back into this app. Leave blank to hide
+// this checkout option.
+export const SHOP_IKHOKHA_LINK = "https://pay.ikhokha.com/weafrica/mpr/weafrica";
+
 const SHOP_GOLD = "#D4A017";
 const CURRENCY_PREFIX = "R"; // South African Rand — change if selling elsewhere
 const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA")}`;
@@ -959,7 +966,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
 // ════════════════════════════════════════════════════════════════════
 
 function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast, c }) {
-  const [method, setMethod] = useState(SHOP_WHATSAPP_NUMBER ? "whatsapp" : "manual_proof");
+  const [method, setMethod] = useState(SHOP_IKHOKHA_LINK ? "ikhokha" : (SHOP_WHATSAPP_NUMBER ? "whatsapp" : "manual_proof"));
   const [submitting, setSubmitting] = useState(false);
   const [proofFile, setProofFile] = useState(null);
   const [note, setNote] = useState("");
@@ -1023,6 +1030,26 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
     onDone();
   };
 
+  const submitIkhokha = async () => {
+    if (!SHOP_IKHOKHA_LINK) { showToast("Card payments aren't set up yet."); return; }
+    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
+    setSubmitting(true);
+    const { error: orderErr } = await supabase.from("shop_orders").insert({
+      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
+      checkout_method: "ikhokha_link", status: "pending_review", subtotal: total, contact_phone: contactPhone || null, delivery_note: note || null,
+    }).select().single().then(async ({ data, error }) => {
+      if (error || !data) return { error };
+      const items = cart.map((it) => ({ order_id: data.id, product_id: it.productId, product_name: it.name, unit_price: it.price, qty: it.qty }));
+      const { error: itemsErr } = await supabase.from("shop_order_items").insert(items);
+      return { error: itemsErr };
+    });
+    setSubmitting(false);
+    if (orderErr) { showToast(`Couldn't submit order: ${orderErr.message}`); return; }
+    window.open(SHOP_IKHOKHA_LINK, "_blank", "noopener,noreferrer");
+    showToast(`Order submitted — pay ${formatMoney(total)} on the iKhokha page, then we'll confirm it.`);
+    onDone();
+  };
+
   const submitGateway = async () => {
     setSubmitting(true);
     const result = await payWithGateway();
@@ -1046,6 +1073,11 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
       </div>
 
       <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
+        <button onClick={() => SHOP_IKHOKHA_LINK && setMethod("ikhokha")} disabled={!SHOP_IKHOKHA_LINK}
+          className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
+          style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_IKHOKHA_LINK ? 1 : 0.4 }}>
+          {SHOP_IKHOKHA_LINK ? <CreditCard size={13} /> : <Lock size={13} />} Card
+        </button>
         <button onClick={() => setMethod("whatsapp")} disabled={!SHOP_WHATSAPP_NUMBER}
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
           style={method === "whatsapp" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_WHATSAPP_NUMBER ? 1 : 0.4 }}>
@@ -1055,11 +1087,6 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
           style={method === "manual_proof" ? { background: c.text, color: c.bg } : { color: c.textDim }}>
           <Upload size={13} /> EFT proof
-        </button>
-        <button onClick={() => SHOP_GATEWAY_ENABLED && setMethod("gateway")} disabled={!SHOP_GATEWAY_ENABLED}
-          className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
-          style={method === "gateway" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_GATEWAY_ENABLED ? 1 : 0.4 }}>
-          {SHOP_GATEWAY_ENABLED ? <CreditCard size={13} /> : <Lock size={13} />} Card
         </button>
       </div>
 
@@ -1116,10 +1143,21 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
         </div>
       )}
 
-      {method === "gateway" && SHOP_GATEWAY_ENABLED && (
-        <button onClick={submitGateway} disabled={submitting} className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-          Pay {formatMoney(total)}
-        </button>
+      {method === "ikhokha" && SHOP_IKHOKHA_LINK && (
+        <div className="space-y-3">
+          <p className="font-body text-sm" style={{ color: c.textDim }}>
+            You'll be taken to a secure iKhokha page to pay {formatMoney(total)} by card. Once you've paid, come back here — we'll confirm your order shortly after.
+          </p>
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery / pickup note (optional)</label>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
+              className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          </div>
+          <button onClick={submitIkhokha} disabled={submitting || missingGuestName}
+            className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: c.accent, color: c.accentText, opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
+            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(total)} on iKhokha`}
+          </button>
+        </div>
       )}
 
       <button onClick={onBack} className="w-full mt-3 font-body text-xs" style={{ color: c.textFaint }}>Back to cart</button>
