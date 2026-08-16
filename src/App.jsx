@@ -8812,6 +8812,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // session never re-fires here on a later visit — only a level crossed
   // since the last time this ran on this device.
   const [progressOpen, setProgressOpen] = useState(false);
+  // The three Home widgets below (results waiting to be logged, upcoming
+  // fixtures, quick actions) each pop out into their own overlay instead of
+  // sitting inline on the page — see the compact bars/FAB right above
+  // "Where you stand" for why each opens differently.
+  const [resultsToLogOpen, setResultsToLogOpen] = useState(false);
+  const [upNextOpen, setUpNextOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   useEffect(() => {
     if (!myId || myProgress.played === 0) return;
     const key = `efootball-level-seen-${myId}`;
@@ -8898,24 +8905,34 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
-      {/* Continue playing — the two "something's waiting on you" strips,
-          right after the player card so the page reads top-to-bottom as:
-          who you are, what needs you next. */}
-      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
-      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
+      {/* Continue playing — each of these pops out on tap instead of sitting
+          inline, so the page reads top-to-bottom as: who you are, what needs
+          you next, right in front of you at a glance, without three
+          scrolling strips eating the fold. Each widget pops out in whatever
+          way fits what it's for:
+          - Results to log is urgent and needs a decision, so it opens as a
+            full modal that grabs attention and blocks behind it.
+          - Up next is just for browsing what's ahead, so it opens as a
+            lighter sheet you can flick through and dismiss.
+          - Quick actions are launch points you might want from anywhere on
+            the page, so they live in a floating dock that stays put as you
+            scroll rather than a one-time overlay. */}
+      <PendingResultsBar items={pendingResultItems} onOpen={() => setResultsToLogOpen(true)} c={c} />
+      <UpNextBar fixtures={myUpcomingFixtures} onOpen={() => setUpNextOpen(true)} c={c} />
 
-      {/* Quick actions — one equal-weight action dock. Shop lives here as a
-          tile like everything else instead of a standing promo banner. */}
-      <section className="mt-4">
-        <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Quick actions</div>
-        <div className="grid grid-cols-4 gap-2">
-          <MenuTile icon={Plus} label="New league" onClick={onCreate} c={c} />
-          <MenuTile icon={Shuffle} label="Random" badge={grabbableChallenges.length || null} onClick={onOpenChallenges} c={c} />
-          <MenuTile icon={TrendingUp} label="Ladder" onClick={onOpenLadder} c={c} />
-          <MenuTile icon={ShoppingBag} label="Shop" external onClick={onOpenShop} c={c} />
-          <MenuTile icon={Repeat} label="Transfers" external onClick={onOpenTransferMarket} c={c} />
-        </div>
-      </section>
+      {resultsToLogOpen && (
+        <PendingResultsModal items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen}
+          onClose={() => setResultsToLogOpen(false)} c={c} />
+      )}
+      {upNextOpen && (
+        <UpNextModal fixtures={myUpcomingFixtures} onOpen={(leagueId, fixtureId) => { setUpNextOpen(false); onOpen(leagueId, fixtureId); }}
+          onClose={() => setUpNextOpen(false)} c={c} />
+      )}
+
+      <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)}
+        onCreate={onCreate} onOpenChallenges={onOpenChallenges} onOpenLadder={onOpenLadder}
+        onOpenShop={onOpenShop} onOpenTransferMarket={onOpenTransferMarket}
+        randomBadge={grabbableChallenges.length || null} c={c} />
 
       {/* Where you stand — Leaderboard preview then the Ladder banner, moved
           up to right after quick actions. This is the core eFootball-style
@@ -8972,73 +8989,124 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   );
 }
 
-// The very top of Home for a signed-in player with clubs in flight: a
-// horizontally-scrolling strip of their next 5 opponents across every
-// league, soonest due date first. Renders nothing for a visitor with no
-// upcoming fixtures (new signups, or someone only spectating), so it never
-// leaves an empty band above the Shop banner.
-function UpNextStrip({ fixtures, onOpen, c }) {
+// Compact "Up next" bar — sits inline on Home showing only the soonest
+// fixture (plus a count of how many more are queued behind it), and pops
+// the full list open in UpNextModal on tap. Renders nothing for a visitor
+// with no upcoming fixtures (new signups, or someone only spectating), so
+// it never leaves an empty band above the Shop banner.
+function UpNextBar({ fixtures, onOpen, c }) {
   if (!fixtures || fixtures.length === 0) return null;
+  const next = fixtures[0];
+  const rest = fixtures.length - 1;
   return (
-    <section className="mt-4">
-      <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Up next</div>
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
-        {fixtures.map((f) => (
-          <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId, f.fixtureId)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId); }}
-            className="shrink-0 w-40 text-left rounded-xl p-3 font-body cursor-pointer transition-transform active:scale-[0.97]"
-            style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
-            <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>{f.opponent.name}</div>
-            <div className="flex items-center justify-between gap-1.5 mt-1.5">
-              <div className="font-mono text-[10px] min-w-0 truncate" style={{ color: c.textDim }}>
-                {f.isHome ? "Home" : "Away"}
-                {f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
-              </div>
-              {f.opponent.phone && (
-                // Stop the click from also bubbling up and opening the league —
-                // tapping WhatsApp here should only open WhatsApp.
-                <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                  <WhatsAppCallLink phone={f.opponent.phone} iconOnly
-                    text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️${firstMatchdayNote(f.round)}`} c={c} />
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+    <button onClick={onOpen} className="mt-4 w-full flex items-center gap-3 text-left rounded-xl px-3.5 py-3 font-body transition-transform active:scale-[0.98]"
+      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+      <span className="font-mono text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: c.textFaint }}>Up next</span>
+      <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+        <span className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {next.opponent.name}</span>
+        <span className="font-mono text-[10px] shrink-0" style={{ color: c.textDim }}>
+          {next.isHome ? "Home" : "Away"}{next.due_at ? ` · Due ${fmtDate(next.due_at)}` : ""}
+        </span>
+      </span>
+      {rest > 0 && (
+        <span className="shrink-0 font-mono text-[10px] font-bold rounded-full px-1.5 py-0.5" style={{ background: c.surfaceHover, color: c.textFaint }}>+{rest}</span>
+      )}
+      <ChevronRight size={14} style={{ color: c.textFaint }} className="shrink-0" />
+    </button>
   );
 }
 
-// Sits at the very top of Home, above even "Up next" — accepted challenges
-// (direct or random, ladder or not) waiting on the signed-in member to log a
-// score. Lets an opponent upload their result the moment they land on the
-// homepage instead of having to find their way into Challenges or the
-// Ladder screen first. Renders nothing when nothing's waiting.
-function PendingResultsStrip({ items, onOpenLogResult, onOpenLogResultOpen, c }) {
+// The full "Up next" list, popped out into a light dismissible sheet from
+// UpNextBar — this one's just for browsing what's ahead (not urgent, no
+// decision needed), so unlike the results modal below it doesn't need to
+// grab full attention; a flick-through-and-dismiss overlay fits better.
+function UpNextModal({ fixtures, onOpen, onClose, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+      <div className="w-full sm:max-w-sm sm:max-h-[80vh] max-h-[75vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>Up next</div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-2">
+          {fixtures.map((f) => (
+            <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId, f.fixtureId)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId, f.fixtureId); }}
+              className="text-left rounded-xl p-3 font-body cursor-pointer transition-transform active:scale-[0.98]"
+              style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+              <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
+              <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>{f.opponent.name}</div>
+              <div className="flex items-center justify-between gap-1.5 mt-1.5">
+                <div className="font-mono text-[10px] min-w-0 truncate" style={{ color: c.textDim }}>
+                  {f.isHome ? "Home" : "Away"}
+                  {f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+                </div>
+                {f.opponent.phone && (
+                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                    <WhatsAppCallLink phone={f.opponent.phone} iconOnly
+                      text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️${firstMatchdayNote(f.round)}`} c={c} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Compact "Results to log" bar — sits inline on Home, right above "Up
+// next", showing just the count of matches waiting on the signed-in player
+// to log. Pops the full list open in PendingResultsModal on tap. Renders
+// nothing when nothing's waiting.
+function PendingResultsBar({ items, onOpen, c }) {
   if (!items || items.length === 0) return null;
   return (
-    <section className="mt-4">
-      <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5" style={{ color: c.red }}>
+    <button onClick={onOpen} className="mt-4 w-full flex items-center gap-3 text-left rounded-xl px-3.5 py-3 font-body transition-transform active:scale-[0.98]"
+      style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
+      <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: c.red }}>
         <Trophy size={11} /> {items.length > 1 ? "Results to log" : "Result to log"}
+      </span>
+      <span className="flex-1 min-w-0 font-semibold text-sm truncate" style={{ color: c.text }}>
+        {items.length === 1 ? `vs ${items[0].opponentUsername}` : `${items.length} matches waiting`}
+      </span>
+      <ChevronRight size={14} style={{ color: c.red }} className="shrink-0" />
+    </button>
+  );
+}
+
+// The full "Results to log" list, popped out into a full attention-grabbing
+// modal from PendingResultsBar — unlike Up next, this one always needs an
+// actual decision (a score to enter), so it opens as a modal that sits in
+// front of everything else rather than a light dismissible sheet.
+function PendingResultsModal({ items, onOpenLogResult, onOpenLogResultOpen, onClose, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.red }}>
+            <Trophy size={13} /> {items.length > 1 ? "Results to log" : "Result to log"}
+          </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
+        <div className="flex flex-col gap-2">
+          {items.map((item) => (
+            <button key={item.id} onClick={() => { onClose(); (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge)); }}
+              className="text-left rounded-xl p-3 font-body transition-transform active:scale-[0.98]"
+              style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
+              <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
+                {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
+              </div>
+              <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>vs {item.opponentUsername}</div>
+              <div className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5" style={{ background: c.accent, color: c.accentText }}>
+                <Trophy size={11} /> Log result
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
-        {items.map((item) => (
-          <button key={item.id} onClick={() => (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge))}
-            className="shrink-0 w-44 text-left rounded-xl p-3 font-body transition-transform active:scale-[0.97]"
-            style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
-            <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
-              {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
-            </div>
-            <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>vs {item.opponentUsername}</div>
-            <div className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5" style={{ background: c.accent, color: c.accentText }}>
-              <Trophy size={11} /> Log result
-            </div>
-          </button>
-        ))}
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -9071,6 +9139,44 @@ function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
       </span>
       <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{label}</span>
     </button>
+  );
+}
+
+// Quick actions — a floating dock rather than a bar or modal like the two
+// widgets above. These are launch points (new league, random challenge,
+// ladder, shop, transfers) someone might reach for from anywhere on Home,
+// not something tied to a moment in time, so it makes sense for it to stay
+// put as a floating button while scrolling instead of a one-shot overlay
+// that has to be re-opened from the same spot every time. Tapping the FAB
+// pops the same equal-weight tile grid open above it; tapping it again, an
+// outside tap, or picking a tile all close it.
+function QuickActionsDock({ open, onToggle, onCreate, onOpenChallenges, onOpenLadder, onOpenShop, onOpenTransferMarket, randomBadge, c }) {
+  const runAndClose = (fn) => () => { onToggle(); fn(); };
+  return (
+    <>
+      {open && (
+        <div className="fixed inset-0 z-40" onClick={onToggle} />
+      )}
+      <div className="fixed bottom-5 right-4 z-50 flex flex-col items-end gap-2.5">
+        {open && (
+          <div className="rounded-2xl p-3 shadow-xl" style={{ background: c.bg, border: `1px solid ${c.borderStrong}` }}>
+            <div className="font-mono text-[9px] uppercase tracking-[0.2em] mb-2 text-right" style={{ color: c.textFaint }}>Quick actions</div>
+            <div className="grid grid-cols-3 gap-2 w-[210px]">
+              <MenuTile icon={Plus} label="New league" onClick={runAndClose(onCreate)} c={c} />
+              <MenuTile icon={Shuffle} label="Random" badge={randomBadge} onClick={runAndClose(onOpenChallenges)} c={c} />
+              <MenuTile icon={TrendingUp} label="Ladder" onClick={runAndClose(onOpenLadder)} c={c} />
+              <MenuTile icon={ShoppingBag} label="Shop" external onClick={runAndClose(onOpenShop)} c={c} />
+              <MenuTile icon={Repeat} label="Transfers" external onClick={runAndClose(onOpenTransferMarket)} c={c} />
+            </div>
+          </div>
+        )}
+        <button onClick={onToggle} aria-label={open ? "Close quick actions" : "Open quick actions"}
+          className="w-13 h-13 rounded-full flex items-center justify-center shadow-xl transition-transform active:scale-95"
+          style={{ width: 52, height: 52, background: c.accent, color: c.accentText }}>
+          {open ? <X size={20} /> : <Zap size={20} />}
+        </button>
+      </div>
+    </>
   );
 }
 
