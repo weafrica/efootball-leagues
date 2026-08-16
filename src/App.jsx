@@ -788,7 +788,7 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
       if (f.played || f.away_team_id === null) return;
       if (f.home_team_id !== team.id && f.away_team_id !== team.id) return;
       const opponentId = f.home_team_id === team.id ? f.away_team_id : f.home_team_id;
-      const opponent = l.teams.find((t) => t.id === opponentId);
+      const opponent = (l.teams || []).find((t) => t.id === opponentId);
       if (!opponent) return;
       rows.push({
         fixtureId: f.id, leagueId: l.id, leagueName: l.name, team, opponent,
@@ -1410,6 +1410,11 @@ function computeMyLeagueWins(leagues, userId) {
   if (!userId) return 0;
   let wins = 0;
   for (const league of leagues || []) {
+    // Defensive: don't let one league row with a missing teams/fixtures
+    // join (a brand-new league mid-creation, a stale/partial row) crash
+    // this useMemo for the whole homepage — just skip it for the win count.
+    const leagueFixtures = league.fixtures || [];
+    const leagueTeams = league.teams || [];
     const isKnockout = league.format === "knockout";
     const isSurvivor = league.format === "survivor";
     const isGroupsKnockout = league.format === "groups_knockout";
@@ -1418,22 +1423,22 @@ function computeMyLeagueWins(leagues, userId) {
     let championTeamId = null;
     if (inKnockoutBracket) {
       const bracketStage = isGroupsKnockout ? 2 : 1;
-      const stageFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
+      const stageFixtures = leagueFixtures.filter((f) => f.stage === bracketStage);
       const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
-      const activeTeams = league.teams.filter((t) => !t.eliminated);
+      const activeTeams = leagueTeams.filter((t) => !t.eliminated);
       if (stageDone && activeTeams.length === 1) championTeamId = activeTeams[0].id;
     } else if (isSurvivor) {
       if (league.final_stage_started) {
-        const stageFixtures = league.fixtures.filter((f) => f.stage === league.current_stage);
+        const stageFixtures = leagueFixtures.filter((f) => f.stage === league.current_stage);
         const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
         if (stageDone) {
-          const displayTeams = league.teams.filter((t) => !t.eliminated);
+          const displayTeams = leagueTeams.filter((t) => !t.eliminated);
           championTeamId = computeStandings(displayTeams, stageFixtures, league)[0]?.id ?? null;
         }
       }
     } else {
-      const leagueComplete = league.fixtures.length > 0 && league.fixtures.every((f) => f.played);
-      if (leagueComplete) championTeamId = computeStandings(league.teams, league.fixtures, league)[0]?.id ?? null;
+      const leagueComplete = leagueFixtures.length > 0 && leagueFixtures.every((f) => f.played);
+      if (leagueComplete) championTeamId = computeStandings(leagueTeams, leagueFixtures, league)[0]?.id ?? null;
     }
 
     if (!championTeamId) continue;
@@ -1462,6 +1467,9 @@ function formatTitleDate(iso) {
 function computeAllLeagueChampionships(leagues) {
   const byUser = new Map();
   for (const league of leagues || []) {
+    // Defensive: same reasoning as computeMyLeagueWins above.
+    const leagueFixtures = league.fixtures || [];
+    const leagueTeams = league.teams || [];
     const isKnockout = league.format === "knockout";
     const isSurvivor = league.format === "survivor";
     const isGroupsKnockout = league.format === "groups_knockout";
@@ -1471,25 +1479,25 @@ function computeAllLeagueChampionships(leagues) {
     let deciderFixtures = null;
     if (inKnockoutBracket) {
       const bracketStage = isGroupsKnockout ? 2 : 1;
-      const stageFixtures = league.fixtures.filter((f) => f.stage === bracketStage);
+      const stageFixtures = leagueFixtures.filter((f) => f.stage === bracketStage);
       const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
-      const activeTeams = league.teams.filter((t) => !t.eliminated);
+      const activeTeams = leagueTeams.filter((t) => !t.eliminated);
       if (stageDone && activeTeams.length === 1) { championTeamId = activeTeams[0].id; deciderFixtures = stageFixtures; }
     } else if (isSurvivor) {
       if (league.final_stage_started) {
-        const stageFixtures = league.fixtures.filter((f) => f.stage === league.current_stage);
+        const stageFixtures = leagueFixtures.filter((f) => f.stage === league.current_stage);
         const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
         if (stageDone) {
-          const displayTeams = league.teams.filter((t) => !t.eliminated);
+          const displayTeams = leagueTeams.filter((t) => !t.eliminated);
           championTeamId = computeStandings(displayTeams, stageFixtures, league)[0]?.id ?? null;
           deciderFixtures = stageFixtures;
         }
       }
     } else {
-      const leagueComplete = league.fixtures.length > 0 && league.fixtures.every((f) => f.played);
+      const leagueComplete = leagueFixtures.length > 0 && leagueFixtures.every((f) => f.played);
       if (leagueComplete) {
-        championTeamId = computeStandings(league.teams, league.fixtures, league)[0]?.id ?? null;
-        deciderFixtures = league.fixtures;
+        championTeamId = computeStandings(leagueTeams, leagueFixtures, league)[0]?.id ?? null;
+        deciderFixtures = leagueFixtures;
       }
     }
 
