@@ -7094,7 +7094,17 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       : guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
     if (!kicksOffThisWeekend && dueFixtures.length === 0) return items;
     const earliest = kicksOffThisWeekend ? startsAtDate.getTime() : groupStageDueThisWeekend ? groupStageDueDate.getTime() : Math.min(...dueFixtures.map((f) => new Date(f.due_at).getTime()));
-    items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
+    // WeekendLeagueCard (shared with the signed-in Home spotlight) reads
+    // league.teams / league.fixtures / league.photo_url directly, the way
+    // Home's own league objects carry them nested. The guest dataset keeps
+    // those as separate top-level arrays instead (same reason PublicLeagueCard
+    // derives leagueTeams/allLeagueFixtures below) — so without this, l.teams
+    // and l.fixtures are simply undefined here and the card crashes reading
+    // .filter off them the moment a weekend league is live for a guest.
+    const leagueTeams = guestData.teams.filter((t) => t.league_id === l.id);
+    const leagueFixtures = guestData.fixtures.filter((f) => f.league_id === l.id);
+    const photoUrl = guestData.extras.find((e) => e.league_id === l.id)?.photo_url ?? null;
+    items.push({ league: { ...l, teams: leagueTeams, fixtures: leagueFixtures, photo_url: photoUrl }, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest) : [];
   const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
@@ -7410,13 +7420,18 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
 // the spotlight is telling you not to miss.
 function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardClick, rankColors, c }) {
   const { league: l, kicksOffThisWeekend, matchCount } = item;
+  // Defensive fallbacks: the signed-in Home spotlight's league objects
+  // always carry these nested, but belt-and-suspenders against any caller
+  // (guest homepage included — see its item-building code) that doesn't.
+  const teams = l.teams || [];
+  const fixtures = l.fixtures || [];
   const isLadderCup = l.format === "ladder_cup";
   const ladderMatches = isLadderCup ? (l.ladder_cup_matches || []) : [];
   const ladderPlayedCount = ladderMatches.filter((m) => m.finalized_at).length;
-  const played = isLadderCup ? ladderPlayedCount : l.fixtures.filter((f) => f.played).length;
+  const played = isLadderCup ? ladderPlayedCount : fixtures.filter((f) => f.played).length;
   const isStaged = l.format === "survivor" || l.format === "groups_knockout";
-  const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
-  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
+  const activeTeams = l.format === "survivor" ? teams.filter((t) => !t.eliminated) : teams;
+  const leader = computeStandings(activeTeams, fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
   const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
   const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
     : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
@@ -7468,10 +7483,10 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
           </div>
 
           <div className="flex items-center gap-1 mt-1.5 font-mono text-[9px]" style={{ color: c.textDim }}>
-            <Shield size={9} /> {l.teams.length}
+            <Shield size={9} /> {teams.length}
             {isLadderCup
               ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
-              : l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
+              : fixtures.length > 0 && <span className="ml-1">· {played}/{fixtures.length}</span>}
           </div>
 
           {leader && leader.p > 0 && (
