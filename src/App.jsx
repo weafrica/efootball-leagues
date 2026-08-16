@@ -2894,6 +2894,10 @@ export default function App() {
   // means a refresh lands back on whichever screen the appNav effect below
   // last recorded, instead of always bouncing to Home.
   const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
+  // Quick actions dock — floating on every screen (see the root return
+  // below), open/closed state lives here rather than inside Home now that
+  // it's no longer scoped to a single screen.
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [activeLeagueId, setActiveLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLeagueId : null) ?? null);
   const [refereeQueue, setRefereeQueue] = useState([]); // [{ id, msg }] — messages waiting to be shown
   const [activeReferee, setActiveReferee] = useState(null); // { id, msg, variant, phase: "in" | "hold" | "out" } — currently on screen
@@ -6677,6 +6681,27 @@ export default function App() {
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); if (isAdmin) loadAccounts(); };
   const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
 
+  // Everything reachable from the header's hamburger menu or Home's old
+  // action grid, now assembled once here so the floating Quick actions dock
+  // (rendered below, outside the header/view switch) really does carry
+  // "everything" and shows up the same way no matter which screen it's
+  // opened from.
+  const grabbableCount = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id).length;
+  const quickActionItems = [
+    { icon: Plus, label: "New league", onClick: () => setView("create") },
+    { icon: Shuffle, label: "Random", badge: grabbableCount || null, onClick: openChallengesScreen },
+    { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
+    { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
+    { icon: ShoppingBag, label: "Shop", external: true, onClick: () => setView("shop") },
+    { icon: Repeat, label: "Transfers", external: true, onClick: () => setView("transferMarket") },
+    { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
+    { icon: Settings2, label: "Edit profile", onClick: () => setEditProfileOpen(true) },
+    { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
+    ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),
+    ...(isAdmin ? [{ icon: History, label: "Activity log", onClick: () => { setView("activity"); loadActivityLog(); } }] : []),
+    { icon: LogOut, label: "Sign out", onClick: signOut },
+  ];
+
   return (
     <div className="min-h-screen transition-colors duration-200" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
       {view !== "shop" && (
@@ -6687,9 +6712,13 @@ export default function App() {
           onOpenChallenges={openChallengesScreen}
           challengeBadge={incomingPendingCount + adminEscalatedResultCount}
           onOpenCreate={() => setView("create")}
-          grabbableCount={(openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id).length}
+          grabbableCount={grabbableCount}
           onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} onOpenLadder={openLadderScreen} />
       )}
+      {/* Quick actions — floating on every screen (not gated behind
+          `view !== "shop"` the way Header is above), so it's reachable no
+          matter where in the app someone is. */}
+      <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)} items={quickActionItems} c={c} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
@@ -8692,10 +8721,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // otherFunLeagues keeps guests from seeing it twice.
   const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
 
-  // Open random challenges anyone but the signed-in member can still grab —
-  // same "unaccepted and up for grabs" definition ChallengesScreen uses.
-  const grabbableChallenges = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id);
-
   // Accepted challenges (direct or random) sitting with no score logged yet,
   // on either the challenge or open-challenge track — surfaced right at the
   // top of Home so an opponent can log a result without first digging into
@@ -8812,13 +8837,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
   // session never re-fires here on a later visit — only a level crossed
   // since the last time this ran on this device.
   const [progressOpen, setProgressOpen] = useState(false);
-  // The three Home widgets below (results waiting to be logged, upcoming
-  // fixtures, quick actions) each pop out into their own overlay instead of
-  // sitting inline on the page — see the compact bars/FAB right above
-  // "Where you stand" for why each opens differently.
+  // The two Home widgets below (results waiting to be logged, upcoming
+  // fixtures) each pop out into their own overlay instead of sitting inline
+  // on the page — see the compact bars right above "Where you stand" for why
+  // each opens differently. Quick actions now lives in the app-wide floating
+  // dock instead (see App's root return), so it doesn't need state here.
   const [resultsToLogOpen, setResultsToLogOpen] = useState(false);
   const [upNextOpen, setUpNextOpen] = useState(false);
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   useEffect(() => {
     if (!myId || myProgress.played === 0) return;
     const key = `efootball-level-seen-${myId}`;
@@ -8907,16 +8932,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       {/* Continue playing — each of these pops out on tap instead of sitting
           inline, so the page reads top-to-bottom as: who you are, what needs
-          you next, right in front of you at a glance, without three
-          scrolling strips eating the fold. Each widget pops out in whatever
-          way fits what it's for:
-          - Results to log is urgent and needs a decision, so it opens as a
-            full modal that grabs attention and blocks behind it.
-          - Up next is just for browsing what's ahead, so it opens as a
-            lighter sheet you can flick through and dismiss.
-          - Quick actions are launch points you might want from anywhere on
-            the page, so they live in a floating dock that stays put as you
-            scroll rather than a one-time overlay. */}
+          you next, right in front of you at a glance, without two scrolling
+          strips eating the fold. Results to log is urgent and needs a
+          decision, so it opens as a full modal that grabs attention and
+          blocks behind it. Up next is just for browsing what's ahead, so it
+          opens as a lighter sheet you can flick through and dismiss. Quick
+          actions used to live down here too, but now lives in a floating
+          dock rendered once at the app level (see App's root return) so
+          it's reachable from every screen, not just Home. */}
       <PendingResultsBar items={pendingResultItems} onOpen={() => setResultsToLogOpen(true)} c={c} />
       <UpNextBar fixtures={myUpcomingFixtures} onOpen={() => setUpNextOpen(true)} c={c} />
 
@@ -8928,11 +8951,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         <UpNextModal fixtures={myUpcomingFixtures} onOpen={(leagueId, fixtureId) => { setUpNextOpen(false); onOpen(leagueId, fixtureId); }}
           onClose={() => setUpNextOpen(false)} c={c} />
       )}
-
-      <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)}
-        onCreate={onCreate} onOpenChallenges={onOpenChallenges} onOpenLadder={onOpenLadder}
-        onOpenShop={onOpenShop} onOpenTransferMarket={onOpenTransferMarket}
-        randomBadge={grabbableChallenges.length || null} c={c} />
 
       {/* Where you stand — Leaderboard preview then the Ladder banner, moved
           up to right after quick actions. This is the core eFootball-style
@@ -9142,16 +9160,21 @@ function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
   );
 }
 
-// Quick actions — a floating dock rather than a bar or modal like the two
-// widgets above. These are launch points (new league, random challenge,
-// ladder, shop, transfers) someone might reach for from anywhere on Home,
-// not something tied to a moment in time, so it makes sense for it to stay
-// put as a floating button while scrolling instead of a one-shot overlay
-// that has to be re-opened from the same spot every time. Tapping the FAB
-// pops the same equal-weight tile grid open above it; tapping it again, an
-// outside tap, or picking a tile all close it.
-function QuickActionsDock({ open, onToggle, onCreate, onOpenChallenges, onOpenLadder, onOpenShop, onOpenTransferMarket, randomBadge, c }) {
+// Quick actions — a floating dock rendered once at the app root (see App's
+// root return) rather than a bar or modal, and rendered on every screen
+// instead of just Home. These are launch points someone might reach for
+// from anywhere in the app — everything that used to live only in the
+// header's hamburger menu or Home's action grid now lives in one place —
+// so it makes sense for the dock to stay put as a floating button while
+// scrolling/navigating instead of a one-shot overlay tied to a single
+// screen. Tapping the FAB pops the same equal-weight tile grid open above
+// it; tapping it again, an outside tap, or picking a tile all close it.
+// `items` is a flat list of { icon, label, onClick, badge?, external? } —
+// callers assemble the full set (including which admin-only tiles to
+// include) once at the top of the app.
+function QuickActionsDock({ open, onToggle, items, c }) {
   const runAndClose = (fn) => () => { onToggle(); fn(); };
+  const totalBadge = items.reduce((sum, it) => sum + (it.badge > 0 ? it.badge : 0), 0);
   return (
     <>
       {open && (
@@ -9159,21 +9182,22 @@ function QuickActionsDock({ open, onToggle, onCreate, onOpenChallenges, onOpenLa
       )}
       <div className="fixed bottom-5 right-4 z-50 flex flex-col items-end gap-2.5">
         {open && (
-          <div className="rounded-2xl p-3 shadow-xl" style={{ background: c.bg, border: `1px solid ${c.borderStrong}` }}>
+          <div className="rounded-2xl p-3 shadow-xl max-h-[70vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.borderStrong}` }}>
             <div className="font-mono text-[9px] uppercase tracking-[0.2em] mb-2 text-right" style={{ color: c.textFaint }}>Quick actions</div>
             <div className="grid grid-cols-3 gap-2 w-[210px]">
-              <MenuTile icon={Plus} label="New league" onClick={runAndClose(onCreate)} c={c} />
-              <MenuTile icon={Shuffle} label="Random" badge={randomBadge} onClick={runAndClose(onOpenChallenges)} c={c} />
-              <MenuTile icon={TrendingUp} label="Ladder" onClick={runAndClose(onOpenLadder)} c={c} />
-              <MenuTile icon={ShoppingBag} label="Shop" external onClick={runAndClose(onOpenShop)} c={c} />
-              <MenuTile icon={Repeat} label="Transfers" external onClick={runAndClose(onOpenTransferMarket)} c={c} />
+              {items.map((it) => (
+                <MenuTile key={it.label} icon={it.icon} label={it.label} badge={it.badge} external={it.external} onClick={runAndClose(it.onClick)} c={c} />
+              ))}
             </div>
           </div>
         )}
         <button onClick={onToggle} aria-label={open ? "Close quick actions" : "Open quick actions"}
-          className="w-13 h-13 rounded-full flex items-center justify-center shadow-xl transition-transform active:scale-95"
+          className="relative w-13 h-13 rounded-full flex items-center justify-center shadow-xl transition-transform active:scale-95"
           style={{ width: 52, height: 52, background: c.accent, color: c.accentText }}>
           {open ? <X size={20} /> : <Zap size={20} />}
+          {!open && totalBadge > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: c.red, color: "#fff", border: `2px solid ${c.bg}` }}>{totalBadge}</span>
+          )}
         </button>
       </div>
     </>
