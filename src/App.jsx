@@ -4,6 +4,7 @@ import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
+import { ErrorBoundary } from "./ErrorBoundary.jsx";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -6720,6 +6721,7 @@ export default function App() {
           matter where in the app someone is. */}
       <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)} items={quickActionItems} c={c} />
       <main className="max-w-3xl mx-auto px-4 pb-24">
+        <ErrorBoundary resetKey={view} onGoHome={() => setView("home")}>
         {view === "accounts" && isAdmin ? (
           <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
         ) : view === "activity" && isAdmin ? (
@@ -6832,6 +6834,7 @@ export default function App() {
             )}
           </>
         )}
+        </ErrorBoundary>
       </main>
       {paymentModal && (
         <PaymentModal league={paymentModal.league} member={paymentModal.member}
@@ -7204,6 +7207,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       </header>
 
       <main className="max-w-3xl mx-auto px-4 pb-24">
+        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); }}>
         {shopOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
@@ -7328,6 +7332,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         </div>
           </>
         )}
+        </ErrorBoundary>
       </main>
       <SupportWhatsAppButton context={shopOpen ? SHOP_NAME : "the Matchday app"} />
       <TermsFooterLink onOpen={() => setTermsOpen(true)} c={c} />
