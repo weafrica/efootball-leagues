@@ -7388,46 +7388,113 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
           })}
         </div>
       )}
-      <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto px-4 pb-3.5 pt-1.5">
-        {items.map(({ league: l, kicksOffThisWeekend, matchCount }, i) => {
-          const isHottest = matchCount > 0 && matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
-          const heatPct = Math.round((matchCount / maxMatches) * 100);
+      <div className="relative no-scrollbar flex items-stretch gap-3 overflow-x-auto px-4 pb-4 pt-1.5">
+        {items.map((item, i) => {
+          const isHottest = item.matchCount > 0 && item.matchCount === maxMatches && items.filter((it) => it.matchCount === maxMatches).length === 1;
+          const heatPct = Math.round((item.matchCount / maxMatches) * 100);
           return (
-            <button key={l.id} onClick={() => onCardClick(l)} className="relative flex flex-col items-start gap-1 shrink-0 rounded-xl px-3.5 py-2.5 text-left w-40"
-              style={{ background: c.surface, border: `1px solid ${i < 3 ? rankColors[i] + "66" : c.border}` }}>
-              {isHottest && (
-                <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
-                  <Flame size={9} /> Hottest
-                </span>
-              )}
-              <div className="flex items-center gap-1.5 w-full">
-                {i < 3 ? (
-                  <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
-                    {i === 0 ? <Crown size={10} style={{ color: rankColors[0] }} /> : <Medal size={10} style={{ color: rankColors[i] }} />}
-                  </span>
-                ) : (
-                  <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 font-mono text-[9px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
-                    {i + 1}
-                  </span>
-                )}
-                <span className="font-body font-semibold text-sm truncate flex-1">{l.name}</span>
-              </div>
-              <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>
-                {kicksOffThisWeekend ? "Kicks off this weekend" : `${matchCount} match${matchCount === 1 ? "" : "es"} due`}
-              </span>
-              {matchCount > 0 && (
-                <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
-                  <div className="h-full rounded-full" style={{ width: `${heatPct}%`, background: c.accent }} />
-                </div>
-              )}
-              <span className="flex items-center gap-1 font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
-                {isJoined?.(l) ? <><ChevronRight size={9} /> View league</> : <><Lock size={9} /> Join the action</>}
-              </span>
-            </button>
+            <WeekendLeagueCard key={item.league.id} item={item} index={i} isHottest={isHottest} heatPct={heatPct}
+              isJoined={isJoined} onCardClick={onCardClick} rankColors={rankColors} c={c} />
           );
         })}
       </div>
     </section>
+  );
+}
+
+// The weekend spotlight's own take on a league card — deliberately built to
+// echo LeagueCard's real info (crest, format/stage, club count, progress,
+// leader) rather than the old name-only chip, but with its own silhouette
+// (a clipped "pass"/ticket shape with a folded corner) so it never reads as
+// just another entry in the regular Leagues list — this is the one league
+// the spotlight is telling you not to miss.
+function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardClick, rankColors, c }) {
+  const { league: l, kicksOffThisWeekend, matchCount } = item;
+  const isLadderCup = l.format === "ladder_cup";
+  const ladderMatches = isLadderCup ? (l.ladder_cup_matches || []) : [];
+  const ladderPlayedCount = ladderMatches.filter((m) => m.finalized_at).length;
+  const played = isLadderCup ? ladderPlayedCount : l.fixtures.filter((f) => f.played).length;
+  const isStaged = l.format === "survivor" || l.format === "groups_knockout";
+  const activeTeams = l.format === "survivor" ? l.teams.filter((t) => !t.eliminated) : l.teams;
+  const leader = computeStandings(activeTeams, l.fixtures.filter((f) => !isStaged || f.stage === l.current_stage), l)[0];
+  const formatLabel = FORMATS.find((f) => f.id === l.format)?.label || l.format;
+  const stageLabel = l.format === "survivor" ? (l.final_stage_started ? "Final stage" : `Stage ${l.current_stage}`)
+    : l.format === "groups_knockout" ? (l.final_stage_started ? "Knockout stage" : "Group stage") : null;
+  const initial = (l.name || "?").trim().charAt(0).toUpperCase();
+  const joined = isJoined?.(l);
+  const rankColor = index < 3 ? rankColors[index] : null;
+
+  return (
+    <button onClick={() => onCardClick(l)} className="relative shrink-0 w-[184px] text-left cursor-pointer transition-transform active:scale-[0.97]"
+      style={{ filter: isHottest ? `drop-shadow(0 0 8px ${c.accent}66)` : "none" }}>
+      <div className="relative overflow-hidden"
+        style={{
+          clipPath: "polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 16px 100%, 0 calc(100% - 16px))",
+          background: c.surface,
+          border: `1px solid ${rankColor ? rankColor + "77" : c.accent + "55"}`,
+        }}>
+        {/* Folded-corner accent — the visual signature that makes this read
+            as a "pass" rather than a plain card, colored by weekend rank. */}
+        <div className="absolute top-0 right-0 w-[22px] h-[22px]"
+          style={{ background: rankColor || c.accent, clipPath: "polygon(100% 0, 0 0, 100% 100%)" }} />
+
+        <div className="relative h-[76px] flex items-center justify-center overflow-hidden"
+          style={{ background: l.photo_url ? undefined : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
+          {l.photo_url ? (
+            <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <span className="font-extrabold text-2xl" style={{ color: c.accent, opacity: 0.85 }}>{initial}</span>
+          )}
+          {isHottest && (
+            <span className="absolute top-1.5 left-1.5 flex items-center gap-0.5 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: c.red, color: "#fff" }}>
+              <Flame size={9} /> Hottest
+            </span>
+          )}
+          <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full pl-1 pr-1.5 py-0.5"
+            style={{ background: `${c.bg}CC`, border: `1px solid ${rankColor ? rankColor + "66" : c.border}` }}>
+            {rankColor ? (
+              index === 0 ? <Crown size={11} style={{ color: rankColors[0] }} /> : <Medal size={11} style={{ color: rankColor }} />
+            ) : (
+              <span className="w-3.5 text-center font-mono text-[9px] font-bold" style={{ color: c.textFaint }}>{index + 1}</span>
+            )}
+            <span className="font-mono text-[9px] font-bold" style={{ color: c.text }}>#{index + 1}</span>
+          </div>
+        </div>
+
+        <div className="p-2.5 pb-3">
+          <div className="font-extrabold text-sm leading-tight truncate">{l.name}</div>
+          <div className="font-mono text-[9px] uppercase tracking-wider truncate mt-0.5" style={{ color: c.textFaint }}>
+            {stageLabel || formatLabel}
+          </div>
+
+          <div className="flex items-center gap-1 mt-1.5 font-mono text-[9px]" style={{ color: c.textDim }}>
+            <Shield size={9} /> {l.teams.length}
+            {isLadderCup
+              ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
+              : l.fixtures.length > 0 && <span className="ml-1">· {played}/{l.fixtures.length}</span>}
+          </div>
+
+          {leader && leader.p > 0 && (
+            <div className="flex items-center gap-1 font-mono text-[9px] truncate mt-1" style={{ color: c.textFaint }}>
+              <Crown size={9} style={{ color: c.accent }} /> <span className="truncate">{leader.name}</span>
+            </div>
+          )}
+
+          <div className="font-mono text-[10px] uppercase tracking-wide mt-1.5" style={{ color: c.accent }}>
+            {kicksOffThisWeekend ? "Kicks off this weekend" : `${matchCount} match${matchCount === 1 ? "" : "es"} due`}
+          </div>
+          {matchCount > 0 && (
+            <div className="w-full h-1 rounded-full overflow-hidden mt-1" style={{ background: c.surfaceHover }}>
+              <div className="h-full rounded-full" style={{ width: `${heatPct}%`, background: c.accent }} />
+            </div>
+          )}
+
+          <div className="flex items-center gap-1 font-mono text-[10px] mt-2" style={{ color: c.textFaint }}>
+            {joined ? <><ChevronRight size={9} /> View league</> : <><Lock size={9} /> Join the action</>}
+          </div>
+        </div>
+      </div>
+    </button>
   );
 }
 
