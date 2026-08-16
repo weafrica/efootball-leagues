@@ -153,6 +153,24 @@ const ENTRY_FEE_STEP = 10;
 const ENTRY_FEE_PRESETS = [10, 20, 50, 100, 150, 200];
 export const formatRand = (n) => `R${Number(n).toLocaleString("en-ZA")}`;
 
+// Small "cards accepted" indicator for the iKhokha card option — a generic
+// dual-circle motif (not the actual Mastercard/Visa trademarked artwork)
+// paired with plain text, so shoppers recognize card payment is supported
+// without us reproducing anyone's logo.
+function CardBrandsBadge({ c }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center" style={{ width: 22 }}>
+        <div className="w-3.5 h-3.5 rounded-full" style={{ background: "#EB5757" }} />
+        <div className="w-3.5 h-3.5 rounded-full -ml-1.5" style={{ background: "#F2A93B", mixBlendMode: "multiply" }} />
+      </div>
+      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>Mastercard</span>
+      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>·</span>
+      <span className="font-body text-[11px] italic font-bold" style={{ color: c.textFaint }}>Visa</span>
+    </div>
+  );
+}
+
 // WeAfrica's payment details, shown wherever someone is about to pay an
 // entry fee into a cash league.
 const BANK_DETAILS = {
@@ -178,7 +196,7 @@ const MUKURU_DETAILS = {
 // Link). Left blank for now so the option is hidden until it's set — see
 // the `IKHOKHA_DETAILS.payLink &&` check in PaymentModal below.
 const IKHOKHA_DETAILS = {
-  payLink: "",
+  payLink: "https://pay.ikhokha.com/weafrica/mpr/weafrica",
 };
 
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
@@ -2238,9 +2256,28 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{league.name}</div>
 
         <div className="rounded-lg p-3 mb-3 font-body text-xs" style={{ background: c.surface, color: c.textDim }}>
+          {IKHOKHA_DETAILS.payLink && (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <CreditCard size={14} style={{ color: c.accent }} />
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Pay by card via iKhokha</span>
+              </div>
+              <a href={IKHOKHA_DETAILS.payLink} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
+                style={{ background: c.accent, color: c.accentText }}>
+                <CreditCard size={13} /> Pay via iKhokha
+              </a>
+              <div className="mt-2">
+                <CardBrandsBadge c={c} />
+              </div>
+              <div className="font-body text-[10px] mt-1.5 mb-3" style={{ color: c.textFaint }}>
+                Opens iKhokha's secure checkout. Still upload your receipt or confirmation screenshot below as proof.
+              </div>
+            </>
+          )}
           <div className="flex items-center gap-2 mb-2">
             <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
-            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Payment details</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or via bank transfer</span>
           </div>
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
             <span style={{ color: c.textFaint }}>Bank</span><span>{BANK_DETAILS.bank}</span>
@@ -2256,22 +2293,6 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
             <span style={{ color: c.textFaint }}>Receiver phone</span><span className="font-mono">{MUKURU_DETAILS.receiverPhone}</span>
           </div>
-          {IKHOKHA_DETAILS.payLink && (
-            <>
-              <div className="flex items-center gap-2 mt-3 mb-2">
-                <CreditCard size={14} style={{ color: c.accent }} />
-                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or pay by card via iKhokha</span>
-              </div>
-              <a href={IKHOKHA_DETAILS.payLink} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
-                style={{ background: c.accent, color: c.accentText }}>
-                <CreditCard size={13} /> Pay via iKhokha
-              </a>
-              <div className="font-body text-[10px] mt-1.5" style={{ color: c.textFaint }}>
-                Opens iKhokha's secure checkout. Still upload your receipt or confirmation screenshot below as proof.
-              </div>
-            </>
-          )}
         </div>
         <div className="font-body text-[11px] mb-4" style={{ color: c.textFaint }}>
           The more you put in, the bigger your prize — {formatRand(ENTRY_FEE_MAX)} is the max contribution (100% share). Your prize for a place is scaled by your entry as a fraction of {formatRand(ENTRY_FEE_MAX)}.

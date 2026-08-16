@@ -81,6 +81,24 @@ async function payWithGateway() {
   return { success: false, reference: null };
 }
 
+// Small "cards accepted" indicator for the iKhokha card option — a generic
+// dual-circle motif (not the actual Mastercard/Visa trademarked artwork)
+// paired with plain text, so shoppers recognize card payment is supported
+// without us reproducing anyone's logo.
+function CardBrandsBadge({ c }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center" style={{ width: 22 }}>
+        <div className="w-3.5 h-3.5 rounded-full" style={{ background: "#EB5757" }} />
+        <div className="w-3.5 h-3.5 rounded-full -ml-1.5" style={{ background: "#F2A93B", mixBlendMode: "multiply" }} />
+      </div>
+      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>Mastercard</span>
+      <span className="font-mono text-[10px] tracking-wide" style={{ color: c.textFaint }}>·</span>
+      <span className="font-body text-[11px] italic font-bold" style={{ color: c.textFaint }}>Visa</span>
+    </div>
+  );
+}
+
 function Spinner({ c }) {
   return (
     <div className="flex items-center justify-center h-40">
@@ -1148,6 +1166,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
           <p className="font-body text-sm" style={{ color: c.textDim }}>
             You'll be taken to a secure iKhokha page to pay {formatMoney(total)} by card. Once you've paid, come back here — we'll confirm your order shortly after.
           </p>
+          <CardBrandsBadge c={c} />
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery / pickup note (optional)</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
