@@ -64,7 +64,7 @@ import {
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles,
-  Zap, Repeat, Rocket,
+  Zap, Repeat, Rocket, CreditCard,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -165,6 +165,20 @@ const BANK_DETAILS = {
 const MUKURU_DETAILS = {
   receiverName: "Saul",
   receiverPhone: "+27694362789",
+};
+
+// iKhokha Pay-by-Link — a hosted checkout page someone can pay into with a
+// card, no bank app or reference number needed. Chosen over a static QR
+// image or a Pay-by-Proxy number because it's just a URL: it drops straight
+// into the same "here are your options" card as the bank/Mukuru details
+// below with no extra image asset, and works the same whether someone taps
+// it on their phone or a desktop.
+// TODO: replace payLink with your real iKhokha Pay-by-Link URL (generate
+// one from the iKhokha merchant dashboard or app — Payment Links / Pay by
+// Link). Left blank for now so the option is hidden until it's set — see
+// the `IKHOKHA_DETAILS.payLink &&` check in PaymentModal below.
+const IKHOKHA_DETAILS = {
+  payLink: "",
 };
 
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
@@ -2242,6 +2256,22 @@ function PaymentModal({ league, member, onCancel, onSubmit, c }) {
             <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
             <span style={{ color: c.textFaint }}>Receiver phone</span><span className="font-mono">{MUKURU_DETAILS.receiverPhone}</span>
           </div>
+          {IKHOKHA_DETAILS.payLink && (
+            <>
+              <div className="flex items-center gap-2 mt-3 mb-2">
+                <CreditCard size={14} style={{ color: c.accent }} />
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or pay by card via iKhokha</span>
+              </div>
+              <a href={IKHOKHA_DETAILS.payLink} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
+                style={{ background: c.accent, color: c.accentText }}>
+                <CreditCard size={13} /> Pay via iKhokha
+              </a>
+              <div className="font-body text-[10px] mt-1.5" style={{ color: c.textFaint }}>
+                Opens iKhokha's secure checkout. Still upload your receipt or confirmation screenshot below as proof.
+              </div>
+            </>
+          )}
         </div>
         <div className="font-body text-[11px] mb-4" style={{ color: c.textFaint }}>
           The more you put in, the bigger your prize — {formatRand(ENTRY_FEE_MAX)} is the max contribution (100% share). Your prize for a place is scaled by your entry as a fraction of {formatRand(ENTRY_FEE_MAX)}.
