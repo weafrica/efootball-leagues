@@ -3103,11 +3103,19 @@ export default function App() {
   // Doubles as the merge path for a brand-new league (createLeague): a
   // league whose id isn't in local state yet gets appended, not just
   // replaced, so callers don't need a separate "add" case.
+  // Merges by id, not replaces — the lazy comments-only fetch below calls
+  // this with a stub row ({ id, comments }), and a full replace would wipe
+  // every other field (teams, fixtures, members, result_submissions...) off
+  // the already-loaded league the instant someone opened it, crashing
+  // anything downstream that reads league.teams/fixtures for that league.
+  // refreshLeague/refreshLeagues pass complete rows (full LEAGUE_SELECT), so
+  // merging is a no-op difference for them — every field they carry just
+  // overwrites the old value as before.
   const mergeLeaguesById = useCallback((rows) => {
     setLeagues((prev) => {
       const base = prev || [];
       const byId = new Map(base.map((l) => [l.id, l]));
-      rows.forEach((row) => byId.set(row.id, row));
+      rows.forEach((row) => byId.set(row.id, { ...(byId.get(row.id) || {}), ...row }));
       // Preserve the same order loadLeagues would produce (newest created
       // first) rather than however Map iteration/insertion happens to land.
       return [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -10800,7 +10808,7 @@ export function GroupTables({ league, groupStageFixtures, avatarByTeamId, sessio
   // Show the viewer's own group's table first, then the rest of the groups
   // in their normal order — so a club opening the group stage lands on
   // their own standings before scrolling past every other group to find it.
-  const myGroupNumber = myTeamId != null ? league.teams.find((t) => t.id === myTeamId)?.group_number : null;
+  const myGroupNumber = myTeamId != null ? (league.teams || []).find((t) => t.id === myTeamId)?.group_number : null;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i)
     .sort((a, b) => (a === myGroupNumber ? -1 : b === myGroupNumber ? 1 : 0));
 
