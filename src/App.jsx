@@ -8874,25 +8874,9 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
-      {/* Live event banner — moved to lead right after the player card, the
-          same "featured event" slot an eFootball-style home screen gives its
-          flagship campaign/event banner. This is the single most
-          time-sensitive, highest-production-value thing on the page (live
-          countdown, medal ranks, heat bar), so it earns top billing instead
-          of sitting below the smaller action strips. Same admin-curated
-          Fri–Sun highlight PublicHome shows guests, so a signed-in player
-          still sees (and can one-tap join or jump into) whatever's kicking
-          off this weekend, even if it's not among the leagues they're
-          already in. */}
-      {weekendLeagues.length > 0 && (
-        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
-          isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
-          onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
-      )}
-
       {/* Continue playing — the two "something's waiting on you" strips,
-          right after the event banner so the page reads top-to-bottom as:
-          who you are, what's live right now, what needs you next. */}
+          right after the player card so the page reads top-to-bottom as:
+          who you are, what needs you next. */}
       <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
       <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
 
@@ -8950,6 +8934,15 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
       <LeagueListsSection leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed}
         myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} c={c} />
+
+      {/* Live event banner — sits below LeagueListsSection now, specifically
+          below the Survival Ladder Cup marquee (the last thing that section
+          renders), per request. */}
+      {weekendLeagues.length > 0 && (
+        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
+          isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
+          onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
+      )}
 
     </div>
   );
