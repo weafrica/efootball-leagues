@@ -3981,17 +3981,24 @@ export default function App() {
   useRealtimeRefresh("ladder_ranks", loadMyLadderRank, !!session);
   useVisibilityPoll(loadMyLadderRank, 60000, !!session);
 
-  // While the Challenges screen — or Home, where the random-challenge
-  // notification banner lives — is open, poll the random-challenge pool
-  // every few seconds. It's a race to accept, so members want to see it
-  // move without having to manually refresh.
-  // Kept live for admins on every screen too (not just Home/Challenges),
-  // otherwise a random-challenge result reported while an admin is off
-  // reviewing a league elsewhere would sit stale in state — undercounting
-  // adminEscalatedResultCount's header badge until they happened to visit
-  // Home or Challenges and trigger a reload.
-  useRealtimeRefresh("open_challenges", loadOpenChallenges, view === "challenges" || view === "home" || isAdmin);
-  useVisibilityPoll(loadOpenChallenges, 30000, view === "challenges" || view === "home" || isAdmin);
+  // The Challenges screen is a genuine "race to accept" — members watching
+  // that screen want the pool to move without a manual refresh, so it stays
+  // on the fast realtime + 30s poll. Kept live for admins on every screen
+  // too (not just Home/Challenges), otherwise a random-challenge result
+  // reported while an admin is off reviewing a league elsewhere would sit
+  // stale in state — undercounting adminEscalatedResultCount's header badge
+  // until they happened to visit Home or Challenges and trigger a reload.
+  useRealtimeRefresh("open_challenges", loadOpenChallenges, view === "challenges" || isAdmin);
+  useVisibilityPoll(loadOpenChallenges, 30000, view === "challenges" || isAdmin);
+
+  // Home only needs this for the header's grabbable-count badge and the
+  // "still up for grabs" banner — neither is a race the way the Challenges
+  // screen above is, so it doesn't need realtime. A realtime subscription
+  // here would mean every open Home tab on the platform re-fetching the
+  // moment *anyone, anywhere* creates/accepts/cancels a random challenge —
+  // for a badge that's fine to be up to two minutes stale. Non-admins only:
+  // admins already get the fast realtime+30s combo above on every screen.
+  useVisibilityPoll(loadOpenChallenges, 120000, view === "home" && !isAdmin);
 
   // Same idea for the community results feed, on a slower clock — new
   // confirmed results trickle in rather than needing a race-to-accept refresh.
