@@ -8583,6 +8583,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest);
+  // The Leagues list below already excludes these — a weekend league gets
+  // one true home (the spotlight above), the same way PublicHome's
+  // otherFunLeagues keeps guests from seeing it twice.
+  const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
 
   // Open random challenges anyone but the signed-in member can still grab —
   // same "unaccepted and up for grabs" definition ChallengesScreen uses.
@@ -8856,7 +8860,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       <LeagueListsSection leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed}
         myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
-        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
+        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} c={c} />
 
     </div>
   );
@@ -10207,9 +10211,14 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 // Home — which used to redo that same work on every unrelated re-render
 // too (a challenges/ladder realtime update, an achievement sync, anything),
 // not just the tick.
-function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
+function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, c }) {
   useNow(60000);
-  const funLeagues = leagues.filter((l) => l.league_type !== "cash");
+  // hideLeagueIds excludes whatever's already shown in the Weekend League
+  // spotlight above (see Home) — otherwise a weekend league appeared both
+  // there and again in the plain "Leagues" list below it. Cash leagues are
+  // never weekend leagues (the spotlight only ever draws from fun leagues),
+  // so this only needs to apply to the fun-leagues filter.
+  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && !(hideLeagueIds && hideLeagueIds.has(l.id)));
   const cashLeagues = leagues.filter((l) => l.league_type === "cash");
 
   // Leagues that need the viewer's attention (something to review, or their
