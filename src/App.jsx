@@ -8874,21 +8874,27 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
 
       {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
-      {/* Continue playing — the two "something's waiting on you" strips,
-          grouped right after the featured banner so the page reads
-          top-to-bottom as: who you are, what's live, what needs you now. */}
-      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
-      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
-
-      {/* Weekend League spotlight — same admin-curated Fri–Sun highlight
-          PublicHome shows guests, so a signed-in player still sees (and can
-          one-tap join or jump into) whatever's kicking off this weekend,
-          even if it's not among the leagues they're already in. */}
+      {/* Live event banner — moved to lead right after the player card, the
+          same "featured event" slot an eFootball-style home screen gives its
+          flagship campaign/event banner. This is the single most
+          time-sensitive, highest-production-value thing on the page (live
+          countdown, medal ranks, heat bar), so it earns top billing instead
+          of sitting below the smaller action strips. Same admin-curated
+          Fri–Sun highlight PublicHome shows guests, so a signed-in player
+          still sees (and can one-tap join or jump into) whatever's kicking
+          off this weekend, even if it's not among the leagues they're
+          already in. */}
       {weekendLeagues.length > 0 && (
         <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
           isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
           onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} c={c} />
       )}
+
+      {/* Continue playing — the two "something's waiting on you" strips,
+          right after the event banner so the page reads top-to-bottom as:
+          who you are, what's live right now, what needs you next. */}
+      <PendingResultsStrip items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen} c={c} />
+      <UpNextStrip fixtures={myUpcomingFixtures} onOpen={onOpen} c={c} />
 
       {/* Quick actions — one equal-weight action dock. Shop lives here as a
           tile like everything else instead of a standing promo banner. */}
@@ -8903,9 +8909,19 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
         </div>
       </section>
 
-      {/* Achievements — the badge collection layer, right after quick
-          actions and before the competitive "where you stand" strips, so a
-          player sees what they've earned before what they're chasing next. */}
+      {/* Where you stand — Leaderboard preview then the Ladder banner, moved
+          up to right after quick actions. This is the core eFootball-style
+          competitive loop (rank, points, who's above you), so it now beats
+          the collectibles below it to the top of the fold instead of trailing
+          them — "how am I doing" before "what have I collected". */}
+      <div className="mt-8">
+        <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
+      </div>
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
+
+      {/* Achievements — the badge collection layer, right after "where you
+          stand" so a player sees their rank first, then what they've earned
+          chasing it. */}
       <AchievementsStrip achievements={achievements} earnedCount={earnedAchievementCount} onOpen={() => setAchievementsOpen(true)} c={c} />
       {achievementsOpen && <AchievementsModal achievements={achievements} earnedCount={earnedAchievementCount} onClose={() => setAchievementsOpen(false)} c={c} />}
 
@@ -8914,15 +8930,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           and "how I stack up against everyone else" sit side by side. */}
       <WallOfFameStrip standings={wallOfFame} onOpen={() => setWallOfFameOpen(true)} c={c} />
       {wallOfFameOpen && <WallOfFameModal standings={wallOfFame} myUserId={myId} onClose={() => setWallOfFameOpen(false)} c={c} />}
-
-      {/* Where you stand — Leaderboard preview then the Ladder banner,
-          grouped together right after quick actions so this competitive
-          "how am I doing" content is easy to reach before the league lists
-          (which are the bulk of the page) take over. */}
-      <div className="mt-8">
-        <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
-      </div>
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
 
       {leagues.length === 0 && (
         <section className="mt-6 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.accent}22, ${c.surface})`, border: `1px solid ${c.border}` }}>
