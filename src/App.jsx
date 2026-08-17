@@ -333,6 +333,19 @@ function isActiveMember(l, session) {
   return !leagueComplete;
 }
 
+// General "is this league over" check across every format — used to move a
+// league out of the current-leagues sections and into Completed Leagues.
+// Round robin/knockout/groups+knockout/survivor are all driven by the same
+// fixtures list, so "every fixture played" (with at least one fixture)
+// covers them uniformly. Survival Ladder Cup has no fixtures list in the
+// same sense — its own finalize-on-read effect sets ladder_cup_finalized_at
+// once the weekly cutoff passes and the champion (if any) is crowned, so
+// that flag is the equivalent signal for that format.
+function isLeagueCompleted(l) {
+  if (l.format === "ladder_cup") return !!l.ladder_cup_finalized_at;
+  return (l.fixtures || []).length > 0 && l.fixtures.every((f) => f.played);
+}
+
 // Builds a map of format-kind -> the signed-in user's currently active fun
 // league of that kind (at most one, by construction of the join rule below).
 // Computing this once per render and doing O(1) lookups per card is cheap;
@@ -10565,12 +10578,19 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
   // built entirely around elimination/one-life drama, so it earns a louder
   // home of its own (see LadderCupSection) rather than blending in as just
   // another card among round-robin/knockout leagues.
-  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && l.format !== "ladder_cup" && !(hideLeagueIds && hideLeagueIds.has(l.id)));
-  const cashLeagues = leagues.filter((l) => l.league_type === "cash");
+  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && l.format !== "ladder_cup" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+  const cashLeagues = leagues.filter((l) => l.league_type === "cash" && !isLeagueCompleted(l));
   // Excludes cash-type Ladder Cup leagues (if any) — those stay in the Cash
   // leagues section above rather than also appearing here, same
   // one-true-home rule the Weekend League spotlight follows.
-  const ladderCupLeagues = leagues.filter((l) => l.format === "ladder_cup" && l.league_type !== "cash" && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+  const ladderCupLeagues = leagues.filter((l) => l.format === "ladder_cup" && l.league_type !== "cash" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+
+  // Finished leagues move here instead of lingering in the sections above —
+  // a completed round robin/knockout/cash league or a finalized Ladder Cup
+  // has nothing left for anyone to act on, so it no longer belongs among
+  // the leagues someone might still join or play in.
+  const completedFunCashLeagues = leagues.filter((l) => l.format !== "ladder_cup" && isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+  const completedLadderCupLeagues = leagues.filter((l) => l.format === "ladder_cup" && l.league_type !== "cash" && isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
 
   // Leagues that need the viewer's attention (something to review, or their
   // own payment needs sorting out) float to the top of each section; the
@@ -10627,6 +10647,17 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
         <LadderCupSection leagues={sortLeagues(ladderCupLeagues)} isMemberOf={isMemberOf} onOpen={onOpen} onJoin={onJoin}
           entryClosed={entryClosed} canManageLeague={canManageLeague} c={c} />
       )}
+
+      {completedFunCashLeagues.length > 0 && (
+        <LeagueSection title="Completed Leagues" icon={Trophy} leagues={sortLeagues(completedFunCashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+          entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+          session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
+      )}
+
+      {completedLadderCupLeagues.length > 0 && (
+        <LadderCupSection leagues={sortLeagues(completedLadderCupLeagues)} isMemberOf={isMemberOf} onOpen={onOpen} onJoin={onJoin}
+          entryClosed={entryClosed} canManageLeague={canManageLeague} title="Completed Survival Ladder Cups" muted c={c} />
+      )}
     </>
   );
 }
@@ -10636,17 +10667,23 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
 // points to a hard Sunday cutoff: the format is built around danger and
 // survival, so the section leans into that instead of blending in with
 // round-robin/knockout leagues.
-function LadderCupSection({ leagues, isMemberOf, onOpen, onJoin, entryClosed, canManageLeague, c }) {
+function LadderCupSection({ leagues, isMemberOf, onOpen, onJoin, entryClosed, canManageLeague, title = "Survival Ladder Cup", muted = false, c }) {
   if (leagues.length === 0) return null;
+  const badgeBg = muted ? c.surfaceHover : "linear-gradient(150deg, #FF4D2E, #B8221A)";
+  const badgeShadow = muted ? "none" : "0 0 12px #FF4D2E55";
+  const iconColor = muted ? c.textFaint : "#fff";
+  const titleColor = muted ? c.textDim : "#FF6B4A";
+  const countBg = muted ? c.surfaceHover : "#FF4D2E22";
+  const countColor = muted ? c.textFaint : "#FF6B4A";
   return (
     <section className="mt-8">
       <div className="flex items-center gap-2.5 mb-3">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "linear-gradient(150deg, #FF4D2E, #B8221A)", boxShadow: "0 0 12px #FF4D2E55" }}>
-          <Swords size={15} color="#fff" />
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: badgeBg, boxShadow: badgeShadow }}>
+          <Swords size={15} color={iconColor} />
         </span>
-        <div className="font-extrabold uppercase italic tracking-tight text-lg leading-none flex items-center gap-2" style={{ color: "#FF6B4A" }}>
-          Survival Ladder Cup
-          <span className="font-mono text-[10px] font-normal not-italic tracking-wider px-1.5 py-0.5 rounded" style={{ background: "#FF4D2E22", color: "#FF6B4A" }}>{leagues.length}</span>
+        <div className="font-extrabold uppercase italic tracking-tight text-lg leading-none flex items-center gap-2" style={{ color: titleColor }}>
+          {title}
+          <span className="font-mono text-[10px] font-normal not-italic tracking-wider px-1.5 py-0.5 rounded" style={{ background: countBg, color: countColor }}>{leagues.length}</span>
         </div>
       </div>
       <div className="no-scrollbar flex items-stretch gap-3.5 overflow-x-auto -mx-4 px-4 pb-1">
