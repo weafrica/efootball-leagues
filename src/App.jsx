@@ -333,6 +333,61 @@ function isActiveMember(l, session) {
   return !leagueComplete;
 }
 
+// Recomputes a knockout bracket's most recent round to figure out whether
+// it's already down to a single winner — mirroring advanceKnockout's own
+// tie-resolution rules (aggregate score, no-show forfeits, final-round
+// penalties) so this agrees with what the "Advance round" button and its
+// "this league already has a champion" check already conclude.
+//
+// This deliberately does NOT rely on team.eliminated: applyKnockoutElimination
+// only ever updates that flag once every leg of a tie is either played or
+// expired — a tie with one leg actually played and the other simply expiring
+// unplayed (nobody ever submits anything for it) never re-triggers that
+// function again after the fact, since nothing about it is event-driven once
+// time alone is what resolves it. team.eliminated can stay stuck stale on a
+// finished bracket's runner-up indefinitely as a result — recomputing from
+// the fixtures directly is what actually stays correct.
+function knockoutBracketWinners(fixtures, bracketStage) {
+  const bracketFixtures = (fixtures || []).filter((f) => f.stage === bracketStage);
+  if (bracketFixtures.length === 0) return null;
+  const maxRound = Math.max(...bracketFixtures.map((f) => f.round));
+  const currentRoundFixtures = bracketFixtures.filter((f) => f.round === maxRound);
+  const unplayed = currentRoundFixtures.filter((f) => !f.played && !isExpired(f));
+  if (unplayed.length > 0) return null; // this round's still in progress
+
+  const ties = {};
+  currentRoundFixtures.forEach((f) => {
+    const key = f.away_team_id === null ? `bye-${f.home_team_id}` : [f.home_team_id, f.away_team_id].sort().join("~");
+    (ties[key] = ties[key] || []).push(f);
+  });
+  const isFinal = isFinalRoundFixtures(currentRoundFixtures);
+  const winners = [];
+  Object.values(ties).forEach((legs) => {
+    if (legs[0].away_team_id === null) { winners.push(legs[0].home_team_id); return; }
+    const totals = {};
+    legs.forEach((f) => {
+      // An expired-unplayed leg contributes nothing to either side's
+      // aggregate (same no-points, no-winner treatment computeStandings
+      // already gives it) — so a tie with one leg genuinely played still
+      // resolves off that leg's real score rather than staying stuck.
+      totals[f.home_team_id] = (totals[f.home_team_id] || 0) + (f.played ? f.home_score : 0);
+      totals[f.away_team_id] = (totals[f.away_team_id] || 0) + (f.played ? f.away_score : 0);
+    });
+    const [teamA, teamB] = Object.keys(totals);
+    if (totals[teamA] === totals[teamB]) {
+      const allLegsNoShow = legs.every((f) => !f.played && isExpired(f));
+      if (allLegsNoShow) return; // both sides knocked out — neither is a winner
+      if (!isFinal) { winners.push(teamA, teamB); return; }
+      const pensA = pensAggregateFor(legs, teamA);
+      const pensB = pensAggregateFor(legs, teamB);
+      if (pensA !== null && pensB !== null && pensA !== pensB) { winners.push(pensA > pensB ? teamA : teamB); return; }
+      return; // final still needs a penalty score entered — not decided yet
+    }
+    winners.push(totals[teamA] > totals[teamB] ? teamA : teamB);
+  });
+  return winners;
+}
+
 // General "is this league over" check across every format — used to move a
 // league out of the current-leagues sections and into Completed Leagues.
 // Deliberately mirrors the same signals LeagueDetail.jsx already uses to
@@ -352,12 +407,11 @@ function isLeagueCompleted(l) {
   const isGroupsKnockout = l.format === "groups_knockout";
   const isSurvivor = l.format === "survivor";
   const inKnockoutBracket = isKnockout || (isGroupsKnockout && l.final_stage_started);
-  const activeTeamsCount = teams.filter((t) => !t.eliminated).length;
 
   if (inKnockoutBracket) {
-    // A champion is decided the moment only one club is left standing —
-    // nothing else in the bracket can still change that outcome.
-    return teams.length > 0 && activeTeamsCount === 1;
+    const bracketStage = isGroupsKnockout ? 2 : 1;
+    const winners = knockoutBracketWinners(fixtures, bracketStage);
+    return teams.length > 0 && winners !== null && winners.length <= 1;
   }
 
   if (isSurvivor) {
