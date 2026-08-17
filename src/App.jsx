@@ -347,7 +347,7 @@ function isActiveMember(l, session) {
 // time alone is what resolves it. team.eliminated can stay stuck stale on a
 // finished bracket's runner-up indefinitely as a result — recomputing from
 // the fixtures directly is what actually stays correct.
-function knockoutBracketWinners(fixtures, bracketStage) {
+export function knockoutBracketWinners(fixtures, bracketStage) {
   const bracketFixtures = (fixtures || []).filter((f) => f.stage === bracketStage);
   if (bracketFixtures.length === 0) return null;
   const maxRound = Math.max(...bracketFixtures.map((f) => f.round));

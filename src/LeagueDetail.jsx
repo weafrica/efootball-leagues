@@ -16,7 +16,7 @@ import {
   WhatsAppLink, avatarColor, challengeResultConfirmExpired, challengeResultMinutesLeft, commentSpeech,
   computeStandings, findSubmissionOpponentId,
   firstMatchdayNote, fmtDate, groupLabel, isExpired, isFinalFixture, isFinalRoundFixtures,
-  isFixtureLocked, isResultComment, isWaReminderActive, isWeekendLeague, knockoutRoundFixtures,
+  isFixtureLocked, isResultComment, isWaReminderActive, isWeekendLeague, knockoutBracketWinners, knockoutRoundFixtures,
   ladderCupResultEscalationReason, nextFixtureForTeam, resultConfirmDeadline, resultEscalationReason, splitCommentsByRoot,
   timeAgo, useCommentSpeakingId, useVoiceRecorder, usesCustomMessage,
   ACHIEVEMENTS_DEF, computeMyProgress, teamForUserInLeague,
@@ -1578,7 +1578,16 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
   const stageDone = stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
 
   const activeTeamsCount = league.teams.filter((t) => !t.eliminated).length;
-  const knockoutChampion = inKnockoutBracket && stageDone && activeTeamsCount === 1 ? league.teams.find((t) => !t.eliminated) : null;
+  // Recomputed straight from the fixtures (same helper isLeagueCompleted in
+  // App.jsx uses) rather than off team.eliminated — that flag can go stale
+  // on a finished bracket's runner-up whenever a tie resolves purely by one
+  // leg expiring unplayed (see knockoutBracketWinners' comment), which used
+  // to leave this page stuck showing "Advance round" — and the dead-end
+  // "This league already has a champion" toast when clicked — even once the
+  // bracket was actually decided.
+  const knockoutBracketStage = isGroupsKnockout ? 2 : 1;
+  const knockoutWinnerIds = inKnockoutBracket ? knockoutBracketWinners(league.fixtures, knockoutBracketStage) : null;
+  const knockoutChampion = knockoutWinnerIds && knockoutWinnerIds.length === 1 ? league.teams.find((t) => t.id === knockoutWinnerIds[0]) : null;
   const survivorComplete = isSurvivor && league.final_stage_started && stageDone;
   const survivorChampion = survivorComplete ? standings[0] : null;
 
