@@ -48,15 +48,14 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 const LadderPage = lazy(() => import("./Ladder.jsx"));
 import { pickBestVoice } from "./utils/pickBestVoice";
 // Step 9 (opponent slate + challenge flow) is the first place App.jsx
-// itself needs the pure engine — isValidMatchLength backstops the same
-// 6–15 range the DB CHECK constraint enforces. Home/away assignment now
+// itself needs the pure engine. Home/away assignment now
 // happens server-side inside initiate_ladder_cup_match (see
 // supabase/migrations/20260815_ladder_cup_match_rpc.sql), so the pure
 // engine's assignHomeTeam isn't imported here anymore — it's still used
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { isValidMatchLength, rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -4962,25 +4961,8 @@ export default function App() {
       showToast(`Couldn't set up the match: ${error.message}`);
       return;
     }
-    const home = Array.isArray(data) ? data[0]?.home_team_id : data?.home_team_id;
     await refreshLeague(league.id);
-    showToast(home === myTeamId
-      ? "You're home — pick your match length to lock it in."
-      : "Challenge sent — waiting on them to pick a match length.");
-  };
-
-  // Home team's choice, 6–15 minutes per half — isValidMatchLength mirrors
-  // the DB CHECK constraint exactly, so a rejection here would've been
-  // rejected there too; checking client-side just gives a clean message
-  // instead of a raw constraint-violation error.
-  const setLadderCupMatchLength = async (league, match, minutes) => {
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this match no longer counts."); return; }
-    if (!isValidMatchLength(minutes)) { showToast("Match length has to be 6–15 minutes."); return; }
-    const { error } = await supabase.from("ladder_cup_matches")
-      .update({ match_length_minutes: minutes }).eq("id", match.id);
-    if (error) { showToast(`Couldn't set match length: ${error.message}`); return; }
-    await refreshLeague(league.id);
-    showToast(`Match length set — ${minutes} min a side. Go play it.`);
+    showToast("Challenge set up — go play it.");
   };
 
   // Either side can back out of a match that hasn't had its length set yet
@@ -7032,7 +7014,6 @@ export default function App() {
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onStartLadderCup={startLadderCupLeague} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
                 onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
-                onSetLadderCupMatchLength={(match, minutes) => setLadderCupMatchLength(activeLeague, match, minutes)}
                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
                 onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}
                 onRespondLadderCupMatchResult={(match, accept) => respondLadderCupMatchResult(activeLeague, match, myTeam(activeLeague)?.id, accept)}

@@ -62,8 +62,6 @@ export const LADDER_CUP_RULES = {
   // toward goal difference? Penalties never do, that's settled. Regulation
   // always does. This flag is the one switch to flip once that's decided.
   COUNT_EXTRA_TIME_IN_GD: false,
-  MATCH_LENGTH_MIN_MINUTES: 6,  // home team's choice, per half
-  MATCH_LENGTH_MAX_MINUTES: 15,
   BASE_SUBSTITUTIONS: 6,
   EXTRA_TIME_SUBSTITUTIONS: 1,  // additional sub allowed only if the match reaches extra time
 };
@@ -597,13 +595,6 @@ export function hasLadderCupCutoffPassed(cutoff, now = new Date()) {
  */
 export function assignHomeTeam(clubAId, clubBId, rng = Math.random) {
   return rng() < 0.5 ? { home: clubAId, away: clubBId } : { home: clubBId, away: clubAId };
-}
-
-/** Home team picks the match length: 6–15 minutes per half. */
-export function isValidMatchLength(minutes) {
-  return Number.isInteger(minutes)
-    && minutes >= LADDER_CUP_RULES.MATCH_LENGTH_MIN_MINUTES
-    && minutes <= LADDER_CUP_RULES.MATCH_LENGTH_MAX_MINUTES;
 }
 
 /**

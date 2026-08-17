@@ -479,35 +479,6 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
 }
 
 
-// Match length picker for the home team — inline row of 6..15, not a
-// modal, since it's a single tap and the row it lives in already has all
-// the context (who the match is against). Mirrors isValidMatchLength's own
-// bounds (LADDER_CUP_RULES.MATCH_LENGTH_{MIN,MAX}_MINUTES) rather than
-// hardcoding 6/15 a second time.
-function LadderCupMatchLengthPicker({ match, onSetLength, c }) {
-  const [saving, setSaving] = useState(false);
-  const options = [];
-  for (let m = LADDER_CUP_RULES.MATCH_LENGTH_MIN_MINUTES; m <= LADDER_CUP_RULES.MATCH_LENGTH_MAX_MINUTES; m++) options.push(m);
-  const pick = async (minutes) => {
-    setSaving(true);
-    await onSetLength(match, minutes);
-    setSaving(false);
-  };
-  return (
-    <div className="mt-2">
-      <div className="font-mono text-[10px] uppercase tracking-wide mb-1.5" style={{ color: c.accent }}>You're home — pick match length (min/half)</div>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((m) => (
-          <button key={m} disabled={saving} onClick={() => pick(m)}
-            className="font-mono text-xs font-semibold w-8 h-8 rounded-lg" style={{ background: c.surfaceHover, color: c.text }}>
-            {m}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // Step 12: the walkover track running alongside (not instead of) the
 // Challenge/match flow above. "Message opponent" is a bookkeeping click —
 // the actual message happens outside the app (WhatsApp) — that starts the
@@ -610,17 +581,16 @@ function LadderCupWalkoverClaimSection({ opponentName, opponentPhone, myTeamName
   );
 }
 
-// One row per opponent in the current ladder-points band. Four states per
-// row: no match yet (Challenge button), a match exists but the length
-// hasn't been picked (home team sees the picker, away team sees a waiting
-// note — either side can cancel from here), the length's set (ready to
-// play — Log result opens the step 10 scoreline form), or it's mid-submit.
-// Either side can log the result — first one to submit wins, same
-// self-report model as the rest of Ladder Cup's match flow. The walkover
-// track (LadderCupWalkoverClaimSection) runs independently underneath —
-// messaging for a walkover doesn't require a Challenge to exist first,
-// since the whole point is an opponent who won't engage at all.
-function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onInitiate, onSetLength, onCancel, onOpenResult, onRespondResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+// One row per opponent in the current ladder-points band. Three states per
+// row: no match yet (Challenge button), a match exists and is ready to play
+// (either side can cancel from here, and Log result opens the step 10
+// scoreline form), or it's mid-submit. Either side can log the result —
+// first one to submit wins, same self-report model as the rest of Ladder
+// Cup's match flow. The walkover track (LadderCupWalkoverClaimSection) runs
+// independently underneath — messaging for a walkover doesn't require a
+// Challenge to exist first, since the whole point is an opponent who won't
+// engage at all.
+function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onInitiate, onCancel, onOpenResult, onRespondResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
   const iAmHome = match && match.home_team_id === myTeamId;
@@ -705,7 +675,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
         {match && !resultPending && !match.finalized_at && (
           <button onClick={() => onOpenResult(match)}
             className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full transition-transform active:scale-95" style={{ background: c.greenSoft, color: c.greenText }}>
-            <Trophy size={13} /> Log result{match.match_length_minutes != null ? ` · ${match.match_length_minutes}m` : ""}
+            <Trophy size={13} /> Log result
           </button>
         )}
         {match && match.finalized_at && (
@@ -719,20 +689,12 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
             <button onClick={() => respond(false)} disabled={resolving} title="Dispute result" className="w-8 h-8 flex items-center justify-center rounded-full transition-transform active:scale-90" style={{ background: c.surfaceHover, color: c.textFaint }}><X size={14} /></button>
           </div>
         )}
-        {match && match.match_length_minutes == null && (
+        {match && !resultPending && !match.finalized_at && (
           <button onClick={cancel} disabled={busy} title="Cancel match" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0 transition-transform active:scale-90" style={{ color: c.textFaint }}>
             <X size={13} />
           </button>
         )}
       </div>
-      {match && match.match_length_minutes == null && iAmHome && (
-        <LadderCupMatchLengthPicker match={match} onSetLength={onSetLength} c={c} />
-      )}
-      {match && match.match_length_minutes == null && !iAmHome && (
-        <div className="font-mono text-[10px] uppercase tracking-wide mt-2 flex items-center gap-1" style={{ color: c.textFaint }}>
-          <Clock size={10} /> {opponent.club_name} is home — waiting on their match length
-        </div>
-      )}
       {/* Step 10 pipeline: reported-but-unconfirmed result. iReported sees a
           waiting/escalated status line (no buttons — the confirm/dispute
           buttons above are only ever offered to the other side); the other
@@ -874,7 +836,7 @@ function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
 // for matchmaking consent. Refreshes automatically off the live `league` prop,
 // same as the standings table, so logging any result elsewhere in the app
 // widens/narrows this club's slate without a separate re-fetch.
-function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, c }) {
   const teamsById = useMemo(() => Object.fromEntries((league.teams || []).map((t) => [t.id, t])), [league.teams]);
   // Hooks stay unconditional (called every render, same order) — the
   // eliminated/pending-second-life/no-entry short-circuits below happen
@@ -926,7 +888,7 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch,
         <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
           walkoverClaim={walkoverClaimWith(op.club_id)}
           canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
-          onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
+          onInitiate={onInitiateMatch} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
           onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
       ))}
     </div>
@@ -1237,7 +1199,7 @@ function LadderCupWidgetOverlay({ title, onClose, c, children }) {
   );
 }
 
-function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
+function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onRejoin, onMessageWalkover, onSubmitWalkoverClaim, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
   // Which of the five small quick-action widgets (if any) is currently
   // popped open over the standings table — see the trigger row + overlay
@@ -1328,7 +1290,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
           {league.ladder_cup_finalized_at ? (
             <LadderCupFinalizedBanner league={league} c={c} />
           ) : myTeam ? (
-            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife} onRejoin={onRejoin}
+            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife} onRejoin={onRejoin}
               onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
           ) : (
             <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
@@ -1511,7 +1473,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onSetLadderCupMatchLength, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1665,7 +1627,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
           onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
           onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction}
-          onInitiateMatch={onInitiateLadderCupMatch} onSetMatchLength={onSetLadderCupMatchLength} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife} onRejoin={onRejoinLadderCup}
+          onInitiateMatch={onInitiateLadderCupMatch} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife} onRejoin={onRejoinLadderCup}
           onMessageWalkover={onMessageLadderCupWalkoverOpponent} onSubmitWalkoverClaim={onSubmitLadderCupWalkoverClaim}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />
       ) : notStarted ? (
