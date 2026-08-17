@@ -46,7 +46,7 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
   // entry-closes field is hidden and unrequired for this format.
   const isLadderCup = format === "ladder_cup";
   const datesOutOfOrder = !isLadderCup && entryClosesAt && startsAt && new Date(startsAt) < new Date(entryClosesAt);
-  const roundPeriodValid = Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720;
+  const roundPeriodValid = isLadderCup || (Number(roundPeriodHours) >= 1 && Number(roundPeriodHours) <= 720);
   const ladderCupValid = format !== "ladder_cup" || !!ladderCupCutoffAt;
   const canCreate = name.trim().length > 0 && (teamNames.length === 0 || teamNames.length >= 2) && teamNameDupes.length === 0 && teamNameMultiWord.length === 0 && survivorValid && groupsValid && ladderCupValid && (isLadderCup || entryClosesAt) && startsAt && !datesOutOfOrder && roundPeriodValid;
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
@@ -160,12 +160,16 @@ export default function CreateLeague({ onCancel, onCreate, isAdmin, c }) {
       )}
       {!datesOutOfOrder && <div className="mb-1.5" />}
 
-      <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Hours per round (match due-date period)</label>
-      <input type="number" min={1} max={720} value={roundPeriodHours} onChange={(e) => setRoundPeriodHours(e.target.value)} className="w-full sm:w-40 border rounded-lg px-3 py-2.5 font-mono text-sm outline-none mb-1.5" style={inputStyle} />
-      {!roundPeriodValid && (
-        <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Enter a number of days between 1 and 30.</div>
+      {!isLadderCup && (
+        <>
+          <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Hours per round (match due-date period)</label>
+          <input type="number" min={1} max={720} value={roundPeriodHours} onChange={(e) => setRoundPeriodHours(e.target.value)} className="w-full sm:w-40 border rounded-lg px-3 py-2.5 font-mono text-sm outline-none mb-1.5" style={inputStyle} />
+          {!roundPeriodValid && (
+            <div className="font-mono text-xs mb-5" style={{ color: c.red }}>Enter a number of days between 1 and 30.</div>
+          )}
+          {roundPeriodValid && <div className="mb-5" />}
+        </>
       )}
-      {roundPeriodValid && <div className="mb-5" />}
 
       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Format</label>
       <div className="space-y-2 mb-2">
