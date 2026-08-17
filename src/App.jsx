@@ -329,8 +329,7 @@ function isActiveMember(l, session) {
   if (!membership || !membership.team_id) return false;
   const myTeamInL = l.teams.find((t) => t.id === membership.team_id);
   if (!myTeamInL || myTeamInL.eliminated) return false;
-  const leagueComplete = l.fixtures.length > 0 && l.fixtures.every((f) => f.played);
-  return !leagueComplete;
+  return !isLeagueCompleted(l);
 }
 
 // Recomputes a knockout bracket's most recent round to figure out whether
