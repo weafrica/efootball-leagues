@@ -10588,9 +10588,9 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
   // Finished leagues move here instead of lingering in the sections above —
   // a completed round robin/knockout/cash league or a finalized Ladder Cup
   // has nothing left for anyone to act on, so it no longer belongs among
-  // the leagues someone might still join or play in.
-  const completedFunCashLeagues = leagues.filter((l) => l.format !== "ladder_cup" && isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
-  const completedLadderCupLeagues = leagues.filter((l) => l.format === "ladder_cup" && l.league_type !== "cash" && isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+  // the leagues someone might still join or play in. One combined section
+  // covers every format, same as the plain "Leagues" grid does.
+  const completedLeagues = leagues.filter((l) => isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
 
   // Leagues that need the viewer's attention (something to review, or their
   // own payment needs sorting out) float to the top of each section; the
@@ -10648,15 +10648,10 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
           entryClosed={entryClosed} canManageLeague={canManageLeague} c={c} />
       )}
 
-      {completedFunCashLeagues.length > 0 && (
-        <LeagueSection title="Completed Leagues" icon={Trophy} leagues={sortLeagues(completedFunCashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+      {completedLeagues.length > 0 && (
+        <LeagueSection title="Completed Leagues" icon={Trophy} leagues={sortLeagues(completedLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
-      )}
-
-      {completedLadderCupLeagues.length > 0 && (
-        <LadderCupSection leagues={sortLeagues(completedLadderCupLeagues)} isMemberOf={isMemberOf} onOpen={onOpen} onJoin={onJoin}
-          entryClosed={entryClosed} canManageLeague={canManageLeague} title="Completed Survival Ladder Cups" muted c={c} />
       )}
     </>
   );
