@@ -1,15 +1,31 @@
-// supabase/functions/create-payment-link/index.ts
+// supabase/functions/ikhokha-webhook/index.ts
 //
-// Creates an iKhokha payment link (Buy Button equivalent) and records a
-// "pending" transaction row, so the webhook can later find it by
-// externalTransactionID and credit the balance.
+// Receives payment status callbacks from iKhokha for league entry fees
+// paid by card, and auto-approves the matching `members` row — no
+// screenshot proof, no admin review, for card payments specifically.
 //
-// Call this from your frontend when the user clicks "Buy" / "Top up".
+// The externalTransactionID in the payload IS the members.id that
+// create-entry-payment set when the link was created.
+//
+// Confirmed request shape (iKhokha's official "iK Pay API Integration
+// Guide"):
+//
+//   POST <callbackUrl>
+//   Headers:
+//     ik-appid: <Application Key ID>
+//     ik-sign:  hash_hmac("sha256", urlPath + requestBody, AppSecret)
+//   Body:
+//   {
+//     "paylinkID": "...",
+//     "status": "SUCCESS" | "FAILURE",
+//     "externalTransactionID": "<members.id>",
+//     "responseCode": "00"
+//   }
 //
 // Deploy with:
-//   supabase functions deploy create-payment-link
+//   supabase functions deploy ikhokha-webhook
 //
-// Required secrets (same as ikhokha-webhook):
+// Required secrets (set with `supabase secrets set ...`):
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
 //   IKHOKHA_APP_ID
@@ -23,13 +39,11 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
-const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID")!;
-const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET")!;
+const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID");
+const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET");
 
-const API_ENDPOINT = "https://api.ikhokha.com/public-api/v1/api/payment";
-
-// Update these to your real site URLs.
-const SITE_URL = "https://weafrica.co.za";
+// Must match CALLBACK_URL in create-entry-payment exactly — it's part of
+// what gets signed.
 const CALLBACK_URL = "https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/ikhokha-webhook";
 
 function jsStringEscape(str: string): string {
@@ -60,94 +74,85 @@ serve(async (req) => {
     return new Response("method not allowed", { status: 405 });
   }
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
-    return new Response("missing auth", { status: 401 });
+  if (!IKHOKHA_SIGN_SECRET) {
+    console.error("IKHOKHA_SIGN_SECRET is not set");
+    return new Response("server misconfigured", { status: 500 });
   }
 
-  // Identify the calling user from their Supabase JWT.
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  const ikAppId = req.headers.get("ik-appid");
+  const ikSign = req.headers.get("ik-sign");
 
-  if (userError || !user) {
+  if (IKHOKHA_APP_ID && ikAppId !== IKHOKHA_APP_ID) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  const { amount, description } = await req.json(); // amount in Rand, e.g. 100.00
-
-  if (!amount || amount <= 0) {
-    return new Response("invalid amount", { status: 400 });
-  }
-
-  const amountInCents = Math.round(amount * 100);
-  const externalTransactionID = crypto.randomUUID();
-
-  // Record the pending transaction BEFORE calling iKhokha, so the
-  // webhook always has something to match against.
-  const { error: insertError } = await supabase.from("transactions").insert({
-    user_id: user.id,
-    reference: externalTransactionID,
-    amount: amount,
-    status: "pending",
-  });
-
-  if (insertError) {
-    return new Response("failed to record transaction", { status: 500 });
-  }
-
-  const requestBody = {
-    entityID: IKHOKHA_APP_ID,
-    externalEntityID: user.id,
-    amount: amountInCents,
-    currency: "ZAR",
-    requesterUrl: SITE_URL,
-    mode: "live", // use "test" while testing, per iKhokha's docs
-    description: description ?? "Payment",
-    externalTransactionID,
-    urls: {
-      callbackUrl: CALLBACK_URL,
-      successPageUrl: `${SITE_URL}/payment/success`,
-      failurePageUrl: `${SITE_URL}/payment/failure`,
-      cancelUrl: `${SITE_URL}/payment/cancel`,
-    },
+  let payload: {
+    paylinkID?: string;
+    status?: string;
+    externalTransactionID?: string;
+    responseCode?: string;
   };
-
-  const requestBodyStr = JSON.stringify(requestBody);
-  const payloadToSign = createPayloadToSign(API_ENDPOINT, requestBodyStr);
-  const signature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
-
-  const ikResponse = await fetch(API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "IK-APPID": IKHOKHA_APP_ID,
-      "IK-SIGN": signature,
-    },
-    body: requestBodyStr,
-  });
-
-  const ikData = await ikResponse.json();
-
-  if (ikData.responseCode !== "00") {
-    await supabase
-      .from("transactions")
-      .update({ status: "failed" })
-      .eq("reference", externalTransactionID);
-
-    return new Response(JSON.stringify({ error: ikData.message ?? "payment link creation failed" }), {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
-    });
+  try {
+    payload = await req.json();
+  } catch {
+    return new Response("invalid json", { status: 400 });
   }
 
-  return new Response(
-    JSON.stringify({
-      paylinkUrl: ikData.paylinkUrl,
-      paylinkID: ikData.paylinkID,
-      externalTransactionID,
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
-  );
+  const requestBodyStr = JSON.stringify(payload);
+  const payloadToSign = createPayloadToSign(CALLBACK_URL, requestBodyStr);
+  const computedSignature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
+
+  if (!ikSign || computedSignature !== ikSign) {
+    console.error(`Signature mismatch. Computed ${computedSignature} but got ${ikSign}`);
+    return new Response("invalid signature", { status: 403 });
+  }
+
+  const { externalTransactionID, status } = payload;
+  if (!externalTransactionID) {
+    return new Response("missing externalTransactionID", { status: 400 });
+  }
+
+  // externalTransactionID is the members.id set by create-entry-payment.
+  const { data: member, error: memberError } = await supabase
+    .from("members")
+    .select("id, payment_status")
+    .eq("id", externalTransactionID)
+    .single();
+
+  if (memberError || !member) {
+    return new Response("member not found", { status: 404 });
+  }
+
+  // Idempotency guard — ignore retries once already resolved.
+  if (member.payment_status !== "pending") {
+    return new Response("already processed", { status: 200 });
+  }
+
+  if (status === "SUCCESS") {
+    const { error } = await supabase
+      .from("members")
+      .update({
+        payment_status: "approved",
+        payment_reviewed_at: new Date().toISOString(),
+        payment_reviewed_by: null, // auto-approved by card payment, not a human admin
+      })
+      .eq("id", externalTransactionID);
+
+    if (error) {
+      return new Response("failed to approve member", { status: 500 });
+    }
+  } else {
+    // FAILURE — let them retry rather than permanently rejecting, since
+    // no proof/admin step is involved for card payments.
+    const { error } = await supabase
+      .from("members")
+      .update({ payment_method: null })
+      .eq("id", externalTransactionID);
+
+    if (error) {
+      return new Response("failed to reset member", { status: 500 });
+    }
+  }
+
+  return new Response("ok", { status: 200 });
 });
