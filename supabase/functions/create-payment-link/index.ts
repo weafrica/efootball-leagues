@@ -1,67 +1,41 @@
-// supabase/functions/ikhokha-webhook/index.ts
+// supabase/functions/create-entry-payment/index.ts
 //
-// Receives payment status callbacks from iKhokha (iK Pay API / Buy Button)
-// and updates the transactions/balances tables accordingly.
+// Creates an iKhokha payment link for a specific league entry (a row
+// already inserted into `members` with payment_status = 'pending').
+// The externalTransactionID sent to iKhokha IS the member row's id,
+// so the webhook can flip that exact row to 'approved' the instant
+// the card payment succeeds — no proof upload, no admin review.
 //
-// Confirmed from iKhokha's official "iK Pay API Integration Guide":
-//
-//   POST <your callbackUrl>
-//   Headers:
-//     ik-appid: <your Application Key ID>
-//     ik-sign:  hash_hmac("sha256", urlPath + requestBody, AppSecret)
-//     Content-Type: application/json
-//   Body:
-//   {
-//     "paylinkID": "2zh1zj6y8xpb0g3",
-//     "status": "SUCCESS" | "FAILURE",
-//     "externalTransactionID": "IKH_REF_CODE_9911",
-//     "responseCode": "00"
-//   }
-//
-// Signature notes (from iKhokha's own Node.js sample):
-//   - urlPath is the PATH portion only of the callbackUrl you supplied
-//     when creating the payment link (e.g. "/functions/v1/ikhokha-webhook"),
-//     not the full URL.
-//   - requestBody is JSON.stringify(parsedBody) — the received JSON body,
-//     re-stringified — with backslashes, double quotes, and single quotes
-//     escaped with a leading backslash, and any null byte replaced with
-//     the two characters "\0".
-//   - The final signature is the hex-encoded HMAC-SHA256 digest.
-//
-// !! Update CALLBACK_URL below to match EXACTLY the callbackUrl you pass
-// !! when creating payment links — the path must match or verification
-// !! will always fail.
+// Call this right after inserting the pending member row, when the
+// user clicks "Pay by card".
 //
 // Deploy with:
-//   supabase functions deploy ikhokha-webhook
+//   supabase functions deploy create-entry-payment
 //
-// Required secrets (set with `supabase secrets set ...`):
+// Required secrets (same as ikhokha-webhook):
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
-//   IKHOKHA_APP_ID       (Application Key ID)
-//   IKHOKHA_SIGN_SECRET  (Application Key Secret)
+//   IKHOKHA_APP_ID
+//   IKHOKHA_SIGN_SECRET
 
 import { serve } from "https://deno.land/std/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")! // service role key bypasses RLS
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
-const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID");
-const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET");
+const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID")!;
+const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET")!;
 
-// The callback URL you configure when creating each payment link.
-// Only the path portion is used in the signature, but keep this as the
-// full URL so it's easy to confirm it matches what you actually send.
+const API_ENDPOINT = "https://api.ikhokha.com/public-api/v1/api/payment";
+
+// Must match your real domain and the webhook's deployed URL exactly —
+// both are part of what gets signed.
+const SITE_URL = "https://weafrica.co.za";
 const CALLBACK_URL = "https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/ikhokha-webhook";
 
-/**
- * Matches iKhokha's jsStringEscape(): escapes backslash, double quote,
- * and single quote with a leading backslash, and replaces any null byte
- * with the two literal characters \0.
- */
 function jsStringEscape(str: string): string {
   return str.replace(/[\\"']/g, "\\$&").replace(/\u0000/g, "\\0");
 }
@@ -90,90 +64,95 @@ serve(async (req) => {
     return new Response("method not allowed", { status: 405 });
   }
 
-  if (!IKHOKHA_SIGN_SECRET) {
-    console.error("IKHOKHA_SIGN_SECRET is not set");
-    return new Response("server misconfigured", { status: 500 });
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return new Response("missing auth", { status: 401 });
   }
 
-  const ikAppId = req.headers.get("ik-appid");
-  const ikSign = req.headers.get("ik-sign");
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
 
-  if (IKHOKHA_APP_ID && ikAppId !== IKHOKHA_APP_ID) {
+  if (userError || !user) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  let payload: {
-    paylinkID?: string;
-    status?: string;
-    externalTransactionID?: string;
-    responseCode?: string;
-  };
-  try {
-    payload = await req.json();
-  } catch {
-    return new Response("invalid json", { status: 400 });
+  const { member_id } = await req.json();
+  if (!member_id) {
+    return new Response("missing member_id", { status: 400 });
   }
 
-  // Re-stringify exactly as iKhokha's own sample does before signing.
-  const requestBodyStr = JSON.stringify(payload);
-  const payloadToSign = createPayloadToSign(CALLBACK_URL, requestBodyStr);
-  const computedSignature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
-
-  if (!ikSign || computedSignature !== ikSign) {
-    console.error(`Signature mismatch. Computed ${computedSignature} but got ${ikSign}`);
-    return new Response("invalid signature", { status: 403 });
-  }
-
-  const { externalTransactionID, status } = payload;
-
-  if (!externalTransactionID) {
-    return new Response("missing externalTransactionID", { status: 400 });
-  }
-
-  // --- Payment failed or was cancelled ---
-  if (status !== "SUCCESS") {
-    await supabase
-      .from("transactions")
-      .update({ status: "failed" })
-      .eq("reference", externalTransactionID);
-
-    return new Response("ok", { status: 200 });
-  }
-
-  // --- Look up the pending transaction ---
-  const { data: txn, error: txnError } = await supabase
-    .from("transactions")
-    .select("user_id, amount, status")
-    .eq("reference", externalTransactionID)
+  // Fetch the pending member row and confirm it belongs to this user.
+  const { data: member, error: memberError } = await supabase
+    .from("members")
+    .select("id, user_id, league_id, entry_fee, payment_status, leagues:league_id(name)")
+    .eq("id", member_id)
     .single();
 
-  if (txnError || !txn) {
-    return new Response("transaction not found", { status: 404 });
+  if (memberError || !member) {
+    return new Response("member not found", { status: 404 });
+  }
+  if (member.user_id !== user.id) {
+    return new Response("forbidden", { status: 403 });
+  }
+  if (member.payment_status !== "pending") {
+    return new Response("entry is not pending payment", { status: 409 });
   }
 
-  // Idempotency guard — if iKhokha retries delivery, don't credit twice.
-  if (txn.status === "paid") {
-    return new Response("already processed", { status: 200 });
+  const amountInCents = Math.round((member.entry_fee || 0) * 100);
+  if (amountInCents <= 0) {
+    return new Response("invalid entry fee", { status: 400 });
   }
 
-  // --- Mark as paid and credit the balance ---
-  const { error: updateError } = await supabase
-    .from("transactions")
-    .update({ status: "paid" })
-    .eq("reference", externalTransactionID);
+  const leagueName = member.leagues?.name ?? "League entry";
 
-  if (updateError) {
-    return new Response("failed to update transaction", { status: 500 });
-  }
+  const requestBody = {
+    entityID: IKHOKHA_APP_ID,
+    externalEntityID: member.league_id,
+    amount: amountInCents,
+    currency: "ZAR",
+    requesterUrl: SITE_URL,
+    mode: "live", // switch to "test" while testing against iKhokha's sandbox, if available
+    description: `Entry fee — ${leagueName}`,
+    externalTransactionID: member.id,
+    urls: {
+      callbackUrl: CALLBACK_URL,
+      successPageUrl: `${SITE_URL}/?paid=success`,
+      failurePageUrl: `${SITE_URL}/?paid=failure`,
+      cancelUrl: `${SITE_URL}/?paid=cancel`,
+    },
+  };
 
-  const { error: rpcError } = await supabase.rpc("increment_balance", {
-    p_user_id: txn.user_id,
-    p_amount: txn.amount,
+  const requestBodyStr = JSON.stringify(requestBody);
+  const payloadToSign = createPayloadToSign(API_ENDPOINT, requestBodyStr);
+  const signature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
+
+  const ikResponse = await fetch(API_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "IK-APPID": IKHOKHA_APP_ID,
+      "IK-SIGN": signature,
+    },
+    body: requestBodyStr,
   });
 
-  if (rpcError) {
-    return new Response("failed to update balance", { status: 500 });
+  const ikData = await ikResponse.json();
+
+  if (ikData.responseCode !== "00") {
+    return new Response(JSON.stringify({ error: ikData.message ?? "payment link creation failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  return new Response("ok", { status: 200 });
+  // Mark this row as a card-payment attempt so the UI/admin view can tell
+  // it apart from the manual proof-upload flow.
+  await supabase.from("members").update({ payment_method: "card" }).eq("id", member.id);
+
+  return new Response(JSON.stringify({ paylinkUrl: ikData.paylinkUrl }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 });
