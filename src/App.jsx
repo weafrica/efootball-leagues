@@ -10652,17 +10652,11 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
   // there and again in the plain "Leagues" list below it. Cash leagues are
   // never weekend leagues (the spotlight only ever draws from fun leagues),
   // so this only needs to apply to the fun-leagues filter.
-  // Survival Ladder Cup gets its own marquee section below Cash leagues
-  // instead of sitting in the plain "Leagues" grid — it's the one format
-  // built entirely around elimination/one-life drama, so it earns a louder
-  // home of its own (see LadderCupSection) rather than blending in as just
-  // another card among round-robin/knockout leagues.
-  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && l.format !== "ladder_cup" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
+  // Survival Ladder Cup lives in the plain "Leagues" grid like every other
+  // format — LeagueCard already has full ladder_cup-aware rendering (see
+  // isLadderCup branches below), so no separate section is needed.
+  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
   const cashLeagues = leagues.filter((l) => l.league_type === "cash" && !isLeagueCompleted(l));
-  // Excludes cash-type Ladder Cup leagues (if any) — those stay in the Cash
-  // leagues section above rather than also appearing here, same
-  // one-true-home rule the Weekend League spotlight follows.
-  const ladderCupLeagues = leagues.filter((l) => l.format === "ladder_cup" && l.league_type !== "cash" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
 
   // Finished leagues move here instead of lingering in the sections above —
   // a completed round robin/knockout/cash league or a finalized Ladder Cup
@@ -10722,142 +10716,12 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, myPayme
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
 
-      {ladderCupLeagues.length > 0 && (
-        <LadderCupSection leagues={sortLeagues(ladderCupLeagues)} isMemberOf={isMemberOf} onOpen={onOpen} onJoin={onJoin}
-          entryClosed={entryClosed} canManageLeague={canManageLeague} c={c} />
-      )}
-
       {completedLeagues.length > 0 && (
         <LeagueSection title="Completed Leagues" icon={Trophy} leagues={sortLeagues(completedLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
           entryClosed={entryClosed} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
     </>
-  );
-}
-
-// Survival Ladder Cup's own section — deliberately louder than the plain
-// LeagueSection grid it used to sit in. One elimination life each, ranked by
-// points to a hard Sunday cutoff: the format is built around danger and
-// survival, so the section leans into that instead of blending in with
-// round-robin/knockout leagues.
-function LadderCupSection({ leagues, isMemberOf, onOpen, onJoin, entryClosed, canManageLeague, title = "Survival Ladder Cup", muted = false, c }) {
-  if (leagues.length === 0) return null;
-  const badgeBg = muted ? c.surfaceHover : "linear-gradient(150deg, #FF4D2E, #B8221A)";
-  const badgeShadow = muted ? "none" : "0 0 12px #FF4D2E55";
-  const iconColor = muted ? c.textFaint : "#fff";
-  const titleColor = muted ? c.textDim : "#FF6B4A";
-  const countBg = muted ? c.surfaceHover : "#FF4D2E22";
-  const countColor = muted ? c.textFaint : "#FF6B4A";
-  return (
-    <section className="mt-8">
-      <div className="flex items-center gap-2.5 mb-3">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: badgeBg, boxShadow: badgeShadow }}>
-          <Swords size={15} color={iconColor} />
-        </span>
-        <div className="font-extrabold uppercase italic tracking-tight text-lg leading-none flex items-center gap-2" style={{ color: titleColor }}>
-          {title}
-          <span className="font-mono text-[10px] font-normal not-italic tracking-wider px-1.5 py-0.5 rounded" style={{ background: countBg, color: countColor }}>{leagues.length}</span>
-        </div>
-      </div>
-      <div className="no-scrollbar flex items-stretch gap-3.5 overflow-x-auto -mx-4 px-4 pb-1">
-        {leagues.map((l) => (
-          <LadderCupCard key={l.id} league={l} joined={isMemberOf(l)} closed={entryClosed(l)}
-            canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} c={c} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-// One elimination life each, ranked by points, until the Sunday cutoff —
-// styled to feel like a battle pass rather than a league table: a jagged
-// octagon silhouette (no soft rounded rect), a black-to-ember gradient,
-// bold italic condensed type, and a bigger footprint than the regular
-// LeagueCard, since this is the platform's marquee elimination format and
-// should read as a bigger deal at a glance.
-function LadderCupCard({ league: l, joined, closed, canManageLeague, onOpen, onJoin, c }) {
-  const entries = l.ladder_cup_entries || [];
-  const activeCount = entries.filter((e) => e.status === "active" || e.status === "pending_second_life").length;
-  const eliminatedCount = entries.filter((e) => e.status === "eliminated").length;
-  const matches = l.ladder_cup_matches || [];
-  const playedCount = matches.filter((m) => m.finalized_at).length;
-  const isFinalized = !!l.ladder_cup_finalized_at;
-  const championEntry = entries.find((e) => e.status === "champion");
-  const championTeam = championEntry ? (l.teams || []).find((t) => t.id === championEntry.team_id) : null;
-  const cutoffPassed = hasLadderCupCutoffPassed(l.ladder_cup_cutoff_at);
-  const cutoffDate = l.ladder_cup_cutoff_at ? new Date(l.ladder_cup_cutoff_at) : null;
-  const initial = (l.name || "?").trim().charAt(0).toUpperCase();
-
-  return (
-    <div onClick={() => onOpen(l.id)} className="group relative shrink-0 w-[196px] cursor-pointer transition-transform active:scale-[0.97]"
-      style={{ filter: "drop-shadow(0 4px 14px rgba(255,77,46,0.25))" }}>
-      <div className="relative overflow-hidden"
-        style={{
-          clipPath: "polygon(5% 0, 95% 0, 100% 14%, 100% 86%, 95% 100%, 5% 100%, 0 86%, 0 14%)",
-          background: "linear-gradient(165deg, #241211, #120808 60%)",
-          border: "1px solid #FF4D2E55",
-        }}>
-        <div className="relative h-[96px] flex items-center justify-center overflow-hidden"
-          style={{ background: l.photo_url ? undefined : "linear-gradient(150deg, #FF4D2E3D, #FF4D2E0D)" }}>
-          {l.photo_url ? (
-            <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover opacity-90" />
-          ) : (
-            <span className="font-extrabold italic text-4xl" style={{ color: "#FF6B4A", opacity: 0.9 }}>{initial}</span>
-          )}
-          <div className="absolute inset-x-0 top-0 h-full" style={{ background: "linear-gradient(180deg, transparent 40%, #120808DD)" }} />
-          <span className="absolute top-2 left-2 flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded" style={{ background: "#FF4D2E", color: "#fff" }}>
-            <Swords size={9} /> Elimination
-          </span>
-          {isFinalized ? (
-            <span className="absolute bottom-1.5 left-2 flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-widest" style={{ color: "#FFD700" }}>
-              <Trophy size={10} /> {championTeam?.name || "Champion crowned"}
-            </span>
-          ) : (
-            <span className="absolute bottom-1.5 left-2 flex items-center gap-1.5 font-mono text-[9px] font-bold uppercase tracking-widest" style={{ color: "#FF6B4A" }}>
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: "#FF6B4A" }} />
-              </span>
-              Live
-            </span>
-          )}
-        </div>
-
-        <div className="p-3">
-          <div className="font-extrabold italic text-base leading-tight truncate" style={{ color: "#fff" }}>{l.name}</div>
-          <div className="font-mono text-[9px] font-bold uppercase tracking-[0.15em] truncate mt-0.5" style={{ color: "#FF6B4A" }}>
-            One life · Ranked by points
-          </div>
-
-          <div className="flex items-center gap-2.5 mt-2.5 font-mono text-[10px] font-bold" style={{ color: "#EFC9C0" }}>
-            <span className="flex items-center gap-1"><Flame size={10} style={{ color: "#FF6B4A" }} /> {activeCount} alive</span>
-            {eliminatedCount > 0 && <span className="flex items-center gap-1 opacity-70">{eliminatedCount} out</span>}
-          </div>
-          {matches.length > 0 && (
-            <div className="font-mono text-[9px] mt-1" style={{ color: "#B08B84" }}>{playedCount} match{playedCount === 1 ? "" : "es"} played</div>
-          )}
-
-          {!isFinalized && cutoffDate && (
-            <div className="font-mono text-[9px] font-bold uppercase tracking-wider mt-1.5" style={{ color: cutoffPassed ? "#FF6B4A" : "#EFC9C0" }}>
-              {cutoffPassed ? "Cutoff reached" : `Cutoff ${fmtDate(l.ladder_cup_cutoff_at)}`}
-            </div>
-          )}
-
-          <div className="mt-2.5">
-            {joined ? (
-              <span className="block text-center font-mono text-[9px] font-bold uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: "#FF4D2E22", color: "#FF6B4A" }}>
-                In the fight
-              </span>
-            ) : closed ? (
-              <span className="block text-center font-mono text-[9px] font-bold uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: "#ffffff11", color: "#B08B84" }}>Closed</span>
-            ) : (
-              <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-extrabold uppercase tracking-wide px-2 py-1.5 rounded"
-                style={{ background: "linear-gradient(120deg, #FF6B4A, #FF4D2E)", color: "#fff" }}>Enter the cup</button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
