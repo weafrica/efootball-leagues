@@ -335,15 +335,40 @@ function isActiveMember(l, session) {
 
 // General "is this league over" check across every format — used to move a
 // league out of the current-leagues sections and into Completed Leagues.
-// Round robin/knockout/groups+knockout/survivor are all driven by the same
-// fixtures list, so "every fixture played" (with at least one fixture)
-// covers them uniformly. Survival Ladder Cup has no fixtures list in the
-// same sense — its own finalize-on-read effect sets ladder_cup_finalized_at
-// once the weekly cutoff passes and the champion (if any) is crowned, so
-// that flag is the equivalent signal for that format.
+// Deliberately mirrors the same signals LeagueDetail.jsx already uses to
+// decide when to show a champion banner for each format, rather than a
+// single generic "every fixture played" check — that check alone misses
+// knockout/groups+knockout leagues, since a bracket can finish (one club
+// standing) while irrelevant fixtures elsewhere in the tree — especially
+// group-stage fixtures that stopped mattering once a club advanced or was
+// eliminated — never get marked played themselves. isExpired auto-forfeit
+// fixtures also count as resolved here, same as the champion banners do.
 function isLeagueCompleted(l) {
   if (l.format === "ladder_cup") return !!l.ladder_cup_finalized_at;
-  return (l.fixtures || []).length > 0 && l.fixtures.every((f) => f.played);
+
+  const teams = l.teams || [];
+  const fixtures = l.fixtures || [];
+  const isKnockout = l.format === "knockout";
+  const isGroupsKnockout = l.format === "groups_knockout";
+  const isSurvivor = l.format === "survivor";
+  const inKnockoutBracket = isKnockout || (isGroupsKnockout && l.final_stage_started);
+  const activeTeamsCount = teams.filter((t) => !t.eliminated).length;
+
+  if (inKnockoutBracket) {
+    // A champion is decided the moment only one club is left standing —
+    // nothing else in the bracket can still change that outcome.
+    return teams.length > 0 && activeTeamsCount === 1;
+  }
+
+  if (isSurvivor) {
+    if (!l.final_stage_started) return false;
+    const stageFixtures = fixtures.filter((f) => f.stage === l.current_stage);
+    return stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
+  }
+
+  // Single/double round robin — and groups_knockout still mid group-stage,
+  // which by definition isn't complete yet either way.
+  return fixtures.length > 0 && fixtures.every((f) => f.played || isExpired(f));
 }
 
 // Builds a map of format-kind -> the signed-in user's currently active fun
