@@ -1773,6 +1773,70 @@ export function computeGlobalLeaderboard(leagues, bounds) {
   return [...byKey.values()].map((r) => ({ ...r, gd: r.gf - r.ga, winRate: r.p ? r.w / r.p : 0, pts: r.w * 3 + r.d }));
 }
 
+// Same "follow the person, not the club" identity computeGlobalLeaderboard
+// uses (grouped by user_id so a rivalry survives a club rename or the same
+// two people meeting again in a completely different league later). A club
+// nobody has claimed yet falls back to its own team id, same as the
+// Leaderboard's unclaimed-club fallback — that just means an unclaimed
+// opponent's history is scoped to whatever they've played under that exact
+// team row, since there's no user to follow them by.
+export function playerKeyForTeam(league, teamId) {
+  if (!teamId) return null;
+  const owner = (league?.members || []).find((m) => m.team_id === teamId);
+  return owner ? `u:${owner.user_id}` : `t:${teamId}`;
+}
+
+// The head-to-head record between two players, across every league they've
+// ever met in — not just the one currently open. Mirrors
+// computeGlobalLeaderboard's per-league owner lookup so this stays correct
+// even for a club whose current owner has changed since an old fixture was
+// played. Returns null for a same-person matchup (keyA === keyB, e.g. two
+// unclaimed placeholder clubs that happen to share a fallback key) since
+// there's no rivalry to show. Matches come back most-recent-first so the
+// streak calculation below and the match-history list can both just walk
+// forward from index 0.
+export function computeHeadToHead(leagues, keyA, keyB) {
+  if (!keyA || !keyB || keyA === keyB) return null;
+  const matches = [];
+  (leagues || []).forEach((l) => {
+    const ownerByTeamId = new Map();
+    (l.members || []).forEach((m) => { if (m.team_id) ownerByTeamId.set(m.team_id, m.user_id); });
+    const keyForTeam = (teamId) => (ownerByTeamId.has(teamId) ? `u:${ownerByTeamId.get(teamId)}` : `t:${teamId}`);
+    (l.fixtures || []).forEach((f) => {
+      if (!f.played || f.away_team_id === null) return;
+      const hKey = keyForTeam(f.home_team_id);
+      const aKey = keyForTeam(f.away_team_id);
+      const aIsHome = hKey === keyA && aKey === keyB;
+      const aIsAway = hKey === keyB && aKey === keyA;
+      if (!aIsHome && !aIsAway) return;
+      matches.push({
+        leagueId: l.id, leagueName: l.name, round: f.round, date: fixturePlayedDate(f),
+        gfA: aIsHome ? f.home_score : f.away_score,
+        gfB: aIsHome ? f.away_score : f.home_score,
+      });
+    });
+  });
+  matches.sort((x, y) => new Date(y.date) - new Date(x.date));
+
+  let w = 0, d = 0, l = 0, gf = 0, ga = 0;
+  matches.forEach((m) => {
+    gf += m.gfA; ga += m.gfB;
+    if (m.gfA > m.gfB) w++; else if (m.gfA < m.gfB) l++; else d++;
+  });
+
+  // Current run, read backwards from the most recent match — stops at the
+  // first result that breaks the streak (or the end of the history).
+  let streak = 0, streakType = null;
+  for (const m of matches) {
+    const result = m.gfA > m.gfB ? "W" : m.gfA < m.gfB ? "L" : "D";
+    if (streakType === null) { streakType = result; streak = 1; }
+    else if (result === streakType) streak++;
+    else break;
+  }
+
+  return { played: matches.length, w, d, l, gf, ga, streak, streakType, matches };
+}
+
 // Picks out the top scorer and the best defensive record (fewest goals
 // conceded) from a set of leaderboard/standings rows that already expose
 // { name, gf, ga }. Requires at least one goal-scoring row to name a top

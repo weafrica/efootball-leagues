@@ -14,7 +14,7 @@ import {
   RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, ShareRangeModal, StandingsPanel,
   VoiceNotePlayer, VoiceRecorderButton, WEEKEND_RESULT_CONFIRM_WINDOW_MINUTES, WhatsAppCallLink,
   WhatsAppLink, avatarColor, challengeResultConfirmExpired, challengeResultMinutesLeft, commentSpeech,
-  computeStandings, findSubmissionOpponentId,
+  computeHeadToHead, computeStandings, findSubmissionOpponentId, playerKeyForTeam,
   firstMatchdayNote, fmtDate, groupLabel, isExpired, isFinalFixture, isFinalRoundFixtures,
   isFixtureLocked, isResultComment, isWaReminderActive, isWeekendLeague, knockoutBracketWinners, knockoutRoundFixtures,
   ladderCupResultEscalationReason, nextFixtureForTeam, resultConfirmDeadline, resultEscalationReason, splitCommentsByRoot,
@@ -1858,14 +1858,14 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
               onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
           {(inGroupStage || inKnockoutBracket) && joined && myTeam && (!canManage || isWeekendLeague(league)) && (
-            <NextOpponentCard league={league} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
+            <NextOpponentCard league={league} leagues={leagues} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
           {(joined || canManage) && (
             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
               getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} c={c} />
+              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} leagues={leagues} c={c} />
           )}
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {joined && !canSeePhones && (
@@ -2736,7 +2736,105 @@ function TeamContactRow({ team, canManage, onUpdateTeamPhone, c }) {
 // record scores). Just their own club's next unplayed match, plus a
 // WhatsApp icon to line up the game with the opponent — mirrors the "Up
 // next" card on Home but scoped to this one league.
-function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
+// The personal rivalry between whoever's behind two clubs, followed across
+// every league they've ever met in — not scoped to the league currently
+// open (see computeHeadToHead/playerKeyForTeam in App.jsx). Shown as a
+// compact strip that expands into the full match-by-match history, so
+// there's always something extra worth a look right before you play someone
+// again: a streak to defend, a rivalry to settle, or — the first time two
+// people meet — a clean slate worth calling out.
+function HeadToHeadStrip({ leagues, league, teamId, opponentId, myLabel, opponentLabel, c }) {
+  const [open, setOpen] = useState(false);
+  const record = useMemo(() => {
+    const keyA = playerKeyForTeam(league, teamId);
+    const keyB = playerKeyForTeam(league, opponentId);
+    return computeHeadToHead(leagues, keyA, keyB);
+  }, [leagues, league, teamId, opponentId]);
+
+  if (!record) return null;
+
+  if (record.played === 0) {
+    return (
+      <div className="mt-3 pt-3 border-t flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider" style={{ borderColor: c.border, color: c.textFaint }}>
+        <Sparkles size={11} /> First ever clash with {opponentLabel} — no history yet
+      </div>
+    );
+  }
+
+  const gd = record.gf - record.ga;
+  const streakColor = record.streakType === "W" ? c.green : record.streakType === "L" ? c.red : c.textDim;
+  const streakLabel = record.streak >= 2
+    ? `${record.streakType === "W" ? "Won" : record.streakType === "L" ? "Lost" : "Drawn"} last ${record.streak}`
+    : null;
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="mt-3 pt-3 border-t w-full flex items-center justify-between gap-2 text-left" style={{ borderColor: c.border }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.accent }}><Swords size={13} /></span>
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: c.textFaint }}>Head-to-head</div>
+            <div className="font-body text-xs font-semibold truncate" style={{ color: c.text }}>
+              {record.w}W {record.d}D {record.l}L · GD {gd > 0 ? "+" : ""}{gd}
+              {streakLabel && <span style={{ color: streakColor }}> · {streakLabel}</span>}
+            </div>
+          </div>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wide shrink-0" style={{ color: c.accent }}>History →</span>
+      </button>
+      {open && (
+        <HeadToHeadModal record={record} myLabel={myLabel} opponentLabel={opponentLabel} onClose={() => setOpen(false)} c={c} />
+      )}
+    </>
+  );
+}
+
+function HeadToHeadStatBlock({ label, value, color, c }) {
+  return (
+    <div className="rounded-lg py-2.5 text-center" style={{ background: `${color}18` }}>
+      <div className="font-mono text-lg font-bold" style={{ color }}>{value}</div>
+      <div className="font-mono text-[9px] uppercase tracking-wider mt-0.5" style={{ color }}>{label}</div>
+    </div>
+  );
+}
+
+function HeadToHeadModal({ record, myLabel, opponentLabel, onClose, c }) {
+  const gd = record.gf - record.ga;
+  return (
+    <LadderCupWidgetOverlay title={`${myLabel} vs ${opponentLabel}`} onClose={onClose} c={c}>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <HeadToHeadStatBlock label="Won" value={record.w} color={c.green} c={c} />
+        <HeadToHeadStatBlock label="Drawn" value={record.d} color={c.textDim} c={c} />
+        <HeadToHeadStatBlock label="Lost" value={record.l} color={c.red} c={c} />
+      </div>
+      <div className="font-mono text-xs mb-4" style={{ color: c.textFaint }}>
+        {record.gf}-{record.ga} goals · GD {gd > 0 ? "+" : ""}{gd} across {record.played} meeting{record.played === 1 ? "" : "s"}
+      </div>
+      <div className="space-y-1.5">
+        {record.matches.map((m, i) => {
+          const result = m.gfA > m.gfB ? "W" : m.gfA < m.gfB ? "L" : "D";
+          const resultColor = result === "W" ? c.green : result === "L" ? c.red : c.textDim;
+          return (
+            <div key={i} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ background: c.surface }}>
+              <div className="min-w-0">
+                <div className="font-body text-xs font-semibold truncate" style={{ color: c.text }}>{m.leagueName}</div>
+                <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>{fmtDate(m.date)} · Matchday {m.round}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-mono text-sm font-bold" style={{ color: c.text }}>{m.gfA}-{m.gfB}</span>
+                <span className="font-mono text-[9px] font-bold uppercase w-5 h-5 rounded flex items-center justify-center" style={{ background: `${resultColor}22`, color: resultColor }}>
+                  {result}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </LadderCupWidgetOverlay>
+  );
+}
+
+function NextOpponentCard({ league, leagues, myTeam, canSeePhones, c }) {
   if (myTeam.eliminated) {
     return (
       <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
@@ -2797,6 +2895,10 @@ function NextOpponentCard({ league, myTeam, canSeePhones, c }) {
             text={`Hi, it's ${myTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`} c={c} />
         )}
       </div>
+      {opponent && (
+        <HeadToHeadStrip leagues={leagues} league={league} teamId={myTeam.id} opponentId={opponent.id}
+          myLabel={myTeam.name} opponentLabel={opponent.name} c={c} />
+      )}
     </div>
   );
 }
@@ -3008,7 +3110,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
   );
 }
 
-function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, c }) {
+function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, leagues, c }) {
   const [matchday, setMatchday] = useState("");
   const [teamQuery, setTeamQuery] = useState("");
   const [result, setResult] = useState(null);
@@ -3078,6 +3180,9 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
       ) : (
         <div className="font-body text-sm mt-3 rounded-lg px-3 py-2.5" style={{ background: c.surfaceHover }}>
           <div className="font-semibold">{result.opponent.name} <span className="font-mono text-xs font-normal" style={{ color: c.textFaint }}>({result.twoLegged ? "Home & away" : (result.legs[0].home_team_id === result.team.id ? "Home" : "Away")})</span></div>
+
+          <HeadToHeadStrip leagues={leagues} league={league} teamId={result.team.id} opponentId={result.opponent.id}
+            myLabel={result.team.name} opponentLabel={result.opponent.name} c={c} />
 
           {(() => {
             const allPlayed = result.legs.every((f) => f.played);
