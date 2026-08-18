@@ -956,6 +956,7 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, onEditScore, c
       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
         {matches.map((m) => (
           <LadderCupEscalatedResultRow key={m.id} match={m} home={teamsById[m.home_team_id]} away={teamsById[m.away_team_id]}
+            reportingTeam={teamsById[m.result_reported_by_team_id]}
             onApprove={() => onResolve(m, true)} onReject={() => onResolve(m, false)}
             onEditScore={(homeGoals, awayGoals) => onEditScore(m, homeGoals, awayGoals)} c={c} />
         ))}
@@ -971,11 +972,18 @@ function LadderCupResultReviewPanel({ league, matches, onResolve, onEditScore, c
 // editLadderCupMatchResult in App.jsx): extra time/penalties aren't
 // editable here since a still-pending match hasn't been played out that
 // far yet to have anything on record to correct.
-function LadderCupEscalatedResultRow({ match: m, home, away, onApprove, onReject, onEditScore, c }) {
+function LadderCupEscalatedResultRow({ match: m, home, away, reportingTeam, onApprove, onReject, onEditScore, c }) {
   const reason = ladderCupResultEscalationReason(m);
   let scoreLine = `${home?.name || "Home"} ${m.home_goals} – ${m.away_goals} ${away?.name || "Away"}`;
   if (m.decided_by === "extra_time") scoreLine += ` (aet ${m.extra_time_home_goals}-${m.extra_time_away_goals})`;
   if (m.decided_by === "penalties") scoreLine += ` (pens ${m.penalties_home}-${m.penalties_away})`;
+  // Same "ask the reporting club about it" affordance PendingResultsPanel
+  // gives admins for fixture-linked results — here resolved off
+  // result_reported_by_team_id since Ladder Cup matches carry no
+  // submitted_by user id, only the reporting team.
+  const reporterWhatsAppText = reportingTeam
+    ? `Hi ${reportingTeam.name}, your Ladder Cup result — ${home?.name || "Home"} ${m.home_goals} – ${m.away_goals} ${away?.name || "Away"} — is with me for approval now. I'll get to it shortly.`
+    : null;
 
   const [editing, setEditing] = useState(false);
   const [editHome, setEditHome] = useState("");
@@ -1021,7 +1029,13 @@ function LadderCupEscalatedResultRow({ match: m, home, away, onApprove, onReject
         </div>
       ) : (
         <>
-          <div className="font-body text-sm truncate">{scoreLine}</div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="font-body text-sm truncate">{scoreLine}</div>
+            {reportingTeam?.phone && (
+              <WhatsAppLink phone={reportingTeam.phone} text={reporterWhatsAppText} iconOnly
+                title={`Message ${reportingTeam.name} about this result`} c={c} />
+            )}
+          </div>
           <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>
             Reported by {(m.result_reported_by_team_id === m.home_team_id ? home : away)?.name || "a club"} · {timeAgo(m.result_reported_at)}
           </div>
