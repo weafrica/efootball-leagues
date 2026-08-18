@@ -51,9 +51,9 @@ export const LADDER_CUP_RULES = {
   RATING_K_FACTOR: 32,         // standard Elo K-factor for one result
   RATING_BAND_START: 100,      // opponent matching starts at ±100 rating
   RATING_BAND_STEP: 50,        // widens ±150, ±200, ±250... no ceiling
-  SHOWN_OPPONENTS: 5,          // always show up to 5 live opponents
+  SHOWN_OPPONENTS: 10,         // always show up to 10 live opponents to contact
   WALKOVER_WAIT_HOURS: 24,     // must message + wait this long before claiming
-  MAX_CONCURRENT_WALKOVER_CLAIMS: 5, // one per shown opponent slot
+  MAX_CONCURRENT_WALKOVER_CLAIMS: 10, // one per shown opponent slot
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,

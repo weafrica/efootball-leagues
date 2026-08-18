@@ -5347,9 +5347,9 @@ export default function App() {
   // just computes claimable_at, 24h out. The DB's partial unique index on
   // (claimant_team_id, target_team_id) for status in (messaged, pending_review)
   // is what actually blocks a second open claim against the same target;
-  // 23505 here means one's already in flight. The "up to 5 concurrent claims"
+  // 23505 here means one's already in flight. The "up to 10 concurrent claims"
   // cap from the ruleset falls out for free since this is only ever called
-  // from a shown-opponent row and getOpponentPool shows at most 5.
+  // from a shown-opponent row and getOpponentPool shows at most 10.
   const messageLadderCupWalkoverOpponent = async (league, myTeamId, opponentTeamId) => {
     if (!myTeamId || !opponentTeamId) return;
     if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new walkover claims."); return; }
