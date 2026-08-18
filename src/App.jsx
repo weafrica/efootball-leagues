@@ -55,7 +55,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, hasMissedJoinContactWindow, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -2198,12 +2198,12 @@ export function WhatsAppLink({ phone, text, label, iconOnly, onClick, title, c }
 // so the other person immediately knows to expect a call. From there the
 // person taps WhatsApp's own call icon. Renders nothing without a usable
 // number, same guard pattern as WhatsAppLink so the two can sit side-by-side.
-export function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
+export function WhatsAppCallLink({ phone, text, label, iconOnly, onClick, c }) {
   const href = waLink(phone, text);
   if (!href) return null;
   if (iconOnly) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp"
+      <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp" onClick={onClick}
         className="inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0"
         style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
         <Phone size={13} />
@@ -2211,7 +2211,7 @@ export function WhatsAppCallLink({ phone, text, label, iconOnly, c }) {
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp"
+    <a href={href} target="_blank" rel="noopener noreferrer" title="Call to arrange the match on WhatsApp" onClick={onClick}
       className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
       style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
       <Phone size={11} /> {label || "Call"}
@@ -4667,6 +4667,63 @@ export default function App() {
     return () => { cancelled = true; };
   }, [leagues, session, isAdmin, refreshLeagues, showToast]);
 
+  // Same lazy-sweep shape as the no-show effect just above, for a
+  // different rule: a Ladder Cup club that's gone 24h since joining
+  // without ever tapping a WhatsApp icon to make contact (see
+  // hasMissedJoinContactWindow / markLadderCupFirstContact) is removed
+  // from the league entirely — not just marked eliminated. There's no run
+  // on the board to preserve (they never played), so this deletes the
+  // teams row outright, same call removeTeam already makes for an
+  // admin-initiated removal — and deliberately does NOT backfill or
+  // replace them with anyone else; the ladder just runs one club short.
+  useEffect(() => {
+    if (!leagues || !session) return;
+    const now = new Date();
+    const targets = leagues
+      .map((l) => ({
+        league: l,
+        ids: (canManageLeague(l) && l.format === "ladder_cup")
+          ? (l.ladder_cup_entries || []).filter((row) => hasMissedJoinContactWindow(row, now)).map((row) => row.team_id)
+          : [],
+      }))
+      .filter(({ ids }) => ids.length > 0);
+    if (targets.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const allIds = targets.flatMap(({ ids }) => ids);
+      await supabase.from("members").delete().in("team_id", allIds);
+      // Same "count what actually came back" pattern as the no-show sweep —
+      // an RLS block on some rows shouldn't silently look like success.
+      const { data: deletedRows, error } = await supabase.from("teams").delete().in("id", allIds).select("id");
+      if (cancelled) return;
+      if (error) { showToast(`Couldn't auto-remove inactive clubs: ${error.message}`); return; }
+      const deletedIds = new Set((deletedRows || []).map((r) => r.id));
+      if (deletedIds.size === 0) return;
+
+      const announcedLeagueNames = [];
+      for (const { league, ids } of targets) {
+        const removedHere = ids.filter((id) => deletedIds.has(id));
+        if (removedHere.length === 0) continue;
+        announcedLeagueNames.push(league.name);
+        const names = removedHere.map((id) => league.teams.find((t) => t.id === id)?.name || "A club");
+        const body = names.length === 1
+          ? `${names[0]} was automatically removed from the Ladder Cup — no contact with an opponent within 24h of joining. Not replaced.`
+          : `${names.join(", ")} were automatically removed from the Ladder Cup — no contact with an opponent within 24h of joining. Not replaced.`;
+        await postComment(league, body, null, null, null, true);
+      }
+
+      await refreshLeagues(targets.map(({ league }) => league.id));
+      const removedCount = deletedIds.size;
+      const where = announcedLeagueNames.length === 1 ? ` in "${announcedLeagueNames[0]}"` : ` across ${announcedLeagueNames.length} leagues`;
+      if (removedCount < allIds.length) {
+        showToast(`${removedCount} of ${allIds.length} inactive clubs${where} were auto-removed — the rest hit a permissions issue and will retry next reload.`);
+        return;
+      }
+      showToast(`${removedCount} club${removedCount === 1 ? "" : "s"} auto-removed${where} — no contact made within 24h of joining.`);
+    })();
+    return () => { cancelled = true; };
+  }, [leagues, session, isAdmin, refreshLeagues, showToast]);
+
 
   const myTeam = (league) => {
     const m = myMembership(league);
@@ -4909,6 +4966,20 @@ export default function App() {
     if (error) {
       showToast(`Club registered, but its ladder entry failed to set up: ${error.message}. Contact the league admin.`);
     }
+  };
+
+  // Fires the moment a club taps ANY WhatsApp icon on its Ladder Cup
+  // opponent board (the "Challenge" call icon or the walkover one) — that's
+  // the "made contact" signal the 24h join-contact window is watching for
+  // (see hasMissedJoinContactWindow / the join-contact sweep effect below).
+  // Best-effort and silent: this rides along with a wa.me link that's
+  // already opening in a new tab, so a failed write here shouldn't show an
+  // error over what the person is actually doing. No refreshLeague either —
+  // nothing about the visible board changes from this alone; the sweep
+  // effect picks up the new timestamp next time leagues reload.
+  const markLadderCupFirstContact = async (league, teamId) => {
+    if (!teamId || league.format !== "ladder_cup") return;
+    await supabase.rpc("mark_ladder_cup_first_contact", { p_league_id: league.id, p_team_id: teamId });
   };
 
   // Step 9: opponent slate + challenge flow. Tapping an opponent on the
@@ -7013,6 +7084,7 @@ export default function App() {
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onStartLadderCup={startLadderCupLeague} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
+                onMarkLadderCupFirstContact={() => markLadderCupFirstContact(activeLeague, myTeam(activeLeague)?.id)}
                 onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
                 onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}

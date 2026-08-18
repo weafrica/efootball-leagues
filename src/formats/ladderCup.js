@@ -54,6 +54,14 @@ export const LADDER_CUP_RULES = {
   SHOWN_OPPONENTS: 10,         // always show up to 10 live opponents to contact
   WALKOVER_WAIT_HOURS: 24,     // must message + wait this long before claiming
   MAX_CONCURRENT_WALKOVER_CLAIMS: 10, // one per shown opponent slot
+  // A freshly-joined club has this long to make first contact with SOME
+  // opponent (tapping the WhatsApp icon on its opponent board) before it's
+  // auto-removed from the league entirely — see hasMissedJoinContactWindow.
+  // Not the same clock as WALKOVER_WAIT_HOURS: that one waits AFTER a
+  // message before a walkover can be claimed against an unresponsive
+  // opponent; this one is about a club that never sent a first message at
+  // all.
+  JOIN_CONTACT_WINDOW_HOURS: 24,
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
@@ -104,6 +112,39 @@ export function createLadderCupEntry(clubId, clubName) {
     rebirth_count: 0,
     past_lives: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Join-contact window (24h to make first contact, or auto-removed)
+// ---------------------------------------------------------------------------
+//
+// Operates directly on the raw ladder_cup_entries DB row shape (status,
+// created_at, first_contact_at) rather than the pure engine entry above —
+// created_at/first_contact_at have no equivalent in createLadderCupEntry's
+// in-memory shape and only ever need to be read here, the same way
+// App.jsx's findNoShowTeamIds reads raw `teams` rows directly instead of
+// going through an adapter.
+
+/**
+ * True once a club has gone JOIN_CONTACT_WINDOW_HOURS since its entry was
+ * created without ever making contact (first_contact_at still null).
+ * Only "active" entries are checked — a club that's already
+ * pending_second_life, eliminated, or champion has moved well past the
+ * point this window cares about. A club that DID make contact is exempt
+ * forever after, even if that contact never turned into a played match —
+ * this only measures whether they showed any sign of life at the start,
+ * not whether they followed through.
+ */
+export function hasMissedJoinContactWindow(entry, now = new Date()) {
+  if (entry.status !== "active" || entry.first_contact_at || !entry.created_at) return false;
+  const deadline = new Date(entry.created_at).getTime() + LADDER_CUP_RULES.JOIN_CONTACT_WINDOW_HOURS * 60 * 60 * 1000;
+  return deadline <= now.getTime();
+}
+
+/** The deadline itself (created_at + the window), for display — null once contact's been made or the entry's past the point this applies. */
+export function joinContactDeadline(entry) {
+  if (entry.status !== "active" || entry.first_contact_at || !entry.created_at) return null;
+  return new Date(new Date(entry.created_at).getTime() + LADDER_CUP_RULES.JOIN_CONTACT_WINDOW_HOURS * 60 * 60 * 1000);
 }
 
 // ---------------------------------------------------------------------------
