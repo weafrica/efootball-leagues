@@ -6,6 +6,7 @@ import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import NetsBadge from "./NetsBadge.jsx";
+import { creditNets, formatNets } from "./nets.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -63,7 +64,7 @@ import {
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
-  ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles,
+  ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles, Coins,
   Zap, Repeat, Rocket, CreditCard,
 } from "lucide-react";
 
@@ -7114,7 +7115,7 @@ export default function App() {
       <main className="max-w-3xl mx-auto px-4 pb-24">
         <ErrorBoundary resetKey={view} onGoHome={() => setView("home")}>
         {view === "accounts" && isAdmin ? (
-          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} c={c} />
+          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} showToast={showToast} c={c} />
         ) : view === "activity" && isAdmin ? (
           <ActivityLogPanel activityLog={activityLog} onBack={goBack} c={c} />
         ) : view === "challenges" ? (
@@ -8580,7 +8581,7 @@ function ActivityLogPanel({ activityLog, onBack, c }) {
   );
 }
 
-function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack, c }) {
+function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack, showToast, c }) {
   const [query, setQuery] = useState("");
 
   if (accounts === null) return <div className="pt-8"><Loader c={c} /></div>;
@@ -8650,7 +8651,7 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack
           {filtered.map((a) => (
             <AccountRow key={a.user_id} account={a} leagueCounts={leagueCountsFor(a.user_id)}
               isSelf={session && a.user_id === session.user.id}
-              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} onApprove={() => onApprove(a)} c={c} />
+              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} onApprove={() => onApprove(a)} showToast={showToast} c={c} />
           ))}
         </div>
       )}
@@ -8698,8 +8699,11 @@ export function GoalExtremesBar({ top, least, c }) {
   );
 }
 
-function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
+function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, showToast, c }) {
   const [copiedField, setCopiedField] = useState(null); // "phone" | "username" | null
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [grantAmount, setGrantAmount] = useState("100");
+  const [granting, setGranting] = useState(false);
   const isFlagged = (account.phone || "").includes("(DUPLICATE-");
   const digitsOnly = (account.phone || "").replace(/\D/g, "");
 
@@ -8709,8 +8713,25 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
     setTimeout(() => setCopiedField(null), 1500);
   };
 
+  const grantNets = async () => {
+    const amount = Number(grantAmount);
+    if (!amount || amount <= 0) { showToast?.("Enter a Nets amount above 0."); return; }
+    setGranting(true);
+    try {
+      await creditNets(account.user_id, amount, "admin_grant", { note: `Granted by admin to ${account.efootball_username || account.user_id}` });
+      showToast?.(`Granted ${formatNets(amount)} to ${account.efootball_username || "this account"}.`);
+      setGrantOpen(false);
+      setGrantAmount("100");
+    } catch (err) {
+      showToast?.(`Couldn't grant Nets: ${err.message}`);
+    } finally {
+      setGranting(false);
+    }
+  };
+
   return (
-    <div className="rounded-lg px-4 py-2.5 flex items-center gap-3" style={{ background: c.surface }}>
+    <div className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
+    <div className="flex items-center gap-3">
       <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
         {(account.efootball_username || "?")[0]?.toUpperCase()}
       </div>
@@ -8744,6 +8765,9 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
           Pending approval
         </button>
       )}
+      <button onClick={() => setGrantOpen((v) => !v)} title="Grant Nets" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: grantOpen ? c.accent : c.textFaint }}>
+        <Coins size={13} />
+      </button>
       <button onClick={() => copy("phone", account.phone)} title="Copy phone number" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: copiedField === "phone" ? c.greenText : c.textFaint }}>
         <Copy size={13} />
       </button>
@@ -8758,6 +8782,17 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, c }) {
           <Trash2 size={13} />
         </button>
       )}
+    </div>
+    {grantOpen && (
+      <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t" style={{ borderColor: c.border }}>
+        <Coins size={13} style={{ color: "#D4A017" }} />
+        <input type="number" min="1" value={grantAmount} onChange={(e) => setGrantAmount(e.target.value)}
+          className="w-24 border rounded-lg px-2 py-1 font-mono text-xs outline-none" style={{ background: c.bg, borderColor: c.border, color: c.text }} />
+        <button onClick={grantNets} disabled={granting} className="font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full font-bold shrink-0" style={{ background: c.accent, color: c.bg, opacity: granting ? 0.6 : 1 }}>
+          {granting ? "Granting…" : `Grant to ${account.efootball_username || "account"}`}
+        </button>
+      </div>
+    )}
     </div>
   );
 }

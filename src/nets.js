@@ -9,21 +9,20 @@
 import { supabase } from "./supabaseClient";
 
 export const NETS_LABEL = "Nets";
-export const NETS_SHORT = "N";
+export const NETS_SYMBOL = "N";
 
-// Formats a balance for display: "1,250 Nets" / "50 Nets" / "0 Nets".
-// Kept as its own function (rather than inlined everywhere) so the format
-// can change in one place later — e.g. adding a coin icon or switching to
-// the short form "N" in tight UI like table cells.
+// Formats a balance for display like a currency — symbol first, same
+// pattern as the Shop's "R1,250" formatMoney: "N1,250" / "N50" / "N0".
 export function formatNets(amount) {
   const n = Number(amount) || 0;
-  return `${n.toLocaleString("en-ZA")} ${NETS_LABEL}`;
+  return `${NETS_SYMBOL}${n.toLocaleString("en-ZA")}`;
 }
 
-// Compact form for tight spaces (badges, chips): "1,250N".
+// Compact form is identical here since the symbol-first style is already
+// short — kept as a separate export so call sites that used the "short"
+// variant for tight spaces (badges, chips) don't need to change.
 export function formatNetsShort(amount) {
-  const n = Number(amount) || 0;
-  return `${n.toLocaleString("en-ZA")}${NETS_SHORT}`;
+  return formatNets(amount);
 }
 
 // One-time balance fetch for a given user (defaults to the signed-in user).
