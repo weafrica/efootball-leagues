@@ -2,17 +2,26 @@
 // next to the user's avatar, same spot most apps put a coin/points balance.
 // Handles its own loading + live updates via watchNetsBalance, so it can be
 // mounted anywhere without the parent needing to manage balance state.
+// Clicking it opens a popout with the full balance + recent transaction
+// history (NetsPanel) — that panel is lazy-loaded (see the import below),
+// so its code and the history fetch it triggers only ever load for someone
+// who actually clicks the chip, not for every visitor who just glances at
+// their balance in the header.
 //
 // Usage:
 //   import NetsBadge from "./NetsBadge";
-//   <NetsBadge c={c} onClick={() => setScreen("nets-history")} />
+//   <NetsBadge c={c} />
 
-import React, { useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Coins } from "lucide-react";
 import { watchNetsBalance, formatNetsShort } from "./nets";
 
-export default function NetsBadge({ c, onClick, className = "" }) {
+const NetsPanel = lazy(() => import("./NetsPanel.jsx"));
+
+export default function NetsBadge({ c, className = "" }) {
   const [balance, setBalance] = useState(null); // null = still loading
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
 
   useEffect(() => {
     let unsub;
@@ -21,17 +30,41 @@ export default function NetsBadge({ c, onClick, className = "" }) {
     return () => { cancelled = true; unsub?.(); };
   }, []);
 
-  const Wrapper = onClick ? "button" : "div";
+  // Same click-outside-closes pattern as the header's own menu — mousedown
+  // AND touchstart, since mousedown alone can fire late (or not at all
+  // before the next tap) on touch devices.
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("touchstart", onClick); };
+  }, [open]);
 
   return (
-    <Wrapper
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-sm font-bold ${className}`}
-      style={{ background: c.surfaceHover, color: c.text, border: `1px solid ${c.border}` }}
-      title="Nets balance"
-    >
-      <Coins size={14} style={{ color: "#D4A017" }} />
-      {balance === null ? "…" : formatNetsShort(balance)}
-    </Wrapper>
+    <div ref={wrapRef} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-sm font-bold ${className}`}
+        style={{ background: open ? c.text : c.surfaceHover, color: open ? c.bg : c.text, border: `1px solid ${c.border}` }}
+        title="Nets balance"
+      >
+        <Coins size={14} style={{ color: open ? c.bg : "#D4A017" }} />
+        {balance === null ? "…" : formatNetsShort(balance)}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-10 z-50">
+          <Suspense fallback={
+            <div className="w-72 max-w-[85vw] rounded-xl border shadow-lg px-4 py-6 text-center font-body text-xs"
+              style={{ background: c.bg, borderColor: c.borderStrong, color: c.textFaint }}>
+              Loading…
+            </div>
+          }>
+            <NetsPanel c={c} onClose={() => setOpen(false)} />
+          </Suspense>
+        </div>
+      )}
+    </div>
   );
 }
