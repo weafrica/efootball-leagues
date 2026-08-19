@@ -7111,7 +7111,7 @@ export default function App() {
                 ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
-                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} c={c} />
+                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
             )}
             {view === "create" && (
               <Suspense fallback={<Loader c={c} />}>
@@ -9039,7 +9039,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -9323,6 +9323,19 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, myPaymentStatus, canM
           the collectibles below it to the top of the fold instead of trailing
           them — "how am I doing" before "what have I collected". */}
       <div className="mt-8">
+        {/* Same quick-action tiles as the floating dock, placed right above
+            the leaderboard preview per request — a horizontally-scrollable
+            row rather than the dock's 3-col grid, since it sits inline on
+            the page instead of floating over it. */}
+        {quickActions && quickActions.length > 0 && (
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
+            {quickActions.map((it) => (
+              <div key={it.label} className="w-20 shrink-0">
+                <MenuTile icon={it.icon} label={it.label} badge={it.badge} external={it.external} onClick={it.onClick} c={c} />
+              </div>
+            ))}
+          </div>
+        )}
         <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
       </div>
       <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
