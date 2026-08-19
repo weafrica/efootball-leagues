@@ -7906,7 +7906,7 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
         <div className="relative h-[76px] flex items-center justify-center overflow-hidden"
           style={{ background: l.photo_url ? undefined : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
           {l.photo_url ? (
-            <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+            <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover" />
           ) : (
             <span className="font-extrabold text-2xl" style={{ color: c.accent, opacity: 0.85 }}>{initial}</span>
           )}
@@ -8156,7 +8156,7 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   // bypassed upstream.
   const photoAndDescription = extra?.photo_url && (
     <div className="mb-3 -mt-1">
-      <img src={toProxiedUrl(extra.photo_url)} alt="" className="w-full h-32 object-cover rounded-lg mb-2" />
+      <img src={toProxiedUrl(extra.photo_url)} alt="" loading="lazy" decoding="async" className="w-full h-32 object-cover rounded-lg mb-2" />
     </div>
   );
 
@@ -8283,7 +8283,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
                 style={{ animationDelay: i === 0 ? "0s" : "0.9s" }}>
                 <span className="animate-pick-ring hex-clip w-11 h-11 overflow-hidden flex items-center justify-center"
                   style={{ "--pick-ring": SHOP_GOLD, background: c.surface }}>
-                  <img src={toProxiedUrl(p.image_url)} alt={p.name} className="w-full h-full object-cover" />
+                  <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 </span>
                 <span className="font-mono text-[8px] font-bold mt-1 px-1.5 py-0.5 rounded-full whitespace-nowrap"
                   style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -8805,7 +8805,7 @@ export function MemberAvatar({ url, username, size = 32, c }) {
     // challenges) renders through this one component, so this single
     // toProxiedUrl call is what stops old-style direct Supabase avatar
     // URLs from costing Cached Egress on every view — see mediaUrl.js.
-    return <img src={toProxiedUrl(url)} alt="" loading="lazy" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
+    return <img src={toProxiedUrl(url)} alt="" loading="lazy" decoding="async" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
   }
   return (
     <div className="rounded-full flex items-center justify-center font-body font-bold shrink-0"
@@ -11068,7 +11068,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
       <div className="relative h-[86px] flex items-center justify-center overflow-hidden"
         style={{ background: isCash ? "linear-gradient(150deg, #B8860B33, #B8860B0D)" : `linear-gradient(150deg, ${c.accent}33, ${c.accent}0D)` }}>
         {l.photo_url ? (
-          <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={toProxiedUrl(l.photo_url)} alt="" loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span className="font-extrabold text-3xl" style={{ color: isCash ? "#B8860B" : c.accent, opacity: 0.85 }}>{initial}</span>
         )}

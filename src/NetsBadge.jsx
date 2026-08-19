@@ -54,7 +54,17 @@ export default function NetsBadge({ c, className = "" }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50">
+        // Fixed to the viewport, not `absolute` relative to this badge's own
+        // small wrapper. NetsBadge sits fairly early in the header (right
+        // after the logo), nowhere near the header's actual right edge — an
+        // `absolute right-0` popout anchored to that narrow wrapper had to
+        // extend ~200px further left than the wrapper itself to fit its
+        // content, which ran straight off the left edge on a phone-width
+        // screen. On a wide desktop layout there was enough margin for that
+        // overflow to go unnoticed, which is why this only ever showed up on
+        // mobile. Viewport-fixed positioning sidesteps the problem entirely:
+        // it no longer matters where the badge sits in the header.
+        <div className="fixed top-14 right-3 z-50">
           <Suspense fallback={
             <div className="w-72 max-w-[85vw] rounded-xl border shadow-lg px-4 py-6 text-center font-body text-xs"
               style={{ background: c.bg, borderColor: c.borderStrong, color: c.textFaint }}>
