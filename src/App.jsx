@@ -4983,8 +4983,9 @@ export default function App() {
   };
 
   // Records "club X has now been shown club Y as a possible opponent" —
-  // starts that pairing's 48h POOL_CONTACT_WINDOW_HOURS clock (see
-  // visibleOpponentPool / ladder_cup_pool_sightings). Idempotent
+  // starts that pairing's 12h POOL_CONTACT_WINDOW_HOURS clock, if/when it
+  // becomes the "live" one (see ladderCupOpponentTimerState /
+  // ladder_cup_pool_sightings). Idempotent
   // server-side (on-conflict-do-nothing), but LeagueDetail.jsx also dedupes
   // client-side against sightings already in league.ladder_cup_pool_sightings
   // before calling this, so it's only actually fired once per newly-seen
@@ -5010,7 +5011,7 @@ export default function App() {
   // Per-opponent version of markLadderCupFirstContact, fired alongside it
   // from the same WhatsApp icon tap — this is the signal that exempts THIS
   // specific opponent from expiring off the caller's own board (see
-  // visibleOpponentPool), distinct from the club-wide "made contact with
+  // ladderCupOpponentTimerState), distinct from the club-wide "made contact with
   // someone" signal the join-contact window watches for.
   const markLadderCupPoolContact = async (league, teamId, opponentTeamId) => {
     if (!teamId || !opponentTeamId || league.format !== "ladder_cup") return;

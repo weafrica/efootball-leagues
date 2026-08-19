@@ -5,7 +5,28 @@ import {
   Shield, Skull, Sparkles, Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
-import { rankLadderCupStandings, getOpponentPool, visibleOpponentPool, poolSightingDeadline, isWalkoverClaimable, hasMissedJoinContactWindow, joinContactDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, isWalkoverClaimable, hasMissedJoinContactWindow, joinContactDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+
+// Live "Xh Ym left" text for a deadline, ticking against a shared `now`
+// (passed down from a parent's own setInterval rather than each row
+// running its own timer — see LadderCupOpponentBoard's `now` state).
+// Below one hour switches to minutes only; deadline in the past reads
+// "Overdue" rather than going negative, since the caller (poolSightingDeadline
+// et al.) stops returning a value the instant the pairing is exempted, but
+// there's a brief window each tick where a just-expired deadline is still
+// the prop in hand.
+function formatCountdown(deadline, now) {
+  if (!deadline) return null;
+  const ms = new Date(deadline).getTime() - now;
+  if (ms <= 0) return "Overdue";
+  const totalMinutes = Math.floor(ms / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${minutes}m left`;
+  return `${minutes}m left`;
+}
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
   KnockoutFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
@@ -590,7 +611,7 @@ function LadderCupWalkoverClaimSection({ opponentName, opponentPhone, myTeamName
 // independently underneath — messaging for a walkover doesn't require a
 // Challenge to exist first, since the whole point is an opponent who won't
 // engage at all.
-function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onMarkFirstContact, onMarkPoolContact, poolSightingDeadlineAt, onInitiate, onCancel, onOpenResult, onRespondResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onMarkFirstContact, onMarkPoolContact, poolSightingDeadlineAt, now, onInitiate, onCancel, onOpenResult, onRespondResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
   const iAmHome = match && match.home_team_id === myTeamId;
@@ -652,8 +673,8 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
                 two independent "made contact" signals at once: the
                 club-wide join-contact one (onMarkFirstContact — see
                 hasMissedJoinContactWindow) and this specific opponent's
-                48h pool-visibility one (onMarkPoolContact — see
-                visibleOpponentPool). First tap of each only counts. */}
+                12h pool-visibility one (onMarkPoolContact — see
+                ladderCupOpponentTimerState). First tap of each only counts. */}
             {canSeePhones && opponentPhone && (
               <WhatsAppCallLink phone={opponentPhone} iconOnly onClick={() => { onMarkFirstContact?.(); onMarkPoolContact?.(); }}
                 text={match
@@ -662,15 +683,20 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
             )}
           </div>
           <span className="inline-block font-mono text-[10px] uppercase tracking-wide mt-0.5 px-1.5 py-[1px] rounded-full" style={{ background: c.surfaceHover, color: c.textFaint }}>{opponent.ladder_rating} rating</span>
-          {/* Per-opponent 48h pool-visibility countdown (see
-              visibleOpponentPool / poolSightingDeadline) — only shown
-              while there's no match yet and this pairing hasn't been
-              contacted; disappears the instant the WhatsApp icon above is
-              tapped for this specific opponent, same as the deadline prop
-              itself going null once contacted_at is set. */}
+          {/* The single "live" 12h pool-visibility countdown (see
+              ladderCupOpponentTimerState / poolSightingDeadline) — only one
+              opponent on the whole board has this running at once, so this
+              only renders for whichever opponent LadderCupOpponentBoard
+              handed a non-null poolSightingDeadlineAt (everyone else's
+              clock hasn't started yet). Disappears the instant the
+              WhatsApp icon above is tapped for this opponent, same as the
+              deadline prop itself going null once contacted_at is set.
+              Live-ticking against the board's shared `now` (formatCountdown)
+              rather than a static date; red once under 3h to flag it's
+              about to drop off. */}
           {!match && poolSightingDeadlineAt && (
-            <div className="font-mono text-[9px] mt-0.5" style={{ color: c.textFaint }}>
-              Message by {fmtDate(poolSightingDeadlineAt)} or they drop off your list
+            <div className="font-mono text-[9px] mt-0.5" style={{ color: new Date(poolSightingDeadlineAt).getTime() - now <= 3 * 60 * 60 * 1000 ? c.red : c.textFaint }}>
+              {formatCountdown(poolSightingDeadlineAt, now)} to message them or they drop off your list
             </div>
           )}
         </div>
@@ -862,28 +888,45 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onMarkFirstConta
   const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
   const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
 
-  // 48h per-opponent pool visibility timer (see visibleOpponentPool /
+  // 12h pool visibility timer (see ladderCupOpponentTimerState /
   // ladder_cup_pool_sightings) — mySightings is just this club's own rows
   // out of the league's full sightings collection, keyed by opponent so
-  // visibleOpponentPool can look each one up in O(1).
+  // ladderCupOpponentTimerState can look each one up in O(1).
   const mySightings = useMemo(() => new Map(
     (league.ladder_cup_pool_sightings || []).filter((s) => s.team_id === myTeam?.id).map((s) => [s.opponent_team_id, s])
   ), [league.ladder_cup_pool_sightings, myTeam?.id]);
-  const visibleOpponents = useMemo(() => visibleOpponentPool(opponents, mySightings), [opponents, mySightings]);
 
-  // Starts the 48h clock the first time each opponent in the raw pool
-  // shows up for this club — deliberately watches `opponents` (every
-  // candidate getOpponentPool returned), not `visibleOpponents`, since an
-  // opponent that's already expired and hasn't been brought back by the
-  // MIN_OPPONENTS_SHOWN floor still needs its sighting recorded once, the
-  // same as any other. onEnsurePoolSighting itself is a safe no-op on the
-  // server for a pairing already tracked; this effect only calls it for
-  // ones missing from mySightings so a stable pool doesn't refire it.
+  // Shared tick for the board's one live "Xh Ym left" countdown
+  // (formatCountdown) — also what ladderCupOpponentTimerState below walks
+  // the pool against, so which opponent is "live" re-evaluates on the same
+  // clock the displayed countdown ticks on. 30s is plenty for a
+  // minutes-granularity display.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!myTeam || !onEnsurePoolSighting) return;
-    opponents.forEach((op) => { if (!mySightings.has(op.club_id)) onEnsurePoolSighting(op.club_id); });
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Only one opponent in the pool is ever "live" (has a running 12h
+  // clock) at a time — everyone else is either exempted (contacted),
+  // already dropped off, or hasn't been reached yet. See
+  // ladderCupOpponentTimerState for the full walk.
+  const { visible: visibleOpponents, live: liveOpponent } = useMemo(
+    () => ladderCupOpponentTimerState(opponents, mySightings, new Date(now)),
+    [opponents, mySightings, now]
+  );
+
+  // Starts the 12h clock for whichever opponent is currently "live" once
+  // it doesn't have a sighting yet — the previous live opponent (now
+  // exempted or dropped off) already has one, so this only ever fires for
+  // the newly-live opponent, one at a time, never the whole pool at once.
+  // onEnsurePoolSighting itself is a safe no-op on the server for a
+  // pairing already tracked.
+  useEffect(() => {
+    if (!myTeam || !onEnsurePoolSighting || !liveOpponent) return;
+    if (!mySightings.has(liveOpponent.club_id)) onEnsurePoolSighting(liveOpponent.club_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opponents, mySightings, myTeam]);
+  }, [liveOpponent, mySightings, myTeam]);
 
   if (!myEntry) return null; // not a registered club in this league — nothing to challenge with
 
@@ -940,7 +983,7 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onMarkFirstConta
           walkoverClaim={walkoverClaimWith(op.club_id)}
           canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
           onMarkFirstContact={onMarkFirstContact} onMarkPoolContact={() => onMarkPoolContact?.(op.club_id)}
-          poolSightingDeadlineAt={poolSightingDeadline(mySightings.get(op.club_id))}
+          poolSightingDeadlineAt={op.club_id === liveOpponent?.club_id ? poolSightingDeadline(mySightings.get(op.club_id)) : null} now={now}
           onInitiate={onInitiateMatch} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
           onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
       ))}
