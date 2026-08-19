@@ -1583,7 +1583,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onMarkLadderCupFirstContact, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onMarkLadderCupFirstContact, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1702,11 +1702,17 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
             <GroupStageDueLine league={league} canManage={canManage} onUpdateGroupStageDueAt={onUpdateGroupStageDueAt} c={c} />
           )}
         </div>
-        {!joined && !entryClosed && !blockedByLeague && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
+        {!joined && !entryClosed && !blockedByLeague && qualified && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
         {!joined && !entryClosed && blockedByLeague && (
           <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
             className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>
             Locked · active in "{blockedByLeague.name}"
+          </span>
+        )}
+        {!joined && !entryClosed && !blockedByLeague && !qualified && (
+          <span title="Requires a top-20% finish in a completed Survival Ladder Cup"
+            className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>
+            Locked · needs a top-20% Ladder Cup finish
           </span>
         )}
         {!joined && entryClosed && <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded shrink-0" style={{ background: c.redSoft, color: c.red }}>Entry closed</span>}
