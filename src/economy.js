@@ -1,0 +1,117 @@
+// src/economy.js
+//
+// WEAFRICA NETS ECONOMY — pricing basics: match rewards, entry fees, and
+// the Top 20 prize pool split.
+//
+// Pure functions only — no React, no Supabase. This is the "how much"
+// layer; actually moving Nets (crediting rewards, debiting entry fees)
+// goes through creditNets/debitNets in src/nets.js, the only place
+// allowed to touch nets_wallets/nets_transactions. Nothing in this file
+// writes anything — call sites compute an amount here, then pass it to
+// those RPCs with the right reason/ref.
+//
+// Field names/style mirror src/formats/ladderCup.js.
+
+// ─────────────────────────────────────────────────────────────────────────
+// Match rewards
+//
+// Every match type pays a fixed net per outcome, plus (for the three
+// formats where it applies) a flat "participation" net paid regardless of
+// outcome — win, draw, or loss all still bank it. Six-Day Survivor and
+// Knockout don't get a participation net; their win reward is already the
+// whole payout for that match.
+// ─────────────────────────────────────────────────────────────────────────
+
+const PARTICIPATION_NET = 1;
+
+const MATCH_REWARD_TABLE = {
+  random_match: { win: 2, draw: 1, loss: 0, draws: true, participation: true },
+  // Ladder Battles pays more for punching up — beating a higher-ranked
+  // opponent is worth 3x a loss's floor, beating a lower-ranked one 1x.
+  ladder_battle: { winHigher: 3, winLower: 1, draw: 2, loss: 0, draws: true, participation: true },
+  six_day_survivor: { win: 4, loss: 0, draws: false, participation: false },
+  league: { win: 5, draw: 2, loss: 0, draws: true, participation: true }, // double round robin
+  // Home & away knockout: win starts at 2 and grows 0.5/round, so a final
+  // (round 8, ~32 days deep) is worth far more than a round-1 win.
+  knockout: { winBase: 2, winPerRound: 0.5, loss: 0, draws: false, participation: false },
+};
+
+export const MATCH_TYPES = Object.keys(MATCH_REWARD_TABLE);
+
+// computeMatchNets(matchType, outcome, options) → number of Nets earned.
+//   matchType: one of MATCH_TYPES
+//   outcome:   "win" | "draw" | "loss"
+//   options:
+//     - ladder_battle win: { beatHigherRank: boolean } — which win tier
+//     - knockout win:      { round: number }            — 1-indexed round
+export function computeMatchNets(matchType, outcome, options = {}) {
+  const table = MATCH_REWARD_TABLE[matchType];
+  if (!table) throw new Error(`computeMatchNets: unknown match type "${matchType}"`);
+
+  let base;
+  if (outcome === "win") {
+    if (matchType === "ladder_battle") base = options.beatHigherRank ? table.winHigher : table.winLower;
+    else if (matchType === "knockout") base = table.winBase + table.winPerRound * ((options.round || 1) - 1);
+    else base = table.win;
+  } else if (outcome === "draw") {
+    if (!table.draws) throw new Error(`computeMatchNets: ${matchType} has no draws`);
+    base = table.draw;
+  } else if (outcome === "loss") {
+    base = table.loss;
+  } else {
+    throw new Error(`computeMatchNets: unknown outcome "${outcome}"`);
+  }
+
+  return base + (table.participation ? PARTICIPATION_NET : 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Entry fees — flat Nets cost to join a paid format. "league" covers both
+// normal (round robin) leagues and Survivor-format leagues; they share one
+// price since both are the same "full league" commitment, distinct from
+// the standalone Six-Day Survivor Cup below.
+// ─────────────────────────────────────────────────────────────────────────
+export const ENTRY_FEES_NETS = {
+  six_day_survivor: 40,
+  league: 240, // normal leagues + survivor-format leagues
+  knockout: 50, // home & away, ~150 teams / 8 rounds / ~32 days
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Top 20 prize pool split — how a finished paid format's pool is divided.
+// Only the top TOP20_PRIZE_SPLIT.length places get paid; with fewer than
+// 20 participants the rest of the split is deliberately left unclaimed
+// rather than redistributed, so finishing 1st in a 5-club league is worth
+// the same 30% share it'd be in a full 20-club one — not a bigger slice of
+// a smaller pie.
+// ─────────────────────────────────────────────────────────────────────────
+export const TOP20_PRIZE_SPLIT = [
+  0.30,   // 1st
+  0.1424, // 2nd
+  0.0949, // 3rd
+  0.0593, // 4th
+  0.0593, // 5th
+  0.0356, 0.0356, 0.0356, 0.0356, 0.0356, // 6th–10th
+  0.0166, 0.0166, 0.0166, 0.0166, 0.0166, 0.0166, 0.0166, 0.0166, 0.0166, 0.0166, // 11th–20th
+];
+
+// computePrizePool(totalNets, participantCount) → [{ rank, nets }, ...]
+//
+// Pays min(participantCount, 20) places. Each place's exact share
+// (totalNets × its split fraction) is floored to a whole Net; the sum of
+// that flooring loss across the paid places — never the whole unclaimed
+// tail below the last paid place — is credited to 1st, so the pool always
+// pays out in whole Nets with minimal rounding drift and no double-dipping
+// into the deliberately-unclaimed portion.
+export function computePrizePool(totalNets, participantCount) {
+  const paidPlaces = Math.min(participantCount, TOP20_PRIZE_SPLIT.length);
+  if (paidPlaces <= 0) return [];
+
+  const shares = TOP20_PRIZE_SPLIT.slice(0, paidPlaces).map((frac) => totalNets * frac);
+  const floors = shares.map((s) => Math.floor(s));
+  const flooredSum = floors.reduce((a, b) => a + b, 0);
+  const exactSum = shares.reduce((a, b) => a + b, 0);
+  floors[0] += Math.round(exactSum - flooredSum);
+
+  return floors.map((nets, i) => ({ rank: i + 1, nets }));
+}
