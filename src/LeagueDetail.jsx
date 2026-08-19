@@ -16,7 +16,7 @@ import {
   WhatsAppLink, avatarColor, challengeResultConfirmExpired, challengeResultMinutesLeft, commentSpeech,
   computeHeadToHead, computeStandings, findSubmissionOpponentId, playerKeyForTeam,
   firstMatchdayNote, fmtDate, groupLabel, isExpired, isFinalFixture, isFinalRoundFixtures,
-  isFixtureLocked, isResultComment, isWaReminderActive, isWeekendLeague, knockoutBracketWinners, knockoutRoundFixtures,
+  isFixtureLocked, fixtureNeedsContact, isResultComment, isWaReminderActive, isWeekendLeague, knockoutBracketWinners, knockoutRoundFixtures,
   ladderCupResultEscalationReason, nextFixtureForTeam, resultConfirmDeadline, resultEscalationReason, splitCommentsByRoot,
   timeAgo, useCommentSpeakingId, useVoiceRecorder, usesCustomMessage,
   ACHIEVEMENTS_DEF, computeMyProgress, teamForUserInLeague,
@@ -1505,7 +1505,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onMarkLadderCupFirstContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onMarkFixtureContact, onMarkLadderCupFirstContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onMessageLadderCupWalkoverOpponent, onSubmitLadderCupWalkoverClaim, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1853,14 +1853,14 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
               onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
           {(inGroupStage || inKnockoutBracket) && joined && myTeam && (!canManage || isWeekendLeague(league)) && (
-            <NextOpponentCard league={league} leagues={leagues} myTeam={myTeam} canSeePhones={canSeePhones} c={c} />
+            <NextOpponentCard league={league} leagues={leagues} myTeam={myTeam} canSeePhones={canSeePhones} onMarkFixtureContact={onMarkFixtureContact} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
-            groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
+            groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} onMarkFixtureContact={onMarkFixtureContact} c={c} />
           {(joined || canManage) && (
             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
               getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} leagues={leagues} c={c} />
+              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} onMarkFixtureContact={onMarkFixtureContact} league={league} leagues={leagues} c={c} />
           )}
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {joined && !canSeePhones && (
@@ -2829,7 +2829,28 @@ function HeadToHeadModal({ record, myLabel, opponentLabel, onClose, c }) {
   );
 }
 
-function NextOpponentCard({ league, leagues, myTeam, canSeePhones, c }) {
+// Shared "message your opponent" contact-countdown banner — see
+// fixtureNeedsContact/mark_fixture_contact. Same visual language as the
+// Ladder Cup join-contact banner (red, Clock icon) but scoped to a single
+// fixture's own due_at rather than a fixed 24h — a fixture's real deadline
+// is whatever round_period_hours the league is on (48h/2 days by default),
+// so the countdown stays truthful for leagues that changed it. Renders
+// nothing once fixtureNeedsContact goes false (played, contact already
+// made, or the fixture's already past its deadline — no point nudging
+// contact on a match that's already a no-show loss).
+function FixtureContactBanner({ fixture, league, c }) {
+  if (!fixtureNeedsContact(fixture, league)) return null;
+  return (
+    <div className="rounded-lg px-2.5 py-1.5 mt-1.5 flex items-center gap-1.5" style={{ background: "rgba(200,30,58,0.08)", border: `1px solid ${c.red}` }}>
+      <Clock size={11} style={{ color: c.red }} />
+      <div className="font-mono text-[9px] uppercase tracking-wide" style={{ color: c.red }}>
+        Message your opponent by {fmtDate(fixture.due_at)} or it's a no-show loss
+      </div>
+    </div>
+  );
+}
+
+function NextOpponentCard({ league, leagues, myTeam, canSeePhones, onMarkFixtureContact, c }) {
   if (myTeam.eliminated) {
     return (
       <div className="rounded-xl p-4 border font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textFaint }}>
@@ -2886,10 +2907,11 @@ function NextOpponentCard({ league, leagues, myTeam, canSeePhones, c }) {
           </div>
         </div>
         {canSeePhones && opponent?.phone && (
-          <WhatsAppCallLink phone={opponent.phone}
+          <WhatsAppCallLink phone={opponent.phone} onClick={() => onMarkFixtureContact?.(fixture)}
             text={`Hi, it's ${myTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`} c={c} />
         )}
       </div>
+      <FixtureContactBanner fixture={fixture} league={league} c={c} />
       {opponent && (
         <HeadToHeadStrip leagues={leagues} league={league} teamId={myTeam.id} opponentId={opponent.id}
           myLabel={myTeam.name} opponentLabel={opponent.name} c={c} />
@@ -2901,7 +2923,7 @@ function NextOpponentCard({ league, leagues, myTeam, canSeePhones, c }) {
 // A single search box: type your eFootball username, get your group standing
 // or knockout opponent back — no need to know a matchday number or dig through
 // tabs. Works for anyone with a registered club, joined or not.
-function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, groupStageFixtures, canSeePhones, c }) {
+function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, groupStageFixtures, canSeePhones, onMarkFixtureContact, c }) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState(null);
 
@@ -2989,11 +3011,12 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly onClick={() => onMarkFixtureContact?.(result.nextFixture)}
                         text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
+                <FixtureContactBanner fixture={result.nextFixture} league={league} c={c} />
               </div>
             );
           })()}
@@ -3054,11 +3077,12 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly onClick={() => onMarkFixtureContact?.(result.myFixtures.find((f) => !f.played) || result.myFixtures[0])}
                         text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.myFixtures[0].round} is due ${fmtDate((result.myFixtures.find((f) => !f.played) || result.myFixtures[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.myFixtures[0].round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
+                {!allPlayed && <FixtureContactBanner fixture={result.myFixtures.find((f) => !f.played) || result.myFixtures[0]} league={league} c={c} />}
               </div>
             );
           })()}
@@ -3090,11 +3114,12 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
                 {canSeePhones && (
                   opp.opponent?.phone ? (
                     <div className="mt-1.5">
-                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly
+                      <WhatsAppCallLink phone={opp.opponent.phone} iconOnly onClick={() => onMarkFixtureContact?.(result.nextFixture)}
                         text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${result.nextFixture.round} is due ${fmtDate(result.nextFixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(result.nextFixture.round)}`} c={c} />
                     </div>
                   ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
                 )}
+                <FixtureContactBanner fixture={result.nextFixture} league={league} c={c} />
               </div>
             );
           })()}
@@ -3105,7 +3130,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
   );
 }
 
-function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, leagues, c }) {
+function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, onMarkFixtureContact, league, leagues, c }) {
   const [matchday, setMatchday] = useState("");
   const [teamQuery, setTeamQuery] = useState("");
   const [result, setResult] = useState(null);
@@ -3213,13 +3238,14 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
           {canSeePhones ? (
             result.opponent.phone ? (
               <div className="mt-1.5">
-                <WhatsAppCallLink phone={result.opponent.phone} iconOnly
+                <WhatsAppCallLink phone={result.opponent.phone} iconOnly onClick={() => onMarkFixtureContact?.(result.legs.find((f) => !f.played) || result.legs[0])}
                   text={`Hi, it's ${result.team.name} 🔥 Call me when you're ready to play — matchday ${matchday} is due ${fmtDate((result.legs.find((f) => !f.played) || result.legs[0]).due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(Number(matchday))}`} c={c} />
               </div>
             ) : <div className="font-mono text-xs mt-1" style={{ color: c.textFaint }}>No number on file for this club yet.</div>
           ) : (
             <div className="font-mono text-xs mt-1" style={{ color: c.red }}>Contact hidden — your club is eliminated.</div>
           )}
+          {!result.expired && <FixtureContactBanner fixture={result.legs.find((f) => !f.played) || result.legs[0]} league={league} c={c} />}
 
           {result.legs.map((fixture) => {
             const isHome = fixture.home_team_id === result.team.id;
