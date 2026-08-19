@@ -62,6 +62,17 @@ export const LADDER_CUP_RULES = {
   // opponent; this one is about a club that never sent a first message at
   // all.
   JOIN_CONTACT_WINDOW_HOURS: 24,
+  // How long a specific opponent stays visible on a club's own challenge
+  // board (getOpponentPool) without that club tapping WhatsApp on them
+  // specifically — a completely different clock from
+  // JOIN_CONTACT_WINDOW_HOURS above (that one's about a club making ANY
+  // contact at all; this one's per-opponent and never removes a club from
+  // the league, only from one other club's own view of who's challengeable).
+  POOL_CONTACT_WINDOW_HOURS: 48,
+  // Never let an expiring pool shrink a club's visible opponent list below
+  // this many, even if every one of them is overdue — see
+  // visibleOpponentPool.
+  MIN_OPPONENTS_SHOWN: 3,
   BASE_WIN_POINTS: 3,
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
@@ -518,6 +529,57 @@ export function getOpponentPool(entry, allEntries) {
   return pool
     .sort((a, b) => Math.abs(ratingOf(a) - myRating) - Math.abs(ratingOf(b) - myRating))
     .slice(0, R.SHOWN_OPPONENTS);
+}
+
+/**
+ * Applies the 48h per-opponent visibility timer on top of an already-
+ * computed getOpponentPool result — this never changes WHO'S eligible to
+ * be matched, only which of them are still shown to this one club right
+ * now. `sightings` is a Map keyed by opponent club_id -> { first_seen_at,
+ * contacted_at } (from ladder_cup_pool_sightings, filtered to this club's
+ * own rows) — an opponent with no entry in the map yet is treated as just
+ * now, never expired (the caller is expected to record a sighting the
+ * moment an opponent is first shown, so this case is transient).
+ *
+ * An opponent drops off the list once POOL_CONTACT_WINDOW_HOURS have
+ * passed since first_seen_at with contacted_at still null — but never
+ * below MIN_OPPONENTS_SHOWN total: if hiding every overdue opponent would
+ * leave fewer than that, the least-overdue ones are kept (or brought back)
+ * until the floor is met, so a club is never left looking at an empty
+ * board. contacted_at, once set, exempts that pairing for good — same
+ * "measures whether contact was ever made, not whether it was followed
+ * through on" rule as the join-contact window.
+ */
+export function visibleOpponentPool(pool, sightings, now = new Date()) {
+  const R = LADDER_CUP_RULES;
+  const windowMs = R.POOL_CONTACT_WINDOW_HOURS * 60 * 60 * 1000;
+  const withStatus = pool.map((op) => {
+    const sighting = sightings?.get(op.club_id);
+    if (!sighting || sighting.contacted_at) return { op, expired: false, overdueMs: -Infinity };
+    const deadline = new Date(sighting.first_seen_at).getTime() + windowMs;
+    const overdueMs = now.getTime() - deadline;
+    return { op, expired: overdueMs >= 0, overdueMs };
+  });
+  const notExpired = withStatus.filter((w) => !w.expired);
+  if (notExpired.length >= Math.min(R.MIN_OPPONENTS_SHOWN, withStatus.length)) {
+    return notExpired.map((w) => w.op);
+  }
+  // Below the floor — bring back the least-overdue expired ones (smallest
+  // overdueMs first) until MIN_OPPONENTS_SHOWN is met or there's nothing
+  // left to bring back.
+  const needed = R.MIN_OPPONENTS_SHOWN - notExpired.length;
+  const broughtBack = withStatus.filter((w) => w.expired).sort((a, b) => a.overdueMs - b.overdueMs).slice(0, needed);
+  return [...notExpired, ...broughtBack].map((w) => w.op);
+}
+
+/**
+ * The deadline (first_seen_at + 48h) for a single opponent card, for
+ * display — null once contacted or if there's no sighting recorded yet
+ * (nothing to show a countdown against until the "seen" write lands).
+ */
+export function poolSightingDeadline(sighting) {
+  if (!sighting || sighting.contacted_at) return null;
+  return new Date(new Date(sighting.first_seen_at).getTime() + LADDER_CUP_RULES.POOL_CONTACT_WINDOW_HOURS * 60 * 60 * 1000);
 }
 
 // ---------------------------------------------------------------------------

@@ -716,16 +716,6 @@ export function isFixtureLocked(fixture, league) {
   return isExpired(fixture);
 }
 
-// Whether the "message your opponent" contact-countdown banner should show
-// for this fixture (see supabase/migrations/20260825_fixture_contact_countdown.sql
-// / markFixtureContact). Only a real, unplayed, not-yet-locked fixture that
-// hasn't had contact made by either side yet — the same "gone quiet after
-// contacting" case the Ladder Cup version also treats as satisfied stays
-// satisfied here too: once contact_made_at is set, it's set for good.
-export function fixtureNeedsContact(fixture, league) {
-  return fixture.away_team_id !== null && !fixture.played && !fixture.contact_made_at && !isFixtureLocked(fixture, league);
-}
-
 // A no-show tie: every leg of a fixture pairing has gone past its deadline
 // unplayed. Both teams are eliminated the moment that's true — regardless
 // of what either side has done earlier in the league; missing this one
@@ -3306,7 +3296,7 @@ export default function App() {
   // nested comment_likes join), so it's the one piece split out of the
   // bulk load and fetched lazily instead, per open league, below.
   const LEAGUE_LIST_SELECT =
-    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), " +
+    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), ladder_cup_pool_sightings(*), " +
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
     "league_reactions(id, user_id, reaction)";
 
@@ -4992,6 +4982,50 @@ export default function App() {
     await supabase.rpc("mark_ladder_cup_first_contact", { p_league_id: league.id, p_team_id: teamId });
   };
 
+  // Records "club X has now been shown club Y as a possible opponent" —
+  // starts that pairing's 48h POOL_CONTACT_WINDOW_HOURS clock (see
+  // visibleOpponentPool / ladder_cup_pool_sightings). Idempotent
+  // server-side (on-conflict-do-nothing), but LeagueDetail.jsx also dedupes
+  // client-side against sightings already in league.ladder_cup_pool_sightings
+  // before calling this, so it's only actually fired once per newly-seen
+  // pairing rather than on every render. Optimistic local insert first, same
+  // reasoning as every other ladder cup write here — the UI (and the
+  // dedupe check on the next render) shouldn't have to wait on the network
+  // round-trip to know this pairing is now being tracked.
+  const ensureLadderCupPoolSighting = async (league, teamId, opponentTeamId) => {
+    if (!teamId || !opponentTeamId || league.format !== "ladder_cup") return;
+    const seenAt = new Date().toISOString();
+    setLeagues((prev) => (prev || []).map((lg) => {
+      if (lg.id !== league.id) return lg;
+      const already = (lg.ladder_cup_pool_sightings || []).some((s) => s.team_id === teamId && s.opponent_team_id === opponentTeamId);
+      if (already) return lg;
+      return {
+        ...lg,
+        ladder_cup_pool_sightings: [...(lg.ladder_cup_pool_sightings || []), { league_id: league.id, team_id: teamId, opponent_team_id: opponentTeamId, first_seen_at: seenAt, contacted_at: null }],
+      };
+    }));
+    await supabase.rpc("ensure_ladder_cup_pool_sighting", { p_league_id: league.id, p_team_id: teamId, p_opponent_team_id: opponentTeamId });
+  };
+
+  // Per-opponent version of markLadderCupFirstContact, fired alongside it
+  // from the same WhatsApp icon tap — this is the signal that exempts THIS
+  // specific opponent from expiring off the caller's own board (see
+  // visibleOpponentPool), distinct from the club-wide "made contact with
+  // someone" signal the join-contact window watches for.
+  const markLadderCupPoolContact = async (league, teamId, opponentTeamId) => {
+    if (!teamId || !opponentTeamId || league.format !== "ladder_cup") return;
+    const contactedAt = new Date().toISOString();
+    setLeagues((prev) => (prev || []).map((lg) => (
+      lg.id !== league.id ? lg : {
+        ...lg,
+        ladder_cup_pool_sightings: (lg.ladder_cup_pool_sightings || []).some((s) => s.team_id === teamId && s.opponent_team_id === opponentTeamId)
+          ? lg.ladder_cup_pool_sightings.map((s) => (s.team_id === teamId && s.opponent_team_id === opponentTeamId ? { ...s, contacted_at: s.contacted_at || contactedAt } : s))
+          : [...(lg.ladder_cup_pool_sightings || []), { league_id: league.id, team_id: teamId, opponent_team_id: opponentTeamId, first_seen_at: contactedAt, contacted_at: contactedAt }],
+      }
+    )));
+    await supabase.rpc("mark_ladder_cup_pool_contact", { p_league_id: league.id, p_team_id: teamId, p_opponent_team_id: opponentTeamId });
+  };
+
   // Step 9: opponent slate + challenge flow. Tapping an opponent on the
   // board doesn't create a "pending" invite the way the platform-wide
   // Ladder's `challenges` table does — Ladder Cup has no accept/decline
@@ -6360,49 +6394,6 @@ export default function App() {
     }
   };
 
-  // Companion to markWaReminder above, for the fixture-level contact
-  // countdown (see supabase/migrations/20260825_fixture_contact_countdown.sql):
-  // fired when EITHER club taps the WhatsApp icon on an upcoming fixture.
-  // Same navigation-race reasoning as markWaReminder — the tab can get
-  // backgrounded the instant WhatsApp opens, so this sets local state
-  // first and fires a keepalive fetch rather than a normal awaited
-  // supabase-js call. Routed through the mark_fixture_contact RPC instead
-  // of a direct PATCH: unlike markWaReminder (admin-only, members table),
-  // this needs to work for ANY club in the fixture, and a plain client
-  // UPDATE against fixtures is admin/creator-only under RLS (see
-  // recordResult vs submitMatchResult) — the RPC bypasses that the same
-  // way every Ladder Cup write does.
-  const markFixtureContact = async (league, fixture) => {
-    const token = session?.access_token;
-    const contactedAt = new Date().toISOString();
-    setLeagues((prev) => (prev || []).map((lg) => (
-      lg.id !== league.id ? lg : {
-        ...lg,
-        fixtures: lg.fixtures.map((f) => (f.id === fixture.id ? { ...f, contact_made_at: contactedAt } : f)),
-      }
-    )));
-    if (!token) { console.warn("[fixture-contact] skipped — no session token"); return; }
-    try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/rpc/mark_fixture_contact`, {
-        method: "POST",
-        keepalive: true,
-        headers: {
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({ p_fixture_id: fixture.id }),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error("[fixture-contact] RPC failed", res.status, body);
-      }
-    } catch (err) {
-      console.error("[fixture-contact] RPC threw", err);
-    }
-  };
-
   const updateTeamPhone = async (teamId, leagueId, phone) => {
     const { error } = await supabase.from("teams").update({ phone }).eq("id", teamId);
     if (error) { showToast("Couldn't save number."); return; }
@@ -7137,8 +7128,9 @@ export default function App() {
                 onResubmitPayment={(member) => openResubmitPayment(activeLeague, member)}
                 onDownloadProof={downloadPaymentProof} onReviewPayment={reviewPayment} onMarkWaReminder={markWaReminder} onClearWaReminder={clearWaReminder} onClearAllWaReminders={clearAllWaReminders}
                 onRecordResult={recordResult} onUpdateTeamPhone={updateTeamPhone} onRemoveTeam={removeTeam} onUpdatePhoto={updateLeaguePhoto} onUpdateDescription={updateLeagueDescription} onUpdateCreatorPhone={updateLeagueCreatorPhone} onUpdateSchedule={updateLeagueSchedule} onUpdateRoundPeriod={updateLeagueRoundPeriod} onUpdateGroupStageDueAt={updateLeagueGroupStageDueAt} onStartLadderCup={startLadderCupLeague} onUpdateMemberMessage={updateLeagueMemberMessage} onNotifyAllMembers={notifyAllMembers}
-                onMarkFixtureContact={(fixture) => markFixtureContact(activeLeague, fixture)}
                 onMarkLadderCupFirstContact={() => markLadderCupFirstContact(activeLeague, myTeam(activeLeague)?.id)}
+                onEnsureLadderCupPoolSighting={(opponentTeamId) => ensureLadderCupPoolSighting(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
+                onMarkLadderCupPoolContact={(opponentTeamId) => markLadderCupPoolContact(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
                 onInitiateLadderCupMatch={(opponentTeamId) => initiateLadderCupMatch(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
                 onCancelLadderCupMatch={(match) => cancelLadderCupMatch(activeLeague, match)}
                 onOpenLadderCupResult={(match) => setLadderCupResultModal({ league: activeLeague, match })}
