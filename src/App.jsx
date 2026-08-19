@@ -7154,7 +7154,11 @@ export default function App() {
             )}
             {view === "leaderboard" && (
               <Suspense fallback={<Loader c={c} />}>
-                <LeaderboardPage leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack} c={c} />
+                {/* Same quickActionItems the floating dock uses everywhere else —
+                    minus the "Leaderboard" tile itself, since that would just
+                    reopen the screen already open. */}
+                <LeaderboardPage leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack}
+                  quickActions={quickActionItems.filter((it) => it.label !== "Leaderboard")} c={c} />
               </Suspense>
             )}
             {view === "ladder" && (
@@ -9501,7 +9505,7 @@ function profileFirstName(session) {
 // carries the same visual weight; none is "the" highlighted button. The
 // Shop tile carries an "external" badge instead of a count, since it leaves
 // the app rather than opening a screen inside it.
-function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
+export function MenuTile({ icon: Icon, label, badge, external, onClick, c }) {
   return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body transition-transform active:scale-[0.97]"
       style={{ background: c.surface, border: `1px solid ${c.border}` }}>

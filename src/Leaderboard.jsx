@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ArrowLeft, Trophy, Search, History, ChevronDown, Check } from "lucide-react";
 import {
-  fmtDate, MemberAvatar, PlayerProfileModal, fixturePlayedDate, seasonAnchor, seasonBounds,
+  fmtDate, MemberAvatar, MenuTile, PlayerProfileModal, fixturePlayedDate, seasonAnchor, seasonBounds,
   currentSeason, computeGlobalLeaderboard, goalExtremes, rankLeaderboard,
   GoalExtremesBar, LEADERBOARD_MIN_PLAYED_FOR_WINRATE, medalFor,
 } from "./App.jsx";
@@ -130,7 +130,7 @@ function SeasonPicker({ value, seasons, anchor, cur, onChange, c }) {
 // scrollable panel; typing a username searches the FULL ranked list (not
 // just the top 10) so someone can find themselves — or anyone else —
 // wherever they actually sit.
-export default function Leaderboard({ leagues, session, memberAvatars, myAvatarUrl, onBack, embedded, c }) {
+export default function Leaderboard({ leagues, session, memberAvatars, myAvatarUrl, onBack, embedded, quickActions, c }) {
   const [metric, setMetric] = useState("wins");
   const [query, setQuery] = useState("");
   const [profileRow, setProfileRow] = useState(null); // the ranked row currently shown in PlayerProfileModal, or null
@@ -190,6 +190,29 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
         <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
       )}
 
+      {/* Same quick-action tiles as the app-wide floating dock (App.jsx's
+          QuickActionsDock), placed inline right at the top of the
+          leaderboard instead of behind a separate floating button — one
+          less tap to jump into a new league, the ladder, a random
+          challenge, etc. straight from here. Horizontally-scrollable row
+          rather than the dock's 3-col grid, since it's competing for
+          space with the rest of the page instead of floating over it. */}
+      {quickActions && quickActions.length > 0 && (
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
+          {quickActions.map((it) => (
+            <div key={it.label} className="w-20 shrink-0">
+              <MenuTile icon={it.icon} label={it.label} badge={it.badge} external={it.external} onClick={it.onClick} c={c} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="relative mb-4">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type a username to find them..."
+          className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+
       <div className="flex items-center gap-2 mb-1">
         <Trophy size={20} style={{ color: c.accent }} />
         <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Leaderboard</h1>
@@ -215,12 +238,6 @@ export default function Leaderboard({ leagues, session, memberAvatars, myAvatarU
       {metric === "winrate" && (
         <div className="font-mono text-[11px] mb-4" style={{ color: c.textFaint }}>Only players with {LEADERBOARD_MIN_PLAYED_FOR_WINRATE}+ matches played are ranked here.</div>
       )}
-
-      <div className="relative mb-4">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type a username to find them..."
-          className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
-      </div>
 
       {results.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
