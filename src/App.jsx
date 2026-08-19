@@ -5,6 +5,7 @@ import { compressImage } from "./utils/imageCompress";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
+import NetsBadge from "./NetsBadge.jsx";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -9005,6 +9006,8 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
           </div>
         )}
         <div className="flex items-center gap-2 shrink-0">
+          <NetsBadge c={c} />
+
           <button onClick={onEditProfile} title="Edit profile" className="w-8 h-8 flex items-center justify-center rounded-full overflow-hidden shrink-0" style={{ background: c.surface, color: c.textDim }}>
             {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" /> : <Settings2 size={14} />}
           </button>
