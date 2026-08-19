@@ -6059,9 +6059,18 @@ export default function App() {
 
   const recordResult = async (league, fixture, homeScore, awayScore, file = null, pensHome = null, pensAway = null) => {
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return; }
-    const { error } = await supabase.from("fixtures")
-      .update({ played: true, home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, played_at: new Date().toISOString() }).eq("id", fixture.id);
-    if (error) { showToast("Couldn't save result."); return; }
+    // Goes through record_fixture_result (see supabase/migrations/20260829_record_fixture_result_rpc.sql)
+    // instead of a plain client .update() — same score-sanity checks
+    // (no negative scores, penalty scores can't be level) the
+    // player-submission paths already have, which the old raw update let
+    // slip past silently. RLS already restricted this write to the
+    // league's creator or an admin either way, so this isn't an
+    // authorization change — the RPC still allows re-recording an
+    // already-played fixture, same as before, so admin corrections keep working.
+    const { error } = await supabase.rpc("record_fixture_result", {
+      p_fixture_id: fixture.id, p_home_score: homeScore, p_away_score: awayScore, p_pens_home: pensHome, p_pens_away: pensAway,
+    });
+    if (error) { showToast(`Couldn't save result: ${error.message}`); return; }
 
     await applyKnockoutElimination(league, fixture, homeScore, awayScore, pensHome, pensAway);
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
