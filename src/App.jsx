@@ -4754,16 +4754,19 @@ export default function App() {
     (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
     || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
-  // Admin-created leagues (except Knockout) require the joining club to
-  // have finished in the top 20% of some completed Survival Ladder Cup at
-  // least once. "The club" is resolved the same way joinLeague itself
-  // resolves team identity — by matching the profile's efootball_username
-  // against a league's team names — since that's the only identity a club
-  // carries across leagues. Only finalized Ladder Cups count (an
-  // in-progress one hasn't produced a real final standing yet); ties share
-  // a rank_position (rankLadderCupStandings' "1224" ranking), so the
-  // qualifying cutoff is ceil(entries * 0.2), and anyone whose
-  // rank_position falls at or inside that cutoff qualifies, ties included.
+  // Admin-created leagues (except Knockout and Survival Ladder Cup itself —
+  // gating entry to a Ladder Cup on having already placed top 20% in one
+  // would lock out anyone who hasn't qualified yet from ever getting the
+  // chance to) require the joining club to have finished in the top 20% of
+  // some completed Survival Ladder Cup at least once. "The club" is
+  // resolved the same way joinLeague itself resolves team identity — by
+  // matching the profile's efootball_username against a league's team
+  // names — since that's the only identity a club carries across leagues.
+  // Only finalized Ladder Cups count (an in-progress one hasn't produced a
+  // real final standing yet); ties share a rank_position
+  // (rankLadderCupStandings' "1224" ranking), so the qualifying cutoff is
+  // ceil(entries * 0.2), and anyone whose rank_position falls at or inside
+  // that cutoff qualifies, ties included.
   const hasQualifyingLadderCupFinish = useMemo(() => {
     const myName = profile?.efootball_username?.trim().toLowerCase();
     if (!myName) return false;
@@ -4783,7 +4786,7 @@ export default function App() {
   }, [leagues, profile]);
 
   const qualifiesForLeague = (league) =>
-    !league.created_by_admin || league.format === "knockout" || hasQualifyingLadderCupFinish;
+    !league.created_by_admin || league.format === "knockout" || league.format === "ladder_cup" || hasQualifyingLadderCupFinish;
 
   // Persists which group each team landed in. Supabase doesn't support per-row
   // bulk updates with different values in one call, so we fire them in parallel.
