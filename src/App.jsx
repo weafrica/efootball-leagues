@@ -7050,7 +7050,6 @@ export default function App() {
     { icon: ShoppingBag, label: "Shop", external: true, onClick: () => setView("shop") },
     { icon: Repeat, label: "Transfers", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
-    { icon: Settings2, label: "Edit profile", onClick: () => setEditProfileOpen(true) },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),
     ...(isAdmin ? [{ icon: History, label: "Activity log", onClick: () => { setView("activity"); loadActivityLog(); } }] : []),
@@ -9559,7 +9558,7 @@ function QuickActionsDock({ open, onToggle, items, c }) {
       )}
       <div className="fixed bottom-5 right-4 z-50 flex flex-col items-end gap-2.5">
         {open && (
-          <div className="rounded-2xl p-3 shadow-xl max-h-[70vh] overflow-y-auto" style={{ background: c.bg, border: `1px solid ${c.borderStrong}` }}>
+          <div className="rounded-2xl p-3 shadow-xl" style={{ background: c.bg, border: `1px solid ${c.borderStrong}` }}>
             <div className="font-mono text-[9px] uppercase tracking-[0.2em] mb-2 text-right" style={{ color: c.textFaint }}>Quick actions</div>
             <div className="grid grid-cols-3 gap-2 w-[210px]">
               {items.map((it) => (
