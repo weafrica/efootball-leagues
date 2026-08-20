@@ -7,7 +7,7 @@ import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
-import { entryFeeForLeagueFormat } from "./economy.js";
+import { entryFeeForLeagueFormat, ENTRY_FEES_NETS } from "./economy.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -3289,6 +3289,30 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Daily login reward: 1N, once per UTC calendar day, just for being
+  // signed in — claim_daily_login_reward (20260842) is the source of
+  // truth on eligibility (locks the wallet row, checks last_login_reward_at
+  // against today's UTC date), so this just calls it whenever a session
+  // shows up — fresh sign-in, a restored session on page load, or an
+  // auth-state change later in the same tab. Idempotent server-side (any
+  // call after the first one that day just returns claimed: false), so no
+  // client-side "already tried this session" guard is needed beyond not
+  // re-firing on every unrelated render, which the session.user.id
+  // dependency below already handles. Balance updates live via
+  // useNetsBalance's Realtime subscription (nets.js), so no manual
+  // refresh here — just the toast telling them it landed.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    (async () => {
+      const { data, error } = await supabase.rpc("claim_daily_login_reward");
+      if (error) return; // silent — not worth surfacing a toast for a bonus that failed to check
+      const result = Array.isArray(data) ? data[0] : data;
+      if (result?.claimed) {
+        showToast(`+${formatNets(1)} for logging in today!`);
+      }
+    })();
+  }, [session?.user?.id, showToast]);
+
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -3652,16 +3676,36 @@ export default function App() {
   // accept, so nobody's number is exposed before they've agreed to it.
   // `isLadder` tags it so that, if it's ever confirmed, the points-awarding
   // trigger in Supabase actually credits the two of them.
+  //
+  // Ladder Challenges now cost ENTRY_FEES_NETS.ladder_challenge (5) —
+  // charged to the challenger here, same after-insert-then-debit-with-
+  // rollback-on-failure pattern joinLeague uses for league entry fees:
+  // nets_debit is self-service (fine to call after the insert), but
+  // reversing it would need nets_credit, which is admin-only, so a failed
+  // debit just deletes the just-created row instead. Plain (non-ladder)
+  // challenges stay free.
   const sendChallenge = async (opponent, isLadder = false) => {
-    const { error } = await supabase.from("challenges").insert({
+    const { data: inserted, error } = await supabase.from("challenges").insert({
       challenger_id: session.user.id,
       challenger_username: profile.efootball_username,
       challenger_phone: profile.phone,
       opponent_id: opponent.user_id,
       opponent_username: opponent.username,
       is_ladder: isLadder,
-    });
+    }).select().single();
     if (error) { showToast(`Couldn't send challenge: ${error.message}`); return; }
+
+    if (isLadder) {
+      const fee = ENTRY_FEES_NETS.ladder_challenge;
+      try {
+        await debitNets(fee, "ladder_challenge_entry_fee", { refType: "challenge", refId: inserted.id });
+      } catch (err) {
+        await supabase.from("challenges").delete().eq("id", inserted.id);
+        showToast(/insufficient/i.test(err.message || "") ? `You need ${formatNets(fee)} to send a ladder challenge.` : `Couldn't charge the entry fee: ${err.message}`);
+        return;
+      }
+    }
+
     logActivity("challenge_sent", { opponent_username: opponent.username, is_ladder: isLadder });
     await loadChallenges();
     showToast(isLadder ? `Ladder challenge sent to ${opponent.username} — win it and their spot is yours.` : `Challenge sent to ${opponent.username}.`);
@@ -3670,7 +3714,22 @@ export default function App() {
   // Accepting fills in the opponent's own phone right at the moment they agree
   // to it — the only way their number ever lands on the row. Declining just
   // flips the status so the challenger can see it was seen and passed on.
+  //
+  // Ladder Challenges: the opponent pays their own ENTRY_FEES_NETS.ladder_challenge
+  // (5) on accept — charged BEFORE the status update rather than after (unlike
+  // sendChallenge's insert-then-debit-with-rollback), since there's no new row
+  // to roll back here; a failed debit just leaves the challenge pending and
+  // nothing else changes. Declining never charges anything.
   const respondChallenge = async (challenge, accept) => {
+    if (accept && challenge.is_ladder) {
+      const fee = ENTRY_FEES_NETS.ladder_challenge;
+      try {
+        await debitNets(fee, "ladder_challenge_entry_fee", { refType: "challenge", refId: challenge.id });
+      } catch (err) {
+        showToast(/insufficient/i.test(err.message || "") ? `You need ${formatNets(fee)} to accept a ladder challenge.` : `Couldn't charge the entry fee: ${err.message}`);
+        return;
+      }
+    }
     const update = accept
       ? { status: "accepted", opponent_phone: profile.phone, responded_at: new Date().toISOString() }
       : { status: "declined", responded_at: new Date().toISOString() };

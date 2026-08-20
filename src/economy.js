@@ -26,9 +26,13 @@ const PARTICIPATION_NET = 1;
 
 const MATCH_REWARD_TABLE = {
   random_match: { win: 2, draw: 1, loss: 0, draws: true, participation: true },
-  // Ladder Battles pays more for punching up — beating a higher-ranked
-  // opponent is worth 3x a loss's floor, beating a lower-ranked one 1x.
-  ladder_battle: { winHigher: 3, winLower: 1, draw: 2, loss: 0, draws: true, participation: true },
+  // Ladder Battle (the per-match reward inside a Ladder Cup) now mirrors
+  // Six-Day Survivor's flat shape exactly: win 4, loss 0, no draws (there
+  // are none in this format), no participation net. Previously tiered by
+  // beatHigherRank (winHigher 3 / winLower 1 / draw 2, +1 participation)
+  // — that scheme is gone; the Ladder Cup's own upset bonus already lives
+  // in the standings-points system (ladderCup.js's UPSET_BONUS), not here.
+  ladder_battle: { win: 4, loss: 0, draws: false, participation: false },
   six_day_survivor: { win: 4, loss: 0, draws: false, participation: false },
   league: { win: 5, draw: 2, loss: 0, draws: true, participation: true }, // double round robin
   // Home & away knockout: win starts at 3 and grows 1/round, so a final
@@ -58,16 +62,14 @@ export const MATCH_TYPES = Object.keys(MATCH_REWARD_TABLE);
 //   matchType: one of MATCH_TYPES
 //   outcome:   "win" | "draw" | "loss"
 //   options:
-//     - ladder_battle win: { beatHigherRank: boolean } — which win tier
-//     - knockout win:      { round: number }            — 1-indexed round
+//     - knockout win: { round: number } — 1-indexed round
 export function computeMatchNets(matchType, outcome, options = {}) {
   const table = MATCH_REWARD_TABLE[matchType];
   if (!table) throw new Error(`computeMatchNets: unknown match type "${matchType}"`);
 
   let base;
   if (outcome === "win") {
-    if (matchType === "ladder_battle") base = options.beatHigherRank ? table.winHigher : table.winLower;
-    else if (matchType === "knockout") base = table.winBase + table.winPerRound * ((options.round || 1) - 1);
+    if (matchType === "knockout") base = table.winBase + table.winPerRound * ((options.round || 1) - 1);
     else base = table.win;
   } else if (outcome === "draw") {
     if (!table.draws) throw new Error(`computeMatchNets: ${matchType} has no draws`);
@@ -86,12 +88,23 @@ export function computeMatchNets(matchType, outcome, options = {}) {
 // normal (round robin) leagues and Survivor-format leagues; they share one
 // price since both are the same "full league" commitment, distinct from
 // the standalone Six-Day Survivor Cup below.
+//
+// All four league-format fees cut by 75% (now 25% of their original
+// value): 40→10, 240→60, 50→12.5→13 (rounded), 80→20. ladder_challenge is
+// a new, separate fee — introduced fresh at 5, not derived from a cut of
+// anything — for individual Ladder Challenges (the `challenges` table,
+// is_ladder = true; NOT the Ladder Cup league format above, which already
+// has its own six_day_survivor-priced entry fee). Each side of a ladder
+// challenge pays their own 5, same as any other Nets self-debit — the
+// challenger on sending, the opponent on accepting (see sendChallenge /
+// respondChallenge in App.jsx).
 // ─────────────────────────────────────────────────────────────────────────
 export const ENTRY_FEES_NETS = {
-  six_day_survivor: 40,
-  league: 240, // normal leagues + survivor-format leagues
-  knockout: 50, // home & away, ~150 teams / 8 rounds / ~32 days
-  groups_knockout: 80,
+  six_day_survivor: 10, // was 40
+  league: 60, // was 240 — normal leagues + survivor-format leagues
+  knockout: 13, // was 50 (12.5 rounded) — home & away, ~150 teams / 8 rounds / ~32 days
+  groups_knockout: 20, // was 80
+  ladder_challenge: 5, // new — per side, individual is_ladder challenges only
 };
 
 // entryFeeForLeagueFormat(format) → Nets cost to join, or null if this
@@ -152,6 +165,38 @@ export function computePrizePool(totalNets, participantCount) {
   if (paidPlaces <= 0) return [];
 
   const shares = TOP20_PRIZE_SPLIT.slice(0, paidPlaces).map((frac) => totalNets * frac);
+  const floors = shares.map((s) => Math.floor(s));
+  const flooredSum = floors.reduce((a, b) => a + b, 0);
+  const exactSum = shares.reduce((a, b) => a + b, 0);
+  floors[0] += Math.round(exactSum - flooredSum);
+
+  return floors.map((nets, i) => ({ rank: i + 1, nets }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Ladder Cup prize pool split — Ladder Cup pays out separately from the
+// pooled Top 20 system above (it's excluded there; see
+// finalize_ladder_cup_prize_pool). Winner takes a flat 50% off the top;
+// the remaining 50% is spread across 2nd–20th using the SAME relative
+// shape TOP20_PRIZE_SPLIT uses for those places (2nd gets proportionally
+// more than 20th, same taper), just rescaled so places 2–20 sum to 0.50
+// instead of 0.70. Scale factor = 0.50 / (1 - TOP20_PRIZE_SPLIT[0]).
+// ─────────────────────────────────────────────────────────────────────────
+const LADDER_CUP_RUNNER_UP_SCALE = 0.50 / (1 - TOP20_PRIZE_SPLIT[0]); // 0.50 / 0.70
+
+export const LADDER_CUP_PRIZE_SPLIT = [
+  0.50, // 1st (champion)
+  ...TOP20_PRIZE_SPLIT.slice(1).map((frac) => frac * LADDER_CUP_RUNNER_UP_SCALE),
+];
+
+// computeLadderCupPrizePool(totalNets, participantCount) → [{ rank, nets }, ...]
+// Same pay-min(participants, 20)-places and floor-then-fix-up-on-1st
+// rounding as computePrizePool, just against LADDER_CUP_PRIZE_SPLIT.
+export function computeLadderCupPrizePool(totalNets, participantCount) {
+  const paidPlaces = Math.min(participantCount, LADDER_CUP_PRIZE_SPLIT.length);
+  if (paidPlaces <= 0) return [];
+
+  const shares = LADDER_CUP_PRIZE_SPLIT.slice(0, paidPlaces).map((frac) => totalNets * frac);
   const floors = shares.map((s) => Math.floor(s));
   const flooredSum = floors.reduce((a, b) => a + b, 0);
   const exactSum = shares.reduce((a, b) => a + b, 0);

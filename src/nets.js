@@ -11,11 +11,11 @@ import { supabase } from "./supabaseClient";
 export const NETS_LABEL = "Nets";
 export const NETS_SYMBOL = "N";
 
-// Formats a balance for display like a currency — symbol first, same
-// pattern as the Shop's "R1,250" formatMoney: "N1,250" / "N50" / "N0".
+// Formats a balance for display like a currency — number first, symbol
+// suffix: "1,250N" / "50N" / "0N".
 export function formatNets(amount) {
   const n = Number(amount) || 0;
-  return `${NETS_SYMBOL}${n.toLocaleString("en-ZA")}`;
+  return `${n.toLocaleString("en-ZA")}${NETS_SYMBOL}`;
 }
 
 // Compact form is identical here since the symbol-first style is already
