@@ -43,6 +43,13 @@ const MATCH_REWARD_TABLE = {
   // (see isDeciderFixture/advanceKnockout in App.jsx) — goes to penalties
   // instead of staying level, so this branch never fires for those.
   knockout: { winBase: 3, winPerRound: 1, loss: 0, draw: 0, draws: true, participation: true },
+  // groups_knockout's group stage (stage 1) only — its own bracket stage
+  // (stage 2) reuses the 'knockout' table above, same as pure knockout
+  // leagues. A plain round-robin group match CAN end level (unlike the
+  // bracket), so this keeps the normal win/draw/loss shape 'league' uses,
+  // just at groups_knockout's own lower reward: win=4, draw=2, loss=0,
+  // +1 participation.
+  groups_knockout_group: { win: 4, draw: 2, loss: 0, draws: true, participation: true },
 };
 
 export const MATCH_TYPES = Object.keys(MATCH_REWARD_TABLE);
@@ -84,6 +91,7 @@ export const ENTRY_FEES_NETS = {
   six_day_survivor: 40,
   league: 240, // normal leagues + survivor-format leagues
   knockout: 50, // home & away, ~150 teams / 8 rounds / ~32 days
+  groups_knockout: 80,
 };
 
 // entryFeeForLeagueFormat(format) → Nets cost to join, or null if this
@@ -97,15 +105,15 @@ export const ENTRY_FEES_NETS = {
 // Sunday cutoff, see LADDER_CUP_INTEGRATION.md) is the "Six-Day Survivor
 // Cup" ENTRY_FEES_NETS.six_day_survivor was priced for — confirmed, not
 // a separate never-built format as previously flagged here.
-//
-// groups_knockout is still NOT priced — it was never given a value in
-// ENTRY_FEES_NETS to begin with.
 export function entryFeeForLeagueFormat(format) {
   if (format === "single_round_robin" || format === "double_round_robin" || format === "survivor") {
     return ENTRY_FEES_NETS.league;
   }
   if (format === "knockout") {
     return ENTRY_FEES_NETS.knockout;
+  }
+  if (format === "groups_knockout") {
+    return ENTRY_FEES_NETS.groups_knockout;
   }
   if (format === "ladder_cup") {
     return ENTRY_FEES_NETS.six_day_survivor;

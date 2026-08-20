@@ -4579,6 +4579,53 @@ export default function App() {
     })();
   }, [activeLeague, refreshLeague, showToast]);
 
+  // Auto-finalizes the Nets prize pool for a finished paid ("fun") league —
+  // same pattern as the ladder-cup auto-finalize effect just above: any
+  // browser that has this league open notices it's complete and calls the
+  // same idempotent, SECURITY DEFINER RPC (finalize_league_prize_pool,
+  // 20260839/20260840) any signed-in member can call. The RPC's own
+  // prizes_paid_at row-locked guard means whichever browser gets there
+  // first is the only one that actually pays out — no client-side race
+  // guard needed beyond the dedupe ref below (that's just to stop this
+  // browser from firing the RPC repeatedly while waiting on its response).
+  //
+  // ladder_cup is excluded — it already has its own finalize_ladder_cup +
+  // per-battle reward system, never a pooled payout. entryFeeForLeagueFormat
+  // returning null (an unpriced fun format) means there was never a pool to
+  // begin with, so nothing to finalize either.
+  //
+  // Ranking: computeKnockoutRanking(league) already produces exactly the
+  // ranked team-id order this needs for every format — champion-first
+  // exit-round ranking for knockout/groups_knockout brackets (falling back
+  // to group-stage standings for anyone who never reached the bracket),
+  // and plain computeStandings order for round robin/survivor. Same
+  // function the Wall of Fame and cash-prize payout already trust for
+  // "who finished where" — see computeMyLeagueWins/computeCashPrizes.
+  const finalizedPrizePoolChecked = useRef(new Set());
+  useEffect(() => {
+    if (!activeLeague) return;
+    if (activeLeague.league_type !== "fun" || activeLeague.format === "ladder_cup") return;
+    if (!entryFeeForLeagueFormat(activeLeague.format)) return;
+    if (activeLeague.prizes_paid_at) return;
+    if (!isLeagueCompleted(activeLeague)) return;
+    if (finalizedPrizePoolChecked.current.has(activeLeague.id)) return;
+    finalizedPrizePoolChecked.current.add(activeLeague.id);
+
+    (async () => {
+      const rankedTeamIds = computeKnockoutRanking(activeLeague);
+      const { error } = await supabase.rpc("finalize_league_prize_pool", {
+        p_league_id: activeLeague.id,
+        p_ranked_team_ids: rankedTeamIds,
+      });
+      if (error) {
+        showToast(`Couldn't finalize the prize pool: ${error.message}`);
+        finalizedPrizePoolChecked.current.delete(activeLeague.id); // let a later read retry
+        return;
+      }
+      await refreshLeague(activeLeague.id);
+    })();
+  }, [activeLeague, refreshLeague, showToast]);
+
   // Picks up the intent set by tapping an "Up next" card on Home (see
   // pendingLogFixtureId above) once activeLeague's fixtures/teams are
   // actually available, and opens the same SubmitResultModal the manual

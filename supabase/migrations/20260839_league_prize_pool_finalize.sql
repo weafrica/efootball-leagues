@@ -10,9 +10,10 @@
 -- pays the full top 20.
 --
 -- ladder_cup is NOT covered here — it already has its own
--- finalize_ladder_cup + per-battle reward system. groups_knockout is
--- still unpriced (see economy.js's entryFeeForLeagueFormat) so it never
--- accumulates a pool; this RPC is simply a no-op for it (v_pool stays 0).
+-- finalize_ladder_cup + per-battle reward system. groups_knockout is now
+-- priced too (80 Nets, see 20260840) and pays out through this same RPC —
+-- v_cap below already caps it at 2 places same as knockout, since a
+-- bracket only cleanly ranks its two finalists.
 --
 -- leagues.prizes_paid_at (added below) is the double-pay guard, set
 -- inside the same row-locked transaction that computes and credits the
