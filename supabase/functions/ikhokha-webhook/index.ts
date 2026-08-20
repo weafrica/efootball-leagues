@@ -1,19 +1,34 @@
-// supabase/functions/create-nets-payment/index.ts
+// supabase/functions/ikhokha-webhook/index.ts
 //
-// Creates an iKhokha payment link for a Nets top-up (a row already
-// inserted into `nets_purchases` with payment_status = 'pending'). Same
-// shape as create-entry-payment, just pointed at nets_purchases instead
-// of members — the externalTransactionID sent to iKhokha IS the purchase
-// row's id, so ikhokha-webhook can flip that exact row to 'approved' (and
-// credit the wallet) the instant the card payment succeeds.
+// Receives payment status callbacks from iKhokha for card payments and
+// auto-approves the matching row — no screenshot proof, no admin review,
+// for card payments specifically. Two things can land here:
+//   - a league entry fee (create-entry-payment), row lives in `members`
+//   - a Nets top-up (create-nets-payment), row lives in `nets_purchases`
 //
-// Call this right after inserting the pending nets_purchases row, when
-// the user clicks "Pay by card" in BuyNetsModal.
+// The externalTransactionID in the payload IS that row's id, whichever
+// table it belongs to — this handler tries `members` first, then
+// `nets_purchases`, since ids from the two tables never collide.
+//
+// Confirmed request shape (iKhokha's official "iK Pay API Integration
+// Guide"):
+//
+//   POST <callbackUrl>
+//   Headers:
+//     ik-appid: <Application Key ID>
+//     ik-sign:  hash_hmac("sha256", urlPath + requestBody, AppSecret)
+//   Body:
+//   {
+//     "paylinkID": "...",
+//     "status": "SUCCESS" | "FAILURE",
+//     "externalTransactionID": "<members.id>",
+//     "responseCode": "00"
+//   }
 //
 // Deploy with:
-//   supabase functions deploy create-nets-payment
+//   supabase functions deploy ikhokha-webhook
 //
-// Required secrets (same as ikhokha-webhook / create-entry-payment):
+// Required secrets (set with `supabase secrets set ...`):
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
 //   IKHOKHA_APP_ID
@@ -27,14 +42,11 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
-const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID")!;
-const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET")!;
+const IKHOKHA_APP_ID = Deno.env.get("IKHOKHA_APP_ID");
+const IKHOKHA_SIGN_SECRET = Deno.env.get("IKHOKHA_SIGN_SECRET");
 
-const API_ENDPOINT = "https://api.ikhokha.com/public-api/v1/api/payment";
-
-// Must match your real domain and the webhook's deployed URL exactly —
-// both are part of what gets signed.
-const SITE_URL = "https://weafrica.co.za";
+// Must match CALLBACK_URL in create-entry-payment exactly — it's part of
+// what gets signed.
 const CALLBACK_URL = "https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/ikhokha-webhook";
 
 function jsStringEscape(str: string): string {
@@ -65,93 +77,154 @@ serve(async (req) => {
     return new Response("method not allowed", { status: 405 });
   }
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
-    return new Response("missing auth", { status: 401 });
+  if (!IKHOKHA_SIGN_SECRET) {
+    console.error("IKHOKHA_SIGN_SECRET is not set");
+    return new Response("server misconfigured", { status: 500 });
   }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  const ikAppId = req.headers.get("ik-appid");
+  const ikSign = req.headers.get("ik-sign");
 
-  if (userError || !user) {
+  if (IKHOKHA_APP_ID && ikAppId !== IKHOKHA_APP_ID) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  const { purchase_id } = await req.json();
-  if (!purchase_id) {
-    return new Response("missing purchase_id", { status: 400 });
+  let payload: {
+    paylinkID?: string;
+    status?: string;
+    externalTransactionID?: string;
+    responseCode?: string;
+  };
+  try {
+    payload = await req.json();
+  } catch {
+    return new Response("invalid json", { status: 400 });
   }
 
-  // Fetch the pending purchase row and confirm it belongs to this user.
+  const requestBodyStr = JSON.stringify(payload);
+  const payloadToSign = createPayloadToSign(CALLBACK_URL, requestBodyStr);
+  const computedSignature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
+
+  if (!ikSign || computedSignature !== ikSign) {
+    console.error(`Signature mismatch. Computed ${computedSignature} but got ${ikSign}`);
+    return new Response("invalid signature", { status: 403 });
+  }
+
+  const { externalTransactionID, status } = payload;
+  if (!externalTransactionID) {
+    return new Response("missing externalTransactionID", { status: 400 });
+  }
+
+  // externalTransactionID is either a members.id (create-entry-payment) or
+  // a nets_purchases.id (create-nets-payment) — try the league-entry table
+  // first since it's the more established flow, then fall back.
+  const { data: member, error: memberError } = await supabase
+    .from("members")
+    .select("id, payment_status")
+    .eq("id", externalTransactionID)
+    .maybeSingle();
+
+  if (memberError) {
+    return new Response("lookup failed", { status: 500 });
+  }
+
+  if (member) {
+    // Idempotency guard — ignore retries once already resolved.
+    if (member.payment_status !== "pending") {
+      return new Response("already processed", { status: 200 });
+    }
+
+    if (status === "SUCCESS") {
+      const { error } = await supabase
+        .from("members")
+        .update({
+          payment_status: "approved",
+          payment_reviewed_at: new Date().toISOString(),
+          payment_reviewed_by: null, // auto-approved by card payment, not a human admin
+        })
+        .eq("id", externalTransactionID);
+
+      if (error) {
+        return new Response("failed to approve member", { status: 500 });
+      }
+    } else {
+      // FAILURE — let them retry rather than permanently rejecting, since
+      // no proof/admin step is involved for card payments.
+      const { error } = await supabase
+        .from("members")
+        .update({ payment_method: null })
+        .eq("id", externalTransactionID);
+
+      if (error) {
+        return new Response("failed to reset member", { status: 500 });
+      }
+    }
+
+    return new Response("ok", { status: 200 });
+  }
+
+  // Not a league entry — try a Nets top-up.
   const { data: purchase, error: purchaseError } = await supabase
     .from("nets_purchases")
-    .select("id, user_id, rand_amount, nets_amount, payment_status")
-    .eq("id", purchase_id)
-    .single();
+    .select("id, user_id, nets_amount, rand_amount, payment_status")
+    .eq("id", externalTransactionID)
+    .maybeSingle();
 
-  if (purchaseError || !purchase) {
-    return new Response("purchase not found", { status: 404 });
+  if (purchaseError) {
+    return new Response("lookup failed", { status: 500 });
   }
-  if (purchase.user_id !== user.id) {
-    return new Response("forbidden", { status: 403 });
+  if (!purchase) {
+    return new Response("transaction not found", { status: 404 });
   }
+
+  // Idempotency guard — ignore retries once already resolved.
   if (purchase.payment_status !== "pending") {
-    return new Response("purchase is not pending payment", { status: 409 });
+    return new Response("already processed", { status: 200 });
   }
 
-  const amountInCents = Math.round((purchase.rand_amount || 0) * 100);
-  if (amountInCents <= 0) {
-    return new Response("invalid amount", { status: 400 });
-  }
-
-  const requestBody = {
-    entityID: IKHOKHA_APP_ID,
-    externalEntityID: purchase.user_id,
-    amount: amountInCents,
-    currency: "ZAR",
-    requesterUrl: SITE_URL,
-    mode: "live", // switch to "test" while testing against iKhokha's sandbox, if available
-    description: `Nets top-up — ${purchase.nets_amount} Nets`,
-    externalTransactionID: purchase.id,
-    urls: {
-      callbackUrl: CALLBACK_URL,
-      successPageUrl: `${SITE_URL}/?paid=success`,
-      failurePageUrl: `${SITE_URL}/?paid=failure`,
-      cancelUrl: `${SITE_URL}/?paid=cancel`,
-    },
-  };
-
-  const requestBodyStr = JSON.stringify(requestBody);
-  const payloadToSign = createPayloadToSign(API_ENDPOINT, requestBodyStr);
-  const signature = await hmacSha256Hex(payloadToSign, IKHOKHA_SIGN_SECRET);
-
-  const ikResponse = await fetch(API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "IK-APPID": IKHOKHA_APP_ID,
-      "IK-SIGN": signature,
-    },
-    body: requestBodyStr,
-  });
-
-  const ikData = await ikResponse.json();
-
-  if (ikData.responseCode !== "00") {
-    return new Response(JSON.stringify({ error: ikData.message ?? "payment link creation failed" }), {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
+  if (status === "SUCCESS") {
+    // Running as service_role, so this can call the internal credit
+    // function directly — no admin check needed, this IS the trusted
+    // server-side confirmation that the money landed. Compute nothing
+    // client-side: nets_amount was fixed when the purchase row was
+    // created and is never re-derived here.
+    const { error: creditError } = await supabase.rpc("_nets_credit_internal", {
+      p_user_id: purchase.user_id,
+      p_amount: purchase.nets_amount,
+      p_reason: "nets_purchase",
+      p_note: `Top-up — R${purchase.rand_amount}`,
+      p_ref_type: "nets_purchase",
+      p_ref_id: purchase.id,
+      p_team_id: null,
     });
+
+    if (creditError) {
+      return new Response("failed to credit nets", { status: 500 });
+    }
+
+    const { error } = await supabase
+      .from("nets_purchases")
+      .update({
+        payment_status: "approved",
+        payment_reviewed_at: new Date().toISOString(),
+        payment_reviewed_by: null, // auto-approved by card payment, not a human admin
+      })
+      .eq("id", externalTransactionID);
+
+    if (error) {
+      return new Response("failed to approve purchase", { status: 500 });
+    }
+  } else {
+    // FAILURE — let them retry rather than permanently rejecting.
+    const { error } = await supabase
+      .from("nets_purchases")
+      .update({ payment_method: null })
+      .eq("id", externalTransactionID);
+
+    if (error) {
+      return new Response("failed to reset purchase", { status: 500 });
+    }
   }
 
-  // Mark this row as a card-payment attempt so the admin review list can
-  // tell it apart from the manual proof-upload flow (mirrors members.payment_method).
-  await supabase.from("nets_purchases").update({ payment_method: "card" }).eq("id", purchase.id);
-
-  return new Response(JSON.stringify({ paylinkUrl: ikData.paylinkUrl }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response("ok", { status: 200 });
 });
