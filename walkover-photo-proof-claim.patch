@@ -33,7 +33,7 @@ index 12f0b62..d120674 100644
  const standingsBefore = rankLadderCupStandings(entries);
  const { winner, loser } = recordLadderCupWin({
 diff --git a/src/App.jsx b/src/App.jsx
-index 3312add..de0c8fa 100644
+index 3312add..a62c26a 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
 @@ -57,7 +57,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
@@ -109,7 +109,7 @@ index 3312add..de0c8fa 100644
      let proofUrl;
      try {
        proofUrl = await uploadToBlob("result-proofs", path, compressed);
-@@ -5551,10 +5530,23 @@ export default function App() {
+@@ -5551,17 +5530,30 @@ export default function App() {
        return;
      }
  
@@ -137,6 +137,14 @@ index 3312add..de0c8fa 100644
      await refreshLeague(league.id);
      showToast("Walkover claim submitted — waiting on admin review.");
    };
+ 
+   // Admin approval: flips the claim, then applies the walkover exactly the
+   // way LADDER_CUP_INTEGRATION.md's own sample does — recordLadderCupWin
+-  // with isWalkover: true, base 3pts only, and the target goes through the
++  // with isWalkover: true, the reduced walkover point value only, and the target goes through the
+   // same loss/second-life path a played defeat would. badge_walkover isn't
+   // part of recordLadderCupWin's round trip (see ladderCupRowPatchFromEntry's
+   // comment above) so it's bumped here, the one place a walkover win is
 @@ -7231,8 +7223,7 @@ export default function App() {
                  onAdminResolveLadderCupMatchResult={(match, approve) => adminResolveLadderCupMatchResult(activeLeague, match, approve)}
                  onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
@@ -374,7 +382,7 @@ index c5c4390..df7d736 100644
        ) : notStarted ? (
          <div>
 diff --git a/src/formats/ladderCup.js b/src/formats/ladderCup.js
-index cd58c26..f2c7937 100644
+index cd58c26..79568c3 100644
 --- a/src/formats/ladderCup.js
 +++ b/src/formats/ladderCup.js
 @@ -9,7 +9,7 @@
@@ -416,7 +424,27 @@ index cd58c26..f2c7937 100644
    JOIN_CONTACT_WINDOW_HOURS: 24,
    // How long a specific opponent stays visible on a club's own challenge
    // board (getOpponentPool) without that club tapping WhatsApp on them
-@@ -611,38 +611,29 @@ export function poolSightingDeadline(sighting) {
+@@ -76,6 +76,7 @@ export const LADDER_CUP_RULES = {
+   // ladderCupOpponentTimerState.
+   MIN_OPPONENTS_SHOWN: 3,
+   BASE_WIN_POINTS: 3,
++  WALKOVER_WIN_POINTS: 1, // an approved walkover is worth less than a played win
+   UPSET_BONUS: 1,
+   HEATER_BONUS: 1,
+   BOUNTY_BONUS: 2,
+@@ -234,8 +235,9 @@ export function getBountyTargetIds(standingsBeforeMatch) {
+ export function computeWinPoints({ isWalkover, beatHigherRank, streakAfterThisWin, isBountyTarget }) {
+   const R = LADDER_CUP_RULES;
+   if (isWalkover) {
+-    // "Walkover win scoring: BASE 3 POINTS ONLY — no upset, no bounty, no heater stack"
+-    return { points: R.BASE_WIN_POINTS, breakdown: { base: R.BASE_WIN_POINTS, upset: 0, heater: 0, bounty: 0 } };
++    // Walkover win scoring: a flat, reduced point award — no upset, no
++    // bounty, no heater stack — since no match was actually played.
++    return { points: R.WALKOVER_WIN_POINTS, breakdown: { base: R.WALKOVER_WIN_POINTS, upset: 0, heater: 0, bounty: 0 } };
+   }
+   const base = R.BASE_WIN_POINTS;
+   const upset = beatHigherRank ? R.UPSET_BONUS : 0;
+@@ -611,38 +613,29 @@ export function poolSightingDeadline(sighting) {
  // Walkover claims (step 3)
  // ---------------------------------------------------------------------------
  
@@ -469,7 +497,7 @@ index cd58c26..f2c7937 100644
  /**
   * Admin approves a pending claim. This only flips the claim's status — the
   * caller still needs to call recordLadderCupWin({ isWalkover: true, ... })
-@@ -667,12 +658,11 @@ export function rejectWalkoverClaim(claim) {
+@@ -667,12 +660,11 @@ export function rejectWalkoverClaim(claim) {
  
  /**
   * Filters out anything not finalized by the Sunday 10PM (UTC+2) cutoff:
@@ -486,7 +514,7 @@ index cd58c26..f2c7937 100644
   * the board from earlier, finalized results; it only tells the caller
   * which in-flight matches/claims to discard rather than rushing them
   * through after the deadline.
-@@ -680,7 +670,7 @@ export function rejectWalkoverClaim(claim) {
+@@ -680,7 +672,7 @@ export function rejectWalkoverClaim(claim) {
  export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
    const cutoffTime = new Date(cutoff).getTime();
    const finalizedMatches = matches.filter((m) => m.finalized_at && new Date(m.finalized_at).getTime() <= cutoffTime);
@@ -497,10 +525,10 @@ index cd58c26..f2c7937 100644
  
 diff --git a/supabase/migrations/20260821_ladder_cup_walkover_claim_direct.sql b/supabase/migrations/20260821_ladder_cup_walkover_claim_direct.sql
 new file mode 100644
-index 0000000..16b7783
+index 0000000..0e1e103
 --- /dev/null
 +++ b/supabase/migrations/20260821_ladder_cup_walkover_claim_direct.sql
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,143 @@
 +-- WEAFRICA SURVIVAL LADDER CUP — walkover claims go direct, no message/wait
 +--
 +-- Previously: message opponent (status 'messaged') → wait 24h
@@ -522,6 +550,17 @@ index 0000000..16b7783
 +--    Safe to run even if the table has no 'messaged' rows.
 +update ladder_cup_walkover_claims set status = 'rejected'
 +  where status = 'messaged';
++
++-- 0b. Some rows can still have a null proof_url after the above — e.g. an
++--     'approved'/'rejected' claim from before screenshots were mandatory
++--     at all. Backfill a placeholder rather than touch their status: an
++--     approved claim already had its result applied to the ladder, and
++--     rewriting history there would misrepresent what actually happened.
++--     The placeholder is obviously not a real URL, so a "View screenshot"
++--     tap on one of these just 404s — same as it effectively does today
++--     with proof_url null.
++update ladder_cup_walkover_claims set proof_url = 'legacy-no-proof-on-file'
++  where proof_url is null;
 +
 +-- 1. messaged_at → claimed_at (same column, new name/meaning: the moment
 +--    the claim — proof and all — was submitted, not the moment someone

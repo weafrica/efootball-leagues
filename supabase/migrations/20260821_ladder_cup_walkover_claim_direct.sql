@@ -20,6 +20,17 @@
 update ladder_cup_walkover_claims set status = 'rejected'
   where status = 'messaged';
 
+-- 0b. Some rows can still have a null proof_url after the above — e.g. an
+--     'approved'/'rejected' claim from before screenshots were mandatory
+--     at all. Backfill a placeholder rather than touch their status: an
+--     approved claim already had its result applied to the ladder, and
+--     rewriting history there would misrepresent what actually happened.
+--     The placeholder is obviously not a real URL, so a "View screenshot"
+--     tap on one of these just 404s — same as it effectively does today
+--     with proof_url null.
+update ladder_cup_walkover_claims set proof_url = 'legacy-no-proof-on-file'
+  where proof_url is null;
+
 -- 1. messaged_at → claimed_at (same column, new name/meaning: the moment
 --    the claim — proof and all — was submitted, not the moment someone
 --    was messaged).
