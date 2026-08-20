@@ -31,9 +31,11 @@ const MATCH_REWARD_TABLE = {
   ladder_battle: { winHigher: 3, winLower: 1, draw: 2, loss: 0, draws: true, participation: true },
   six_day_survivor: { win: 4, loss: 0, draws: false, participation: false },
   league: { win: 5, draw: 2, loss: 0, draws: true, participation: true }, // double round robin
-  // Home & away knockout: win starts at 2 and grows 0.5/round, so a final
-  // (round 8, ~32 days deep) is worth far more than a round-1 win.
-  knockout: { winBase: 2, winPerRound: 0.5, loss: 0, draws: false, participation: false },
+  // Home & away knockout: win starts at 3 and grows 1/round, so a final
+  // (round 8, ~32 days deep) is worth far more than a round-1 win. Applies
+  // uniformly to every played fixture — leg or decider — since the reward
+  // is per-fixture, not per-tie: participation net now applies here too.
+  knockout: { winBase: 3, winPerRound: 1, loss: 0, draws: false, participation: true },
 };
 
 export const MATCH_TYPES = Object.keys(MATCH_REWARD_TABLE);
