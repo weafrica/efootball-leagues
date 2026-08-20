@@ -73,22 +73,18 @@ that's the whole mechanism, no extra state to track. An empty result means
 there's genuinely no one in range yet; show a "waiting for opponents"
 state rather than treating it as an error.
 
-## 4. Walkover claims (step 3)
+## 4. Walkover claims (step 3, revised — direct claim, no message/wait)
 
 ```js
-import { createWalkoverClaim, isWalkoverClaimable, submitWalkoverClaim, approveWalkoverClaim, recordLadderCupWin } from "./formats/ladderCup.js";
+import { createWalkoverClaim, approveWalkoverClaim, recordLadderCupWin } from "./formats/ladderCup.js";
 
-// Player messages an opponent from the opponent slate:
-const claim = createWalkoverClaim(myClubId, targetClubId);
-// persist to ladder_cup_walkover_claims (status: "messaged")
-
-// 24h later, player submits with a screenshot — UI should only show the
-// claim button once isWalkoverClaimable(claim) is true:
-const submitted = submitWalkoverClaim(claim, proofUrl);
-// persist (status: "pending_review")
+// Player taps "Claim walkover" on an opponent from the opponent slate,
+// screenshot proof required up front — no messaging step, no wait:
+const claim = createWalkoverClaim(myClubId, targetClubId, proofUrl);
+// persist to ladder_cup_walkover_claims (status: "pending_review" already)
 
 // Admin approves:
-const approved = approveWalkoverClaim(submitted);
+const approved = approveWalkoverClaim(claim);
 // then apply it as a real result, same path as any logged match:
 const standingsBefore = rankLadderCupStandings(entries);
 const { winner, loser } = recordLadderCupWin({
