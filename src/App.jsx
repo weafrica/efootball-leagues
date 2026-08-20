@@ -6,7 +6,8 @@ import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import NetsBadge from "./NetsBadge.jsx";
-import { creditNets, formatNets } from "./nets.js";
+import { creditNets, debitNets, formatNets } from "./nets.js";
+import { entryFeeForLeagueFormat } from "./economy.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -5676,6 +5677,31 @@ export default function App() {
       team_id: match ? match.id : null,
     });
     if (error) { showToast("Couldn't join — you may already be a member."); return; }
+
+    // Nets entry fee — fun leagues only (cash leagues already charge real
+    // money via the proof-of-payment flow in startJoin/claimOrRegisterTeam
+    // below) and only when actually claiming/registering a team, never for
+    // joining as a spectator (team_id: null). See economy.js's
+    // entryFeeForLeagueFormat for which formats are priced.
+    //
+    // Charged AFTER the member row exists rather than before: nets_debit
+    // is self-service (fine to call first), but reversing a charge would
+    // need nets_credit, which is admin-only (20260826/20260831) — a plain
+    // user can't refund themselves through it. Deleting the just-created
+    // membership row on a failed debit is self-service (same RLS leaveLeague
+    // already relies on), so failing this way needs no privileged refund
+    // path at all.
+    const entryFee = (match && league.league_type === "fun") ? entryFeeForLeagueFormat(league.format) : null;
+    if (entryFee) {
+      try {
+        await debitNets(entryFee, "league_entry_fee", { refType: "league", refId: leagueId });
+      } catch (err) {
+        await supabase.from("members").delete().eq("league_id", leagueId).eq("user_id", session.user.id);
+        showToast(/insufficient/i.test(err.message || "") ? `You need ${formatNets(entryFee)} to join this league.` : `Couldn't charge the entry fee: ${err.message}`);
+        return;
+      }
+    }
+
     logActivity("league_joined", { league_id: leagueId, league_name: league.name, as_team: !!match });
     await refreshLeague(leagueId);
     showToast(match ? `Joined — you're playing as ${match.name}.` : "Joined as a spectator — your username isn't on this league's team list.");

@@ -79,6 +79,33 @@ export const ENTRY_FEES_NETS = {
   knockout: 50, // home & away, ~150 teams / 8 rounds / ~32 days
 };
 
+// entryFeeForLeagueFormat(format) → Nets cost to join, or null if this
+// league format isn't a paid-entry format.
+//
+// Maps leagues.format (single_round_robin, double_round_robin, survivor,
+// knockout, groups_knockout, ladder_cup) onto ENTRY_FEES_NETS. 'league'
+// covers every round-robin/survivor shape, per the "normal leagues +
+// survivor-format leagues" comment above. ladder_cup ("Survival Ladder
+// Cup" — ranked ladder, one elimination life each, decided by the weekly
+// Sunday cutoff, see LADDER_CUP_INTEGRATION.md) is the "Six-Day Survivor
+// Cup" ENTRY_FEES_NETS.six_day_survivor was priced for — confirmed, not
+// a separate never-built format as previously flagged here.
+//
+// groups_knockout is still NOT priced — it was never given a value in
+// ENTRY_FEES_NETS to begin with.
+export function entryFeeForLeagueFormat(format) {
+  if (format === "single_round_robin" || format === "double_round_robin" || format === "survivor") {
+    return ENTRY_FEES_NETS.league;
+  }
+  if (format === "knockout") {
+    return ENTRY_FEES_NETS.knockout;
+  }
+  if (format === "ladder_cup") {
+    return ENTRY_FEES_NETS.six_day_survivor;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Top 20 prize pool split — how a finished paid format's pool is divided.
 // Only the top TOP20_PRIZE_SPLIT.length places get paid; with fewer than
