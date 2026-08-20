@@ -667,10 +667,17 @@ export function isFinalFixture(fixture, league) {
 // higher than that. Same job isFinalFixture does for the bracket final:
 // tells the result-entry UI this scoreline needs a penalty score if it's
 // tied, since (like the final) there's no further leg to fall back on.
+// A league configured for a single leg (knockout_legs === 1) never gets a
+// second leg to fall back on either — that one match IS the tie, the same
+// way the final is — so it's just as decisive as an actual decider leg even
+// though its own leg number (1) isn't past the configured count (also 1).
+// Without this, a level scoreline on a single-leg non-final tie would skip
+// the penalty prompt and advanceKnockout would try to bolt on a decider leg
+// for a league that was configured to never have one.
 export function isDeciderFixture(fixture, league) {
   if (!fixture || fixture.away_team_id === null) return false;
   const configuredLegs = league.knockout_legs || 1;
-  return fixture.leg > configuredLegs;
+  return configuredLegs === 1 || fixture.leg > configuredLegs;
 }
 
 // Sums a penalty-shootout score the same way aggregateFor sums regulation
@@ -6351,8 +6358,11 @@ export default function App() {
       if (totals[teamA] === totals[teamB]) {
         const allLegsNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
         if (allLegsNoShow) { bothEliminatedIds.push(teamA, teamB); return; }
-        if (isFinal) {
-          // The final always needs exactly one winner — fall back to penalties.
+        if (isFinal || configuredLegs === 1) {
+          // The final always needs exactly one winner, and a single-leg
+          // config has no second leg to fall back on either — both fall
+          // back to penalties instead of inserting a leg that was never
+          // configured to exist.
           const pensA = pensAggregateFor(legs, teamA);
           const pensB = pensAggregateFor(legs, teamB);
           if (pensA !== null && pensB !== null && pensA !== pensB) {
@@ -6362,7 +6372,7 @@ export default function App() {
           tieNeedsPens = true;
           return;
         }
-        // Non-final and still level. If no decider leg has been added yet
+        // Non-final, multi-leg, and still level. If no decider leg has been added yet
         // for this tie (legs.length is still just the configured home &
         // away count), add one now instead of letting both clubs through —
         // the round can't advance until it's played (the unplayed check at

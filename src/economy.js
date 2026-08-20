@@ -35,7 +35,14 @@ const MATCH_REWARD_TABLE = {
   // (round 8, ~32 days deep) is worth far more than a round-1 win. Applies
   // uniformly to every played fixture — leg or decider — since the reward
   // is per-fixture, not per-tie: participation net now applies here too.
-  knockout: { winBase: 3, winPerRound: 1, loss: 0, draws: false, participation: true },
+  //
+  // draws: true, draw: 0 — a level scoreline pays the same as a loss (0
+  // base + 1 participation = 1). This is only reachable for a plain leg of
+  // a two-legged (home & away) tie: every fixture that must produce an
+  // outright winner — a single-leg match, the final, or the tie's decider
+  // (see isDeciderFixture/advanceKnockout in App.jsx) — goes to penalties
+  // instead of staying level, so this branch never fires for those.
+  knockout: { winBase: 3, winPerRound: 1, loss: 0, draw: 0, draws: true, participation: true },
 };
 
 export const MATCH_TYPES = Object.keys(MATCH_REWARD_TABLE);
