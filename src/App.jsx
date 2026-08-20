@@ -57,7 +57,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, isWalkoverClaimable, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, hasMissedJoinContactWindow, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, hasMissedJoinContactWindow, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -5501,48 +5501,27 @@ export default function App() {
     showToast(rebirthAnnouncement(clubName, finishedLife));
   };
 
-  // Step 12: walkover claims (message → 24h wait → claim with screenshot →
-  // admin review). "Message opponent" is a purely local bookkeeping step —
-  // the actual message happens outside the app (WhatsApp) — createWalkoverClaim
-  // just computes claimable_at, 24h out. The DB's partial unique index on
-  // (claimant_team_id, target_team_id) for status in (messaged, pending_review)
-  // is what actually blocks a second open claim against the same target;
-  // 23505 here means one's already in flight. The "up to 10 concurrent claims"
-  // cap from the ruleset falls out for free since this is only ever called
-  // from a shown-opponent row and getOpponentPool shows at most 10.
-  const messageLadderCupWalkoverOpponent = async (league, myTeamId, opponentTeamId) => {
+  // Step 12: walkover claims — claim with screenshot proof, straight to
+  // admin review. No messaging step, no wait: the button uploads a
+  // screenshot and creates the claim (already at pending_review) in one
+  // go. Routed through the claim_ladder_cup_walkover RPC rather than a
+  // direct insert — same RLS-safe pattern as ensure_ladder_cup_entry and
+  // initiate_ladder_cup_match (see
+  // supabase/migrations/20260821_ladder_cup_walkover_claim_direct.sql).
+  // The DB's partial unique index on (claimant_team_id, target_team_id)
+  // for status = pending_review is what actually blocks a second open
+  // claim against the same target; 23505 here means one's already in
+  // flight. The "up to 10 concurrent claims" cap from the ruleset falls
+  // out for free since this is only ever called from a shown-opponent row
+  // and getOpponentPool shows at most 10.
+  const claimLadderCupWalkover = async (league, myTeamId, opponentTeamId, file) => {
     if (!myTeamId || !opponentTeamId) return;
     if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new walkover claims."); return; }
-    const claim = createWalkoverClaim(myTeamId, opponentTeamId);
-    // Routed through the start_ladder_cup_walkover_claim RPC rather than a
-    // direct insert — same RLS-safe pattern as ensure_ladder_cup_entry and
-    // initiate_ladder_cup_match (see
-    // supabase/migrations/20260816_ladder_cup_walkover_claim_rpc.sql). The
-    // table's partial unique index still enforces "one open claim per
-    // target" server-side, so a duplicate still comes back as a 23505.
-    const { error } = await supabase.rpc("start_ladder_cup_walkover_claim", {
-      p_league_id: league.id, p_claimant_team_id: myTeamId, p_target_team_id: opponentTeamId,
-      p_messaged_at: claim.messaged_at, p_claimable_at: claim.claimable_at,
-    });
-    if (error) {
-      showToast(error.code === "23505" ? "You've already got an open walkover claim against them." : `Couldn't start the claim: ${error.message}`);
-      return;
-    }
-    await refreshLeague(league.id);
-    showToast("Opponent messaged — claimable in 24h if they still haven't played.");
-  };
-
-  // Screenshot proof is mandatory, same as a played result. isWalkoverClaimable
-  // is re-checked here (not just trusted from the button being shown) since
-  // the 24h window could've lapsed between render and tap.
-  const submitLadderCupWalkoverClaim = async (league, claimRow, file) => {
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this claim no longer counts."); return; }
     if (!file) { showToast("Attach a screenshot before submitting the claim."); return; }
-    if (!isWalkoverClaimable(claimRow)) { showToast("Not claimable yet — still inside the 24h wait."); return; }
 
     const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
     const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${session.user.id}/walkover-${claimRow.id}-${Date.now()}.${ext}`;
+    const path = `${session.user.id}/walkover-${myTeamId}-${opponentTeamId}-${Date.now()}.${ext}`;
     let proofUrl;
     try {
       proofUrl = await uploadToBlob("result-proofs", path, compressed);
@@ -5551,10 +5530,23 @@ export default function App() {
       return;
     }
 
-    const { error } = await supabase.from("ladder_cup_walkover_claims")
-      .update({ status: "pending_review", proof_url: proofUrl }).eq("id", claimRow.id);
-    if (error) { showToast(`Couldn't submit the claim: ${error.message}`); return; }
-    logActivity("walkover_claim_submitted", { league_id: league.id, claim_id: claimRow.id });
+    let claim;
+    try {
+      claim = createWalkoverClaim(myTeamId, opponentTeamId, proofUrl);
+    } catch (err) {
+      showToast(err.message);
+      return;
+    }
+
+    const { error } = await supabase.rpc("claim_ladder_cup_walkover", {
+      p_league_id: league.id, p_claimant_team_id: myTeamId, p_target_team_id: opponentTeamId,
+      p_claimed_at: claim.claimed_at, p_proof_url: claim.proof_url,
+    });
+    if (error) {
+      showToast(error.code === "23505" ? "You've already got an open walkover claim against them." : `Couldn't submit the claim: ${error.message}`);
+      return;
+    }
+    logActivity("walkover_claim_submitted", { league_id: league.id, target_team_id: opponentTeamId });
     await refreshLeague(league.id);
     showToast("Walkover claim submitted — waiting on admin review.");
   };
@@ -7231,8 +7223,7 @@ export default function App() {
                 onAdminResolveLadderCupMatchResult={(match, approve) => adminResolveLadderCupMatchResult(activeLeague, match, approve)}
                 onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
                 onRejoinLadderCup={() => rejoinLadderCup(activeLeague, myTeam(activeLeague)?.id)}
-                onMessageLadderCupWalkoverOpponent={(opponentTeamId) => messageLadderCupWalkoverOpponent(activeLeague, myTeam(activeLeague)?.id, opponentTeamId)}
-                onSubmitLadderCupWalkoverClaim={(claim, file) => submitLadderCupWalkoverClaim(activeLeague, claim, file)}
+                onClaimLadderCupWalkover={(opponentTeamId, file) => claimLadderCupWalkover(activeLeague, myTeam(activeLeague)?.id, opponentTeamId, file)}
                 onApproveLadderCupWalkoverClaim={(claim) => approveLadderCupWalkoverClaim(activeLeague, claim)}
                 onRejectLadderCupWalkoverClaim={(claim) => rejectLadderCupWalkoverClaim(activeLeague, claim)}
                 onAdvance={advanceStage} onGenerateFixtures={generateFixtures}

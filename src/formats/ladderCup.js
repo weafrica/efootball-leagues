@@ -9,7 +9,7 @@
 //
 // NOT in this file yet (coming in later steps):
 //   - opponent matching (±10 band, widening)
-//   - walkover claims (message → 24h wait → claim → admin review)
+//   - walkover claims (claim with screenshot proof → admin review)
 //   - hard-cutoff finalization / crowning a champion
 //   - badge display logic beyond the raw counters recordLadderCupWin tracks
 //
@@ -25,7 +25,9 @@
 // STEP 2 added opponent matching (below, at the bottom of the file) — the
 // ±100 ladder_rating band that widens until it finds live opponents, no
 // byes. ladder_rating is a separate Elo-style number, decoupled from pts —
-// see "Matchmaking rating" below. STEP 3 added walkover claims. STEP 4 added cutoff finalization
+// see "Matchmaking rating" below. STEP 3 added walkover claims (later
+// simplified to a direct claim-with-screenshot, no messaging/wait step).
+// STEP 4 added cutoff finalization
 // and the full tiebreaker chain. STEP 5 added the remaining MATCH FLOW
 // mechanics: random home-team assignment, match length validation, and
 // substitution counts. The engine now covers the full ruleset. STEP 10
@@ -52,15 +54,13 @@ export const LADDER_CUP_RULES = {
   RATING_BAND_START: 100,      // opponent matching starts at ±100 rating
   RATING_BAND_STEP: 50,        // widens ±150, ±200, ±250... no ceiling
   SHOWN_OPPONENTS: 10,         // always show up to 10 live opponents to contact
-  WALKOVER_WAIT_HOURS: 24,     // must message + wait this long before claiming
   MAX_CONCURRENT_WALKOVER_CLAIMS: 10, // one per shown opponent slot
   // A freshly-joined club has this long to make first contact with SOME
   // opponent (tapping the WhatsApp icon on its opponent board) before it's
   // auto-removed from the league entirely — see hasMissedJoinContactWindow.
-  // Not the same clock as WALKOVER_WAIT_HOURS: that one waits AFTER a
-  // message before a walkover can be claimed against an unresponsive
-  // opponent; this one is about a club that never sent a first message at
-  // all.
+  // Unrelated to walkover claims (those no longer have a waiting clock at
+  // all — see createWalkoverClaim below); this is about a club that never
+  // reached out to anyone at all.
   JOIN_CONTACT_WINDOW_HOURS: 24,
   // How long a specific opponent stays visible on a club's own challenge
   // board (getOpponentPool) without that club tapping WhatsApp on them
@@ -611,36 +611,27 @@ export function poolSightingDeadline(sighting) {
 // Walkover claims (step 3)
 // ---------------------------------------------------------------------------
 
-/** @typedef {"messaged"|"pending_review"|"approved"|"rejected"} WalkoverClaimStatus */
+/** @typedef {"pending_review"|"approved"|"rejected"} WalkoverClaimStatus */
 
 /**
- * Message opponent once, then wait 24h before a walkover can be claimed.
- * Caller must enforce MAX_CONCURRENT_WALKOVER_CLAIMS (one per shown
- * opponent slot) before creating another — this function doesn't see the
- * claimant's other open claims, only the one it's creating.
+ * Claim a walkover on a shown opponent, screenshot proof required up
+ * front — no messaging step, no waiting period. Goes straight into the
+ * admin review queue. Caller must enforce MAX_CONCURRENT_WALKOVER_CLAIMS
+ * (one per shown opponent slot) before creating another — this function
+ * doesn't see the claimant's other open claims, only the one it's
+ * creating.
  */
-export function createWalkoverClaim(claimantClubId, targetClubId, now = new Date()) {
-  const claimableAt = new Date(now.getTime() + LADDER_CUP_RULES.WALKOVER_WAIT_HOURS * 60 * 60 * 1000);
+export function createWalkoverClaim(claimantClubId, targetClubId, proofUrl, now = new Date()) {
+  if (!proofUrl) {
+    throw new Error("Photo proof is required to claim a walkover.");
+  }
   return {
     claimant_club_id: claimantClubId,
     target_club_id: targetClubId,
-    messaged_at: now.toISOString(),
-    claimable_at: claimableAt.toISOString(),
-    status: /** @type {WalkoverClaimStatus} */ ("messaged"),
-    proof_url: null,
+    claimed_at: now.toISOString(),
+    status: /** @type {WalkoverClaimStatus} */ ("pending_review"),
+    proof_url: proofUrl,
   };
-}
-
-export function isWalkoverClaimable(claim, now = new Date()) {
-  return claim.status === "messaged" && new Date(claim.claimable_at) <= now;
-}
-
-/** Submits the claim with screenshot proof once the 24h wait has passed — moves it into admin review. */
-export function submitWalkoverClaim(claim, proofUrl, now = new Date()) {
-  if (!isWalkoverClaimable(claim, now)) {
-    throw new Error("Walkover not claimable yet — still inside the 24h wait.");
-  }
-  return { ...claim, status: "pending_review", proof_url: proofUrl };
 }
 
 /**
@@ -667,12 +658,11 @@ export function rejectWalkoverClaim(claim) {
 
 /**
  * Filters out anything not finalized by the Sunday 10PM (UTC+2) cutoff:
- * matches still mid-play, and walkover claims still inside their 24h
- * window (whether or not they've been submitted for review — if they
- * weren't approved before the cutoff, they don't count).
+ * matches still mid-play, and walkover claims still awaiting admin review
+ * (if they weren't approved before the cutoff, they don't count).
  *
- * "Anything not finalized by then (mid-match, or a walkover claim still in
- * its 24h window) does not count" — this doesn't undo points already on
+ * "Anything not finalized by then (mid-match, or a walkover claim still
+ * awaiting review) does not count" — this doesn't undo points already on
  * the board from earlier, finalized results; it only tells the caller
  * which in-flight matches/claims to discard rather than rushing them
  * through after the deadline.
@@ -680,7 +670,7 @@ export function rejectWalkoverClaim(claim) {
 export function finalizeAtCutoff({ matches, walkoverClaims, cutoff }) {
   const cutoffTime = new Date(cutoff).getTime();
   const finalizedMatches = matches.filter((m) => m.finalized_at && new Date(m.finalized_at).getTime() <= cutoffTime);
-  const finalizedClaims = walkoverClaims.filter((c) => c.status === "approved" && new Date(c.approved_at || c.claimable_at).getTime() <= cutoffTime);
+  const finalizedClaims = walkoverClaims.filter((c) => c.status === "approved" && new Date(c.approved_at || c.claimed_at).getTime() <= cutoffTime);
   return { finalizedMatches, finalizedClaims };
 }
 
