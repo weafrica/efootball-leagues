@@ -5567,31 +5567,18 @@ export default function App() {
       return;
     }
 
+    // Routed through approve_ladder_cup_walkover_claim (RPC, security
+    // definer) — it creates the ladder_cup_matches row itself and
+    // delegates to _apply_ladder_cup_match_win, the same authoritative
+    // path a played/decider match win goes through, so standings, elo,
+    // badges (badge_walkover included), and Nets crediting all happen
+    // server-side under one guarded, idempotent write instead of numbers
+    // computed in the browser and trusted by apply_ladder_cup_entry_result.
+    // See supabase/migrations/20260837_ladder_cup_walkover_claim_reward_crediting.sql.
+    const { error } = await supabase.rpc("approve_ladder_cup_walkover_claim", { p_claim_id: claimRow.id });
+    if (error) { showToast(`Couldn't approve the claim: ${error.message}`); return; }
+
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
-    const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
-    const winnerRow = rowsById[claimRow.claimant_team_id];
-    const loserRow = rowsById[claimRow.target_team_id];
-    if (!winnerRow || !loserRow) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return; }
-
-    const mapped = (league.ladder_cup_entries || []).map((r) => ladderCupEntryFromRow(r, teamsById[r.team_id]?.name || "Unknown club"));
-    const standingsBeforeMatch = rankLadderCupStandings(mapped);
-    const winnerEntry = ladderCupEntryFromRow(winnerRow, teamsById[claimRow.claimant_team_id]?.name || "Unknown club");
-    const loserEntry = ladderCupEntryFromRow(loserRow, teamsById[claimRow.target_team_id]?.name || "Unknown club");
-
-    const { winner, loser } = recordLadderCupWin({
-      winner: winnerEntry, loser: loserEntry, standingsBeforeMatch, isWalkover: true, winnerGoals: 0, loserGoals: 0,
-    });
-
-    const { error: claimErr } = await supabase.from("ladder_cup_walkover_claims").update({
-      status: "approved", approved_at: new Date().toISOString(), reviewed_by: session.user.id,
-    }).eq("id", claimRow.id);
-    if (claimErr) { showToast(`Couldn't approve the claim: ${claimErr.message}`); return; }
-
-    await Promise.all([
-      applyLadderCupEntryPatch(league.id, winnerRow.id, claimRow.claimant_team_id, claimRow.target_team_id, winner, winnerRow.badge_walkover + 1),
-      applyLadderCupEntryPatch(league.id, loserRow.id, claimRow.claimant_team_id, claimRow.target_team_id, loser, loserRow.badge_walkover),
-    ]);
-
     const winnerName = teamsById[claimRow.claimant_team_id]?.name || "A club";
     const loserName = teamsById[claimRow.target_team_id]?.name || "their opponent";
     await postComment(league, `Ladder Cup — walkover win for ${winnerName} over ${loserName}`, null, null, claimRow.proof_url, true, null, null);
@@ -5607,8 +5594,10 @@ export default function App() {
       showToast(err.message);
       return;
     }
-    const { error } = await supabase.from("ladder_cup_walkover_claims")
-      .update({ status: "rejected", reviewed_by: session.user.id }).eq("id", claimRow.id);
+    // Routed through reject_ladder_cup_walkover_claim (RPC) — same
+    // server-side pending_review + admin/league-creator checks as the
+    // approve path, instead of a bare client .update().
+    const { error } = await supabase.rpc("reject_ladder_cup_walkover_claim", { p_claim_id: claimRow.id });
     if (error) { showToast(`Couldn't reject the claim: ${error.message}`); return; }
     await refreshLeague(league.id);
     showToast("Walkover claim rejected.");
