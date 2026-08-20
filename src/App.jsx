@@ -5309,57 +5309,43 @@ export default function App() {
   // logic lives. Reads the scoreline straight off `match` (already
   // persisted by submitLadderCupMatchResult) rather than taking it as
   // arguments, since by this point it's just replaying what was reported.
+  //
+  // NOTE: standings (pts/w/l/gd/streak/ladder_rating/badges/second-life
+  // transition) are no longer computed here and pushed to the server —
+  // confirm_ladder_cup_match_result now does the full recompute itself,
+  // server-side, inside _apply_ladder_cup_match_win (see
+  // supabase/migrations/20260833_ladder_cup_server_side_result_and_reward.sql).
+  // The old flow computed recordLadderCupWin's result in the browser and
+  // pushed the numbers to apply_ladder_cup_entry_result, which trusted
+  // them outright — any signed-in member of either club could call that
+  // RPC directly with fabricated numbers. This function's only job now is
+  // to trigger the confirm and reflect what the server actually decided.
   const applyLadderCupMatchResult = async (league, match) => {
     const decidedBy = match.decided_by;
     const winnerTeamId = match.winner_team_id;
     const winnerSide = winnerTeamId === match.home_team_id ? "home" : "away";
     const loserTeamId = winnerSide === "home" ? match.away_team_id : match.home_team_id;
-    const winnerGoals = winnerSide === "home" ? match.home_goals : match.away_goals;
-    const loserGoals = winnerSide === "home" ? match.away_goals : match.home_goals;
-    const extraTimeGoalsWinner = winnerSide === "home" ? match.extra_time_home_goals : match.extra_time_away_goals;
-    const extraTimeGoalsLoser = winnerSide === "home" ? match.extra_time_away_goals : match.extra_time_home_goals;
 
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
-    const winnerRow = rowsById[winnerTeamId];
-    const loserRow = rowsById[loserTeamId];
-    if (!winnerRow || !loserRow) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
-
-    const mapped = (league.ladder_cup_entries || []).map((r) => ladderCupEntryFromRow(r, teamsById[r.team_id]?.name || "Unknown club"));
-    const standingsBeforeMatch = rankLadderCupStandings(mapped);
-    const winnerEntry = ladderCupEntryFromRow(winnerRow, teamsById[winnerTeamId]?.name || "Unknown club");
-    const loserEntry = ladderCupEntryFromRow(loserRow, teamsById[loserTeamId]?.name || "Unknown club");
-
-    const { winner, loser } = recordLadderCupWin({
-      winner: winnerEntry, loser: loserEntry, standingsBeforeMatch,
-      winnerGoals, loserGoals, decidedBy, extraTimeGoalsWinner, extraTimeGoalsLoser,
-    });
+    if (!rowsById[winnerTeamId] || !rowsById[loserTeamId]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
 
     // Routed through confirm_ladder_cup_match_result (RPC, security
-    // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql)
-    // instead of a direct .update() on ladder_cup_matches. The plain
-    // client update here was written assuming it'd work the same way for
-    // an admin's approve as it does for the reporting side's own confirm
-    // — but an admin resolving an *escalated* match (timeout or dispute
-    // cap, see ladderCupResultEscalationReason) is often not a member of
-    // either club, and nothing ever granted that caller write access to
-    // this row. That's why an admin's Approve silently did nothing and
-    // the match sat in the review queue forever: this update was failing
-    // exactly the way the ladder_cup_entries updates were (see
-    // 20260819's migration) — just without a visible fallback toast,
-    // since a failed match update stops the whole result from applying
-    // (never reaches the entries update or the "couldn't be fully
-    // updated" toast below it).
+    // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql
+    // and 20260833's server-side recompute) instead of a direct .update()
+    // on ladder_cup_matches. The plain client update here was written
+    // assuming it'd work the same way for an admin's approve as it does
+    // for the reporting side's own confirm — but an admin resolving an
+    // *escalated* match (timeout or dispute cap, see
+    // ladderCupResultEscalationReason) is often not a member of either
+    // club, and nothing ever granted that caller write access to this
+    // row. That's why an admin's Approve silently did nothing and the
+    // match sat in the review queue forever.
     const { error: matchErr } = await supabase.rpc("confirm_ladder_cup_match_result", {
       p_match_id: match.id, p_league_id: league.id,
       p_team_a_id: match.home_team_id, p_team_b_id: match.away_team_id,
     });
     if (matchErr) { showToast(`Couldn't save the match result: ${matchErr.message}`); return false; }
-
-    await Promise.all([
-      applyLadderCupEntryPatch(league.id, winnerRow.id, winnerTeamId, loserTeamId, winner, winnerRow.badge_walkover),
-      applyLadderCupEntryPatch(league.id, loserRow.id, winnerTeamId, loserTeamId, loser, loserRow.badge_walkover),
-    ]);
 
     const homeName = teamsById[match.home_team_id]?.name || "Home";
     const awayName = teamsById[match.away_team_id]?.name || "Away";
@@ -5368,10 +5354,16 @@ export default function App() {
     if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
     await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, match.proof_url, true, null, null, match.id);
 
+    // Read back the loser's post-confirm status for the toast — the
+    // server (not this client) decided whether that was elimination or a
+    // second-life offer, so ask it rather than recomputing locally.
+    const { data: loserRowAfter } = await supabase
+      .from("ladder_cup_entries").select("status").eq("league_id", league.id).eq("team_id", loserTeamId).maybeSingle();
+
     await refreshLeague(league.id);
-    showToast(loser.status === "eliminated"
+    showToast(loserRowAfter?.status === "eliminated"
       ? `Result confirmed — ${teamsById[loserTeamId]?.name || "they"} are eliminated.`
-      : loser.status === "pending_second_life"
+      : loserRowAfter?.status === "pending_second_life"
       ? `Result confirmed — ${teamsById[loserTeamId]?.name || "they"} have 24h to accept a second life.`
       : "Result confirmed.");
     return true;
