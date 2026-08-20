@@ -658,6 +658,20 @@ export function isFinalFixture(fixture, league) {
   return isFinalRoundFixtures(roundFixtures);
 }
 
+// A knockout tie that's still level after the configured home-and-away legs
+// gets a decider leg added automatically (see advanceKnockout) instead of
+// letting both clubs through — the decider is just the next leg number past
+// however many legs the league is configured for (2 for a normal home &
+// away tie), so a fixture is "the decider" purely by having a leg number
+// higher than that. Same job isFinalFixture does for the bracket final:
+// tells the result-entry UI this scoreline needs a penalty score if it's
+// tied, since (like the final) there's no further leg to fall back on.
+export function isDeciderFixture(fixture, league) {
+  if (!fixture || fixture.away_team_id === null) return false;
+  const configuredLegs = league.knockout_legs || 1;
+  return fixture.leg > configuredLegs;
+}
+
 // Sums a penalty-shootout score the same way aggregateFor sums regulation
 // goals, but returns null (rather than 0) the moment either leg is missing
 // a penalty entry for that side — unlike a goal, "no penalties recorded
@@ -2511,11 +2525,13 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // The final is always a single decisive match — if it's tied, penalties
-  // are the only way through, so this modal asks for them right here
-  // instead of sending the admin off to a separate screen.
+  // The final — and now a decider leg, added automatically when a
+  // non-final tie is still level after the configured home & away legs
+  // (see advanceKnockout) — are always single decisive matches: if either
+  // is tied, penalties are the only way through, so this modal asks for
+  // them right here instead of sending the admin off to a separate screen.
   const isFinal = isFinalFixture(fixture, league);
-  const needsPens = isFinal && Number(h) === Number(a);
+  const needsPens = (isFinal || isDeciderFixture(fixture, league)) && Number(h) === Number(a);
   const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
 
   const submit = async () => {
@@ -6316,7 +6332,15 @@ export default function App() {
     // aggregate for the same reason both sides no-showed — nobody actually
     // played to earn advancement, so both clubs are knocked out instead.
     const bothEliminatedIds = [];
-    let finalNeedsPens = false;
+    // deciderInserts: non-final ties still level after the configured home
+    // & away legs. A decider leg gets added for each — its score folds
+    // straight into `totals` above once played (both sides' prior legs
+    // were exactly equal, so adding the decider's score to each total is
+    // mathematically identical to just comparing the decider alone), so no
+    // separate aggregation logic is needed once it comes back played.
+    const deciderInserts = [];
+    let tieNeedsPens = false;
+    const configuredLegs = fresh.knockout_legs || 1;
     Object.values(ties).forEach((legs) => {
       if (legs[0].away_team_id === null) { winners.push(legs[0].home_team_id); return; }
       const totals = {};
@@ -6328,26 +6352,54 @@ export default function App() {
       if (totals[teamA] === totals[teamB]) {
         const allLegsNoShow = legs.every((f) => !f.played && isFixtureLocked(f, league));
         if (allLegsNoShow) { bothEliminatedIds.push(teamA, teamB); return; }
-        if (!isFinal) {
-          // Level on aggregate outside the final: both clubs earned it home
-          // and away, so both go through rather than forcing an admin to
-          // arbitrarily break the tie with a manual score edit.
-          winners.push(teamA, teamB);
+        if (isFinal) {
+          // The final always needs exactly one winner — fall back to penalties.
+          const pensA = pensAggregateFor(legs, teamA);
+          const pensB = pensAggregateFor(legs, teamB);
+          if (pensA !== null && pensB !== null && pensA !== pensB) {
+            winners.push(pensA > pensB ? teamA : teamB);
+            return;
+          }
+          tieNeedsPens = true;
           return;
         }
-        // The final always needs exactly one winner — fall back to penalties.
+        // Non-final and still level. If no decider leg has been added yet
+        // for this tie (legs.length is still just the configured home &
+        // away count), add one now instead of letting both clubs through —
+        // the round can't advance until it's played (the unplayed check at
+        // the top of this function already catches that on the next call,
+        // since the decider becomes part of this round's fixtures).
+        if (legs.length <= configuredLegs) {
+          deciderInserts.push({
+            league_id: league.id, stage: bracketStage, round: maxRound,
+            leg: legs.length + 1, home_team_id: teamA, away_team_id: teamB,
+            due_at: new Date(Date.now() + roundPeriodMs(fresh)).toISOString(),
+          });
+          return;
+        }
+        // A decider has already been played and is folded into `totals`
+        // above, but it's STILL level — same fallback as the final: a
+        // penalty score on the decider leg decides it.
         const pensA = pensAggregateFor(legs, teamA);
         const pensB = pensAggregateFor(legs, teamB);
         if (pensA !== null && pensB !== null && pensA !== pensB) {
           winners.push(pensA > pensB ? teamA : teamB);
           return;
         }
-        finalNeedsPens = true;
+        tieNeedsPens = true;
         return;
       }
       winners.push(totals[teamA] > totals[teamB] ? teamA : teamB);
     });
-    if (finalNeedsPens) { showToast("The final is level after regulation — enter the penalty shootout score to decide a winner."); return; }
+
+    if (deciderInserts.length > 0) {
+      const ok = await insertChunked("fixtures", deciderInserts, showToast);
+      if (!ok) return;
+      await refreshLeague(league.id);
+      showToast(`${deciderInserts.length} tie${deciderInserts.length === 1 ? "" : "s"} still level after home & away — a decider match has been added.`);
+      return;
+    }
+    if (tieNeedsPens) { showToast("A tie is level after regulation — enter the penalty shootout score to decide a winner."); return; }
 
     if (bothEliminatedIds.length > 0) {
       const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", bothEliminatedIds).select("id");
@@ -11353,11 +11405,13 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
 
   if (!homeTeam || !awayTeam) return null;
 
-  // The final is always a single decisive match — a level scoreline here
-  // needs a penalty score before it can be saved, since there's no second
-  // leg to fall back on.
+  // The final — and a decider leg, added automatically when a non-final
+  // tie is still level after the configured home & away legs (see
+  // advanceKnockout) — are always single decisive matches: a level
+  // scoreline here needs a penalty score before it can be saved, since
+  // there's no further leg to fall back on.
   const isFinal = isFinalFixture(fixture, league);
-  const needsPens = isFinal && Number(h) === Number(a);
+  const needsPens = (isFinal || isDeciderFixture(fixture, league)) && Number(h) === Number(a);
   const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
 
   const save = async () => {
