@@ -4563,6 +4563,25 @@ export default function App() {
         }
       }
 
+      // Ladder Cup's own Top 20 prize pool payout (economy.js's
+      // LADDER_CUP_PRIZE_SPLIT / finalize_ladder_cup_prize_pool, 20260841)
+      // — separate from finalize_league_prize_pool, which excludes
+      // ladder_cup entirely. Ranked by the full standings board order
+      // (every entry, including eliminated clubs — not crownChampion's
+      // non-eliminated-only subset), since 2nd-20th place money doesn't
+      // require having survived to cutoff, only the champion does. The
+      // RPC itself re-derives the real pool from entry-fee transactions
+      // and is idempotent (ladder_cup_prizes_paid_at guard), so a failure
+      // here just means the payout retries next time someone opens the
+      // league — no need to unwind the finalize above.
+      const { error: prizeErr } = await supabase.rpc("finalize_ladder_cup_prize_pool", {
+        p_league_id: activeLeague.id,
+        p_ranked_team_ids: rankLadderCupStandings(mapped).map((e) => e.club_id),
+      });
+      if (prizeErr) {
+        showToast(`Champion crowned, but the prize pool couldn't be finalized: ${prizeErr.message}`);
+      }
+
       const teamsById = Object.fromEntries((activeLeague.teams || []).map((t) => [t.id, t]));
       const championName = champion ? (teamsById[champion.club_id]?.name || "Unknown club") : null;
       let announcement = championName
@@ -4589,10 +4608,12 @@ export default function App() {
   // guard needed beyond the dedupe ref below (that's just to stop this
   // browser from firing the RPC repeatedly while waiting on its response).
   //
-  // ladder_cup is excluded — it already has its own finalize_ladder_cup +
-  // per-battle reward system, never a pooled payout. entryFeeForLeagueFormat
-  // returning null (an unpriced fun format) means there was never a pool to
-  // begin with, so nothing to finalize either.
+  // ladder_cup is excluded from THIS effect/RPC — it has its own separate
+  // pooled payout (finalize_ladder_cup_prize_pool, 20260841: champion 50%,
+  // 2nd-20th spread across the rest), fired from the ladder-cup finalize
+  // effect above once finalize_ladder_cup crowns a champion, not from here.
+  // entryFeeForLeagueFormat returning null (an unpriced fun format) means
+  // there was never a pool to begin with, so nothing to finalize either.
   //
   // Ranking: computeKnockoutRanking(league) already produces exactly the
   // ranked team-id order this needs for every format — champion-first
