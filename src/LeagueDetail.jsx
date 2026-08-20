@@ -508,10 +508,23 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
 // a rejected one), same "try again" path a declined second life doesn't
 // get but a walkover claim does, since a reviewer might've rejected it
 // over a bad screenshot rather than a bad claim.
+// Five distinct prompts, not the same button five times, so a player
+// actually has to read each one rather than reflex-clicking through a
+// counter. Cancel at any point drops back to the (not claiming) state
+// entirely rather than resuming from a partial confirm count.
+const WALKOVER_CONFIRM_PROMPTS = [
+  "Are you sure your opponent never played this match? A walkover can't be undone once it's approved.",
+  "Double-check: did you actually try to reach and schedule with them before the cutoff?",
+  "This will be logged as a full loss for your opponent — still sure this isn't a mix-up?",
+  "Almost there — confirm again this is the right opponent and the right match.",
+  "Final check: submit this walkover claim?",
+];
+
 function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
   const [busy, setBusy] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [file, setFile] = useState(null);
+  const [confirmStep, setConfirmStep] = useState(0); // 0 = not confirming; 1..N = which prompt is showing
 
   const submit = async () => {
     if (!file) return;
@@ -520,7 +533,15 @@ function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
     setBusy(false);
     setClaiming(false);
     setFile(null);
+    setConfirmStep(0);
   };
+
+  const startConfirm = () => { if (file) setConfirmStep(1); };
+  const advanceConfirm = () => {
+    if (confirmStep < WALKOVER_CONFIRM_PROMPTS.length) setConfirmStep((s) => s + 1);
+    else submit();
+  };
+  const cancelConfirm = () => setConfirmStep(0);
 
   if (claim && claim.status === "pending_review") {
     return (
@@ -543,6 +564,29 @@ function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
     );
   }
 
+  if (confirmStep > 0) {
+    const isLast = confirmStep === WALKOVER_CONFIRM_PROMPTS.length;
+    return (
+      <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
+        <div className="font-mono text-[10px] uppercase tracking-wide mb-1" style={{ color: "#B8860B" }}>
+          Confirm {confirmStep} of {WALKOVER_CONFIRM_PROMPTS.length}
+        </div>
+        <div className="font-body text-xs mb-2" style={{ color: c.text }}>
+          {WALKOVER_CONFIRM_PROMPTS[confirmStep - 1]}
+        </div>
+        <div className="flex gap-2">
+          <button disabled={busy} onClick={advanceConfirm} className="flex-1 font-body text-xs font-semibold px-3 py-2 rounded-full"
+            style={{ background: "#B8860B", color: "#fff" }}>
+            {busy ? "Submitting…" : isLast ? "Yes, submit claim" : "Yes, I'm sure"}
+          </button>
+          <button disabled={busy} onClick={cancelConfirm} className="font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
       <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-2 mb-1.5 cursor-pointer font-body text-xs" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
@@ -551,9 +595,9 @@ function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
         <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
       </label>
       <div className="flex gap-2">
-        <button disabled={!file || busy} onClick={submit} className="flex-1 font-body text-xs font-semibold px-3 py-2 rounded-full"
+        <button disabled={!file || busy} onClick={startConfirm} className="flex-1 font-body text-xs font-semibold px-3 py-2 rounded-full"
           style={file && !busy ? { background: "#B8860B", color: "#fff" } : { background: c.surfaceHover, color: c.textFaint }}>
-          {busy ? "Submitting…" : "Submit claim"}
+          Submit claim
         </button>
         <button disabled={busy} onClick={() => { setClaiming(false); setFile(null); }} className="font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.surfaceHover, color: c.textDim }}>
           Cancel
