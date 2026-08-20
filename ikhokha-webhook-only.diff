@@ -1,0 +1,149 @@
+diff --git a/supabase/functions/ikhokha-webhook/index.ts b/supabase/functions/ikhokha-webhook/index.ts
+index 46cb111..e8dcc35 100644
+--- a/supabase/functions/ikhokha-webhook/index.ts
++++ b/supabase/functions/ikhokha-webhook/index.ts
+@@ -1,11 +1,14 @@
+ // supabase/functions/ikhokha-webhook/index.ts
+ //
+-// Receives payment status callbacks from iKhokha for league entry fees
+-// paid by card, and auto-approves the matching `members` row — no
+-// screenshot proof, no admin review, for card payments specifically.
++// Receives payment status callbacks from iKhokha for card payments and
++// auto-approves the matching row — no screenshot proof, no admin review,
++// for card payments specifically. Two things can land here:
++//   - a league entry fee (create-entry-payment), row lives in `members`
++//   - a Nets top-up (create-nets-payment), row lives in `nets_purchases`
+ //
+-// The externalTransactionID in the payload IS the members.id that
+-// create-entry-payment set when the link was created.
++// The externalTransactionID in the payload IS that row's id, whichever
++// table it belongs to — this handler tries `members` first, then
++// `nets_purchases`, since ids from the two tables never collide.
+ //
+ // Confirmed request shape (iKhokha's official "iK Pay API Integration
+ // Guide"):
+@@ -112,25 +115,95 @@ serve(async (req) => {
+     return new Response("missing externalTransactionID", { status: 400 });
+   }
+ 
+-  // externalTransactionID is the members.id set by create-entry-payment.
++  // externalTransactionID is either a members.id (create-entry-payment) or
++  // a nets_purchases.id (create-nets-payment) — try the league-entry table
++  // first since it's the more established flow, then fall back.
+   const { data: member, error: memberError } = await supabase
+     .from("members")
+     .select("id, payment_status")
+     .eq("id", externalTransactionID)
+-    .single();
++    .maybeSingle();
+ 
+-  if (memberError || !member) {
+-    return new Response("member not found", { status: 404 });
++  if (memberError) {
++    return new Response("lookup failed", { status: 500 });
++  }
++
++  if (member) {
++    // Idempotency guard — ignore retries once already resolved.
++    if (member.payment_status !== "pending") {
++      return new Response("already processed", { status: 200 });
++    }
++
++    if (status === "SUCCESS") {
++      const { error } = await supabase
++        .from("members")
++        .update({
++          payment_status: "approved",
++          payment_reviewed_at: new Date().toISOString(),
++          payment_reviewed_by: null, // auto-approved by card payment, not a human admin
++        })
++        .eq("id", externalTransactionID);
++
++      if (error) {
++        return new Response("failed to approve member", { status: 500 });
++      }
++    } else {
++      // FAILURE — let them retry rather than permanently rejecting, since
++      // no proof/admin step is involved for card payments.
++      const { error } = await supabase
++        .from("members")
++        .update({ payment_method: null })
++        .eq("id", externalTransactionID);
++
++      if (error) {
++        return new Response("failed to reset member", { status: 500 });
++      }
++    }
++
++    return new Response("ok", { status: 200 });
++  }
++
++  // Not a league entry — try a Nets top-up.
++  const { data: purchase, error: purchaseError } = await supabase
++    .from("nets_purchases")
++    .select("id, user_id, nets_amount, rand_amount, payment_status")
++    .eq("id", externalTransactionID)
++    .maybeSingle();
++
++  if (purchaseError) {
++    return new Response("lookup failed", { status: 500 });
++  }
++  if (!purchase) {
++    return new Response("transaction not found", { status: 404 });
+   }
+ 
+   // Idempotency guard — ignore retries once already resolved.
+-  if (member.payment_status !== "pending") {
++  if (purchase.payment_status !== "pending") {
+     return new Response("already processed", { status: 200 });
+   }
+ 
+   if (status === "SUCCESS") {
++    // Running as service_role, so this can call the internal credit
++    // function directly — no admin check needed, this IS the trusted
++    // server-side confirmation that the money landed. Compute nothing
++    // client-side: nets_amount was fixed when the purchase row was
++    // created and is never re-derived here.
++    const { error: creditError } = await supabase.rpc("_nets_credit_internal", {
++      p_user_id: purchase.user_id,
++      p_amount: purchase.nets_amount,
++      p_reason: "nets_purchase",
++      p_note: `Top-up — R${purchase.rand_amount}`,
++      p_ref_type: "nets_purchase",
++      p_ref_id: purchase.id,
++      p_team_id: null,
++    });
++
++    if (creditError) {
++      return new Response("failed to credit nets", { status: 500 });
++    }
++
+     const { error } = await supabase
+-      .from("members")
++      .from("nets_purchases")
+       .update({
+         payment_status: "approved",
+         payment_reviewed_at: new Date().toISOString(),
+@@ -139,18 +212,17 @@ serve(async (req) => {
+       .eq("id", externalTransactionID);
+ 
+     if (error) {
+-      return new Response("failed to approve member", { status: 500 });
++      return new Response("failed to approve purchase", { status: 500 });
+     }
+   } else {
+-    // FAILURE — let them retry rather than permanently rejecting, since
+-    // no proof/admin step is involved for card payments.
++    // FAILURE — let them retry rather than permanently rejecting.
+     const { error } = await supabase
+-      .from("members")
++      .from("nets_purchases")
+       .update({ payment_method: null })
+       .eq("id", externalTransactionID);
+ 
+     if (error) {
+-      return new Response("failed to reset member", { status: 500 });
++      return new Response("failed to reset purchase", { status: 500 });
+     }
+   }
+ 
