@@ -11,6 +11,35 @@ import { supabase } from "./supabaseClient";
 export const NETS_LABEL = "Nets";
 export const NETS_SYMBOL = "N";
 
+// Buy Nets — Rand-to-Nets conversion for real-money top-ups (BuyNetsModal).
+// Base rate is 1:1 (R1 = 1 Net), same as every other Rand figure in this
+// app (see economy.js's ENTRY_FEE_* — those are already plain Rand
+// amounts). Bigger top-ups get a bonus so there's a reason to buy more at
+// once rather than repeatedly topping up the minimum; tiers line up with
+// ENTRY_FEE_PRESETS in paymentConfig.js so the bonus jumps land on amounts
+// people are already choosing from.
+const NETS_BONUS_TIERS = [
+  { min: 200, pct: 0.20 },
+  { min: 150, pct: 0.15 },
+  { min: 100, pct: 0.10 },
+  { min: 50, pct: 0.05 },
+];
+
+// Bonus percentage (0–1) for a given Rand amount — highest tier whose
+// minimum the amount meets, or 0 below the smallest tier.
+export function netsBonusPct(rand) {
+  const r = Number(rand) || 0;
+  const tier = NETS_BONUS_TIERS.find((t) => r >= t.min);
+  return tier ? tier.pct : 0;
+}
+
+// Nets a given Rand amount buys, bonus included — rounded down so a top-up
+// never credits a fractional Net.
+export function netsForRand(rand) {
+  const r = Number(rand) || 0;
+  return Math.floor(r * (1 + netsBonusPct(r)));
+}
+
 // Formats a balance for display like a currency — number first, symbol
 // suffix: "1,250N" / "50N" / "0N".
 export function formatNets(amount) {
