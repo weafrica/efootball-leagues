@@ -7220,7 +7220,6 @@ export default function App() {
     { icon: Shuffle, label: "Random", badge: grabbableCount || null, onClick: openChallengesScreen },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
-    { icon: ShoppingBag, label: "Shop", external: true, onClick: () => setView("shop") },
     { icon: Repeat, label: "Transfers", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
@@ -7748,8 +7747,6 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </Suspense>
         ) : (
           <>
-        <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
-
         {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
             live-season pulse, stat strip). No CTA button here on purpose:
             this is the "look, it's real and it's live" beat, not the sign-in
@@ -7860,6 +7857,13 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             <span className="font-body text-xs" style={{ color: c.textDim }}>Stay signed in on this device</span>
           </label>
         </div>
+
+        {/* Shop — moved down here, after the sign-in ask rather than
+            leading the page with it, so a first-time visitor sees the
+            league/ladder proof and the sign-in CTA before a store pitch.
+            Still open to guests with no account needed (see onOpen above),
+            it's just no longer competing with "sign in" for top billing. */}
+        <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
           </>
         )}
         </ErrorBoundary>
@@ -8355,13 +8359,15 @@ function GoogleIcon({ small }) {
   );
 }
 
-// Full-width promo banner for the WeAfrica Shop — sits above everything
-// else on both the login page and Home, so it reads as top billing rather
-// than one more icon buried in the menu grid. Deliberately in gold, not the
-// app's green, so it registers as a store placement rather than another
-// screen inside the app. The whole card is a tap target (not just the
-// pill), open to guests and members alike since browsing the store needs no
-// account.
+// Full-width promo banner for the WeAfrica Shop — sits at the bottom of the
+// login page, after the sign-in CTA, so a first-time visitor sees the real
+// league/ladder proof and the sign-in ask before a store pitch. Deliberately
+// in gold, not the app's green, so it registers as a store placement rather
+// than another screen inside the app. The whole card is a tap target (not
+// just the pill), open to guests and members alike since browsing the store
+// needs no account. (No longer surfaced from the signed-in Home's quick
+// actions either — see quickActionItems in App — so this banner is now the
+// one place the Shop is promoted from.)
 function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   const hasPicks = picks && picks.length > 0;
   return (
