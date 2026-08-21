@@ -32,9 +32,10 @@ const ALLOWED_PREFIXES = [
   "shop-photos/",
   "comment-voice-notes/",
   "result-proofs/",
+  "team-sale-photos/",
 ];
 
-const IMAGE_PREFIXES = new Set(["avatars/", "league-photos/", "comment-photos/", "shop-photos/", "result-proofs/"]);
+const IMAGE_PREFIXES = new Set(["avatars/", "league-photos/", "comment-photos/", "shop-photos/", "result-proofs/", "team-sale-photos/"]);
 
 export default async function handler(req, res) {
   try {

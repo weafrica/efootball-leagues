@@ -7220,7 +7220,7 @@ export default function App() {
     { icon: Shuffle, label: "Random", badge: grabbableCount || null, onClick: openChallengesScreen },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
-    { icon: Repeat, label: "Transfers", external: true, onClick: () => setView("transferMarket") },
+    { icon: Repeat, label: "The Kit Room", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),

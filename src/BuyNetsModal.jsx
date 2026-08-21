@@ -48,7 +48,7 @@ export default function BuyNetsModal({ onCancel, onSubmit, onPayByCard, c }) {
           </div>
           <button aria-label="Cancel" onClick={onCancel} className="w-8 h-8 flex items-center justify-center rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}><X size={14} /></button>
         </div>
-        <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>Top up your balance to enter leagues, spend in the Shop, or bid in the Transfer Market.</div>
+        <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>Top up your balance to enter leagues, spend in the Shop, or bid in The Kit Room.</div>
 
         <div className="rounded-lg p-3 mb-3 font-body text-xs" style={{ background: c.surface, color: c.textDim }}>
           {IKHOKHA_DETAILS.payLink && (
