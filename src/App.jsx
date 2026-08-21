@@ -3409,9 +3409,21 @@ export default function App() {
   // the fetch if this league already has comments loaded — e.g. right
   // after refreshLeague/refreshLeagues ran and merged them in already.
   useEffect(() => {
-    if (!activeLeagueId) return;
-    const current = (leagues || []).find((l) => l.id === activeLeagueId);
-    if (current && current.comments) return;
+    // Wait for the full bulk load (loadLeagues) to land before doing
+    // anything — on a hard reload straight into a league/cup page, `view`
+    // and `activeLeagueId` are restored from history synchronously, before
+    // `leagues` has loaded (`leagues === null`). Without this guard,
+    // `current` below comes back undefined and the effect would still fire,
+    // merging a bare `{ id, comments }` stub into state — missing
+    // teams/fixtures/everything else — which is what activeLeague resolves
+    // to next render, crashing Header's `activeLeague.teams.length`.
+    if (!activeLeagueId || leagues === null) return;
+    const current = leagues.find((l) => l.id === activeLeagueId);
+    // Only proceed for a league that's actually already loaded (with its
+    // full LEAGUE_LIST_SELECT shape) and just missing comments — never for
+    // one not yet present in state at all, which is exactly the case that
+    // used to produce the broken stub above.
+    if (!current || current.comments) return;
     let cancelled = false;
     supabase
       .from("comments")
@@ -9144,7 +9156,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
           <div className="w-8 h-8 rounded flex items-center justify-center shrink-0" style={{ background: c.green }}><Trophy size={16} color={c.accent} /></div>
           <div className="text-lg font-extrabold tracking-tight uppercase truncate">Matchday</div>
         </button>
-        {view === "league" && activeLeague && (
+        {view === "league" && activeLeague && activeLeague.teams && activeLeague.fixtures && (
           <div className="hidden sm:block font-mono text-xs uppercase tracking-wider shrink-0" style={{ color: c.textFaint }}>
             {activeLeague.teams.length} clubs · {activeLeague.fixtures.filter((f) => f.played).length}/{activeLeague.fixtures.length} played
           </div>
