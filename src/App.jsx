@@ -7,7 +7,7 @@ import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
-import { entryFeeForLeagueFormat, ENTRY_FEES_NETS } from "./economy.js";
+import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets } from "./economy.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -290,6 +290,16 @@ export const LADDER_THEME = {
   accentText: "#0A0806", green: "#2D6A4F", greenSoft: "rgba(45,106,79,0.35)", greenText: "#7FC9A2",
   red: "#C81E3A", redSoft: "rgba(200,30,58,0.25)", toastBg: "#F5EEDC", toastText: "#0A0806",
 };
+
+// Wildcard Match (the Home-screen spotlight for open/"random" challenges) —
+// a violet/hot-pink duo, deliberately its own family rather than reusing
+// c.accent (green, "a league action") or LADDER_THEME's gold (already
+// "ranked ladder"). Panel background still comes from the caller's own
+// theme (c.surface/c.bg) so it keeps respecting light/dark mode — only the
+// accent, glow, and CTA colors are fixed, the same way c.red is fixed for
+// "urgent" across both themes.
+const WILDCARD_VIOLET = "#9B5DE5";
+const WILDCARD_PINK = "#F72585";
 
 // `kind` groups formats for the one-active-fun-league-per-kind join rule: single
 // round robin, double round robin, and survivor all play out as an ongoing
@@ -9491,6 +9501,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
 
       {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
+      {/* Wildcard Match — the open/"random" challenge broadcast, promoted
+          out of the header's small badge icon into its own spotlight right
+          under the player card, so it's the first thing anyone sees after
+          "who am I" and before "what's due". Deliberately its own violet/
+          pink look (see WILDCARD_VIOLET/WILDCARD_PINK) so it reads as a
+          special one-tap event, not just another list item. */}
+      <WildcardMatchSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges} c={c} />
+
       {/* Continue playing — each of these pops out on tap instead of sitting
           inline, so the page reads top-to-bottom as: who you are, what needs
           you next, right in front of you at a glance, without two scrolling
@@ -9775,6 +9793,103 @@ function QuickActionsDock({ open, onToggle, items, c }) {
         </button>
       </div>
     </>
+  );
+}
+
+// Wildcard Match — a dedicated, standalone spotlight for the open/"random"
+// challenge broadcast (see sendRandomChallenge/acceptOpenChallenge in App,
+// and the "Random challenge" board in ChallengesScreen), promoted out of
+// the header's small badge icon into its own eye-catching card right at the
+// top of Home. It never fires or grabs a challenge itself — same "preview
+// card that opens the full screen" contract as LadderStrip/LeaderboardStrip
+// below — it just makes the feature impossible to miss and always shows the
+// most exciting truth available: someone else's open challenge beats your
+// own waiting one, which beats the plain "try it" pitch.
+function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpenChallenges, c }) {
+  const myId = session?.user?.id;
+  const list = openChallenges || [];
+  const grabbable = list.filter((ch) => ch.status === "open" && ch.creator_id !== myId);
+  const myOpenBroadcast = list.find((ch) => ch.creator_id === myId && ch.status === "open");
+
+  const avatarByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, m.avatar_url || null); });
+    return map;
+  }, [memberAvatars]);
+
+  // Reads straight from the economy so this card can never drift out of
+  // sync with what a random_match actually pays (see economy.js).
+  const winNets = computeMatchNets("random_match", "win");
+
+  const state = grabbable.length > 0 ? "grabbable" : myOpenBroadcast ? "waiting" : "idle";
+  const headline = state === "grabbable"
+    ? (grabbable.length === 1 ? "1 wildcard is live" : `${grabbable.length} wildcards are live`)
+    : state === "waiting" ? "Your wildcard is live" : "Fire one open to everyone";
+
+  return (
+    <section className="mt-6">
+      <div role="button" tabIndex={0} onClick={onOpenChallenges} onKeyDown={(e) => { if (e.key === "Enter") onOpenChallenges(); }}
+        className="relative w-full rounded-2xl p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
+        style={{ background: `linear-gradient(135deg, ${WILDCARD_VIOLET}26, ${c.surface} 60%, ${WILDCARD_PINK}14)`, border: `1px solid ${WILDCARD_VIOLET}55` }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_VIOLET, opacity: 0.22 }} />
+          <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_PINK, opacity: 0.18, animationDelay: "3s" }} />
+          {state === "grabbable" && (
+            <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_PINK}3D 45%, ${WILDCARD_VIOLET}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
+          )}
+        </div>
+
+        <div className="relative flex items-center gap-2.5">
+          <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_VIOLET}26`, border: `1px solid ${WILDCARD_VIOLET}66` }}>
+            <Shuffle size={18} style={{ color: WILDCARD_PINK }} />
+            {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_PINK, boxShadow: `0 0 0 2px ${c.surface}` }} />}
+          </span>
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_PINK }}>Wildcard Match</div>
+            <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
+          </div>
+          <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1"
+            style={{ background: `${WILDCARD_VIOLET}22`, color: WILDCARD_VIOLET, border: `1px solid ${WILDCARD_VIOLET}55` }}>
+            <Sparkles size={10} /> +{winNets} Nets
+          </span>
+        </div>
+
+        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_VIOLET}40` }}>
+          {state === "grabbable" && (
+            <>
+              <div className="flex -space-x-2.5 shrink-0">
+                {grabbable.slice(0, 4).map((ch) => (
+                  <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
+                    <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={28} c={c} />
+                  </div>
+                ))}
+                {grabbable.length > 4 && (
+                  <span className="w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint, boxShadow: `0 0 0 2px ${c.surface}` }}>+{grabbable.length - 4}</span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it — before someone else does.</div>
+            </>
+          )}
+          {state === "waiting" && (
+            <>
+              <span className="flex items-center gap-1 shrink-0">
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK }} />
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK, animationDelay: "0.3s" }} />
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK, animationDelay: "0.6s" }} />
+              </span>
+              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
+            </>
+          )}
+          {state === "idle" && (
+            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>One tap. Open to every player. First to accept it wins it.</div>
+          )}
+          <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
+            style={{ background: `linear-gradient(135deg, ${WILDCARD_VIOLET}, ${WILDCARD_PINK})`, color: "#fff" }}>
+            {state === "grabbable" ? <>Grab it <ChevronRight size={12} /></> : state === "waiting" ? <>View <ChevronRight size={12} /></> : <><Shuffle size={13} /> Send</>}
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }
 
