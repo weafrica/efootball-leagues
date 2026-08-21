@@ -66,7 +66,7 @@ import {
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles, Coins,
-  Zap, Repeat, Rocket, CreditCard,
+  Zap, Repeat, Rocket, CreditCard, Tag, Handshake,
 } from "lucide-react";
 
 const THEME_KEY = "efootball-theme-v1";
@@ -292,14 +292,24 @@ export const LADDER_THEME = {
 };
 
 // Wildcard Match (the Home-screen spotlight for open/"random" challenges) —
-// a violet/hot-pink duo, deliberately its own family rather than reusing
+// a teal/amber duo, deliberately its own family rather than reusing
 // c.accent (green, "a league action") or LADDER_THEME's gold (already
 // "ranked ladder"). Panel background still comes from the caller's own
 // theme (c.surface/c.bg) so it keeps respecting light/dark mode — only the
 // accent, glow, and CTA colors are fixed, the same way c.red is fixed for
 // "urgent" across both themes.
-const WILDCARD_VIOLET = "#9B5DE5";
-const WILDCARD_PINK = "#F72585";
+const WILDCARD_TEAL = "#2EC4B6";
+const WILDCARD_AMBER = "#FFB703";
+
+// The Kit Room (club transfers + eFootball team sales) — sits at the
+// bottom of the Home leagues list as its own marketplace spotlight, so it
+// needs a look that doesn't compete with LADDER_THEME's gold or
+// WILDCARD_TEAL/WILDCARD_AMBER above. Goes cobalt/steel instead — a
+// cooler, more "retail tag" feel (solid left rail + a rotated corner tag,
+// no glow blobs) rather than another soft radial-glow card, so it reads as
+// a different kind of thing (a marketplace) rather than another event.
+const KIT_ROOM_COBALT = "#3A86FF";
+const KIT_ROOM_STEEL = "#94A3B8";
 
 // `kind` groups formats for the one-active-fun-league-per-kind join rule: single
 // round robin, double round robin, and survivor all play out as an ongoing
@@ -9510,8 +9520,8 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
       {/* Wildcard Match — the open/"random" challenge broadcast, promoted
           out of the header's small badge icon into its own spotlight right
           under the player card, so it's the first thing anyone sees after
-          "who am I" and before "what's due". Deliberately its own violet/
-          pink look (see WILDCARD_VIOLET/WILDCARD_PINK) so it reads as a
+          "who am I" and before "what's due". Deliberately its own teal/
+          amber look (see WILDCARD_TEAL/WILDCARD_AMBER) so it reads as a
           special one-tap event, not just another list item. */}
       <WildcardMatchSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges} c={c} />
 
@@ -9590,7 +9600,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
 
       <LeagueListsSection leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague}
         myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
-        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} c={c} />
+        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} onOpenTransferMarket={onOpenTransferMarket} c={c} />
 
       {/* Live event banner — sits below LeagueListsSection now, specifically
           below the Survival Ladder Cup marquee (the last thing that section
@@ -9836,31 +9846,31 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
     <section className="mt-6">
       <div role="button" tabIndex={0} onClick={onOpenChallenges} onKeyDown={(e) => { if (e.key === "Enter") onOpenChallenges(); }}
         className="relative w-full rounded-2xl p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
-        style={{ background: `linear-gradient(135deg, ${WILDCARD_VIOLET}26, ${c.surface} 60%, ${WILDCARD_PINK}14)`, border: `1px solid ${WILDCARD_VIOLET}55` }}>
+        style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}26, ${c.surface} 60%, ${WILDCARD_AMBER}14)`, border: `1px solid ${WILDCARD_TEAL}55` }}>
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_VIOLET, opacity: 0.22 }} />
-          <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_PINK, opacity: 0.18, animationDelay: "3s" }} />
+          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_TEAL, opacity: 0.22 }} />
+          <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_AMBER, opacity: 0.18, animationDelay: "3s" }} />
           {state === "grabbable" && (
-            <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_PINK}3D 45%, ${WILDCARD_VIOLET}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
+            <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_AMBER}3D 45%, ${WILDCARD_TEAL}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
           )}
         </div>
 
         <div className="relative flex items-center gap-2.5">
-          <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_VIOLET}26`, border: `1px solid ${WILDCARD_VIOLET}66` }}>
-            <Shuffle size={18} style={{ color: WILDCARD_PINK }} />
-            {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_PINK, boxShadow: `0 0 0 2px ${c.surface}` }} />}
+          <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_TEAL}66` }}>
+            <Shuffle size={18} style={{ color: WILDCARD_AMBER }} />
+            {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_AMBER, boxShadow: `0 0 0 2px ${c.surface}` }} />}
           </span>
           <div className="flex-1 min-w-0 leading-tight">
-            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_PINK }}>Wildcard Match</div>
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>Wildcard Match</div>
             <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
           </div>
           <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1"
-            style={{ background: `${WILDCARD_VIOLET}22`, color: WILDCARD_VIOLET, border: `1px solid ${WILDCARD_VIOLET}55` }}>
+            style={{ background: `${WILDCARD_TEAL}22`, color: WILDCARD_TEAL, border: `1px solid ${WILDCARD_TEAL}55` }}>
             <Sparkles size={10} /> +{winNets} Nets
           </span>
         </div>
 
-        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_VIOLET}40` }}>
+        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_TEAL}40` }}>
           {state === "grabbable" && (
             <>
               <div className="flex -space-x-2.5 shrink-0">
@@ -9879,9 +9889,9 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
           {state === "waiting" && (
             <>
               <span className="flex items-center gap-1 shrink-0">
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK }} />
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK, animationDelay: "0.3s" }} />
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_PINK, animationDelay: "0.6s" }} />
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER }} />
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.3s" }} />
+                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.6s" }} />
               </span>
               <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
             </>
@@ -9890,8 +9900,65 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
             <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>One tap. Open to every player. First to accept it wins it.</div>
           )}
           <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
-            style={{ background: `linear-gradient(135deg, ${WILDCARD_VIOLET}, ${WILDCARD_PINK})`, color: "#fff" }}>
+            style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}, ${WILDCARD_AMBER})`, color: "#fff" }}>
             {state === "grabbable" ? <>Grab it <ChevronRight size={12} /></> : state === "waiting" ? <>View <ChevronRight size={12} /></> : <><Shuffle size={13} /> Send</>}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// The Kit Room — a standalone marketplace spotlight for club transfers and
+// eFootball team sales (see TransferMarket.jsx), placed at the bottom of
+// the Home leagues list, after Completed Leagues, so it reads as "done
+// with this season? here's where clubs and teams change hands" rather than
+// competing with the active-league sections above it. Deliberately built
+// as a "retail tag" rather than another soft-glow event card (see
+// KIT_ROOM_COBALT/KIT_ROOM_STEEL): a solid left rail, a faint diagonal
+// fabric-stripe texture (evoking a kit/jersey), and a rotated corner tag —
+// its own visual family, not a WildcardMatchSpotlight reskin.
+function KitRoomSpotlight({ onOpenTransferMarket, c }) {
+  return (
+    <section className="mt-6">
+      <div role="button" tabIndex={0} onClick={onOpenTransferMarket} onKeyDown={(e) => { if (e.key === "Enter") onOpenTransferMarket(); }}
+        className="relative w-full rounded-2xl pl-5 pr-4 py-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
+        style={{ background: c.surface, border: `1px solid ${c.border}`, borderLeft: `4px solid ${KIT_ROOM_COBALT}` }}>
+        {/* Faint diagonal fabric-stripe texture — the widget's own visual
+            signature, standing in for Wildcard's glow blobs / shine sweep. */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          style={{ backgroundImage: `repeating-linear-gradient(135deg, ${KIT_ROOM_COBALT} 0px, ${KIT_ROOM_COBALT} 2px, transparent 2px, transparent 14px)` }} />
+
+        {/* Rotated corner tag, like a price/kit tag stitched to the panel. */}
+        <div className="pointer-events-none absolute -right-9 top-3 rotate-45 px-9 py-0.5"
+          style={{ background: KIT_ROOM_COBALT }}>
+          <span className="font-mono text-[9px] font-bold uppercase tracking-widest" style={{ color: "#fff" }}>Market</span>
+        </div>
+
+        <div className="relative flex items-center gap-2.5">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${KIT_ROOM_COBALT}1F`, border: `1px solid ${KIT_ROOM_COBALT}55` }}>
+            <Shirt size={18} style={{ color: KIT_ROOM_COBALT }} />
+          </span>
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: KIT_ROOM_STEEL }}>The Kit Room</div>
+            <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>Buy, sell, trade</div>
+          </div>
+        </div>
+
+        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px solid ${c.border}` }}>
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2.5 py-1"
+              style={{ background: `${KIT_ROOM_COBALT}18`, color: KIT_ROOM_COBALT, border: `1px solid ${KIT_ROOM_COBALT}40` }}>
+              <Handshake size={10} /> Club transfers
+            </span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2.5 py-1"
+              style={{ background: `${KIT_ROOM_STEEL}18`, color: KIT_ROOM_STEEL, border: `1px solid ${KIT_ROOM_STEEL}40` }}>
+              <Camera size={10} /> Team sales
+            </span>
+          </div>
+          <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
+            style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
+            Browse <ChevronRight size={12} />
           </span>
         </div>
       </div>
@@ -11142,7 +11209,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 // Home — which used to redo that same work on every unrelated re-render
 // too (a challenges/ladder realtime update, an achievement sync, anything),
 // not just the tick.
-function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, c }) {
+function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, c }) {
   useNow(60000);
   // hideLeagueIds excludes whatever's already shown in the Weekend League
   // spotlight above (see Home) — otherwise a weekend league appeared both
@@ -11218,6 +11285,8 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
           entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
+
+      <KitRoomSpotlight onOpenTransferMarket={onOpenTransferMarket} c={c} />
     </>
   );
 }
