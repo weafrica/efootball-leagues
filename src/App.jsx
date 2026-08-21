@@ -6617,8 +6617,26 @@ export default function App() {
       `Final confirmation — click to permanently remove ${team.name}.`,
     ], async () => {
       await supabase.from("members").delete().eq("team_id", team.id);
-      const { error } = await supabase.from("teams").delete().eq("id", team.id);
-      if (error) { showToast(`Couldn't remove club: ${error.message}`); return; }
+
+      // A team that has already played can't be hard-deleted — its id is
+      // referenced (NOT NULL, no cascade) by ladder_cup_matches' home/away
+      // team columns and by regular league fixtures, so deleting it here
+      // would hit the same 23503 foreign-key error removeTeam used to
+      // throw. Once match history exists, we just drop the membership
+      // (already done above) and leave the now-unclaimed teams row in
+      // place — same as leaveLeague already does post-start.
+      const [{ count: matchCount }, { count: fixtureCount }] = await Promise.all([
+        supabase.from("ladder_cup_matches").select("id", { count: "exact", head: true })
+          .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`),
+        supabase.from("fixtures").select("id", { count: "exact", head: true })
+          .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`),
+      ]);
+
+      if ((matchCount || 0) === 0 && (fixtureCount || 0) === 0) {
+        const { error } = await supabase.from("teams").delete().eq("id", team.id);
+        if (error) { showToast(`Couldn't remove club: ${error.message}`); return; }
+      }
+
       await refreshLeague(team.league_id);
       showToast(`${team.name} removed from the league.`);
     });
