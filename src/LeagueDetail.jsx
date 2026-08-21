@@ -5,7 +5,7 @@ import {
   Shield, Skull, Sparkles, Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
-import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, hasMissedJoinContactWindow, joinContactDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 
 // Live "Xh Ym left" text for a deadline, ticking against a shared `now`
 // (passed down from a parent's own setInterval rather than each row
@@ -616,7 +616,7 @@ function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
 // independently underneath — claiming a walkover doesn't require a
 // Challenge to exist first, since the whole point is an opponent who won't
 // engage at all.
-function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onMarkFirstContact, onMarkPoolContact, poolSightingDeadlineAt, now, onInitiate, onCancel, onOpenResult, onRespondResult, onClaimWalkover, c }) {
+function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onMarkPoolContact, poolSightingDeadlineAt, now, onInitiate, onCancel, onOpenResult, onRespondResult, onClaimWalkover, c }) {
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
   const iAmHome = match && match.home_team_id === myTeamId;
@@ -675,13 +675,11 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
                 to chase a walkover) is exactly what this icon is for. Silently
                 renders nothing without a number on file, same guard every
                 other WhatsAppCallLink use in this file relies on. Also fires
-                two independent "made contact" signals at once: the
-                club-wide join-contact one (onMarkFirstContact — see
-                hasMissedJoinContactWindow) and this specific opponent's
-                12h pool-visibility one (onMarkPoolContact — see
-                ladderCupOpponentTimerState). First tap of each only counts. */}
+                this opponent's 12h pool-visibility "made contact" signal
+                (onMarkPoolContact — see ladderCupOpponentTimerState); first
+                tap only counts. */}
             {canSeePhones && opponentPhone && (
-              <WhatsAppCallLink phone={opponentPhone} iconOnly onClick={() => { onMarkFirstContact?.(); onMarkPoolContact?.(); }}
+              <WhatsAppCallLink phone={opponentPhone} iconOnly onClick={() => onMarkPoolContact?.()}
                 text={match
                   ? `Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Call me when you're ready to play our Ladder Cup match — let's lock in the time ⚽🕹️`
                   : `Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Fancy a Ladder Cup match? Call me and let's set it up ⚽🕹️`} c={c} />
@@ -882,7 +880,7 @@ function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
 // for matchmaking consent. Refreshes automatically off the live `league` prop,
 // same as the standings table, so logging any result elsewhere in the app
 // widens/narrows this club's slate without a separate re-fetch.
-function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onMarkFirstContact, onEnsurePoolSighting, onMarkPoolContact, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onRejoin, onClaimWalkover, c }) {
+function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSighting, onMarkPoolContact, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onRespondSecondLife, onRejoin, onClaimWalkover, c }) {
   const teamsById = useMemo(() => Object.fromEntries((league.teams || []).map((t) => [t.id, t])), [league.teams]);
   // Hooks stay unconditional (called every render, same order) — the
   // eliminated/pending-second-life/no-entry short-circuits below happen
@@ -964,29 +962,15 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onMarkFirstConta
       || null;
   };
 
-  // 24h join-contact window (see hasMissedJoinContactWindow /
-  // formats/ladderCup.js): shown only while myEntry has never made
-  // contact — deadline is null (and this stays hidden) the instant any
-  // WhatsApp icon below gets tapped for the first time.
-  const contactDeadline = joinContactDeadline(myEntry._row);
-
   return (
     <div className="mt-3 space-y-1.5">
-      {contactDeadline && (
-        <div className="rounded-lg px-3 py-2 mb-1.5 flex items-center gap-2" style={{ background: "rgba(200,30,58,0.1)", border: `1px solid ${c.red}` }}>
-          <Clock size={13} style={{ color: c.red }} />
-          <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>
-            Message an opponent by {fmtDate(contactDeadline)} SAST or {myTeam.name} is auto-removed — no contact within 24h of joining
-          </div>
-        </div>
-      )}
       {opponents.length === 0 ? (
         <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>No one's in range to challenge yet — check back as more clubs join or results come in.</div>
       ) : visibleOpponents.map((op) => (
         <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
           walkoverClaim={walkoverClaimWith(op.club_id)}
           canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
-          onMarkFirstContact={onMarkFirstContact} onMarkPoolContact={() => onMarkPoolContact?.(op.club_id)}
+          onMarkPoolContact={() => onMarkPoolContact?.(op.club_id)}
           poolSightingDeadlineAt={op.club_id === liveOpponent?.club_id ? poolSightingDeadline(mySightings.get(op.club_id)) : null} now={now}
           onInitiate={onInitiateMatch} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
           onClaimWalkover={onClaimWalkover} c={c} />
@@ -1313,7 +1297,7 @@ function LadderCupWidgetOverlay({ title, onClose, c, children }) {
   );
 }
 
-function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onMarkFirstContact, onEnsurePoolSighting, onMarkPoolContact, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onRejoin, onClaimWalkover, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
+function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, canSeePhones, session, myTeam, myUsername, avatarByTeamId, resultComments, regularComments, onLeave, onRemoveTeam, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onUpdateCreatorPhone, onUpdateTeamPhone, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onEnsurePoolSighting, onMarkPoolContact, onInitiateMatch, onCancelMatch, onOpenResult, onRespondResult, onAdminResolveResult, onAdminEditResult, onRespondSecondLife, onRejoin, onClaimWalkover, onApproveWalkoverClaim, onRejectWalkoverClaim, onStartLadderCup, c: _appTheme }) {
   const [tab, setTab] = useState("table");
   // Which of the five small quick-action widgets (if any) is currently
   // popped open over the standings table — see the trigger row + overlay
@@ -1404,7 +1388,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
           {league.ladder_cup_finalized_at ? (
             <LadderCupFinalizedBanner league={league} c={c} />
           ) : myTeam ? (
-            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onMarkFirstContact={onMarkFirstContact} onEnsurePoolSighting={onEnsurePoolSighting} onMarkPoolContact={onMarkPoolContact} onInitiateMatch={onInitiateMatch} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife} onRejoin={onRejoin}
+            <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onEnsurePoolSighting={onEnsurePoolSighting} onMarkPoolContact={onMarkPoolContact} onInitiateMatch={onInitiateMatch} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult} onRespondSecondLife={onRespondSecondLife} onRejoin={onRejoin}
               onClaimWalkover={onClaimWalkover} c={c} />
           ) : (
             <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>
@@ -1587,7 +1571,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onMarkLadderCupFirstContact, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onClaimLadderCupWalkover, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onClaimLadderCupWalkover, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1747,7 +1731,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} onClearAllWaReminders={onClearAllWaReminders}
           onUpdateMemberMessage={onUpdateMemberMessage} onNotifyAllMembers={onNotifyAllMembers} onUpdateCreatorPhone={onUpdateCreatorPhone} onUpdateTeamPhone={onUpdateTeamPhone}
           onPostComment={onPostComment} onDeleteComment={onDeleteComment} onEditComment={onEditComment} onEditResult={onEditResult} onEditLadderCupResult={onEditLadderCupResult} onToggleReaction={onToggleReaction}
-          onMarkFirstContact={onMarkLadderCupFirstContact} onEnsurePoolSighting={onEnsureLadderCupPoolSighting} onMarkPoolContact={onMarkLadderCupPoolContact}
+          onEnsurePoolSighting={onEnsureLadderCupPoolSighting} onMarkPoolContact={onMarkLadderCupPoolContact}
           onInitiateMatch={onInitiateLadderCupMatch} onCancelMatch={onCancelLadderCupMatch} onOpenResult={onOpenLadderCupResult} onRespondResult={onRespondLadderCupMatchResult} onAdminResolveResult={onAdminResolveLadderCupMatchResult} onAdminEditResult={onAdminEditLadderCupMatchResult} onRespondSecondLife={onRespondLadderCupSecondLife} onRejoin={onRejoinLadderCup}
           onClaimWalkover={onClaimLadderCupWalkover}
           onApproveWalkoverClaim={onApproveLadderCupWalkoverClaim} onRejectWalkoverClaim={onRejectLadderCupWalkoverClaim} onStartLadderCup={onStartLadderCup} c={c} />

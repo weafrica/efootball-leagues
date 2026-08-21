@@ -55,21 +55,11 @@ export const LADDER_CUP_RULES = {
   RATING_BAND_STEP: 50,        // widens ±150, ±200, ±250... no ceiling
   SHOWN_OPPONENTS: 10,         // always show up to 10 live opponents to contact
   MAX_CONCURRENT_WALKOVER_CLAIMS: 10, // one per shown opponent slot
-  // A freshly-joined club has this long to make first contact with SOME
-  // opponent (tapping the WhatsApp icon on its opponent board) before it's
-  // auto-removed from the league entirely — see hasMissedJoinContactWindow.
-  // Unrelated to walkover claims (those no longer have a waiting clock at
-  // all — see createWalkoverClaim below); this is about a club that never
-  // reached out to anyone at all.
-  JOIN_CONTACT_WINDOW_HOURS: 24,
   // How long a specific opponent stays visible on a club's own challenge
   // board (getOpponentPool) without that club tapping WhatsApp on them
-  // specifically — a completely different clock from
-  // JOIN_CONTACT_WINDOW_HOURS above (that one's about a club making ANY
-  // contact at all; this one's per-opponent and never removes a club from
-  // the league, only from one other club's own view of who's challengeable).
-  // Only one opponent's clock runs at a time (see ladderCupOpponentTimerState) —
-  // this is that clock's length, not a per-opponent-in-parallel timer.
+  // specifically. Only one opponent's clock runs at a time (see
+  // ladderCupOpponentTimerState) — this is that clock's length, not a
+  // per-opponent-in-parallel timer.
   POOL_CONTACT_WINDOW_HOURS: 12,
   // Never let an expiring pool shrink a club's visible opponent list below
   // this many, even if every one of them is overdue — see
@@ -125,39 +115,6 @@ export function createLadderCupEntry(clubId, clubName) {
     rebirth_count: 0,
     past_lives: [],
   };
-}
-
-// ---------------------------------------------------------------------------
-// Join-contact window (24h to make first contact, or auto-removed)
-// ---------------------------------------------------------------------------
-//
-// Operates directly on the raw ladder_cup_entries DB row shape (status,
-// created_at, first_contact_at) rather than the pure engine entry above —
-// created_at/first_contact_at have no equivalent in createLadderCupEntry's
-// in-memory shape and only ever need to be read here, the same way
-// App.jsx's findNoShowTeamIds reads raw `teams` rows directly instead of
-// going through an adapter.
-
-/**
- * True once a club has gone JOIN_CONTACT_WINDOW_HOURS since its entry was
- * created without ever making contact (first_contact_at still null).
- * Only "active" entries are checked — a club that's already
- * pending_second_life, eliminated, or champion has moved well past the
- * point this window cares about. A club that DID make contact is exempt
- * forever after, even if that contact never turned into a played match —
- * this only measures whether they showed any sign of life at the start,
- * not whether they followed through.
- */
-export function hasMissedJoinContactWindow(entry, now = new Date()) {
-  if (entry.status !== "active" || entry.first_contact_at || !entry.created_at) return false;
-  const deadline = new Date(entry.created_at).getTime() + LADDER_CUP_RULES.JOIN_CONTACT_WINDOW_HOURS * 60 * 60 * 1000;
-  return deadline <= now.getTime();
-}
-
-/** The deadline itself (created_at + the window), for display — null once contact's been made or the entry's past the point this applies. */
-export function joinContactDeadline(entry) {
-  if (entry.status !== "active" || entry.first_contact_at || !entry.created_at) return null;
-  return new Date(new Date(entry.created_at).getTime() + LADDER_CUP_RULES.JOIN_CONTACT_WINDOW_HOURS * 60 * 60 * 1000);
 }
 
 // ---------------------------------------------------------------------------
