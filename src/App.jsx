@@ -9806,7 +9806,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+            <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={c} />
             {myLadderRank && (
               <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
                 style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
@@ -9815,7 +9815,6 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
             )}
           </div>
         </div>
-        {rulesOpen && <div onClick={(e) => e.stopPropagation()}><Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} /></Suspense></div>}
         <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
           {top5.map((row, i) => (
             <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
@@ -9849,6 +9848,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
           </button>
         </div>
       </div>
+      {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} /></Suspense>}
     </section>
   );
 }
