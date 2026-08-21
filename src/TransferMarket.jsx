@@ -2,10 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import {
   ArrowLeft, Tag, Send, X, Check, XCircle, Trash2, ChevronDown, ChevronUp,
-  ShieldCheck, Handshake, Gavel, Camera, ImagePlus, Shirt, Loader2,
+  ShieldCheck, Handshake, Gavel, Camera, ImagePlus, Shirt, Loader2, Plus,
 } from "lucide-react";
 import { compressImage } from "./utils/imageCompress";
 import { uploadToBlob } from "./utils/blobUpload";
+import { logActivity } from "./activityLog";
+import { watchNetsBalance, formatNets, netsForRand } from "./nets.js";
+import BuyNetsModal from "./BuyNetsModal.jsx";
 import { KIT_ROOM_COBALT, KIT_ROOM_STEEL } from "./App.jsx";
 
 // Split out the same way Shop/Leaderboard/Ladder are: lazy-loaded from
@@ -19,8 +22,16 @@ import { KIT_ROOM_COBALT, KIT_ROOM_STEEL } from "./App.jsx";
 // underlying `members` row to the buyer, so they're the one playing as
 // that club everywhere else in the app from that point on.
 
-const CURRENCY_PREFIX = "R"; // South African Rand — matches the Shop
-const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA")}`;
+// The Kit Room prices everything in Nets (the site's in-app currency —
+// see nets.js) rather than Rand: asking prices and offers are just plain
+// numbers in the database (transfer_listings.asking_price, team_sale_
+// listings.asking_price, *_offers.amount — see their migrations), so
+// showing them through formatNets is a display-only choice, not a rate
+// conversion. Players top up their Nets balance with real money via the
+// "Buy Nets" button below (BuyNetsModal) — this is the only place in the
+// app that flow is wired up; NetsBadge/NetsPanel only show balance +
+// transaction history, no purchasing.
+const formatMoney = formatNets;
 
 function Spinner({ c }) {
   return (
@@ -82,7 +93,77 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   const [localToast, setLocalToast] = useState(null);
   const showToast = showToastProp || ((msg) => { setLocalToast(msg); setTimeout(() => setLocalToast((t) => (t === msg ? null : t)), 3000); });
 
+  // Buy Nets — the only place in the app a player can top up their Nets
+  // balance with real money (NetsBadge/NetsPanel is balance + history
+  // only). Bank transfer / Mukuru go through proof-upload + admin review,
+  // card goes through create-nets-payment and is auto-credited by the
+  // iKhokha webhook.
+  const [buyNetsOpen, setBuyNetsOpen] = useState(false);
+  const [netsBalance, setNetsBalance] = useState(null);
+
   const myId = session?.user?.id;
+
+  useEffect(() => {
+    if (!session) { setNetsBalance(null); return; }
+    let unsub;
+    let cancelled = false;
+    watchNetsBalance((b) => { if (!cancelled) setNetsBalance(b); }).then((fn) => { unsub = fn; });
+    return () => { cancelled = true; unsub?.(); };
+  }, [session]);
+
+  const handleBuyNetsSubmit = async (rand, rawFile) => {
+    if (!session) { showToast("You need to be signed in to buy Nets."); return; }
+    const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
+    const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+    const path = `${session.user.id}/nets-${Date.now()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file, { cacheControl: "31536000" });
+    if (uploadErr) { showToast(`Couldn't upload proof of payment: ${uploadErr.message}`); return; }
+    logActivity("storage_upload", { bucket: "payment-proofs", purpose: "nets_purchase", bytes: file.size ?? null });
+
+    const { error } = await supabase.from("nets_purchases").insert({
+      user_id: session.user.id,
+      rand_amount: rand,
+      nets_amount: netsForRand(rand),
+      payment_status: "pending",
+      payment_method: "bank_transfer",
+      payment_proof_path: path,
+    });
+    if (error) { showToast(`Couldn't submit: ${error.message}`); return; }
+
+    logActivity("nets_purchase_submitted", { rand_amount: rand, method: "bank_transfer" });
+    setBuyNetsOpen(false);
+    showToast(`Submitted — ${formatNets(netsForRand(rand))} pending admin approval.`);
+  };
+
+  const handleBuyNetsByCard = async (rand) => {
+    if (!session) { showToast("You need to be signed in to buy Nets."); return; }
+
+    const { data: purchase, error } = await supabase.from("nets_purchases").insert({
+      user_id: session.user.id,
+      rand_amount: rand,
+      nets_amount: netsForRand(rand),
+      payment_status: "pending",
+    }).select().single();
+    if (error) { showToast(`Couldn't start purchase: ${error.message}`); return; }
+
+    const response = await fetch(
+      "https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/create-nets-payment",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ purchase_id: purchase.id }),
+      }
+    );
+
+    const data = await response.json();
+    if (!response.ok) { showToast(data.error || "Couldn't start card payment. Please try again."); return; }
+
+    logActivity("nets_purchase_submitted", { rand_amount: rand, method: "card" });
+    window.location.href = data.paylinkUrl;
+  };
 
   const loadListings = async () => {
     const { data, error } = await supabase.from("transfer_listings").select("*").order("created_at", { ascending: false });
@@ -285,8 +366,19 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
           </div>
         </div>
         <p className="relative font-body text-xs mt-3 pt-3" style={{ color: c.textDim, borderTop: `1px solid ${c.border}` }}>
-          Buy and sell clubs, or sell your own eFootball team to another member. Accepting an offer hands the deal over for real.
+          Buy and sell clubs, or sell your own eFootball team to another member. Accepting an offer hands the deal over for real. Everything here trades in Nets.
         </p>
+        <div className="relative flex items-center justify-between gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${c.border}` }}>
+          <div className="leading-tight">
+            <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Your Nets balance</div>
+            <div className="font-mono text-sm font-bold">{netsBalance === null ? "…" : formatNets(netsBalance)}</div>
+          </div>
+          <button onClick={() => setBuyNetsOpen(true)}
+            className="flex items-center gap-1 font-body text-xs font-semibold px-3.5 py-2 rounded-full shrink-0"
+            style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
+            <Plus size={13} /> Buy Nets
+          </button>
+        </div>
       </div>
 
       {/* Market switcher */}
@@ -602,6 +694,15 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
           {localToast}
         </div>
       )}
+
+      {buyNetsOpen && (
+        <BuyNetsModal
+          c={c}
+          onCancel={() => setBuyNetsOpen(false)}
+          onSubmit={handleBuyNetsSubmit}
+          onPayByCard={handleBuyNetsByCard}
+        />
+      )}
     </div>
   );
 }
@@ -639,7 +740,7 @@ function SellForm({ clubs, onSubmit, c, showToast }) {
         </select>
       </div>
       <div>
-        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Asking price (optional)</label>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Asking price in Nets (optional)</label>
         <input type="number" min="0" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
           placeholder="Leave blank to accept offers only"
           className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none"
@@ -683,7 +784,7 @@ function OfferModal({ listing, clubName, onClose, onSubmit, c }) {
         {listing.asking_price && (
           <p className="font-body text-xs mb-3" style={{ color: c.textDim }}>Asking price: {formatMoney(listing.asking_price)}</p>
         )}
-        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Your offer</label>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Your offer in Nets</label>
         <input type="number" min="0" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus
           className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none mb-3"
           style={{ background: c.surface, borderColor: c.border, color: c.text }} />
@@ -859,7 +960,7 @@ function TeamSaleSellForm({ onSubmit, c, showToast, session }) {
         </p>
       </div>
       <div>
-        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Asking price (optional)</label>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Asking price in Nets (optional)</label>
         <input type="number" min="0" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
           placeholder="Leave blank to accept offers only"
           className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none"

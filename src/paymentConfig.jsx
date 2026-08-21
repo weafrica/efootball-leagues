@@ -2,10 +2,11 @@
 // them (PaymentModal for cash leagues, BuyNetsModal for Nets top-ups)
 // doesn't have to import App.jsx itself to get them. That matters because
 // NetsBadge is mounted directly in the header (always in the initial
-// bundle) while NetsPanel/BuyNetsModal are lazy-loaded specifically to
-// keep that initial bundle small — if they pulled their payment details
-// from App.jsx, that import would drag App.jsx's ~700KB source back into
-// the "lazy" chunk and defeat the point of lazy-loading it.
+// bundle) while TransferMarket/BuyNetsModal (Buy Nets only lives in The
+// Kit Room now) are lazy-loaded specifically to keep that initial bundle
+// small — if they pulled their payment details from App.jsx, that import
+// would drag App.jsx's ~700KB source back into the "lazy" chunk and
+// defeat the point of lazy-loading it.
 
 import React from "react";
 
