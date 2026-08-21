@@ -4,7 +4,7 @@
 // card for instant, automatic credit, or pay manually and upload proof
 // for an admin to review. Kept as its own small component (not imported
 // from App.jsx) so NetsPanel's lazy-loaded chunk doesn't have to pull in
-// App.jsx to get it — see paymentConfig.js's header comment.
+// App.jsx to get it — see paymentConfig.jsx's header comment.
 
 import React, { useState } from "react";
 import { Coins, CreditCard, Upload, X } from "lucide-react";
@@ -12,7 +12,7 @@ import {
   BANK_DETAILS, MUKURU_DETAILS, IKHOKHA_DETAILS, CardBrandsBadge,
   ENTRY_FEE_MIN, ENTRY_FEE_MAX, ENTRY_FEE_STEP, ENTRY_FEE_PRESETS,
   formatRand, clampFee,
-} from "./paymentConfig.js";
+} from "./paymentConfig.jsx";
 import { formatNets, netsForRand, netsBonusPct } from "./nets.js";
 
 export default function BuyNetsModal({ onCancel, onSubmit, onPayByCard, c }) {
