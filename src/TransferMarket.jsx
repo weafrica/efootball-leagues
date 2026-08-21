@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { compressImage } from "./utils/imageCompress";
 import { uploadToBlob } from "./utils/blobUpload";
+import { KIT_ROOM_COBALT, KIT_ROOM_STEEL } from "./App.jsx";
 
 // Split out the same way Shop/Leaderboard/Ladder are: lazy-loaded from
 // App.jsx, only mounted once someone actually opens the Transfer Market.
@@ -263,11 +264,30 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     <div className="max-w-md mx-auto px-4 pt-6 pb-16">
       <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}><ArrowLeft size={15} /> Back</button>
 
-      <div className="flex items-center gap-2 mb-1">
-        <Handshake size={20} style={{ color: c.accent }} />
-        <h1 className="font-display text-xl font-bold" style={{ color: c.text }}>The Kit Room</h1>
+      {/* Header banner — deliberately the same "retail tag" look as the
+          Home widget (KitRoomSpotlight in App.jsx): solid cobalt left
+          rail, a faint diagonal fabric-stripe texture, and a rotated
+          corner tag, rather than the app's usual plain title block. */}
+      <div className="relative rounded-2xl pl-5 pr-4 py-4 mb-4 overflow-hidden"
+        style={{ background: c.surface, border: `1px solid ${c.border}`, borderLeft: `4px solid ${KIT_ROOM_COBALT}` }}>
+        <div className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          style={{ backgroundImage: `repeating-linear-gradient(135deg, ${KIT_ROOM_COBALT} 0px, ${KIT_ROOM_COBALT} 2px, transparent 2px, transparent 14px)` }} />
+        <div className="pointer-events-none absolute -right-9 top-3 rotate-45 px-9 py-0.5" style={{ background: KIT_ROOM_COBALT }}>
+          <span className="font-mono text-[9px] font-bold uppercase tracking-widest" style={{ color: "#fff" }}>Market</span>
+        </div>
+        <div className="relative flex items-center gap-2.5">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${KIT_ROOM_COBALT}1F`, border: `1px solid ${KIT_ROOM_COBALT}55` }}>
+            <Shirt size={18} style={{ color: KIT_ROOM_COBALT }} />
+          </span>
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: KIT_ROOM_STEEL }}>The Kit Room</div>
+            <h1 className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>Buy, sell, trade</h1>
+          </div>
+        </div>
+        <p className="relative font-body text-xs mt-3 pt-3" style={{ color: c.textDim, borderTop: `1px solid ${c.border}` }}>
+          Buy and sell clubs, or sell your own eFootball team to another member. Accepting an offer hands the deal over for real.
+        </p>
       </div>
-      <p className="font-body text-xs mb-5" style={{ color: c.textDim }}>Buy and sell clubs, or sell your own eFootball team to another member. Accepting an offer hands the deal over for real.</p>
 
       {/* Market switcher */}
       <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: c.surface }}>
@@ -277,7 +297,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
         ].map((m) => (
           <button key={m.id} onClick={() => setMarket(m.id)}
             className="flex-1 font-body text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5"
-            style={{ background: market === m.id ? c.accent : "transparent", color: market === m.id ? c.accentText : c.textDim }}>
+            style={{ background: market === m.id ? KIT_ROOM_COBALT : "transparent", color: market === m.id ? "#fff" : c.textDim }}>
             <m.icon size={13} /> {m.label}
           </button>
         ))}
@@ -295,7 +315,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className="flex-1 font-body text-xs font-semibold py-2 rounded-lg transition-colors"
-            style={{ background: tab === t.id ? c.accent : "transparent", color: tab === t.id ? c.accentText : c.textDim }}>
+            style={{ background: tab === t.id ? KIT_ROOM_COBALT : "transparent", color: tab === t.id ? "#fff" : c.textDim }}>
             {t.label}
           </button>
         ))}
@@ -312,7 +332,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
                   <p className="font-body font-semibold text-sm" style={{ color: c.text }}>{clubName(l.league_id, l.team_id)}</p>
                   <p className="font-body text-[11px] mt-0.5" style={{ color: c.textDim }}>{leagueName(l.league_id)}</p>
                 </div>
-                <p className="font-mono font-bold text-sm shrink-0" style={{ color: c.accent }}>
+                <p className="font-mono font-bold text-sm shrink-0" style={{ color: KIT_ROOM_COBALT }}>
                   {l.asking_price ? formatMoney(l.asking_price) : "Offers only"}
                 </p>
               </div>
@@ -322,7 +342,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
               ) : (
                 <button onClick={() => setOfferModal(l)}
                   className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
-                  style={{ background: c.accent, color: c.accentText }}>
+                  style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
                   <Send size={13} /> Make an offer
                 </button>
               )}
@@ -350,7 +370,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
                   </div>
                   <StatusPill status={l.status} c={c} />
                 </div>
-                <p className="font-mono font-bold text-sm mt-2" style={{ color: c.accent }}>
+                <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>
                   {l.status === "sold" ? `Sold for ${formatMoney(l.sold_price)}` : (l.asking_price ? formatMoney(l.asking_price) : "Offers only")}
                 </p>
                 {l.status === "active" && (
@@ -419,7 +439,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
                   </div>
                   <StatusPill status={o.status} c={c} />
                 </div>
-                <p className="font-mono font-bold text-sm mt-2" style={{ color: c.accent }}>Your offer: {formatMoney(o.amount)}</p>
+                <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>Your offer: {formatMoney(o.amount)}</p>
                 {o.status === "pending" && (
                   <button onClick={() => withdrawOffer(o)}
                     className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
@@ -452,7 +472,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
         ].map((t) => (
           <button key={t.id} onClick={() => setTeamTab(t.id)}
             className="flex-1 font-body text-xs font-semibold py-2 rounded-lg transition-colors"
-            style={{ background: teamTab === t.id ? c.accent : "transparent", color: teamTab === t.id ? c.accentText : c.textDim }}>
+            style={{ background: teamTab === t.id ? KIT_ROOM_COBALT : "transparent", color: teamTab === t.id ? "#fff" : c.textDim }}>
             {t.label}
           </button>
         ))}
@@ -469,7 +489,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
               ) : (
                 <button onClick={() => setTeamOfferModal(l)}
                   className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
-                  style={{ background: c.accent, color: c.accentText }}>
+                  style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
                   <Send size={13} /> Make an offer
                 </button>
               )}
@@ -551,7 +571,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
                   <p className="font-body font-semibold text-sm" style={{ color: c.text }}>{listing ? listing.title : "Listing"}</p>
                   <StatusPill status={o.status} c={c} />
                 </div>
-                <p className="font-mono font-bold text-sm mt-2" style={{ color: c.accent }}>Your offer: {formatMoney(o.amount)}</p>
+                <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>Your offer: {formatMoney(o.amount)}</p>
                 {o.status === "pending" && (
                   <button onClick={() => withdrawTeamOffer(o)}
                     className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
@@ -634,7 +654,7 @@ function SellForm({ clubs, onSubmit, c, showToast }) {
       </div>
       <button onClick={submit} disabled={busy || !selected}
         className="w-full font-body text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-        style={{ background: c.accent, color: c.accentText }}>
+        style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
         <Tag size={15} /> {busy ? "Listing…" : "List in The Kit Room"}
       </button>
     </div>
@@ -673,7 +693,7 @@ function OfferModal({ listing, clubName, onClose, onSubmit, c }) {
           style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         <button onClick={submit} disabled={busy || !amount}
           className="w-full font-body text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-          style={{ background: c.accent, color: c.accentText }}>
+          style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
           <Send size={15} /> {busy ? "Sending…" : "Send offer"}
         </button>
       </div>
@@ -706,13 +726,13 @@ function TeamSaleCard({ listing: l, c, onOpenPhotos, showStatus, children }) {
         {showStatus ? (
           <StatusPill status={l.status} c={c} />
         ) : (
-          <p className="font-mono font-bold text-sm shrink-0" style={{ color: c.accent }}>
+          <p className="font-mono font-bold text-sm shrink-0" style={{ color: KIT_ROOM_COBALT }}>
             {l.asking_price ? formatMoney(l.asking_price) : "Offers only"}
           </p>
         )}
       </div>
       {showStatus && (
-        <p className="font-mono font-bold text-sm mt-2" style={{ color: c.accent }}>
+        <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>
           {l.status === "sold" ? `Sold for ${formatMoney(l.sold_price)}` : (l.asking_price ? formatMoney(l.asking_price) : "Offers only")}
         </p>
       )}
@@ -734,7 +754,7 @@ function PhotoLightbox({ photos, onClose, c }) {
         {urls.map((_, i) => (
           <button key={i} onClick={() => setIndex(i)}
             className="w-2 h-2 rounded-full"
-            style={{ background: i === index ? c.accent : "rgba(255,255,255,0.35)" }} />
+            style={{ background: i === index ? KIT_ROOM_COBALT : "rgba(255,255,255,0.35)" }} />
         ))}
       </div>
     </div>
@@ -854,7 +874,7 @@ function TeamSaleSellForm({ onSubmit, c, showToast, session }) {
       </div>
       <button onClick={submit} disabled={!canSubmit}
         className="w-full font-body text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-        style={{ background: c.accent, color: c.accentText }}>
+        style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
         <Shirt size={15} /> {busy ? "Listing…" : "List your team"}
       </button>
     </div>

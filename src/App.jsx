@@ -308,8 +308,8 @@ const WILDCARD_AMBER = "#FFB703";
 // cooler, more "retail tag" feel (solid left rail + a rotated corner tag,
 // no glow blobs) rather than another soft radial-glow card, so it reads as
 // a different kind of thing (a marketplace) rather than another event.
-const KIT_ROOM_COBALT = "#3A86FF";
-const KIT_ROOM_STEEL = "#94A3B8";
+export const KIT_ROOM_COBALT = "#3A86FF";
+export const KIT_ROOM_STEEL = "#94A3B8";
 
 // `kind` groups formats for the one-active-fun-league-per-kind join rule: single
 // round robin, double round robin, and survivor all play out as an ongoing
