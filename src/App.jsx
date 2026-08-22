@@ -10037,12 +10037,18 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
   const theme = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
   const [rulesOpen, setRulesOpen] = useState(false);
   const [joining, setJoining] = useState(false);
-  if (!ladder || ladder.length === 0) return null;
+  if (!ladder) return null; // still loading — nothing to show either way yet
   const top5 = ladder.slice(0, 5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
   const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
   const isMember = !!myLadderRank;
   const canJoin = !!session && !isMember;
+  // A truly empty ladder (nobody's ever joined, or everyone who never
+  // played got purged) used to make this whole card vanish — Join button
+  // included — which meant the very first person who'd want to click Join
+  // could never see it. Only bail out now if there's genuinely nothing
+  // useful to show: no members AND no Join card for this viewer either.
+  if (top5.length === 0 && !canJoin) return null;
 
   const handleJoin = async (e) => {
     e.stopPropagation(); // sits inside the whole-card onClick=onOpenLadder below
@@ -10099,7 +10105,12 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
         )}
 
         <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
-          {top5.map((row, i) => (
+          {top5.length === 0 ? (
+            <div className="flex items-center shrink-0 rounded-xl px-3.5 py-2.5 font-body text-xs"
+              style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
+              No one's on the ladder yet — be the first.
+            </div>
+          ) : top5.map((row, i) => (
             <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
               style={{
                 background: i === 0 ? `linear-gradient(135deg, ${theme.accent}26, ${theme.surface})` : theme.surface,
