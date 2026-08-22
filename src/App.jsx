@@ -2319,9 +2319,11 @@ function RefereeNotification({ data, c, onClose }) {
   return (
     <>
       {/* Vignette: dims whatever's underneath just enough that she pops
-          against a busy page. Sits below her (z-99 vs z-100), never
-          intercepts taps. */}
-      <div className="fixed inset-0 z-[99] pointer-events-none"
+          against a busy page. Sits below her (z-99 vs z-100). Now catches
+          taps anywhere on screen to dismiss her — the bubble/mascot layer
+          above stays pointer-events-none except for its own buttons, so a
+          tap that lands outside those buttons falls through to this layer. */}
+      <div className="fixed inset-0 z-[99]" onClick={onClose}
         style={{
           background: "radial-gradient(circle at 50% 50%, transparent 0%, rgba(0,0,0,0.45) 100%)",
           animation: `${data.phase === "out" ? "referee-vignette-out" : "referee-vignette-in"} 450ms ease-out forwards`,
