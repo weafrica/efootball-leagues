@@ -677,8 +677,13 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
           {!match && <Swords size={10} className="absolute -bottom-1 -right-1 rounded-full p-[3px]" style={{ background: c.bg, color: c.accent, boxShadow: `0 0 0 1px ${c.border}` }} />}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
-            {opponent.club_name}
+          <div className="font-body text-sm font-semibold flex items-center gap-1.5">
+            {/* min-w-0 lets this flex item actually shrink below its
+                content width — without it, truncate's overflow-hidden
+                has nothing to bite on and the WhatsApp icon sibling gets
+                pushed out of the row and clipped instead of the name
+                truncating, on any name+icon combo wider than the row. */}
+            <span className="truncate min-w-0">{opponent.club_name}</span>
             {/* Same call-to-arrange entry point the fixture-based formats offer —
                 available any time a number's on file, not just once a match
                 exists, since messaging an opponent (to set up a challenge, or
