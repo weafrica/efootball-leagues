@@ -170,6 +170,14 @@ function LadderCupBadgeRow({ row, c }) {
 const LADDER_CUP_STANDINGS_ROW_HEIGHT = 42;
 const LADDER_CUP_STANDINGS_VISIBLE_ROWS = 10;
 
+// Opponent pool cards vary in height (an in-progress match with reported
+// scores/buttons is taller than a plain "Challenge" row), so unlike the
+// fixed-height standings rows above this is an approximate collapsed-row
+// height used only to size the "show 3, scroll for the rest" window —
+// a taller card just scrolls further, same as any overflow list.
+const LADDER_CUP_OPPONENT_ROW_HEIGHT = 96;
+const LADDER_CUP_OPPONENT_VISIBLE_ROWS = 3;
+
 // Cosmetic Elo-style tier read off ladder_rating (the separate matchmaking
 // number — see formats/ladderCup.js) purely so the table has a sense of
 // "climbing the ranks" beyond the raw points column. Thresholds are
@@ -964,19 +972,33 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSigh
       || null;
   };
 
+  const opponentScrolls = visibleOpponents.length > LADDER_CUP_OPPONENT_VISIBLE_ROWS;
+
   return (
     <div className="mt-3 space-y-1.5">
       {opponents.length === 0 ? (
         <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>No one's in range to challenge yet — check back as more clubs join or results come in.</div>
-      ) : visibleOpponents.map((op) => (
-        <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
-          walkoverClaim={walkoverClaimWith(op.club_id)}
-          canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
-          onMarkPoolContact={() => onMarkPoolContact?.(op.club_id)}
-          poolSightingDeadlineAt={op.club_id === liveOpponent?.club_id ? poolSightingDeadline(mySightings.get(op.club_id)) : null} now={now}
-          onInitiate={onInitiateMatch} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
-          onClaimWalkover={onClaimWalkover} c={c} />
-      ))}
+      ) : (
+        <>
+          <div className={opponentScrolls ? "space-y-1.5 overflow-y-auto pr-1" : "space-y-1.5"}
+            style={opponentScrolls ? { maxHeight: LADDER_CUP_OPPONENT_ROW_HEIGHT * LADDER_CUP_OPPONENT_VISIBLE_ROWS + 12 } : undefined}>
+            {visibleOpponents.map((op) => (
+              <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
+                walkoverClaim={walkoverClaimWith(op.club_id)}
+                canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
+                onMarkPoolContact={() => onMarkPoolContact?.(op.club_id)}
+                poolSightingDeadlineAt={op.club_id === liveOpponent?.club_id ? poolSightingDeadline(mySightings.get(op.club_id)) : null} now={now}
+                onInitiate={onInitiateMatch} onCancel={onCancelMatch} onOpenResult={onOpenResult} onRespondResult={onRespondResult}
+                onClaimWalkover={onClaimWalkover} c={c} />
+            ))}
+          </div>
+          {opponentScrolls && (
+            <div className="font-mono text-[10px] text-center" style={{ color: c.textFaint }}>
+              Scroll for more — showing {LADDER_CUP_OPPONENT_VISIBLE_ROWS} of {visibleOpponents.length}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
