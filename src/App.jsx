@@ -3720,17 +3720,22 @@ export default function App() {
     showToast("You're on the ladder!");
   };
 
-  // Admin-only cleanup: drops every ladder_ranks row with 0 wins/losses/draws —
-  // paid (or, for pre-fee members, grandfathered) but never actually played a
-  // ladder match — via purge_inactive_ladder_members() (see
-  // supabase/migrations/20260849_ladder_join_fee_and_purge.sql). They're not
-  // banned; join_ladder() has no history check, so anyone purged can pay the
-  // 5N fee and join again like a new player. Destructive (a real DELETE,
-  // no undo), so it goes through the same 3-step requestConfirm guard as the
-  // other irreversible admin actions instead of a single window.confirm().
+  // Admin-only manual trigger for the same cleanup that also now runs on
+  // its own every day at 03:00 UTC via pg_cron (see
+  // supabase/migrations/20260850_ladder_purge_auto_schedule.sql) — drops
+  // every ladder_ranks row with 0 wins/losses/draws that's been sitting
+  // untouched for 7+ days (a grace period so someone who joined this
+  // morning and hasn't played their first match yet is never swept up).
+  // This button exists for running it on demand — right after a known
+  // wave of signups, say — rather than waiting for the nightly job.
+  // Purged players aren't banned; join_ladder() has no history check, so
+  // anyone removed can pay the 5N fee and join again like a new player.
+  // Destructive (a real DELETE, no undo), so it goes through the same
+  // 3-step requestConfirm guard as the other irreversible admin actions
+  // instead of a single window.confirm().
   const purgeInactiveLadderMembers = () => {
     requestConfirm([
-      "Remove everyone on the ladder who's never played a match? They keep their profile — just lose their ladder spot and would need to pay the join fee again.",
+      "Remove everyone on the ladder who's never played a match (and joined 7+ days ago)? They keep their profile — just lose their ladder spot and would need to pay the join fee again.",
       "Are you sure? This deletes their ladder_ranks row outright — there's no undo.",
       "Final check — click to permanently remove every never-played member from the ladder.",
     ], async () => {
