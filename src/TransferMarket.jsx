@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import {
   ArrowLeft, Tag, Send, X, Check, XCircle, Trash2, ChevronDown, ChevronUp,
-  ShieldCheck, Handshake, Gavel, Camera, ImagePlus, Shirt, Loader2, Plus,
+  ShieldCheck, Handshake, Gavel, Camera, ImagePlus, Shirt, Loader2, Plus, Package,
 } from "lucide-react";
 import { compressImage } from "./utils/imageCompress";
 import { uploadToBlob } from "./utils/blobUpload";
@@ -32,6 +32,37 @@ import { KIT_ROOM_COBALT, KIT_ROOM_STEEL } from "./App.jsx";
 // app that flow is wired up; NetsBadge/NetsPanel only show balance +
 // transaction history, no purchasing.
 const formatMoney = formatNets;
+
+// Items — the third Kit Room market, for the account-level perks/cosmetics
+// below rather than clubs or eFootball teams. Fixed catalog (not free
+// text) since these are known, finite item types — keep this in sync with
+// the item_key check constraint in
+// supabase/migrations/20260845_item_market.sql. `price` is just the
+// suggested/starting price shown when listing; sellers can still ask for
+// more or less, same as any other listing here.
+const ITEM_CATALOG = [
+  { key: "league_entry_fee_ticket", label: "League entry fee ticket", price: 60 },
+  { key: "profile_picture", label: "Profile picture", price: 3 },
+  { key: "club_badge_crest", label: "Club badge/crest", price: 3 },
+  { key: "custom_club_colors", label: "Custom club colors", price: 1 },
+  { key: "username_title_tag", label: "Username/title tag", price: 1 },
+  { key: "verified_featured_club_status", label: "Verified/featured club status", price: 8 },
+  { key: "goal_celebration_animation", label: "Goal celebration animation", price: 4 },
+  { key: "victory_screen_skin", label: "Victory screen skin", price: 4 },
+  { key: "voice_commentary_pack", label: "Voice/commentary pack", price: 5 },
+  { key: "rival_nemesis_tag", label: "Rival/nemesis tag", price: 3 },
+  { key: "create_a_tournament_tool", label: "Create-a-tournament tool", price: 15 },
+  { key: "club_merger_alliance_feature", label: "Club merger/alliance feature", price: 30 },
+  { key: "sponsorship_slot_local_business", label: "Sponsorship slot (local business)", price: 45 },
+  { key: "season_archive_hall_of_fame_access", label: "Season archive/hall of fame access", price: 4 },
+  { key: "rematch_token", label: "Rematch token", price: 1 },
+  { key: "raffle_ticket", label: "Raffle ticket", price: 1 },
+  { key: "mystery_box_cosmetic", label: "Mystery box (cosmetic)", price: 3 },
+  { key: "sponsor_a_player", label: "Sponsor-a-player", price: 1 },
+  { key: "physical_trophy_medal_upgrade", label: "Physical trophy/medal upgrade", price: 30 },
+  { key: "data_bundle", label: "Data bundle", price: 3 },
+];
+const itemLabel = (key) => ITEM_CATALOG.find((i) => i.key === key)?.label || key;
 
 function Spinner({ c }) {
   return (
@@ -89,6 +120,19 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   const [expandedTeamListing, setExpandedTeamListing] = useState(null);
   const [teamOfferModal, setTeamOfferModal] = useState(null);
   const [lightboxPhotos, setLightboxPhotos] = useState(null); // { urls, index } | null
+
+  // Items (The Kit Room) — the account-level perks/cosmetics catalog
+  // (ITEM_CATALOG above), separate from clubs and team sales since there's
+  // no league team or eFootball account behind these — just a fixed list
+  // of virtual items. Unlike the other two markets, accepting an offer
+  // here also settles the Nets automatically (see accept_item_offer in
+  // supabase/migrations/20260845_item_market.sql).
+  const [itemTab, setItemTab] = useState("browse"); // browse | mine | offers | sell
+  const [itemListings, setItemListings] = useState(null);
+  const [myItemOffers, setMyItemOffers] = useState(null);
+  const [itemOffersByListing, setItemOffersByListing] = useState({});
+  const [expandedItemListing, setExpandedItemListing] = useState(null);
+  const [itemOfferModal, setItemOfferModal] = useState(null);
 
   const [localToast, setLocalToast] = useState(null);
   const showToast = showToastProp || ((msg) => { setLocalToast(msg); setTimeout(() => setLocalToast((t) => (t === msg ? null : t)), 3000); });
@@ -332,6 +376,79 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     loadTeamListings();
   };
 
+  // ── Items ─────────────────────────────────────────────────────────────
+  const loadItemListings = async () => {
+    const { data, error } = await supabase.from("item_listings").select("*").order("created_at", { ascending: false });
+    if (!error) setItemListings(data || []);
+  };
+  useEffect(() => { if (market === "items") loadItemListings(); }, [market]);
+
+  const loadMyItemOffers = async () => {
+    if (!myId) return;
+    const { data, error } = await supabase.from("item_offers").select("*").eq("buyer_id", myId).order("created_at", { ascending: false });
+    if (!error) setMyItemOffers(data || []);
+  };
+  useEffect(() => { if (market === "items" && itemTab === "offers") loadMyItemOffers(); }, [market, itemTab]);
+
+  const loadItemOffersFor = async (listingId) => {
+    const { data, error } = await supabase.from("item_offers").select("*").eq("listing_id", listingId).order("created_at", { ascending: false });
+    if (!error) setItemOffersByListing((prev) => ({ ...prev, [listingId]: data || [] }));
+  };
+
+  const activeItemListings = (itemListings || []).filter((l) => l.status === "active");
+  const myItemListings = (itemListings || []).filter((l) => l.seller_id === myId);
+
+  const submitItemListing = async ({ item_key, asking_price, description }) => {
+    const { error } = await supabase.from("item_listings").insert({
+      seller_id: myId, item_key,
+      asking_price: asking_price ? Number(asking_price) : null,
+      description: description || null,
+    });
+    if (error) { showToast(`Couldn't list your item: ${error.message}`); return false; }
+    showToast("Item listed in The Kit Room.");
+    await loadItemListings();
+    setItemTab("mine");
+    return true;
+  };
+
+  const submitItemOffer = async (listing, amount, message) => {
+    const { error } = await supabase.from("item_offers").insert({
+      listing_id: listing.id, buyer_id: myId, amount: Number(amount), message: message || null,
+    });
+    if (error) { showToast(`Couldn't send offer: ${error.message}`); return false; }
+    showToast("Offer sent.");
+    setItemOfferModal(null);
+    return true;
+  };
+
+  const withdrawItemOffer = async (offer) => {
+    const { error } = await supabase.from("item_offers").update({ status: "withdrawn" }).eq("id", offer.id);
+    if (error) { showToast(`Couldn't withdraw: ${error.message}`); return; }
+    showToast("Offer withdrawn.");
+    loadMyItemOffers();
+  };
+
+  const acceptItemOffer = async (offer) => {
+    const { error } = await supabase.rpc("accept_item_offer", { p_offer_id: offer.id });
+    if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
+    showToast("Deal done — Nets have been settled.");
+    await loadItemListings();
+    if (offer.listing_id) loadItemOffersFor(offer.listing_id);
+  };
+
+  const declineItemOffer = async (offer) => {
+    const { error } = await supabase.rpc("decline_item_offer", { p_offer_id: offer.id });
+    if (error) { showToast(`Couldn't decline offer: ${error.message}`); return; }
+    if (offer.listing_id) loadItemOffersFor(offer.listing_id);
+  };
+
+  const cancelItemListing = async (listing) => {
+    const { error } = await supabase.rpc("cancel_item_listing", { p_listing_id: listing.id });
+    if (error) { showToast(`Couldn't cancel listing: ${error.message}`); return; }
+    showToast("Listing cancelled.");
+    loadItemListings();
+  };
+
   if (!session) {
     return (
       <div className="max-w-md mx-auto px-4 pt-6 pb-16">
@@ -386,6 +503,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
         {[
           { id: "clubs", label: "Club Transfers", icon: Handshake },
           { id: "teams", label: "Team Sales", icon: Shirt },
+          { id: "items", label: "Items", icon: Package },
         ].map((m) => (
           <button key={m.id} onClick={() => setMarket(m.id)}
             className="flex-1 font-body text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5"
@@ -688,6 +806,152 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       </>
       )}
 
+      {market === "items" && (
+      <>
+      {/* Items tabs */}
+      <div className="flex gap-1 p-1 rounded-xl mb-5" style={{ background: c.surface }}>
+        {[
+          { id: "browse", label: "Browse" },
+          { id: "sell", label: "Sell" },
+          { id: "mine", label: "My listings" },
+          { id: "offers", label: "My offers" },
+        ].map((t) => (
+          <button key={t.id} onClick={() => setItemTab(t.id)}
+            className="flex-1 font-body text-xs font-semibold py-2 rounded-lg transition-colors"
+            style={{ background: itemTab === t.id ? KIT_ROOM_COBALT : "transparent", color: itemTab === t.id ? "#fff" : c.textDim }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {itemTab === "browse" && (
+        itemListings === null ? <Spinner c={c} /> :
+        activeItemListings.length === 0 ? <EmptyState icon={Package} title="No items listed right now" sub="Check back later, or list one of your own from the Sell tab." c={c} /> :
+        <div className="space-y-3">
+          {activeItemListings.map((l) => (
+            <div key={l.id} className="rounded-2xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-body font-semibold text-sm" style={{ color: c.text }}>{itemLabel(l.item_key)}</p>
+                <p className="font-mono font-bold text-sm shrink-0" style={{ color: KIT_ROOM_COBALT }}>
+                  {l.asking_price ? formatMoney(l.asking_price) : "Offers only"}
+                </p>
+              </div>
+              {l.description && <p className="font-body text-xs mt-2" style={{ color: c.textDim }}>{l.description}</p>}
+              {l.seller_id === myId ? (
+                <p className="font-body text-[11px] mt-3" style={{ color: c.textFaint }}>This is your own listing.</p>
+              ) : (
+                <button onClick={() => setItemOfferModal(l)}
+                  className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
+                  style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
+                  <Send size={13} /> Make an offer
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {itemTab === "sell" && (
+        <ItemSellForm onSubmit={submitItemListing} c={c} />
+      )}
+
+      {itemTab === "mine" && (
+        myItemListings.length === 0 ? <EmptyState icon={Gavel} title="You haven't listed an item yet" sub="Switch to the Sell tab to put one on the market." c={c} /> :
+        <div className="space-y-3">
+          {myItemListings.map((l) => {
+            const isOpen = expandedItemListing === l.id;
+            const offers = itemOffersByListing[l.id];
+            return (
+              <div key={l.id} className="rounded-2xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-body font-semibold text-sm" style={{ color: c.text }}>{itemLabel(l.item_key)}</p>
+                  <StatusPill status={l.status} c={c} />
+                </div>
+                <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>
+                  {l.status === "sold" ? `Sold for ${formatMoney(l.sold_price)}` : (l.asking_price ? formatMoney(l.asking_price) : "Offers only")}
+                </p>
+                {l.status === "active" && (
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => { const next = isOpen ? null : l.id; setExpandedItemListing(next); if (next) loadItemOffersFor(l.id); }}
+                      className="flex-1 font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1"
+                      style={{ background: c.surfaceHover, color: c.text }}>
+                      {isOpen ? "Hide offers" : "View offers"} {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <button onClick={() => cancelItemListing(l)}
+                      className="font-body text-xs font-semibold py-2 px-3 rounded-lg flex items-center gap-1"
+                      style={{ background: c.redSoft, color: c.red }}>
+                      <Trash2 size={13} /> Cancel
+                    </button>
+                  </div>
+                )}
+                {isOpen && (
+                  <div className="mt-3 space-y-2 pt-3 border-t" style={{ borderColor: c.border }}>
+                    {offers === undefined ? <Spinner c={c} /> : offers.length === 0 ? (
+                      <p className="font-body text-xs" style={{ color: c.textDim }}>No offers yet.</p>
+                    ) : offers.map((o) => (
+                      <div key={o.id} className="rounded-xl p-3" style={{ background: c.surfaceHover }}>
+                        <div className="flex items-center justify-between">
+                          <p className="font-mono font-bold text-sm" style={{ color: c.text }}>{formatMoney(o.amount)}</p>
+                          <StatusPill status={o.status} c={c} />
+                        </div>
+                        {o.message && <p className="font-body text-xs mt-1" style={{ color: c.textDim }}>"{o.message}"</p>}
+                        {o.status === "pending" && (
+                          <div className="flex gap-2 mt-2">
+                            <button onClick={() => acceptItemOffer(o)}
+                              className="flex-1 font-body text-[11px] font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1"
+                              style={{ background: c.green, color: "#fff" }}>
+                              <Check size={12} /> Accept
+                            </button>
+                            <button onClick={() => declineItemOffer(o)}
+                              className="flex-1 font-body text-[11px] font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1"
+                              style={{ background: c.redSoft, color: c.red }}>
+                              <XCircle size={12} /> Decline
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {itemTab === "offers" && (
+        myItemOffers === null ? <Spinner c={c} /> :
+        myItemOffers.length === 0 ? <EmptyState icon={Send} title="You haven't made any offers" sub="Browse item listings and make an offer on one you want." c={c} /> :
+        <div className="space-y-3">
+          {myItemOffers.map((o) => {
+            const listing = (itemListings || []).find((l) => l.id === o.listing_id);
+            return (
+              <div key={o.id} className="rounded-2xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-body font-semibold text-sm" style={{ color: c.text }}>{listing ? itemLabel(listing.item_key) : "Listing"}</p>
+                  <StatusPill status={o.status} c={c} />
+                </div>
+                <p className="font-mono font-bold text-sm mt-2" style={{ color: KIT_ROOM_COBALT }}>Your offer: {formatMoney(o.amount)}</p>
+                {o.status === "pending" && (
+                  <button onClick={() => withdrawItemOffer(o)}
+                    className="mt-3 w-full font-body text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1.5"
+                    style={{ background: c.redSoft, color: c.red }}>
+                    <X size={13} /> Withdraw offer
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {itemOfferModal && (
+        <OfferModal listing={itemOfferModal} clubName={itemLabel(itemOfferModal.item_key)}
+          onClose={() => setItemOfferModal(null)} onSubmit={submitItemOffer} c={c} />
+      )}
+      </>
+      )}
+
       {!showToastProp && localToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl font-body text-sm font-semibold shadow-lg z-50"
           style={{ background: c.toastBg, color: c.toastText }}>
@@ -754,6 +1018,59 @@ function SellForm({ clubs, onSubmit, c, showToast }) {
           style={{ background: c.surface, borderColor: c.border, color: c.text }} />
       </div>
       <button onClick={submit} disabled={busy || !selected}
+        className="w-full font-body text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
+        style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
+        <Tag size={15} /> {busy ? "Listing…" : "List in The Kit Room"}
+      </button>
+    </div>
+  );
+}
+
+function ItemSellForm({ onSubmit, c }) {
+  const [itemKey, setItemKey] = useState(ITEM_CATALOG[0].key);
+  const [price, setPrice] = useState(String(ITEM_CATALOG[0].price));
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    await onSubmit({ item_key: itemKey, asking_price: price, description });
+    setBusy(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Item</label>
+        <select value={itemKey}
+          onChange={(e) => {
+            const key = e.target.value;
+            setItemKey(key);
+            const item = ITEM_CATALOG.find((i) => i.key === key);
+            setPrice(item ? String(item.price) : "");
+          }}
+          className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none"
+          style={{ background: c.surface, borderColor: c.border, color: c.text }}>
+          {ITEM_CATALOG.map((item) => (
+            <option key={item.key} value={item.key}>{item.label}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Asking price in Nets (optional)</label>
+        <input type="number" min="0" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
+          placeholder="Leave blank to accept offers only"
+          className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none"
+          style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+      <div>
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Description (optional)</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+          placeholder="Anything a buyer should know…"
+          className="w-full font-body text-sm rounded-xl px-3 py-2.5 border outline-none resize-none"
+          style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+      <button onClick={submit} disabled={busy}
         className="w-full font-body text-sm font-semibold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
         style={{ background: KIT_ROOM_COBALT, color: "#fff" }}>
         <Tag size={15} /> {busy ? "Listing…" : "List in The Kit Room"}
