@@ -981,7 +981,18 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSigh
       ) : (
         <>
           <div className={opponentScrolls ? "space-y-1.5 overflow-y-auto pr-1" : "space-y-1.5"}
-            style={opponentScrolls ? { maxHeight: LADDER_CUP_OPPONENT_ROW_HEIGHT * LADDER_CUP_OPPONENT_VISIBLE_ROWS + 12 } : undefined}>
+            style={opponentScrolls ? {
+              maxHeight: LADDER_CUP_OPPONENT_ROW_HEIGHT * LADDER_CUP_OPPONENT_VISIBLE_ROWS + 12,
+              // iOS/Safari has a known bug where content inside a freshly
+              // scrollable (overflow-y-auto) container — especially inline
+              // SVGs like the WhatsApp icon in each row — doesn't get
+              // painted until something forces a relayout (e.g. rotating
+              // the device). Forcing this onto its own GPU layer makes it
+              // paint correctly up front instead of relying on that. Also
+              // gets iOS's momentum/inertia scrolling for free.
+              WebkitOverflowScrolling: "touch",
+              transform: "translateZ(0)",
+            } : undefined}>
             {visibleOpponents.map((op) => (
               <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
                 walkoverClaim={walkoverClaimWith(op.club_id)}
