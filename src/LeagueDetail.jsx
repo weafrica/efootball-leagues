@@ -5,6 +5,7 @@ import {
   Shield, Skull, Sparkles, Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
+import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import { entryFeeForLeagueFormat } from "./economy.js";
 import { formatNets } from "./nets.js";
@@ -604,6 +605,7 @@ function LadderCupWalkoverClaimSection({ claim, onSubmitClaim, c }) {
         {file ? file.name : "Upload a screenshot showing they never played"}
         <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
       </label>
+      <FacebookHighlightsPrompt c={c} />
       <div className="flex gap-2">
         <button disabled={!file || busy} onClick={startConfirm} className="flex-1 font-body text-xs font-semibold px-3 py-2 rounded-full"
           style={file && !busy ? { background: "#B8860B", color: "#fff" } : { background: c.surfaceHover, color: c.textFaint }}>
@@ -739,8 +741,9 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
           </button>
         )}
         {match && match.finalized_at && (
-          <div className="shrink-0 font-mono text-xs font-semibold px-3 py-2" style={{ color: c.textFaint }}>
-            {myGoals} – {theirGoals}
+          <div className="shrink-0 flex items-center gap-1.5">
+            <span className="font-mono text-xs font-semibold px-1" style={{ color: c.textFaint }}>{myGoals} – {theirGoals}</span>
+            <FacebookHighlightsIcon c={c} size={22} iconOnly />
           </div>
         )}
         {resultPending && !iReported && !escalated && (

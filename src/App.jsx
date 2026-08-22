@@ -5,6 +5,7 @@ import { compressImage } from "./utils/imageCompress";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
+import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
 import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS } from "./economy.js";
@@ -2636,9 +2637,11 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
           {file ? file.name : "Upload a screenshot of the final scoreboard"}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
-        <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
+        <div className="font-mono text-[11px] mb-3" style={{ color: c.textFaint }}>
           The admin reviews this before it counts — once approved it's posted to the comments under your name automatically.
         </div>
+
+        <FacebookHighlightsPrompt c={c} />
 
         <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
@@ -2698,9 +2701,11 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
           {file ? file.name : "Upload a screenshot of the final scoreboard"}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
-        <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
+        <div className="font-mono text-[11px] mb-3" style={{ color: c.textFaint }}>
           If the screenshot clearly shows both usernames and this score, it's approved instantly. Otherwise {opponentUsername} will need to confirm it.
         </div>
+
+        <FacebookHighlightsPrompt c={c} />
 
         <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
@@ -2821,9 +2826,11 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
           {file ? file.name : "Upload a screenshot of the final scoreboard"}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
-        <div className="font-mono text-[11px] mb-5" style={{ color: c.textFaint }}>
+        <div className="font-mono text-[11px] mb-3" style={{ color: c.textFaint }}>
           This posts straight to the ladder — points, streaks, and elimination update immediately, no admin review.
         </div>
+
+        <FacebookHighlightsPrompt c={c} />
 
         <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
@@ -10659,6 +10666,7 @@ export function CommunityResultRow({ result: r, myId, c }) {
           {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
         </div>
       </div>
+      {r.confirmed && <FacebookHighlightsIcon c={c} size={22} />}
     </div>
   );
 }
@@ -11166,7 +11174,10 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "confirmed" && (
-          <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <FacebookHighlightsIcon c={c} size={22} iconOnly />
+            <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
+          </div>
         )}
         {ch.status === "accepted" && ch.result_status === "expired" && (
           <button onClick={() => onRemove(ch)} title="Dismiss" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.textFaint }}><X size={13} /></button>
