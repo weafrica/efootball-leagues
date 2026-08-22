@@ -112,6 +112,13 @@ export const ENTRY_FEES_NETS = {
 // Sunday cutoff, see LADDER_CUP_INTEGRATION.md) is the "Six-Day Survivor
 // Cup" ENTRY_FEES_NETS.six_day_survivor was priced for — confirmed, not
 // a separate never-built format as previously flagged here.
+// One-time fee to join the permanent Ladder Battles ladder (ladder_ranks) —
+// separate from ENTRY_FEES_NETS since it's not a league format. Charged and
+// the ladder_ranks row created together by the join_ladder() RPC (see
+// supabase/migrations/20260849_ladder_join_fee_and_purge.sql) — keep this in
+// sync with that migration's v_fee constant if it ever changes.
+export const LADDER_JOIN_FEE_NETS = 5;
+
 export function entryFeeForLeagueFormat(format) {
   if (format === "single_round_robin" || format === "double_round_robin" || format === "survivor") {
     return ENTRY_FEES_NETS.league;

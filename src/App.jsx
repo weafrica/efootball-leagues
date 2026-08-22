@@ -7,7 +7,7 @@ import { uploadToBlob } from "./utils/blobUpload";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
-import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets } from "./economy.js";
+import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS } from "./economy.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -3701,6 +3701,25 @@ export default function App() {
     showToast(next ? "Ladder challenges paused — you won't receive new ones until you unpause." : "Ladder challenges resumed.");
   };
 
+  // Joins the permanent ladder — a one-time 5N fee. Charging and creating
+  // the ladder_ranks row both happen inside join_ladder() (SECURITY
+  // DEFINER; ladder_ranks has no client insert policy at all, so unlike
+  // joinLeague's members-table insert-then-debit-then-rollback-on-failure
+  // dance, there's no client-side insert to unwind here — if the debit
+  // fails, the RPC's own transaction rolls back the whole thing.
+  const joinLadder = async () => {
+    const { error } = await supabase.rpc("join_ladder");
+    if (error) {
+      showToast(/insufficient/i.test(error.message || "")
+        ? `You need ${formatNets(LADDER_JOIN_FEE_NETS)} to join the ladder.`
+        : `Couldn't join the ladder: ${error.message}`);
+      return;
+    }
+    await loadMyLadderRank();
+    if (view === "ladder") await loadLadder();
+    showToast("You're on the ladder!");
+  };
+
   // Sends a challenge to another member. Snapshots the challenger's own
   // username/phone onto the row right away (same pattern used everywhere
   // else in the app — a team's display_name/phone are snapshotted at join
@@ -7344,7 +7363,7 @@ export default function App() {
               <Suspense fallback={<Loader c={c} />}>
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
                 onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={goBack}
-                onTogglePause={toggleLadderPause}
+                onTogglePause={toggleLadderPause} onJoinLadder={joinLadder}
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
                 recentMatches={ladderResults}

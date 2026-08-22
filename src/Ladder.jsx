@@ -6,6 +6,8 @@ import {
   ChallengeBoard, ChallengeChatModal, ChallengeRow, LADDER_THEME, Loader,
   MemberAvatar, PlayerProfileModal, RulesButton, ShareRangeModal, timeAgo,
 } from "./App.jsx";
+import { LADDER_JOIN_FEE_NETS } from "./economy.js";
+import { formatNets } from "./nets.js";
 
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
@@ -36,10 +38,11 @@ const SHARE_LADDER_COLUMNS = [
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-export default function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
+export default function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, onJoinLadder, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
   challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, memberAvatars, myAvatarUrl }) {
   const c = LADDER_THEME; // the Ladder always renders in its own black/gold/red look, not the app's normal theme
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
@@ -75,6 +78,16 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
         return rank(a) - rank(b) || new Date(b.created_at) - new Date(a.created_at);
       });
   }, [challenges, myId]);
+
+  const handleJoin = async () => {
+    if (joining) return;
+    setJoining(true);
+    try {
+      await onJoinLadder();
+    } finally {
+      setJoining(false);
+    }
+  };
 
   if (!ladder) return <Loader c={c} />;
 
@@ -169,6 +182,19 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
               ? { background: c.accent, color: c.accentText, borderColor: c.accent }
               : { background: "transparent", borderColor: c.borderStrong, color: c.textDim }}>
             {myLadderRank.challenges_paused ? <><Play size={13} /> Resume ladder challenges</> : <><Pause size={13} /> Pause ladder challenges</>}
+          </button>
+        </div>
+      )}
+
+      {session && !myLadderRank && (
+        <div className="rounded-xl px-4 py-3 mb-4 text-center" style={{ background: c.surfaceHover, border: `1px solid ${c.accent}55` }}>
+          <div className="font-body text-sm mb-2.5" style={{ color: c.textDim }}>
+            Not on the ladder yet — join for a one-time {formatNets(LADDER_JOIN_FEE_NETS)} fee.
+          </div>
+          <button onClick={handleJoin} disabled={joining}
+            className="w-full flex items-center justify-center gap-1.5 font-body text-sm font-semibold px-3 py-2.5 rounded-lg disabled:opacity-50"
+            style={{ background: c.accent, color: c.accentText }}>
+            <Swords size={14} /> {joining ? "Joining..." : `Join Ladder — ${formatNets(LADDER_JOIN_FEE_NETS)}`}
           </button>
         </div>
       )}
