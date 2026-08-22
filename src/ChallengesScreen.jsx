@@ -140,8 +140,8 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   // read-only CommunityResultRow — matched back to the actual challenge/open
   // challenge record by id, since the community-results view only carries
   // display fields, not the row an action can be taken against.
-  const challengesById = new Map(challenges.map((ch) => [ch.id, ch]));
-  const openChallengesById = new Map((openChallenges || []).map((ch) => [ch.id, ch]));
+  const challengesById = new Map(challenges.map((ch) => [String(ch.id), ch]));
+  const openChallengesById = new Map((openChallenges || []).map((ch) => [String(ch.id), ch]));
 
   return (
     <div className="pt-6">
@@ -309,7 +309,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
                   </div>
                   <div className="flex flex-col gap-1.5">
                     {escalatedCommunityResults.map((r) => {
-                      const ch = r.kind === "open" ? openChallengesById.get(r.id) : challengesById.get(r.id);
+                      const ch = r.kind === "open" ? openChallengesById.get(String(r.id)) : challengesById.get(String(r.id));
                       if (!ch) return <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />;
                       if (r.kind === "open") {
                         return (
