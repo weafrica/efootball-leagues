@@ -3955,9 +3955,15 @@ export default function App() {
     if (!session) return;
     // Same reasoning as loadChallenges above — an admin reviewing a random
     // challenge they weren't personally part of otherwise never receives
-    // that row at all, no matter how expired its confirm window is.
-    let query = supabase.from("open_challenges").select("*").order("created_at", { ascending: false }).limit(50);
-    if (!isAdmin) query = query.or(`status.eq.open,creator_id.eq.${session.user.id},accepted_by.eq.${session.user.id}`);
+    // that row at all, no matter how expired its confirm window is. The
+    // limit below is scoped to non-admins only: an admin needs every
+    // unresolved/escalated open challenge reachable regardless of how old
+    // it is, or an old one that's aged out of "most recent 50" becomes
+    // permanently unreviewable — silently missing from both the top
+    // escalated-review box and the Community Results escalated section,
+    // with no error to point at why.
+    let query = supabase.from("open_challenges").select("*").order("created_at", { ascending: false });
+    if (!isAdmin) query = query.or(`status.eq.open,creator_id.eq.${session.user.id},accepted_by.eq.${session.user.id}`).limit(50);
     const { data, error } = await query;
     if (error) { showToast("Couldn't load random challenges."); setOpenChallenges([]); return; }
     setOpenChallenges(data || []);
