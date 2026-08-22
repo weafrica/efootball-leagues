@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { entryFeeForLeagueFormat } from "./economy.js";
+import { formatNets } from "./nets.js";
 
 // Live "Xh Ym left" text for a deadline, ticking against a shared `now`
 // (passed down from a parent's own setInterval rather than each row
@@ -1690,7 +1692,18 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
             <GroupStageDueLine league={league} canManage={canManage} onUpdateGroupStageDueAt={onUpdateGroupStageDueAt} c={c} />
           )}
         </div>
-        {!joined && !entryClosed && !blockedByLeague && qualified && <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}><Users size={14} /> Join</button>}
+        {!joined && !entryClosed && !blockedByLeague && qualified && (() => {
+          // Only "fun" leagues charge a flat Nets entry fee via nets_debit —
+          // cash leagues have members choose their own Rand entry fee and
+          // upload proof of payment when they join (see CreateLeague.jsx),
+          // so there's no fixed Nets amount to show for those here.
+          const entryFee = league.league_type === "fun" ? entryFeeForLeagueFormat(league.format) : null;
+          return (
+            <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+              <Users size={14} /> Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}
+            </button>
+          );
+        })()}
         {!joined && !entryClosed && blockedByLeague && (
           <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
             className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>

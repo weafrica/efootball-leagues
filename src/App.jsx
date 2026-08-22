@@ -2302,7 +2302,7 @@ function TermsFooterLink({ onOpen, c }) {
 // (see the queueing logic in App()) just for a bit of visual variety —
 // pointer-events stay off throughout so she never blocks a tap on
 // whatever's underneath her.
-function RefereeNotification({ data, c }) {
+function RefereeNotification({ data, c, onClose }) {
   const isFullBody = data.variant === "fullbody";
   // Same singleton used by the rules player and comment rows — tapping this
   // speaker reads the notification aloud with whatever voice/engine those
@@ -2358,6 +2358,10 @@ function RefereeNotification({ data, c }) {
             <button onClick={() => commentSpeech.speak(data.id, data.msg)} title="Read notification aloud"
               className="pointer-events-auto shrink-0 transition-colors" style={{ color: isSpeaking ? c.accent : c.textDim }}>
               <Volume2 size={16} />
+            </button>
+            <button onClick={onClose} title="Close"
+              className="pointer-events-auto shrink-0 transition-colors" style={{ color: c.textDim }}>
+              <X size={16} />
             </button>
           </div>
         </div>
@@ -3225,6 +3229,12 @@ export default function App() {
     setRefereeQueue((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, msg }]);
   }, []);
 
+  // Player tapped the referee notification's close button — send her
+  // straight to the "out" animation rather than waiting on any timer.
+  const dismissReferee = useCallback(() => {
+    setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur));
+  }, []);
+
   // Pulls the next queued message onto screen once nothing's currently
   // showing — so firing several actions in quick succession (e.g.
   // confirming a few results back to back) queues them one after another
@@ -3253,12 +3263,10 @@ export default function App() {
       return () => clearTimeout(t);
     }
     if (activeReferee.phase === "hold") {
-      // Someone tapped the speaker on this notification — hold off the
-      // usual auto-dismiss timer. The effect below sends her to "out" the
-      // moment the reading actually finishes instead.
-      if (refereeSpeakingId === activeReferee.id) return;
-      const t = setTimeout(() => setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur)), 2400);
-      return () => clearTimeout(t);
+      // No auto-dismiss timer here anymore — she stays on screen until the
+      // player taps the close button (see dismissReferee below), or until a
+      // speaker-triggered read of her finishes (handled by the effect below).
+      return;
     }
     if (activeReferee.phase === "out") {
       const t = setTimeout(() => setActiveReferee(null), 450);
@@ -7472,7 +7480,7 @@ export default function App() {
           onCancel={() => setLadderChallengeOpen(false)} c={c} />
       )}
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
-      {activeReferee && <RefereeNotification data={activeReferee} c={c} />}
+      {activeReferee && <RefereeNotification data={activeReferee} c={c} onClose={dismissReferee} />}
       <SupportWhatsAppButton context={view === "shop" ? SHOP_NAME : "the Matchday app"} />
       <TermsFooterLink onOpen={() => setView("terms")} c={c} />
     </div>
@@ -11557,10 +11565,16 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
           ) : !qualified ? (
             <span title="Requires a top-20% finish in a completed Survival Ladder Cup"
               className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>Locked</span>
-          ) : (
-            <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-bold px-2 py-1.5 rounded-full"
-              style={{ background: c.accent, color: c.accentText }}>Join</button>
-          )}
+          ) : (() => {
+            // Same "fun leagues only" rule as LeagueDetail's Join button —
+            // cash leagues pick their own Rand entry fee at join time, so
+            // there's no fixed Nets amount to show here for those.
+            const entryFee = l.league_type === "fun" ? entryFeeForLeagueFormat(l.format) : null;
+            return (
+              <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-bold px-2 py-1.5 rounded-full"
+                style={{ background: c.accent, color: c.accentText }}>Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}</button>
+            );
+          })()}
         </div>
       </div>
     </div>
