@@ -8,7 +8,7 @@ import {
   ChallengeBoard, ChallengeChatModal, ChallengeRow, CommunityResultRow,
   Loader, MemberAvatar, REACTIONS, REACTION_EMOJI, RulesButton, VoiceNotePlayer,
   VoiceRecorderButton, WhatsAppCallLink, WhatsAppLink, avatarColor, challengeResultConfirmExpired,
-  challengeResultMinutesLeft, commentSpeech, ladderDaysLeft, timeAgo,
+  challengeResultMinutesLeft, commentSpeech, isCommunityResultEscalated, ladderDaysLeft, timeAgo,
   useCommentSpeakingId, useVoiceRecorder,
 } from "./App.jsx";
 
@@ -115,6 +115,15 @@ export default function ChallengesScreen({ session, members, challenges, openCha
     const now = new Date();
     return d.toDateString() === now.toDateString();
   }).length;
+
+  // Admin-only: pull escalated (past the opponent's confirm window, still
+  // unconfirmed) rows out of the Community results feed into their own
+  // section up top, instead of leaving them scattered — in red — among a
+  // hundred confirmed results an admin has to scroll past to spot them.
+  // Non-admins keep seeing the flat feed exactly as before, escalated rows
+  // still highlighted in place.
+  const escalatedCommunityResults = isAdmin ? filteredResults.filter(isCommunityResultEscalated) : [];
+  const nonEscalatedCommunityResults = isAdmin ? filteredResults.filter((r) => !isCommunityResultEscalated(r)) : filteredResults;
 
   return (
     <div className="pt-6">
@@ -274,9 +283,21 @@ export default function ChallengesScreen({ session, members, challenges, openCha
           {filteredResults.length === 0 ? (
             <div className="font-body text-xs py-2 text-center" style={{ color: c.textFaint }}>No results match "{resultsQuery}".</div>
           ) : (
-            <div className="flex flex-col gap-1.5 max-h-[28rem] overflow-y-auto pr-0.5">
-              {filteredResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
-            </div>
+            <>
+              {escalatedCommunityResults.length > 0 && (
+                <div className="rounded-xl p-3 border mb-2.5" style={{ background: "rgba(220,38,38,0.06)", borderColor: c.red }}>
+                  <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5" style={{ color: c.red }}>
+                    <AlertTriangle size={12} /> Escalated — awaiting admin review ({escalatedCommunityResults.length})
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {escalatedCommunityResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5 max-h-[28rem] overflow-y-auto pr-0.5">
+                {nonEscalatedCommunityResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
+              </div>
+            </>
           )}
         </>
       )}

@@ -10645,21 +10645,25 @@ export function LeagueReactionBar({ league, session, onToggle, c, compact = fals
   );
 }
 
+// Shared by CommunityResultRow (styling a single row) and ChallengesScreen
+// (pulling escalated rows out of the feed into their own admin-facing
+// section) — a community-results row counts as escalated once it's still
+// unconfirmed and the opponent's 30-minute confirm window has passed. The
+// view doesn't expose result_reported_at directly, but result_confirmed_at
+// is already populated (and used for timeAgo) even on unconfirmed rows —
+// same report timestamp under a name that only tells the truth once the
+// result is actually confirmed.
+export function isCommunityResultEscalated(r) {
+  return !!(!r.confirmed && r.result_confirmed_at
+    && (Date.now() - new Date(r.result_confirmed_at).getTime()) >= RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
+}
+
 export function CommunityResultRow({ result: r, myId, c }) {
   const p1Wins = r.score_one > r.score_two;
   const p2Wins = r.score_two > r.score_one;
   const involvesMe = myId && (r.player_one_id === myId || r.player_two_id === myId);
   const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
-  // The view doesn't expose result_reported_at directly, but
-  // result_confirmed_at is already populated (and used for timeAgo) even on
-  // unconfirmed rows — same report timestamp under a name that only tells
-  // the truth once the result is actually confirmed. Reuse it here to tell
-  // "still within the opponent's 30-minute window" apart from "that window
-  // passed and it's now sitting in the admin queue" — the two states this
-  // feed was collapsing into one static "Awaiting confirmation" label no
-  // matter how many hours had actually gone by.
-  const pastConfirmWindow = !r.confirmed && r.result_confirmed_at
-    && (Date.now() - new Date(r.result_confirmed_at).getTime()) >= RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000;
+  const pastConfirmWindow = isCommunityResultEscalated(r);
 
   return (
     <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}`, opacity: r.confirmed ? 1 : 0.75 }}>
