@@ -237,7 +237,7 @@ export default function ChallengesScreen({ session, members, challenges, openCha
           No challenges yet — search above for someone to challenge.
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 max-h-[23rem] overflow-y-auto pr-0.5">
           {sorted.map((ch) => <ChallengeRow key={ch.id} challenge={ch} myId={myId} myUsername={myUsername} onAccept={onAccept} onDecline={onDecline} onRemove={onRemove}
             onOpenLogResult={onOpenLogResult} onConfirmResult={onConfirmResult} onDisputeResult={onDisputeResult} onViewResultProof={onViewResultProof}
             onOpenChat={setChatModal} c={c} />)}
