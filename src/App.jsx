@@ -10650,6 +10650,16 @@ export function CommunityResultRow({ result: r, myId, c }) {
   const p2Wins = r.score_two > r.score_one;
   const involvesMe = myId && (r.player_one_id === myId || r.player_two_id === myId);
   const nameStyle = (isWinner) => ({ fontWeight: isWinner ? 700 : 500, color: isWinner ? c.text : c.textFaint });
+  // The view doesn't expose result_reported_at directly, but
+  // result_confirmed_at is already populated (and used for timeAgo) even on
+  // unconfirmed rows — same report timestamp under a name that only tells
+  // the truth once the result is actually confirmed. Reuse it here to tell
+  // "still within the opponent's 30-minute window" apart from "that window
+  // passed and it's now sitting in the admin queue" — the two states this
+  // feed was collapsing into one static "Awaiting confirmation" label no
+  // matter how many hours had actually gone by.
+  const pastConfirmWindow = !r.confirmed && r.result_confirmed_at
+    && (Date.now() - new Date(r.result_confirmed_at).getTime()) >= RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000;
 
   return (
     <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: involvesMe ? c.surfaceHover : "transparent", border: `1px solid ${involvesMe ? c.borderStrong : c.border}`, opacity: r.confirmed ? 1 : 0.75 }}>
@@ -10662,8 +10672,9 @@ export function CommunityResultRow({ result: r, myId, c }) {
           <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}–{r.score_two}</span>
           <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
         </div>
-        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>
-          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}{!r.confirmed && " · Awaiting confirmation"}
+        <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: pastConfirmWindow ? c.red : c.textFaint }}>
+          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}
+          {!r.confirmed && (pastConfirmWindow ? " · Escalated to admin" : " · Awaiting confirmation")}
         </div>
       </div>
       {r.confirmed && <FacebookHighlightsIcon c={c} size={22} />}
