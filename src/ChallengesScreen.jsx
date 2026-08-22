@@ -124,6 +124,14 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   // still highlighted in place.
   const escalatedCommunityResults = isAdmin ? filteredResults.filter(isCommunityResultEscalated) : [];
   const nonEscalatedCommunityResults = isAdmin ? filteredResults.filter((r) => !isCommunityResultEscalated(r)) : filteredResults;
+  // Lookup so the escalated rows above can be rendered with real
+  // approve/reject/edit-score/view-proof actions (via AdminEscalatedResultRow,
+  // the same row the top-of-page review box uses) instead of the inert
+  // read-only CommunityResultRow — matched back to the actual challenge/open
+  // challenge record by id, since the community-results view only carries
+  // display fields, not the row an action can be taken against.
+  const challengesById = new Map(challenges.map((ch) => [ch.id, ch]));
+  const openChallengesById = new Map((openChallenges || []).map((ch) => [ch.id, ch]));
 
   return (
     <div className="pt-6">
@@ -290,7 +298,28 @@ export default function ChallengesScreen({ session, members, challenges, openCha
                     <AlertTriangle size={12} /> Escalated — awaiting admin review ({escalatedCommunityResults.length})
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    {escalatedCommunityResults.map((r) => <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />)}
+                    {escalatedCommunityResults.map((r) => {
+                      const ch = r.kind === "open" ? openChallengesById.get(r.id) : challengesById.get(r.id);
+                      if (!ch) return <CommunityResultRow key={`${r.kind}-${r.id}`} result={r} myId={myId} c={c} />;
+                      if (r.kind === "open") {
+                        return (
+                          <AdminEscalatedResultRow key={`oc-${ch.id}`} nameA={ch.creator_username} nameB={ch.accepted_by_username}
+                            scoreA={ch.creator_score} scoreB={ch.accepted_by_score}
+                            reportedByUsername={ch.result_reported_by === ch.creator_id ? ch.creator_username : ch.accepted_by_username}
+                            reporterPhone={phoneByUserId[ch.result_reported_by]}
+                            onApprove={() => onAdminApproveResultOpen(ch)} onReject={() => onAdminRejectResultOpen(ch)}
+                            onEditScore={(a, b) => onAdminEditResultOpen(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
+                        );
+                      }
+                      return (
+                        <AdminEscalatedResultRow key={`ch-${ch.id}`} nameA={ch.challenger_username} nameB={ch.opponent_username}
+                          scoreA={ch.challenger_score} scoreB={ch.opponent_score}
+                          reportedByUsername={ch.result_reported_by === ch.challenger_id ? ch.challenger_username : ch.opponent_username}
+                          reporterPhone={phoneByUserId[ch.result_reported_by]}
+                          onApprove={() => onAdminApproveResult(ch)} onReject={() => onAdminRejectResult(ch)}
+                          onEditScore={(a, b) => onAdminEditResult(ch, a, b)} onViewProof={() => onViewResultProof(ch)} c={c} />
+                      );
+                    })}
                   </div>
                 </div>
               )}
