@@ -123,7 +123,17 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   // Non-admins keep seeing the flat feed exactly as before, escalated rows
   // still highlighted in place.
   const escalatedCommunityResults = isAdmin ? filteredResults.filter(isCommunityResultEscalated) : [];
-  const nonEscalatedCommunityResults = isAdmin ? filteredResults.filter((r) => !isCommunityResultEscalated(r)) : filteredResults;
+  // Random (open) challenge results that haven't been approved yet — either
+  // still inside the opponent's confirm window, or past it and sitting in
+  // the escalated section above — don't belong in the general history feed
+  // below; only an approved/confirmed random result counts as history.
+  // Direct challenges are unaffected and keep showing their "Awaiting
+  // confirmation" state inline, same as before.
+  const nonEscalatedCommunityResults = filteredResults.filter((r) => {
+    if (isAdmin && isCommunityResultEscalated(r)) return false;
+    if (r.kind === "open" && !r.confirmed) return false;
+    return true;
+  });
   // Lookup so the escalated rows above can be rendered with real
   // approve/reject/edit-score/view-proof actions (via AdminEscalatedResultRow,
   // the same row the top-of-page review box uses) instead of the inert
