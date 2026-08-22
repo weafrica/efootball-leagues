@@ -7307,7 +7307,7 @@ export default function App() {
                 challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
-                ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")}
+                ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
@@ -9280,7 +9280,7 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -9587,7 +9587,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
         )}
         <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
       </div>
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} c={c} />
+      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} session={session} onJoinLadder={onJoinLadder} showToast={showToast} c={c} />
 
       {/* Achievements — the badge collection layer, right after "where you
           stand" so a player sees their rank first, then what they've earned
@@ -9990,31 +9990,63 @@ function KitRoomSpotlight({ onOpenTransferMarket, c }) {
 // the page rather than a widget bolted onto it. Shows the top 5 by
 // rank_position (which never resets) plus, if the viewer has a spot on it
 // themselves, a quiet "you're #N" line that opens the challenge picker.
-function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
-  const c = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
+// The permanent ladder, sitting in front of everything else on Home — a
+// horizontally-scrolling strip, not a boxed-off card, so it reads as part of
+// the page rather than a widget bolted onto it. Shows the top 5 by
+// rank_position (which never resets), plus one of three states for the
+// viewer themselves:
+//   - signed out: no personal state, just a plain way in
+//   - signed in, not yet a member: a friendly one-liner + a Join button —
+//     the one place on Home this fee is explained, so it's spelled out
+//     rather than assumed
+//   - signed in, already a member: the "you're #N" chip this always had
+//
+// Previously this only ever showed the "you're #N" chip when myLadderRank
+// existed and silently showed nothing in its place otherwise — a brand new
+// player had no way to tell from this widget that joining was even a thing,
+// let alone that it cost anything. That's the gap this redesign closes.
+function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder, showToast }) {
+  const theme = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [joining, setJoining] = useState(false);
   if (!ladder || ladder.length === 0) return null;
   const top5 = ladder.slice(0, 5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
-  const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : c.accent;
+  const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
+  const isMember = !!myLadderRank;
+  const canJoin = !!session && !isMember;
+
+  const handleJoin = async (e) => {
+    e.stopPropagation(); // sits inside the whole-card onClick=onOpenLadder below
+    if (joining) return;
+    setJoining(true);
+    try {
+      await onJoinLadder();
+    } catch (err) {
+      showToast?.(`Couldn't join the ladder: ${err.message}`);
+    } finally {
+      setJoining(false);
+    }
+  };
+
   return (
     <section className="pt-5">
       <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
-        className="relative w-full rounded-2xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        className="relative w-full rounded-2xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]" style={{ background: theme.bg, border: `1px solid ${theme.border}` }}>
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16 }} />
         </div>
-        <div className="relative flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${c.borderStrong}` }} />
-            <div className="leading-tight">
-              <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: c.accent }}>Ladder Battles</div>
-              <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: c.red }}>No Mercy</div>
+        <div className="relative flex items-center justify-between mb-3 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${theme.borderStrong}` }} />
+            <div className="leading-tight min-w-0">
+              <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: theme.accent }}>Ladder Battles</div>
+              <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: theme.red }}>No Mercy</div>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={c} />
-            {myLadderRank && (
+            <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={theme} />
+            {isMember && (
               <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
                 style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
                 {myLadderRank.rank_position <= 3 && <Crown size={10} />} You're #{myLadderRank.rank_position} <ChevronRight size={12} />
@@ -10022,16 +10054,32 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
             )}
           </div>
         </div>
+
+        {canJoin && (
+          <div className="relative flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 mb-3"
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
+            <div className="font-body text-xs min-w-0" style={{ color: theme.textDim }}>
+              Not on the ladder yet — one-time <span className="font-bold" style={{ color: theme.accent }}>{formatNets(LADDER_JOIN_FEE_NETS)}</span> to join.
+            </div>
+            <button onClick={handleJoin} disabled={joining}
+              className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-50"
+              style={{ background: theme.accent, color: theme.accentText }}>
+              <Swords size={13} /> {joining ? "Joining..." : "Join"}
+            </button>
+          </div>
+        )}
+
         <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
           {top5.map((row, i) => (
             <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
               style={{
-                background: i === 0 ? `linear-gradient(135deg, ${c.accent}26, ${c.surface})` : c.surface,
-                border: `1px solid ${i === 0 ? c.accent + "55" : c.border}`,
+                background: i === 0 ? `linear-gradient(135deg, ${theme.accent}26, ${theme.surface})` : theme.surface,
+                border: `1px solid ${i === 0 ? theme.accent + "55" : theme.border}`,
               }}>
               {i === 0 && (
                 <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                  <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${c.accent}3D, transparent)` }} />
+                  <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}3D, transparent)` }} />
                 </div>
               )}
               {i < 3 ? (
@@ -10039,23 +10087,23 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder }) {
                   {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
                 </span>
               ) : (
-                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: c.surfaceHover, color: c.textFaint }}>
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: theme.surfaceHover, color: theme.textFaint }}>
                   {i + 1}
                 </span>
               )}
               <div className="flex flex-col leading-tight">
-                <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: c.text }}>{row.username}</span>
-                <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+                <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: theme.text }}>{row.username}</span>
+                <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
               </div>
             </div>
           ))}
           <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
-            style={{ color: c.accent, background: c.surfaceHover, border: `1px dashed ${c.borderStrong}` }}>
-            <Swords size={13} /> {myLadderRank && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
+            style={{ color: theme.accent, background: theme.surfaceHover, border: `1px dashed ${theme.borderStrong}` }}>
+            <Swords size={13} /> {isMember && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
           </button>
         </div>
       </div>
-      {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} /></Suspense>}
+      {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={theme} /></Suspense>}
     </section>
   );
 }
