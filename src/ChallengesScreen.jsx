@@ -28,6 +28,23 @@ export default function ChallengesScreen({ session, members, challenges, openCha
   const [rulesOpen, setRulesOpen] = useState(false);
   const [chatModal, setChatModal] = useState(null); // { challengeId, kind, counterpartUsername } — in-site chat with a matched opponent
 
+  // Admin-only: phone numbers for the WhatsApp icon on escalated results
+  // below, keyed by user id — sourced from the accounts list (only ever
+  // loaded/passed for an admin; see openChallengesScreen in App.jsx), never
+  // from `members`, which deliberately excludes phone numbers since every
+  // signed-in player can see that list to pick an opponent.
+  //
+  // Hoisted above the loading-state early return below: hooks must run in
+  // the same order on every render, and this was previously declared after
+  // that return, so the very first render (members/challenges still null)
+  // called 6 hooks while a later render, once data arrived, called 7 —
+  // React error #310 ("rendered fewer hooks than expected").
+  const phoneByUserId = useMemo(() => {
+    const map = {};
+    (accounts || []).forEach((a) => { if (a.phone) map[a.user_id] = a.phone; });
+    return map;
+  }, [accounts]);
+
   if (members === null || challenges === null) return <div className="pt-8"><Loader c={c} /></div>;
 
   const myId = session.user.id;
@@ -61,15 +78,8 @@ export default function ChallengesScreen({ session, members, challenges, openCha
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
   // Admin-only: phone numbers for the WhatsApp icon on escalated results
-  // below, keyed by user id — sourced from the accounts list (only ever
-  // loaded/passed for an admin; see openChallengesScreen in App.jsx), never
-  // from `members`, which deliberately excludes phone numbers since every
-  // signed-in player can see that list to pick an opponent.
-  const phoneByUserId = useMemo(() => {
-    const map = {};
-    (accounts || []).forEach((a) => { if (a.phone) map[a.user_id] = a.phone; });
-    return map;
-  }, [accounts]);
+  // below — see the hoisted useMemo near the top of the component for why
+  // this moved up above the loading-state early return.
 
   // Admin-only: results whose 30-minute opponent-confirm window has passed without
   // a response — these move here instead of staying stuck waiting forever.
