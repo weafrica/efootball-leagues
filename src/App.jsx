@@ -3720,6 +3720,29 @@ export default function App() {
     showToast("You're on the ladder!");
   };
 
+  // Admin-only cleanup: drops every ladder_ranks row with 0 wins/losses/draws —
+  // paid (or, for pre-fee members, grandfathered) but never actually played a
+  // ladder match — via purge_inactive_ladder_members() (see
+  // supabase/migrations/20260849_ladder_join_fee_and_purge.sql). They're not
+  // banned; join_ladder() has no history check, so anyone purged can pay the
+  // 5N fee and join again like a new player. Destructive (a real DELETE,
+  // no undo), so it goes through the same 3-step requestConfirm guard as the
+  // other irreversible admin actions instead of a single window.confirm().
+  const purgeInactiveLadderMembers = () => {
+    requestConfirm([
+      "Remove everyone on the ladder who's never played a match? They keep their profile — just lose their ladder spot and would need to pay the join fee again.",
+      "Are you sure? This deletes their ladder_ranks row outright — there's no undo.",
+      "Final check — click to permanently remove every never-played member from the ladder.",
+    ], async () => {
+      const { data: removed, error } = await supabase.rpc("purge_inactive_ladder_members");
+      if (error) { showToast(`Couldn't purge inactive members: ${error.message}`); return; }
+      await loadMyLadderRank();
+      if (view === "ladder") await loadLadder();
+      loadLadderTop5();
+      showToast(removed === 1 ? "Removed 1 player who never played." : `Removed ${removed} players who never played.`);
+    });
+  };
+
   // Sends a challenge to another member. Snapshots the challenger's own
   // username/phone onto the row right away (same pattern used everywhere
   // else in the app — a team's display_name/phone are snapshotted at join
@@ -7363,7 +7386,7 @@ export default function App() {
               <Suspense fallback={<Loader c={c} />}>
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
                 onOpenChallenge={() => setLadderChallengeOpen(true)} onBack={goBack}
-                onTogglePause={toggleLadderPause} onJoinLadder={joinLadder}
+                onTogglePause={toggleLadderPause} onJoinLadder={joinLadder} onPurgeInactive={purgeInactiveLadderMembers}
                 comments={ladderComments} isAdmin={isAdmin} myUsername={profile?.efootball_username || session.user.email}
                 onPostComment={postLadderComment} onDeleteComment={deleteLadderComment} onToggleCommentReaction={toggleLadderCommentReaction}
                 recentMatches={ladderResults}

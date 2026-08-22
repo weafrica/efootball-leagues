@@ -1,6 +1,6 @@
 import React, { useState, useMemo, Suspense, lazy } from "react";
 import {
-  ArrowLeft, Camera, Crown, Download, Medal, Pause, Play, Search, Swords,
+  ArrowLeft, Camera, Crown, Download, Medal, Pause, Play, Search, Swords, UserMinus,
 } from "lucide-react";
 import {
   ChallengeBoard, ChallengeChatModal, ChallengeRow, LADDER_THEME, Loader,
@@ -38,7 +38,7 @@ const SHARE_LADDER_COLUMNS = [
 // the viewer is actually allowed to challenge right now. LadderStrip and the
 // Ladder menu tile both land here; the pick-a-target sheet stays reachable
 // from the CTA below for people who'd rather jump straight to it.
-export default function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, onJoinLadder, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
+export default function LadderPage({ ladder, myLadderRank, targets, session, onOpenChallenge, onBack, onTogglePause, onJoinLadder, onPurgeInactive, comments, isAdmin, myUsername, onPostComment, onDeleteComment, onToggleCommentReaction, recentMatches,
   challenges, onAccept, onDecline, onRemove, onOpenLogResult, onConfirmResult, onDisputeResult, onViewResultProof, showToast, memberAvatars, myAvatarUrl }) {
   const c = LADDER_THEME; // the Ladder always renders in its own black/gold/red look, not the app's normal theme
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -146,6 +146,12 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {isAdmin && onPurgeInactive && (
+            <button onClick={onPurgeInactive} title="Remove members who've never played a ladder match"
+              className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.red }}>
+              <UserMinus size={14} />
+            </button>
+          )}
           <button onClick={() => setShareOpen(true)} title="Download image" disabled={ladder.length === 0}
             className="w-8 h-8 flex items-center justify-center rounded-full disabled:opacity-40" style={{ background: c.surface, color: c.textDim }}>
             <Download size={14} />
