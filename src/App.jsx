@@ -1246,6 +1246,12 @@ export const ACHIEVEMENTS_DEF = [
   { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", category: "ladder", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
   { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", category: "ladder", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
   { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
+  // Also gates the Wall of Fame, same as league_champion (see
+  // computeWallOfFame) — finishing #1 in League 1 at the Sunday 23:59 UTC
+  // cutoff (ladder_wall_of_fame) counts as a title in its own right, not
+  // just ladder_no1's live-rank moment. ctx.ladderLeague1Wins comes from
+  // ladderChampions (loadLadderChampions), filtered to the signed-in member.
+  { id: "ladder_champion", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "Ladder Champion", desc: "Finish #1 in League 1 at the Sunday cutoff", target: 1, value: (ctx) => (ctx.ladderLeague1Wins ? 1 : 0) },
 ];
 
 // Fixed display order + label for each achievement category — used to group
@@ -1298,7 +1304,7 @@ const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", plat
 // championshipsByUserId (see computeAllLeagueChampionships) attaches which
 // specific league(s) each winner actually won, and when — the badge alone
 // only says "won something," this is what says "won WHAT, and WHEN."
-function computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId) {
+function computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId) {
   const byUser = {};
   (allAchievements || []).forEach((row) => {
     const def = ACHIEVEMENTS_DEF.find((d) => d.id === row.achievement_id);
@@ -1307,12 +1313,24 @@ function computeWallOfFame(allAchievements, profileByUserId, championshipsByUser
     const entry = byUser[row.user_id];
     entry.count += 1;
     entry.score += TIER_WEIGHT[def.tier] || 1;
-    if (def.id === "league_champion") entry.isLeagueWinner = true;
+    if (def.id === "league_champion" || def.id === "ladder_champion") entry.isLeagueWinner = true;
     if (!entry.bestBadge || TIER_ORDER[def.tier] > TIER_ORDER[entry.bestBadge.tier]) entry.bestBadge = def;
   });
   return Object.values(byUser)
     .filter((e) => e.isLeagueWinner)
-    .map((e) => ({ ...e, profile: profileByUserId.get(e.userId), titles: (championshipsByUserId && championshipsByUserId.get(e.userId)) || [] }))
+    .map((e) => ({
+      ...e,
+      profile: profileByUserId.get(e.userId),
+      // Regular-league titles and League 1 ladder titles are two separate
+      // sources (leagues/fixtures/teams vs ladder_wall_of_fame) merged here
+      // into one combined, re-sorted list — same {leagueId, leagueName,
+      // wonAt} shape (see computeLadderTitlesByUserId), so the modal
+      // doesn't need to know which kind a given title is.
+      titles: [
+        ...((championshipsByUserId && championshipsByUserId.get(e.userId)) || []),
+        ...((ladderTitlesByUserId && ladderTitlesByUserId.get(e.userId)) || []),
+      ].sort((a, b) => new Date(b.wonAt) - new Date(a.wonAt)),
+    }))
     .filter((e) => e.profile)
     .sort((a, b) => b.score - a.score || b.count - a.count)
     .map((e, i) => ({ ...e, rank: i + 1 }));
@@ -1762,6 +1780,27 @@ function computeAllLeagueChampionships(leagues) {
     if (!byUser.has(championMember.user_id)) byUser.set(championMember.user_id, []);
     byUser.get(championMember.user_id).push(title);
   }
+  byUser.forEach((titles) => titles.sort((a, b) => new Date(b.wonAt) - new Date(a.wonAt)));
+  return byUser;
+}
+
+// Ladder League 1 championships — same {leagueId, leagueName, wonAt} title
+// shape as computeAllLeagueChampionships above, built from a completely
+// separate source (ladder_wall_of_fame rows, tier 1 only — see
+// loadLadderChampions) since League Ladder isn't part of the `leagues`
+// array at all. leagueId here is synthetic (week+user, not a real league
+// row) since it only needs to be a unique React key, not a navigable id.
+function computeLadderTitlesByUserId(ladderChampions) {
+  const byUser = new Map();
+  (ladderChampions || []).forEach((row) => {
+    const title = {
+      leagueId: `ladder-week-${row.week_number}-${row.user_id}`,
+      leagueName: `League Ladder — Week ${row.week_number}`,
+      wonAt: row.recorded_at,
+    };
+    if (!byUser.has(row.user_id)) byUser.set(row.user_id, []);
+    byUser.get(row.user_id).push(title);
+  });
   byUser.forEach((titles) => titles.sort((a, b) => new Date(b.wonAt) - new Date(a.wonAt)));
   return byUser;
 }
@@ -3588,6 +3627,7 @@ export default function App() {
   const [activityLog, setActivityLog] = useState(null); // admin-only: recent user_activity_log rows
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
   const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member — feeds the Wall of Fame
+  const [ladderChampions, setLadderChampions] = useState(null); // every League 1 Sunday-cutoff winner (ladder_wall_of_fame, tier 1 only) — feeds the Wall of Fame's ladder_champion badge + titles, same public/no-RLS-hassle shape as allAchievements
   const [teamAvatars, setTeamAvatars] = useState({}); // team_id -> avatar_url, for club photos on the Table (mirrors the guest view's version)
   const [playerLocations, setPlayerLocations] = useState({}); // user_id -> {timezone, country_code}, for opponent flags/local-time/suggested-time (roadmap 2a/2b/2c)
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
@@ -4178,6 +4218,21 @@ export default function App() {
     const { data, error } = await supabase.from("achievements").select("user_id, achievement_id, earned_at");
     if (error) { setAllAchievements([]); return; }
     setAllAchievements(data || []);
+  }, []);
+
+  // Every League 1 Sunday-cutoff winner, platform-wide — used to be shown
+  // only inside League 1's own LeagueLadderDetail page; now feeds the
+  // homepage Wall of Fame instead (merged into the trophy/badge ranking via
+  // the ladder_champion achievement — see ACHIEVEMENTS_DEF) as well as the
+  // per-user titles list (see computeLadderTitlesByUserId). tier=1 filter
+  // via the ladder_leagues join, same "readable by anyone, nothing
+  // sensitive" reasoning as loadAllAchievements above.
+  const loadLadderChampions = useCallback(async () => {
+    const { data, error } = await supabase.from("ladder_wall_of_fame")
+      .select("user_id, week_number, pts, recorded_at, ladder_leagues!inner(tier)")
+      .eq("ladder_leagues.tier", 1);
+    if (error) { console.error("Couldn't load ladder champions:", error.message); setLadderChampions([]); return; }
+    setLadderChampions(data || []);
   }, []);
 
   // Every challenge the signed-in member is involved in, either as the one who
@@ -4989,8 +5044,9 @@ export default function App() {
     loadTeamAvatars(); // also feeds the Table's club photos
     loadPlayerLocations(); // feeds opponent flags/local-time/suggested-time (roadmap 2a/2b/2c)
     loadAllAchievements(); // feeds the Wall of Fame
+    loadLadderChampions(); // feeds the Wall of Fame's ladder_champion badge + titles
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
-  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements]);
+  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
 
   // The ladder never resets, but ranks can move any time someone else's
   // challenge gets confirmed — so refresh it quietly while Home is open,
@@ -8290,7 +8346,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder} onOpenLadderLeague={openLeagueLadder}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
             )}
             {view === "create" && (
@@ -10664,7 +10720,7 @@ function AppPromoModal({ onInstall, onClose, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -10755,9 +10811,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   // myLeaguesWon (which only needs a count, for the achievement) since this
   // one runs across every user, not just the signed-in one.
   const championshipsByUserId = useMemo(() => computeAllLeagueChampionships(leagues), [leagues]);
+  const ladderTitlesByUserId = useMemo(() => computeLadderTitlesByUserId(ladderChampions), [ladderChampions]);
+  // Signed-in member's own League 1 win count, for the ladder_champion
+  // achievement — same "just a count for the achievement" split as
+  // myLeaguesWon vs championshipsByUserId above.
+  const myLadderLeague1Wins = (ladderChampions || []).filter((r) => r.user_id === myId).length;
   const achievements = useMemo(
-    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank, leaguesWon: myLeaguesWon }),
-    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position, myLeaguesWon]
+    () => computeAchievements({ p: myProgress, joinedCount: joinedLeagueCount, myLadderRank, leaguesWon: myLeaguesWon, ladderLeague1Wins: myLadderLeague1Wins }),
+    [myProgress.played, myProgress.w, myProgress.d, myProgress.bestStreak, myProgress.bestNoLossStreak, myProgress.cleanSheets, myProgress.biggestWinMargin, myProgress.level, joinedLeagueCount, myLadderRank?.rank_position, myLeaguesWon, myLadderLeague1Wins]
   );
   const earnedAchievementCount = achievements.filter((a) => a.earned).length;
   const [achievementsOpen, setAchievementsOpen] = useState(false);
@@ -10792,7 +10853,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
     if (myId) map.set(myId, { username: myDisplayName, avatar_url: myAvatarUrl });
     return map;
   }, [memberAvatars, myId, myDisplayName, myAvatarUrl]);
-  const wallOfFame = useMemo(() => computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId), [allAchievements, profileByUserId, championshipsByUserId]);
+  const wallOfFame = useMemo(() => computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId), [allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId]);
   const [wallOfFameOpen, setWallOfFameOpen] = useState(false);
 
   // Mirrors every earned badge to Supabase — this is what lets a badge

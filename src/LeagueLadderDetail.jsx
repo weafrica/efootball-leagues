@@ -989,7 +989,6 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   const [corrections, setCorrections] = useState([]);
   const [tier, setTier] = useState(null);
   const [maxTier, setMaxTier] = useState(null);
-  const [wallOfFame, setWallOfFame] = useState([]);
   const [membership, setMembership] = useState(null); // latest ladder_memberships row for this user, or null
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState(null);
@@ -1139,23 +1138,11 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
 
     const userIds = [...new Set((fixtureRows || []).flatMap((f) => [f.home_user_id, f.away_user_id]))];
 
-    // Wall of Fame — League 1 only ("belongs to the number 1 player in
-    // League 1 at cutoff time, Sunday 23:59 UTC"). Recent champions, most
-    // recent first.
-    let wofUserIds = [];
-    let wofRows = [];
-    if (leagueRow?.tier === 1) {
-      const { data } = await supabase.from("ladder_wall_of_fame")
-        .select("week_number, user_id, pts")
-        .eq("league_id", leagueId)
-        .order("week_number", { ascending: false })
-        .limit(5);
-      wofRows = data || [];
-      wofUserIds = wofRows.map((r) => r.user_id);
-    }
-    setWallOfFame(wofRows);
+    // Wall of Fame for League 1 now lives on the homepage only (merged
+    // into the platform-wide trophy/badge ranking — see App.jsx's
+    // ladder_champion achievement + loadLadderChampions), not here.
 
-    const allUserIds = [...new Set([...userIds, ...wofUserIds])];
+    const allUserIds = [...new Set(userIds)];
     if (allUserIds.length > 0) {
       const { data: profileRows } = await supabase.from("profiles")
         .select("user_id, efootball_username, avatar_url, phone, timezone, country_code")
@@ -1746,24 +1733,6 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
         ) : (
           <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
         )
-      )}
-
-      {tier === 1 && wallOfFame.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Star size={14} style={{ color: c.accent }} />
-            <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Wall of Fame</span>
-          </div>
-          <div className="flex flex-col gap-1">
-            {wallOfFame.map((row) => (
-              <div key={row.week_number} className="flex justify-between font-mono text-xs" style={{ color: c.text }}>
-                <span>Week {row.week_number}</span>
-                <span className="font-semibold">{nameFor(row.user_id)}</span>
-                <span style={{ color: c.textFaint }}>{row.pts} pts</span>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       <div>
