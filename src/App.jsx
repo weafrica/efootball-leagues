@@ -78,7 +78,7 @@ import {
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
   TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles, Coins,
-  Zap, Repeat, Rocket, CreditCard, Tag, Handshake, Bell, GraduationCap,
+  Zap, Repeat, Rocket, CreditCard, Tag, Handshake, Bell, GraduationCap, Wrench,
 } from "lucide-react";
 import NetCoinIcon, { NetsAmount } from "./NetCoinIcon";
 
@@ -160,6 +160,11 @@ const SHOP_GOLD = "#D4A017"; // brand accent, distinct from the app's green so t
 // two lines and shipping.
 const SHOP_PROMO_ACTIVE = false;
 const SHOP_PROMO_TEXT = "Sale";
+
+// League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
+// to false once the Ladder is back to normal — the notice just won't fire
+// again, no redeploy-adjacent cleanup needed.
+const LADDER_MAINTENANCE_ACTIVE = true;
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 export const ENTRY_FEE_MIN = 10;
@@ -3623,6 +3628,22 @@ export default function App() {
     }, 2500);
     return () => clearTimeout(t);
   }, [isStandalone, session]);
+  // League Ladder maintenance notice — shown once per browser session to
+  // anyone signed in, on their first Home load, so they don't tap into
+  // the Ladder mid-fix and think something's broken. Everything else on
+  // the platform (leagues, challenges, Shop, etc.) is unaffected, so this
+  // is purely informational — it doesn't block or gate the Ladder tab
+  // itself. Flip LADDER_MAINTENANCE_ACTIVE to false to retire it; the
+  // sessionStorage key means nobody sees a stale notice reappear once
+  // it's off, since a fresh session simply won't set it again.
+  const [ladderMaintenanceOpen, setLadderMaintenanceOpen] = useState(false);
+  useEffect(() => {
+    if (!LADDER_MAINTENANCE_ACTIVE) return;
+    if (!session) return;
+    if (sessionStorage.getItem("ladderMaintenanceShown")) return;
+    sessionStorage.setItem("ladderMaintenanceShown", "1");
+    setLadderMaintenanceOpen(true);
+  }, [session]);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
   const [activityLog, setActivityLog] = useState(null); // admin-only: recent user_activity_log rows
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
@@ -8492,6 +8513,9 @@ export default function App() {
         <AppPromoModal onInstall={() => { setAppPromoOpen(false); handleInstallClick(); }}
           onClose={() => setAppPromoOpen(false)} c={c} />
       )}
+      {ladderMaintenanceOpen && (
+        <LadderMaintenanceModal onClose={() => setLadderMaintenanceOpen(false)} c={c} />
+      )}
       {ladderChallengeOpen && (
         <LadderChallengeSheet myRank={myLadderRank} targets={ladderTargets}
           onChallenge={async (target) => { await sendChallenge(target, true); setLadderChallengeOpen(false); }}
@@ -10715,6 +10739,32 @@ function AppPromoModal({ onInstall, onClose, c }) {
             Maybe later
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// League Ladder maintenance notice — see ladderMaintenanceOpen above.
+// Purely informational: it doesn't gate the Ladder tab itself, just warns
+// the player before they tap in so a stale/paused board doesn't read as a
+// bug. Mirrors AppPromoModal's overlay/close pattern above it.
+function LadderMaintenanceModal({ onClose, c }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl p-6 border relative" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <button aria-label="Close" onClick={onClose} className="absolute top-3 right-3" style={{ color: c.textFaint }}>
+          <X size={16} />
+        </button>
+        <div className="mx-auto mb-3 w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: c.surfaceHover }}>
+          <Wrench size={22} style={{ color: c.textDim }} />
+        </div>
+        <div className="font-display font-black text-lg leading-tight mb-1.5 text-center">Ladder under maintenance</div>
+        <div className="font-body text-sm mb-5 text-center" style={{ color: c.textDim }}>
+          The League Ladder is getting some quick repairs and will be back shortly. Everything else — leagues, challenges, the Shop — is up and running as normal.
+        </div>
+        <button onClick={onClose} className="w-full font-body font-semibold px-4 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+          Got it
+        </button>
       </div>
     </div>
   );
