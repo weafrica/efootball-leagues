@@ -1,0 +1,50 @@
+--- efootball-leagues-repo/src/LeagueLadderDetail.jsx	2026-08-28 13:39:34.000000000 +0000
++++ /home/claude/work/efootball-leagues-repo/src/LeagueLadderDetail.jsx	2026-08-28 12:39:37.497223726 +0000
+@@ -1121,7 +1121,14 @@
+   // param sitting unused — this is the client finally passing it through.
+   const submitResult = async (fixtureId) => {
+     const draft = scoreDrafts[fixtureId];
+-    if (!draft || draft.home === "" || draft.away === "") return;
++    // An untouched side is treated as 0 rather than forcing the player to
++    // type it explicitly — a 3-0 result only needs the "3" entered, and a
++    // 0-0 result doesn't need either box touched at all. Still bail out
++    // entirely if BOTH sides were left blank (draft never opened, or
++    // cleared back out) — that's "nothing entered", not "0-0 entered".
++    if (!draft || (draft.home === "" && draft.away === "")) return;
++    const homeScore = draft.home === "" ? 0 : Number(draft.home);
++    const awayScore = draft.away === "" ? 0 : Number(draft.away);
+     const file = proofFiles[fixtureId];
+     if (!file) { showToast("Attach a photo of the final scoreboard before submitting."); return; }
+ 
+@@ -1142,8 +1149,8 @@
+     const { error } = await withTimeout(
+       supabase.rpc("submit_ladder_fixture_result", {
+         p_fixture_id: fixtureId,
+-        p_home_score: Number(draft.home),
+-        p_away_score: Number(draft.away),
++        p_home_score: homeScore,
++        p_away_score: awayScore,
+         p_proof_url: proofUrl,
+       }),
+       15000,
+@@ -1215,10 +1222,17 @@
+     setCorrectionDraft({ home: "", away: "" });
+   };
+   const submitCorrection = async (fixtureId) => {
+-    const homeScore = Number(correctionDraft.home);
+-    const awayScore = Number(correctionDraft.away);
++    // Same "blank side = 0" treatment as the player-facing submitResult
++    // above — an admin correcting a 4-0 shouldn't have to type the 0.
++    // Still block on BOTH sides blank (nothing entered at all) and on any
++    // genuinely invalid (non-integer / negative) value typed into either.
++    if (correctionDraft.home === "" && correctionDraft.away === "") {
++      showToast("Enter a valid score for both players.");
++      return;
++    }
++    const homeScore = correctionDraft.home === "" ? 0 : Number(correctionDraft.home);
++    const awayScore = correctionDraft.away === "" ? 0 : Number(correctionDraft.away);
+     if (
+-      correctionDraft.home === "" || correctionDraft.away === "" ||
+       !Number.isInteger(homeScore) || !Number.isInteger(awayScore) ||
+       homeScore < 0 || awayScore < 0
+     ) {

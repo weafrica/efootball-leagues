@@ -1,0 +1,318 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index a4ae6e2..e5bec0c 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1562,6 +1562,28 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
+ // this fixture. This is a standings-table penalty only, not a real
+ // scoreline — the fixture itself stays unplayed/scoreless in the database;
+ // isExpired just tells computeStandings to treat it this way live.
++// The three collections LEAGUE_SELECT carries beyond LEAGUE_SUMMARY_SELECT
++// — kept as their own list so the detail select string (built inline
++// against App.jsx's LEAGUE_SUMMARY_SELECT) and this merge guard can't
++// silently drift apart. `comments` is included too even though it's
++// already its own top-level key, for the same reason.
++const LEAGUE_DETAIL_ONLY_KEYS = ["comments", "ladder_cup_walkover_claims", "ladder_cup_second_life_offers", "ladder_cup_pool_sightings"];
++
++// Guards against a narrow summary-shaped league row (LEAGUE_SUMMARY_SELECT
++// — the whole-platform bulk load, or a background refresh of a league
++// nobody has opened) silently overwriting a league whose full detail is
++// already loaded in state. Without this, any summary-level refetch that
++// happened to touch an already-open league would wipe its comments/
++// ladder-cup sub-tables the instant it landed, even though the player is
++// looking right at that data. If `existing` has no `_detailLoadedAt` yet,
++// there's nothing to protect — the summary row is returned as-is.
++function mergeSummaryPreservingDetail(existing, summaryRow) {
++  if (!existing?._detailLoadedAt) return summaryRow;
++  const preserved = {};
++  LEAGUE_DETAIL_ONLY_KEYS.forEach((key) => { preserved[key] = existing[key]; });
++  return { ...summaryRow, ...preserved, _detailLoadedAt: existing._detailLoadedAt };
++}
++
+ export function computeStandings(teams, fixtures, league) {
+   const table = {};
+   teams.forEach((t) => { table[t.id] = { id: t.id, name: t.name, eliminated: t.eliminated, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 }; });
+@@ -3779,20 +3801,25 @@ export default function App() {
+   // This is the single source of truth for every league across the whole
+   // signed-in app (Home, league lists, LeagueDetail, achievements, admin
+   // screens).
+-  // LEAGUE_LIST_SELECT is everything the bulk, whole-platform load
++  // LEAGUE_SUMMARY_SELECT is everything the bulk, whole-platform load
+   // (loadLeagues) needs — every field genuinely read from a Home league
+   // card or from anywhere that iterates *all* leagues (attentionScore's
+   // result_submissions check, LeagueReactionBar's compact reaction bar,
+-  // computeMyUpcomingFixtures/computeMyProgress's fixtures scan), so none
+-  // of those stayed narrowed further. `comments` (+ nested comment_likes)
+-  // is the one collection that is genuinely detail-only — it's read
+-  // exclusively by CommentNode/CommentsSection/LeagueDetail, never by
+-  // anything that scans every league — and it's also the single largest,
+-  // fastest-growing nested collection (unbounded free-text replies plus a
+-  // nested comment_likes join), so it's the one piece split out of the
+-  // bulk load and fetched lazily instead, per open league, below.
+-  const LEAGUE_LIST_SELECT =
+-    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), ladder_cup_pool_sightings(*), " +
++  // computeMyUpcomingFixtures/computeMyProgress's fixtures scan, the
++  // platform-wide Leaderboard/season/head-to-head passes), so teams,
++  // fixtures, members, ladder_cup_entries and ladder_cup_matches stay
++  // full-width — audited and genuinely touched Home-wide, narrowing them
++  // would just break those screens.
++  // Three collections are confirmed read *only* through a single
++  // already-open league object (`activeLeague.X` / `league.X` inside a
++  // click/action handler) and never via a `(leagues || []).forEach`-style
++  // scan of the whole platform: `ladder_cup_walkover_claims`,
++  // `ladder_cup_second_life_offers`, `ladder_cup_pool_sightings`. Like
++  // `comments`, they're also unbounded/fast-growing for a long-running
++  // Ladder Cup, so they're the ones split out of the bulk load and fetched
++  // lazily instead, per opened league, via LEAGUE_DETAIL_SELECT below.
++  const LEAGUE_SUMMARY_SELECT =
++    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
+     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
+     "league_reactions(id, user_id, reaction)";
+ 
+@@ -3800,21 +3827,37 @@ export default function App() {
+     "id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
+     "comment_likes(id, user_id, reaction)";
+ 
+-  // Full per-league shape (LEAGUE_LIST_SELECT + comments) — used by
+-  // refreshLeague/refreshLeagues below, which only ever re-fetch one or a
+-  // few leagues at a time after a mutation (often a comment mutation
+-  // itself), so paying for comments there is cheap and keeps them fresh
+-  // without a second round trip.
++  // Full per-league shape (LEAGUE_SUMMARY_SELECT + the three detail-only
++  // ladder-cup collections + comments) — fetched for exactly one league at
++  // a time, only once a player has actually opened it (see the
++  // activeLeagueId effect below), never as part of the whole-platform
++  // bulk load. `LEAGUE_DETAIL_ONLY_KEYS` (module scope, near
++  // mergeSummaryPreservingDetail) is the list of object keys this adds on
++  // top of the summary shape — keep the two in sync if this select string
++  // changes.
+   const LEAGUE_SELECT =
+-    LEAGUE_LIST_SELECT + ", comments(" + LEAGUE_COMMENTS_SELECT + ")";
+-
++    LEAGUE_SUMMARY_SELECT +
++    ", ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), ladder_cup_pool_sightings(*)" +
++    ", comments(" + LEAGUE_COMMENTS_SELECT + ")";
++
++  // loadLeagues now fetches the narrow summary shape — every league on the
++  // platform, but without the three detail-only ladder-cup collections or
++  // comments (see LEAGUE_SUMMARY_SELECT above). A league the player
++  // currently has open already has its full detail loaded in state
++  // (tagged with `_detailLoadedAt`, set by the activeLeagueId effect
++  // below); this summary reload must not silently downgrade that league
++  // back to the narrow shape, so each row is merged through
++  // mergeSummaryPreservingDetail rather than replacing state outright.
+   const loadLeagues = useCallback(async () => {
+     const { data, error } = await supabase
+       .from("leagues")
+-      .select(LEAGUE_LIST_SELECT)
++      .select(LEAGUE_SUMMARY_SELECT)
+       .order("created_at", { ascending: false });
+     if (error) { showToast("Couldn't load leagues."); setLeagues([]); return; }
+-    setLeagues(data || []);
++    setLeagues((prev) => {
++      const prevById = new Map((prev || []).map((l) => [l.id, l]));
++      return (data || []).map((row) => mergeSummaryPreservingDetail(prevById.get(row.id), row));
++    });
+   }, [showToast]);
+ 
+   // Every mutation used to follow itself with a full loadLeagues() — a
+@@ -3830,72 +3873,108 @@ export default function App() {
+   // Doubles as the merge path for a brand-new league (createLeague): a
+   // league whose id isn't in local state yet gets appended, not just
+   // replaced, so callers don't need a separate "add" case.
+-  // Merges by id, not replaces — the lazy comments-only fetch below calls
+-  // this with a stub row ({ id, comments }), and a full replace would wipe
+-  // every other field (teams, fixtures, members, result_submissions...) off
+-  // the already-loaded league the instant someone opened it, crashing
+-  // anything downstream that reads league.teams/fixtures for that league.
+-  // refreshLeague/refreshLeagues pass complete rows (full LEAGUE_SELECT), so
+-  // merging is a no-op difference for them — every field they carry just
+-  // overwrites the old value as before.
++  // Merges by id, not replaces — the lazy detail fetch below calls this
++  // with a stub-like row too, and a full replace would wipe every other
++  // field off the already-loaded league the instant someone opened it,
++  // crashing anything downstream that reads league.teams/fixtures for that
++  // league. A row without `_detailLoadedAt` is a narrow SUMMARY row —
++  // routed through mergeSummaryPreservingDetail so it can't silently
++  // downgrade a league whose full detail is already loaded (see that
++  // function below). A row *with* `_detailLoadedAt` is a full DETAIL row
++  // (from refreshLeague/refreshLeagues once a league's detail is loaded,
++  // or the activeLeagueId effect below) and always overwrites as before.
+   const mergeLeaguesById = useCallback((rows) => {
+     setLeagues((prev) => {
+       const base = prev || [];
+       const byId = new Map(base.map((l) => [l.id, l]));
+-      rows.forEach((row) => byId.set(row.id, { ...(byId.get(row.id) || {}), ...row }));
++      rows.forEach((row) => {
++        const existing = byId.get(row.id);
++        const safeRow = row._detailLoadedAt ? row : mergeSummaryPreservingDetail(existing, row);
++        byId.set(row.id, { ...(existing || {}), ...safeRow });
++      });
+       // Preserve the same order loadLeagues would produce (newest created
+       // first) rather than however Map iteration/insertion happens to land.
+       return [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+     });
+   }, []);
+ 
+-  // Lazily fills in `comments` for whichever league is actually open,
+-  // rather than every league carrying its full comment history in memory
+-  // and over the wire on every load (see LEAGUE_LIST_SELECT above). Skips
+-  // the fetch if this league already has comments loaded — e.g. right
+-  // after refreshLeague/refreshLeagues ran and merged them in already.
++  // Lazily fills in the full detail shape (comments, ladder_cup_walkover_
++  // claims, ladder_cup_second_life_offers, ladder_cup_pool_sightings — see
++  // LEAGUE_DETAIL_ONLY_KEYS) for whichever league is actually open, rather
++  // than every league on the platform carrying that in memory and over the
++  // wire on every load (see LEAGUE_SUMMARY_SELECT above). Skips the fetch
++  // once this league already has detail loaded, tagged by `_detailLoadedAt`
++  // — e.g. right after this same effect (or refreshLeague/refreshLeagues)
++  // already merged it in.
+   useEffect(() => {
+     // Wait for the full bulk load (loadLeagues) to land before doing
+     // anything — on a hard reload straight into a league/cup page, `view`
+     // and `activeLeagueId` are restored from history synchronously, before
+     // `leagues` has loaded (`leagues === null`). Without this guard,
+     // `current` below comes back undefined and the effect would still fire,
+-    // merging a bare `{ id, comments }` stub into state — missing
+-    // teams/fixtures/everything else — which is what activeLeague resolves
+-    // to next render, crashing Header's `activeLeague.teams.length`.
++    // merging a bare stub into state — missing teams/fixtures/everything
++    // else — which is what activeLeague resolves to next render, crashing
++    // Header's `activeLeague.teams.length`.
+     if (!activeLeagueId || leagues === null) return;
+     const current = leagues.find((l) => l.id === activeLeagueId);
+     // Only proceed for a league that's actually already loaded (with its
+-    // full LEAGUE_LIST_SELECT shape) and just missing comments — never for
+-    // one not yet present in state at all, which is exactly the case that
+-    // used to produce the broken stub above.
+-    if (!current || current.comments) return;
++    // summary shape, at minimum) and just missing detail — never for one
++    // not yet present in state at all, which is exactly the case that used
++    // to produce the broken stub above.
++    if (!current || current._detailLoadedAt) return;
+     let cancelled = false;
+     supabase
+-      .from("comments")
+-      .select(LEAGUE_COMMENTS_SELECT)
+-      .eq("league_id", activeLeagueId)
++      .from("leagues")
++      .select(LEAGUE_SELECT)
++      .eq("id", activeLeagueId)
++      .maybeSingle()
+       .then(({ data, error }) => {
+-        if (cancelled || error) return;
+-        mergeLeaguesById([{ id: activeLeagueId, comments: data || [] }]);
++        if (cancelled || error || !data) return;
++        mergeLeaguesById([{ ...data, _detailLoadedAt: Date.now() }]);
+       });
+     return () => { cancelled = true; };
+   }, [activeLeagueId, leagues, mergeLeaguesById]);
+ 
++  // refreshLeague/refreshLeagues pick their select per league: a league
++  // whose detail is already loaded (open, or was open earlier this
++  // session) gets re-fetched with the full LEAGUE_SELECT so it stays
++  // complete; anything else only needs the cheap LEAGUE_SUMMARY_SELECT.
++  // Reads `leagues` via leaguesRef rather than as a hook dependency so
++  // these callbacks stay stable across every state update instead of being
++  // rebuilt (and re-subscribed everywhere they're used, e.g. the
++  // useVisibilityPoll/useRealtimeRefresh calls below) on every league
++  // change.
++  const leaguesRef = useRef(leagues);
++  useEffect(() => { leaguesRef.current = leagues; }, [leagues]);
++
+   const refreshLeague = useCallback(async (leagueId) => {
+     if (!leagueId) return;
+-    const { data, error } = await supabase.from("leagues").select(LEAGUE_SELECT).eq("id", leagueId).maybeSingle();
++    const hasDetail = !!leaguesRef.current?.find((l) => l.id === leagueId)?._detailLoadedAt;
++    const { data, error } = await supabase.from("leagues").select(hasDetail ? LEAGUE_SELECT : LEAGUE_SUMMARY_SELECT).eq("id", leagueId).maybeSingle();
+     if (error) { showToast("Couldn't refresh the league — try reloading."); return; }
+     if (!data) { setLeagues((prev) => (prev || []).filter((l) => l.id !== leagueId)); return; } // deleted/no longer visible
+-    mergeLeaguesById([data]);
++    mergeLeaguesById([hasDetail ? { ...data, _detailLoadedAt: Date.now() } : data]);
+   }, [showToast, mergeLeaguesById]);
+ 
+   const refreshLeagues = useCallback(async (leagueIds) => {
+     const ids = [...new Set((leagueIds || []).filter(Boolean))];
+     if (ids.length === 0) return;
+-    const { data, error } = await supabase.from("leagues").select(LEAGUE_SELECT).in("id", ids);
+-    if (error) { showToast("Couldn't refresh leagues — try reloading."); return; }
+-    mergeLeaguesById(data || []);
++    // Same per-league branch as refreshLeague, batched: split into the
++    // leagues that already have detail loaded (re-fetch full) vs. everyone
++    // else (re-fetch summary only), one request per shape instead of one
++    // per league.
++    const detailIds = ids.filter((id) => !!leaguesRef.current?.find((l) => l.id === id)?._detailLoadedAt);
++    const summaryIds = ids.filter((id) => !detailIds.includes(id));
++    const [detailRes, summaryRes] = await Promise.all([
++      detailIds.length ? supabase.from("leagues").select(LEAGUE_SELECT).in("id", detailIds) : Promise.resolve({ data: [] }),
++      summaryIds.length ? supabase.from("leagues").select(LEAGUE_SUMMARY_SELECT).in("id", summaryIds) : Promise.resolve({ data: [] }),
++    ]);
++    if (detailRes.error || summaryRes.error) { showToast("Couldn't refresh leagues — try reloading."); return; }
++    const now = Date.now();
++    mergeLeaguesById([
++      ...(detailRes.data || []).map((row) => ({ ...row, _detailLoadedAt: now })),
++      ...(summaryRes.data || []),
++    ]);
+   }, [showToast, mergeLeaguesById]);
+ 
+ 
+@@ -8443,12 +8522,18 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
+   //      without needing to know what that other query returns.
+   //      FixtureScoreRow (phone numbers, penalty scores) is never rendered
+   //      on the guest page, so those columns are excluded entirely here.
+-  //   2. GUEST_DATA_CACHE_MS: cache the whole bundle in sessionStorage for a
+-  //      short window, so a guest refreshing the page, opening a second tab,
+-  //      or bouncing back from the shop within that window reuses the last
+-  //      fetch instead of re-querying every table again. Short enough that
+-  //      nobody sees meaningfully stale standings/ladder data.
+-  const GUEST_DATA_CACHE_MS = 90 * 1000;
++  //   2. GUEST_DATA_CACHE_MS: cache the whole bundle in localStorage (not
++  //      sessionStorage) for a few minutes, so a guest refreshing the page,
++  //      opening a second tab, or coming back later within that window
++  //      reuses the last fetch instead of re-querying every table again.
++  //      localStorage rather than sessionStorage specifically because this
++  //      is anonymous, identical-for-everyone data — there's no reason a
++  //      second tab, or the same tab five minutes after a reload, should
++  //      pay for its own fresh copy. A few minutes is short enough that
++  //      nobody sees meaningfully stale standings/ladder data, but long
++  //      enough to actually absorb repeat guest visits instead of just
++  //      repeat tabs in the same 90 seconds.
++  const GUEST_DATA_CACHE_MS = 5 * 60 * 1000;
+   const GUEST_DATA_CACHE_KEY = "guestDataCacheV1";
+ 
+   // Deferred until guestLeaguesRevealed flips true (Ladder/Leagues tapped)
+@@ -8464,7 +8549,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
+     let cancelled = false;
+     (async () => {
+       try {
+-        const cachedRaw = sessionStorage.getItem(GUEST_DATA_CACHE_KEY);
++        const cachedRaw = localStorage.getItem(GUEST_DATA_CACHE_KEY);
+         if (cachedRaw) {
+           const cached = JSON.parse(cachedRaw);
+           if (cached?.data && Date.now() - cached.ts < GUEST_DATA_CACHE_MS) {
+@@ -8472,7 +8557,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
+             return;
+           }
+         }
+-      } catch { /* corrupt/unavailable sessionStorage — just refetch */ }
++      } catch { /* corrupt/unavailable localStorage — just refetch */ }
+ 
+       const [leaguesRes, teamsRes, fixturesRes, extraRes, ladderRes, resultsRes, teamAvatarsRes, settingsRes] = await Promise.all([
+         // Traced through every guest-tree consumer of a league object
+@@ -8544,7 +8629,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
+       // asks for) resolves as { data: null, error: {...} }, not a thrown
+       // rejection — so Promise.all still "succeeds" and nextGuestData
+       // silently gets [] for that slice via the `|| []` above. Caching that
+-      // would freeze the broken empty state in sessionStorage for
++      // would freeze the broken empty state in localStorage for
+       // GUEST_DATA_CACHE_MS on every reload, masking the real error behind
+       // what looks like a fast, working page. Skipping the cache write here
+       // means a real failure is visible (and re-fetched) on every reload
+@@ -8559,7 +8644,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
+         }
+       } else {
+         try {
+-          sessionStorage.setItem(GUEST_DATA_CACHE_KEY, JSON.stringify({ data: nextGuestData, ts: Date.now() }));
++          localStorage.setItem(GUEST_DATA_CACHE_KEY, JSON.stringify({ data: nextGuestData, ts: Date.now() }));
+         } catch { /* storage full/unavailable — not worth failing the page over */ }
+       }
+     })();

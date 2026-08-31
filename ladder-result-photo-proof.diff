@@ -1,0 +1,161 @@
+--- a/src/LeagueLadderDetail.jsx
++++ b/src/LeagueLadderDetail.jsx
+@@ -22,7 +22,7 @@
+ // system entirely.
+ 
+ import React, { useState, useEffect, useCallback, useMemo } from "react";
+-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil } from "lucide-react";
++import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, Camera, Image as ImageIcon } from "lucide-react";
+ import { supabase } from "./supabaseClient";
+ import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
+ import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
+@@ -31,6 +31,13 @@
+ import { formatNets } from "./nets.js";
+ import { FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
+ import { WhatsAppCallLink, waLink } from "./App.jsx";
++// Same upload path Survivor Ladder Cup's submitLadderCupMatchResult uses
++// (App.jsx) — downscale client-side, then straight to the shared
++// "result-proofs" Blob bucket (src/utils/blobUpload.js's KNOWN_BUCKETS).
++// submit_ladder_fixture_result (20260888) already accepts and stores
++// p_proof_url; only the client side was missing it here.
++import { compressImage } from "./utils/imageCompress.js";
++import { uploadToBlob } from "./utils/blobUpload.js";
+ 
+ // ZONE_LABEL / ZONE_COLOR_KEY — Elite Safety Zone / Checkpoint Safety /
+ // Danger Zone badges (Phase 7). Purely cosmetic on top of
+@@ -332,6 +339,7 @@
+   const [loading, setLoading] = useState(true);
+   const [scoreDrafts, setScoreDrafts] = useState({}); // fixtureId -> { home, away }
+   const [submittingId, setSubmittingId] = useState(null);
++  const [proofFiles, setProofFiles] = useState({}); // fixtureId -> File, mirrors scoreDrafts
+   // submissions — every ladder_fixture_result_submissions row (any status)
+   // for this week's fixtures, newest first. Kept as a flat list (not keyed
+   // by fixture) since resultEscalationReason/priorRejectedCount need to
+@@ -501,21 +509,56 @@
+   // ladder_fixture_result_submissions row; the fixture stays 'pending'
+   // until the opponent confirms, an admin approves, or the 1-hour
+   // auto-approve sweep fires.
++  //
++  // Photo proof — copied from Survivor Ladder Cup's submitLadderCupMatchResult
++  // (App.jsx): mandatory scoreboard screenshot, downscaled with
++  // compressImage the same way (1600px / 0.85), then uploaded to the same
++  // shared "result-proofs" Blob bucket before the RPC call. The RPC
++  // (submit_ladder_fixture_result, 20260888) already had a p_proof_url
++  // param sitting unused — this is the client finally passing it through.
+   const submitResult = async (fixtureId) => {
+     const draft = scoreDrafts[fixtureId];
+     if (!draft || draft.home === "" || draft.away === "") return;
++    const file = proofFiles[fixtureId];
++    if (!file) { alert("Attach a photo of the final scoreboard before submitting."); return; }
++
+     setSubmittingId(fixtureId);
++
++    let proofUrl;
++    try {
++      const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
++      const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
++      const path = `${session.user.id}/${fixtureId}-${Date.now()}.${ext}`;
++      proofUrl = await uploadToBlob("result-proofs", path, compressed);
++    } catch (uploadErr) {
++      setSubmittingId(null);
++      alert(`Couldn't upload photo: ${uploadErr.message}`);
++      return;
++    }
++
+     const { error } = await supabase.rpc("submit_ladder_fixture_result", {
+       p_fixture_id: fixtureId,
+       p_home_score: Number(draft.home),
+       p_away_score: Number(draft.away),
++      p_proof_url: proofUrl,
+     });
+     setSubmittingId(null);
+     if (error) { alert(error.message); return; }
+     setScoreDrafts((d) => ({ ...d, [fixtureId]: undefined }));
++    setProofFiles((f) => ({ ...f, [fixtureId]: undefined }));
+     await load();
+   };
+ 
++  // Blob URLs are permanent, public CDN URLs (see uploadToBlob's header) —
++  // no signed-URL step needed, unlike the legacy Supabase-storage-path rows
++  // downloadResultProof (App.jsx) still has to handle for the older,
++  // pre-Blob result-proofs rows elsewhere in the app. Every ladder proof is
++  // written post-migration, so this is always the simple case.
++  const viewProof = (url) => {
++    if (!url) return;
++    window.open(url, "_blank", "noopener,noreferrer");
++  };
++
+   // Opponent confirm/dispute — respond_to_ladder_fixture_result_submission
+   // rejects the caller server-side if they're not the other participant,
+   // so this doesn't need to duplicate that check to be safe, only to be
+@@ -655,6 +698,10 @@
+   // dispute-cap.
+   const submissionsFor = (f) => submissions.filter((s) => s.fixture_id === f.id);
+   const pendingSubmissionFor = (f) => submissionsFor(f).find((s) => s.status === "pending") || null;
++  // ladder_fixtures itself carries no proof_url (see 20260887's header —
++  // deliberately no new columns there); the approved submission row is
++  // where a played fixture's proof photo actually lives.
++  const approvedSubmissionFor = (f) => submissionsFor(f).find((s) => s.status === "approved") || null;
+ 
+   return (
+     <div className="p-4 flex flex-col gap-6" style={{ background: c.bg, fontFamily: c.font, minHeight: "100%" }}>
+@@ -791,6 +838,12 @@
+               ) : (
+                 <div className="flex items-center gap-2">
+                   <div className="font-mono text-sm font-bold" style={{ color: c.text }}>{f.home_score} - {f.away_score}</div>
++                  {approvedSubmissionFor(f)?.proof_url && (
++                    <button onClick={() => viewProof(approvedSubmissionFor(f).proof_url)} title="View proof photo"
++                      className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
++                      <ImageIcon size={12} />
++                    </button>
++                  )}
+                   {isAdmin && (
+                     <button onClick={() => startCorrection(f)} title="Correct this result"
+                       className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
+@@ -865,6 +918,20 @@
+                         style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}
+                         value={scoreDrafts[f.id]?.away ?? ""}
+                         onChange={(e) => setScoreDrafts((d) => ({ ...d, [f.id]: { ...d[f.id], away: e.target.value } }))} />
++                      {/* Mandatory scoreboard photo — same requirement and
++                          upload path as Survivor Ladder Cup's result form.
++                          Hidden native input behind a small camera-icon
++                          label so this fits the same compact row as the
++                          score boxes; label text flips to a checkmark once
++                          a file's attached so there's a visible confirmation
++                          before hitting Submit. */}
++                      <label title={proofFiles[f.id] ? proofFiles[f.id].name : "Attach scoreboard photo"}
++                        className="cursor-pointer flex items-center justify-center rounded p-1"
++                        style={{ background: c.surface, color: proofFiles[f.id] ? c.accent : c.textFaint, border: `1px solid ${c.border}` }}>
++                        {proofFiles[f.id] ? <Check size={12} /> : <Camera size={12} />}
++                        <input type="file" accept="image/*" capture="environment" className="hidden"
++                          onChange={(e) => setProofFiles((p) => ({ ...p, [f.id]: e.target.files?.[0] || undefined }))} />
++                      </label>
+                       <button onClick={() => submitResult(f.id)} disabled={submittingId === f.id}
+                         className="font-mono text-[10px] uppercase px-2 py-1 rounded"
+                         style={{ background: c.accent, color: c.accentText }}>
+@@ -898,6 +965,12 @@
+                         <span className="font-mono text-xs font-bold" style={{ color: c.text }}>
+                           {pending.home_score} - {pending.away_score}
+                         </span>
++                        {pending.proof_url && (
++                          <button onClick={() => viewProof(pending.proof_url)} title="View proof photo"
++                            className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
++                            <ImageIcon size={12} />
++                          </button>
++                        )}
+                         <span className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+                           reported — {confirmMinutesLeft(pending)}m left
+                         </span>
+@@ -937,6 +1010,12 @@
+                         <span className="font-mono text-xs font-bold" style={{ color: c.text }}>
+                           {pending.home_score} - {pending.away_score}
+                         </span>
++                        {pending.proof_url && (
++                          <button onClick={() => viewProof(pending.proof_url)} title="View proof photo"
++                            className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
++                            <ImageIcon size={12} />
++                          </button>
++                        )}
+                         <span className="font-mono text-[10px] uppercase" style={{ color: c.red }}>
+                           {escalation === "dispute-cap" ? "disputed twice" : "timed out"} · auto-approves in {autoApproveMins}m
+                         </span>

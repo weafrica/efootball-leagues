@@ -1,0 +1,85 @@
+--- orig/efootball-leagues-repo/src/economy.js	2026-08-25 10:52:10.000000000 +0000
++++ work/efootball-leagues-repo/src/economy.js	2026-08-26 08:50:47.418256121 +0000
+@@ -105,13 +105,14 @@
+ // league format isn't a paid-entry format.
+ //
+ // Maps leagues.format (single_round_robin, double_round_robin, survivor,
+-// knockout, groups_knockout, ladder_cup) onto ENTRY_FEES_NETS. 'league'
+-// covers every round-robin/survivor shape, per the "normal leagues +
+-// survivor-format leagues" comment above. ladder_cup ("Survival Ladder
+-// Cup" — ranked ladder, one elimination life each, decided by the weekly
+-// Sunday cutoff, see LADDER_CUP_INTEGRATION.md) is the "Six-Day Survivor
+-// Cup" ENTRY_FEES_NETS.six_day_survivor was priced for — confirmed, not
+-// a separate never-built format as previously flagged here.
++// knockout, groups_knockout) onto ENTRY_FEES_NETS. 'league' covers every
++// round-robin/survivor shape, per the "normal leagues + survivor-format
++// leagues" comment above. ladder_cup ("Survival Ladder Cup" — ranked
++// ladder, one elimination life each, decided by the weekly Sunday
++// cutoff, see LADDER_CUP_INTEGRATION.md) used to reuse the "Six-Day
++// Survivor Cup" price (ENTRY_FEES_NETS.six_day_survivor) here — it's now
++// free to join instead, so it's handled as its own branch below rather
++// than through this table.
+ // One-time fee to join the permanent Ladder Battles ladder (ladder_ranks) —
+ // separate from ENTRY_FEES_NETS since it's not a league format. Charged and
+ // the ladder_ranks row created together by the join_ladder() RPC (see
+@@ -129,8 +130,13 @@
+   if (format === "groups_knockout") {
+     return ENTRY_FEES_NETS.groups_knockout;
+   }
++  // Survival Ladder Cup is free to play — no Nets entry fee. (Used to
++  // reuse ENTRY_FEES_NETS.six_day_survivor; the Ladder Battle match
++  // reward and the Top 20 prize pool split are unaffected by this, but
++  // with no entry fee collected the real-money prize pool naturally
++  // finalizes at 0 — see finalize_ladder_cup_prize_pool.)
+   if (format === "ladder_cup") {
+-    return ENTRY_FEES_NETS.six_day_survivor;
++    return null;
+   }
+   return null;
+ }
+--- orig/efootball-leagues-repo/src/CreateLeague.jsx	2026-08-17 12:06:36.000000000 +0000
++++ work/efootball-leagues-repo/src/CreateLeague.jsx	2026-08-26 08:51:14.247316392 +0000
+@@ -90,7 +90,9 @@
+       startsAt: new Date(startsAt).toISOString(),
+       roundPeriodHours: Number(roundPeriodHours),
+       description: description.trim(),
+-      leagueType: isAdmin ? leagueType : "fun",
++      // Survival Ladder Cup is always free to play, regardless of whatever
++      // leagueType was left selected from before the format was switched.
++      leagueType: isAdmin && !isLadderCup ? leagueType : "fun",
+     });
+   };
+ 
+@@ -103,7 +105,7 @@
+       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>League name</label>
+       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Friday Night eFootball Cup" className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-5" style={inputStyle} />
+ 
+-      {isAdmin && (
++      {isAdmin && !isLadderCup && (
+         <div className="mb-5">
+           <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>League type</label>
+           <div className="flex gap-2">
+@@ -123,6 +125,9 @@
+           </div>
+         </div>
+       )}
++      {isAdmin && isLadderCup && (
++        <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>Survival Ladder Cup is always free to play — no entry fee, cash or Nets.</div>
++      )}
+ 
+       <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>Description <span style={{ color: c.textFaint }}>(optional — rules, prize, payment details, WhatsApp group link, etc.)</span></label>
+       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={leagueType === "cash" ? "e.g. Pay to EFT: Acc 12345678, Bank ABC. Winner takes the pot." : "e.g. Winner takes the pot. Join the WhatsApp group: ..."} className="w-full border rounded-lg px-4 py-2.5 font-body outline-none resize-none mb-5" style={inputStyle} />
+--- orig/efootball-leagues-repo/src/App.jsx	2026-08-26 10:13:26.000000000 +0000
++++ work/efootball-leagues-repo/src/App.jsx	2026-08-26 08:50:57.234616420 +0000
+@@ -5216,7 +5216,10 @@
+       // Only an admin can actually create a cash league — enforced again here
+       // (not just in the CreateLeague UI) since input is client-supplied.
+       // The database's own check constraint / RLS policy is the real backstop.
+-      league_type: isAdmin && leagueType === "cash" ? "cash" : "fun",
++      // Survival Ladder Cup is free to play — never a cash league,
++      // regardless of what CreateLeague happened to pass in (same
++      // belt-and-braces re-check as entry_closes_at above).
++      league_type: format !== "ladder_cup" && isAdmin && leagueType === "cash" ? "cash" : "fun",
+     };
+     if (format === "knockout" || format === "groups_knockout") {
+       insertPayload.knockout_legs = knockoutLegs;

@@ -1,0 +1,84 @@
+--- orig/efootball-leagues-repo/src/LeagueLadderDetail.jsx	2026-08-25 16:56:06.000000000 +0000
++++ efootball-leagues-repo/src/LeagueLadderDetail.jsx	2026-08-25 15:45:50.130801254 +0000
+@@ -29,6 +29,7 @@
+ import { ladderEntryFeeForTier } from "./economy.js";
+ import { formatNets } from "./nets.js";
+ import { FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
++import { WhatsAppCallLink } from "./App.jsx";
+ 
+ // ZONE_LABEL / ZONE_COLOR_KEY — Elite Safety Zone / Checkpoint Safety /
+ // Danger Zone badges (Phase 7). Purely cosmetic on top of
+@@ -295,7 +296,7 @@
+     setMembers(memberUserIds);
+     if (memberUserIds.length > 0) {
+       const { data: memberProfileRows } = await supabase.from("profiles")
+-        .select("user_id, efootball_username, avatar_url").in("user_id", memberUserIds);
++        .select("user_id, efootball_username, avatar_url, phone").in("user_id", memberUserIds);
+       const memberMap = {};
+       (memberProfileRows || []).forEach((p) => { memberMap[p.user_id] = p; });
+       setProfilesById((prev) => ({ ...prev, ...memberMap }));
+@@ -337,7 +338,7 @@
+     const allUserIds = [...new Set([...userIds, ...wofUserIds])];
+     if (allUserIds.length > 0) {
+       const { data: profileRows } = await supabase.from("profiles")
+-        .select("user_id, efootball_username, avatar_url")
++        .select("user_id, efootball_username, avatar_url, phone")
+         .in("user_id", allUserIds);
+       const map = {};
+       (profileRows || []).forEach((p) => { map[p.user_id] = p; });
+@@ -415,6 +416,22 @@
+ 
+   const isParticipant = (f) => session?.user?.id === f.home_user_id || session?.user?.id === f.away_user_id;
+ 
++  // Ladder fixtures pair players directly (no team/club layer), so the
++  // "opponent" for a pending fixture is just whichever of home/away user
++  // isn't the signed-in player. Mirrors NextOpponentCard's WhatsAppCallLink
++  // usage in normal leagues — same intent (line up the match), same
++  // message shape, just addressed by username instead of club name since
++  // ladder has no club concept.
++  const opponentFor = (f) => {
++    const opponentId = session?.user?.id === f.home_user_id ? f.away_user_id : f.home_user_id;
++    return profilesById[opponentId];
++  };
++
++  // Regular players only see their own fixture(s) for the week, not the
++  // whole tier's matchups — admins still see everything, since they need
++  // the full list to moderate/oversee forfeits etc.
++  const visibleFixtures = isAdmin ? (fixtures || []) : (fixtures || []).filter(isParticipant);
++
+   return (
+     <div className="p-4 flex flex-col gap-6">
+       <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
+@@ -511,7 +528,7 @@
+       <div>
+         <div className="font-mono text-sm font-bold mb-3" style={{ color: c.text }}>Fixtures</div>
+         <div className="flex flex-col gap-2">
+-          {(fixtures || []).map((f) => (
++          {visibleFixtures.map((f) => (
+             <div key={f.id} className="rounded-lg border p-3 flex items-center justify-between gap-3" style={{ borderColor: c.border }}>
+               <div className="font-mono text-xs" style={{ color: c.text }}>
+                 {nameFor(f.home_user_id)} <span style={{ color: c.textFaint }}>vs</span> {nameFor(f.away_user_id)}
+@@ -533,6 +550,10 @@
+                       {formatCountdown(f.countdown_expires_at)}
+                     </span>
+                   )}
++                  {isParticipant(f) && opponentFor(f)?.phone && (
++                    <WhatsAppCallLink phone={opponentFor(f).phone} iconOnly
++                      text={`Hi, it's ${nameFor(session.user.id)} 🔥 Call me when you're ready to play our ladder fixture this week — let's lock in the time ⚽🕹️`} c={c} />
++                  )}
+                   <input type="number" min="0" placeholder="0" className="w-12 text-center rounded font-mono text-xs p-1"
+                     style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}
+                     value={scoreDrafts[f.id]?.home ?? ""}
+@@ -557,8 +578,10 @@
+               )}
+             </div>
+           ))}
+-          {(fixtures || []).length === 0 && (
+-            <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>No fixtures for this league yet.</div>
++          {visibleFixtures.length === 0 && (
++            <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
++              {isAdmin ? "No fixtures for this league yet." : "You have no fixture this week."}
++            </div>
+           )}
+         </div>
+       </div>

@@ -1,0 +1,71 @@
+diff --git a/src/nets.js b/src/nets.js
+index decb2f8..17314ee 100644
+--- a/src/nets.js
++++ b/src/nets.js
+@@ -84,12 +84,23 @@ export async function getNetsBalance(userId) {
+ // already used for live payment-status updates elsewhere in the app.
+ // Returns an unsubscribe function; call it on unmount.
+ //
++// Multiple screens legitimately want this at once (NetsBadge is always
++// mounted in the header, and The Kit Room/NetsPanel add their own on top
++// of that) — Realtime only allows a channel to be subscribed once, and
++// throws if you try to attach another postgres_changes listener to a
++// channel that's already subscribed. So rather than opening a channel per
++// caller, this keeps one shared channel per user id and fans its updates
++// out to every current listener; the channel itself is only opened once
++// and only torn down once the last listener for that user unsubscribes.
++//
+ // Usage (inside a component):
+ //   useEffect(() => {
+ //     let unsub;
+ //     watchNetsBalance(onBalanceChange).then((fn) => { unsub = fn; });
+ //     return () => unsub?.();
+ //   }, []);
++const walletChannels = new Map(); // uid -> { channel, listeners: Set<fn> }
++
+ export async function watchNetsBalance(onBalanceChange, userId) {
+   let uid = userId;
+   if (!uid) {
+@@ -101,16 +112,32 @@ export async function watchNetsBalance(onBalanceChange, userId) {
+   const initial = await getNetsBalance(uid);
+   onBalanceChange(initial);
+ 
+-  const channel = supabase
+-    .channel(`nets-wallet-${uid}`)
+-    .on(
+-      "postgres_changes",
+-      { event: "*", schema: "public", table: "nets_wallets", filter: `user_id=eq.${uid}` },
+-      (payload) => onBalanceChange(payload.new?.balance ?? 0)
+-    )
+-    .subscribe();
+-
+-  return () => { supabase.removeChannel(channel); };
++  let entry = walletChannels.get(uid);
++  if (!entry) {
++    const listeners = new Set();
++    const channel = supabase
++      .channel(`nets-wallet-${uid}`)
++      .on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: "nets_wallets", filter: `user_id=eq.${uid}` },
++        (payload) => {
++          const balance = payload.new?.balance ?? 0;
++          listeners.forEach((fn) => fn(balance));
++        }
++      )
++      .subscribe();
++    entry = { channel, listeners };
++    walletChannels.set(uid, entry);
++  }
++  entry.listeners.add(onBalanceChange);
++
++  return () => {
++    entry.listeners.delete(onBalanceChange);
++    if (entry.listeners.size === 0) {
++      supabase.removeChannel(entry.channel);
++      walletChannels.delete(uid);
++    }
++  };
+ }
+ 
+ // Grants Nets to a wallet — rewards, refunds, admin top-ups. reason is a

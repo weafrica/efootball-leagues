@@ -1,0 +1,219 @@
+--- orig/efootball-leagues-repo/src/economy.js	2026-08-25 10:52:10.000000000 +0000
++++ work/efootball-leagues-repo/src/economy.js	2026-08-26 09:28:45.832527446 +0000
+@@ -105,13 +105,14 @@
+ // league format isn't a paid-entry format.
+ //
+ // Maps leagues.format (single_round_robin, double_round_robin, survivor,
+-// knockout, groups_knockout, ladder_cup) onto ENTRY_FEES_NETS. 'league'
+-// covers every round-robin/survivor shape, per the "normal leagues +
+-// survivor-format leagues" comment above. ladder_cup ("Survival Ladder
+-// Cup" — ranked ladder, one elimination life each, decided by the weekly
+-// Sunday cutoff, see LADDER_CUP_INTEGRATION.md) is the "Six-Day Survivor
+-// Cup" ENTRY_FEES_NETS.six_day_survivor was priced for — confirmed, not
+-// a separate never-built format as previously flagged here.
++// knockout, groups_knockout) onto ENTRY_FEES_NETS. 'league' covers every
++// round-robin/survivor shape, per the "normal leagues + survivor-format
++// leagues" comment above. ladder_cup ("Survival Ladder Cup" — ranked
++// ladder, one elimination life each, decided by the weekly Sunday
++// cutoff, see LADDER_CUP_INTEGRATION.md) used to reuse the "Six-Day
++// Survivor Cup" price (ENTRY_FEES_NETS.six_day_survivor) here — it's now
++// free to join instead, so it's handled as its own branch below rather
++// than through this table.
+ // One-time fee to join the permanent Ladder Battles ladder (ladder_ranks) —
+ // separate from ENTRY_FEES_NETS since it's not a league format. Charged and
+ // the ladder_ranks row created together by the join_ladder() RPC (see
+@@ -119,6 +120,14 @@
+ // sync with that migration's v_fee constant if it ever changes.
+ export const LADDER_JOIN_FEE_NETS = 5;
+ 
++// Fee to "buy your life back" — rejoin (rebirth) a fully eliminated
++// Survival Ladder Cup club, after both the original life and the one
++// second-life offer are gone. Charged and the entry reset together by the
++// rebirth_ladder_cup_entry() RPC (see
++// supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) — keep this in
++// sync with that migration's v_fee constant if it ever changes.
++export const LADDER_CUP_REBIRTH_FEE_NETS = 6;
++
+ export function entryFeeForLeagueFormat(format) {
+   if (format === "single_round_robin" || format === "double_round_robin" || format === "survivor") {
+     return ENTRY_FEES_NETS.league;
+@@ -129,8 +138,13 @@
+   if (format === "groups_knockout") {
+     return ENTRY_FEES_NETS.groups_knockout;
+   }
++  // Survival Ladder Cup is free to play — no Nets entry fee. (Used to
++  // reuse ENTRY_FEES_NETS.six_day_survivor; the Ladder Battle match
++  // reward and the Top 20 prize pool split are unaffected by this, but
++  // with no entry fee collected the real-money prize pool naturally
++  // finalizes at 0 — see finalize_ladder_cup_prize_pool.)
+   if (format === "ladder_cup") {
+-    return ENTRY_FEES_NETS.six_day_survivor;
++    return null;
+   }
+   return null;
+ }
+--- orig/efootball-leagues-repo/src/index.css	2026-08-15 16:00:10.000000000 +0000
++++ work/efootball-leagues-repo/src/index.css	2026-08-26 09:29:39.816610946 +0000
+@@ -45,7 +45,55 @@
+   0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+   50% { transform: translate(-16px, 12px) scale(1.12); opacity: 1; }
+ }
+-.animate-glow-drift { animation: glow-drift 7s ease-in-out infinite; }
++.animate-glow-drift { animation: glow-drift 7s ease-in-out infinite; }
++
++/* Join button — a deliberately louder CTA than every other button in the
++   app: its own fixed sunset-gold gradient (independent of the active
++   theme's accent, so it reads the same and still pops in both light and
++   dark mode) rather than the flat theme-accent fill every other button
++   uses, a condensed display font in place of the usual body/mono, and a
++   soft glow that breathes so it draws the eye without flashing. Kept as
++   a CSS class (not inline style) since the gradient/animation/font-family
++   trio doesn't vary per-theme the way background/color do elsewhere —
++   callers still set color inline for contrast against the gradient. */
++.btn-join {
++  font-family: 'Barlow Condensed', 'Oswald', sans-serif;
++  background: linear-gradient(135deg, #FFD166 0%, #D4A017 55%, #FF7A00 100%);
++  text-transform: uppercase;
++  letter-spacing: 0.07em;
++  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
++  animation: join-btn-glow 2.6s ease-in-out infinite;
++}
++.btn-join:hover { transform: translateY(-1px) scale(1.03); filter: brightness(1.08); }
++.btn-join:active { transform: translateY(0) scale(0.96); filter: brightness(0.97); }
++
++@keyframes join-btn-glow {
++  0%, 100% { box-shadow: 0 0 0 0 rgba(212,160,23,0), 0 2px 6px rgba(0,0,0,0.18); }
++  50% { box-shadow: 0 0 16px 4px rgba(212,160,23,0.6), 0 2px 10px rgba(0,0,0,0.22); }
++}
++
++/* Rebirth button — "buy your life back" after a Survival Ladder Cup club
++   is fully eliminated (both lives spent). Deliberately a different color
++   story from .btn-join's gold above (same "loud CTA" idea — condensed
++   display font, breathing glow, lift on hover — just its own fire-into-
++   magic red/crimson/violet gradient) so the two never get confused: gold
++   means "join something new", this one means "rise from the ashes". */
++.btn-rebirth {
++  font-family: 'Barlow Condensed', 'Oswald', sans-serif;
++  background: linear-gradient(135deg, #FF3B30 0%, #C81E5C 55%, #7B2FF7 100%);
++  text-transform: uppercase;
++  letter-spacing: 0.06em;
++  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
++  animation: rebirth-btn-glow 2.2s ease-in-out infinite;
++}
++.btn-rebirth:hover:not(:disabled) { transform: translateY(-1px) scale(1.03); filter: brightness(1.1); }
++.btn-rebirth:active:not(:disabled) { transform: translateY(0) scale(0.96); filter: brightness(0.95); }
++.btn-rebirth:disabled { opacity: 0.75; animation: none; }
++
++@keyframes rebirth-btn-glow {
++  0%, 100% { box-shadow: 0 0 0 0 rgba(200,30,92,0), 0 2px 6px rgba(0,0,0,0.2); }
++  50% { box-shadow: 0 0 18px 5px rgba(123,47,247,0.55), 0 2px 10px rgba(0,0,0,0.25); }
++}
+ 
+ /* Small decorative "product" glyphs on the shop banner — bob up and down
+    while pulsing a glow, each icon offset with its own animation-delay so
+--- orig/efootball-leagues-repo/src/LeagueDetail.jsx	2026-08-25 11:24:32.000000000 +0000
++++ work/efootball-leagues-repo/src/LeagueDetail.jsx	2026-08-26 09:29:47.610377530 +0000
+@@ -7,7 +7,7 @@
+ import { toProxiedUrl } from "./utils/mediaUrl";
+ import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
+ import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+-import { entryFeeForLeagueFormat } from "./economy.js";
++import { entryFeeForLeagueFormat, LADDER_CUP_REBIRTH_FEE_NETS } from "./economy.js";
+ import { formatNets } from "./nets.js";
+ 
+ // Live "Xh Ym left" text for a deadline, ticking against a shared `now`
+@@ -880,12 +880,12 @@
+           </div>
+         )}
+         <div className="font-body text-xs mb-3" style={{ color: c.textDim }}>
+-          Rejoin now and {clubName} comes back at 0 pts — a clean slate, one more shot at the ladder.
++          Buy your life back and {clubName} comes back at 0 pts — a clean slate, one more shot at the ladder.
+         </div>
+         <button disabled={busy} onClick={act}
+-          className="w-full font-body text-sm font-bold px-3 py-3 rounded-full flex items-center justify-center gap-1.5"
+-          style={{ background: "#F0A020", color: "#fff", boxShadow: "0 0 0 1px #F0A020, 0 0 18px 2px #F0A02055" }}>
+-          <Flame size={14} /> {busy ? "Rising from the ashes…" : "Rejoin — Be Reborn"}
++          className="btn-rebirth w-full font-extrabold text-sm px-3 py-3 rounded-full flex items-center justify-center gap-1.5"
++          style={{ color: "#fff" }}>
++          <Flame size={14} /> {busy ? "Rising from the ashes…" : `Buy Life Back — ${formatNets(LADDER_CUP_REBIRTH_FEE_NETS)}`}
+         </button>
+       </div>
+     </div>
+@@ -1740,8 +1740,8 @@
+           // so there's no fixed Nets amount to show for those here.
+           const entryFee = league.league_type === "fun" ? entryFeeForLeagueFormat(league.format) : null;
+           return (
+-            <button onClick={onJoin} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-sm px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+-              <Users size={14} /> Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}
++            <button onClick={onJoin} className="btn-join shrink-0 flex items-center gap-2 font-extrabold text-base px-6 py-2.5 rounded-full" style={{ color: "#1A1206" }}>
++              <Users size={16} /> Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}
+             </button>
+           );
+         })()}
+--- orig/efootball-leagues-repo/src/App.jsx	2026-08-26 10:13:26.000000000 +0000
++++ work/efootball-leagues-repo/src/App.jsx	2026-08-26 09:29:11.504609263 +0000
+@@ -8,7 +8,7 @@
+ import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
+ import NetsBadge from "./NetsBadge.jsx";
+ import { creditNets, debitNets, formatNets } from "./nets.js";
+-import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS } from "./economy.js";
++import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS } from "./economy.js";
+ import { computeStandings as computeLeagueLadderStandings } from "./formats/leagueLadder.js";
+ import { getLadderTierTheme } from "./ladderTierThemes.js";
+ // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
+@@ -5216,7 +5216,10 @@
+       // Only an admin can actually create a cash league — enforced again here
+       // (not just in the CreateLeague UI) since input is client-supplied.
+       // The database's own check constraint / RLS policy is the real backstop.
+-      league_type: isAdmin && leagueType === "cash" ? "cash" : "fun",
++      // Survival Ladder Cup is free to play — never a cash league,
++      // regardless of what CreateLeague happened to pass in (same
++      // belt-and-braces re-check as entry_closes_at above).
++      league_type: format !== "ladder_cup" && isAdmin && leagueType === "cash" ? "cash" : "fun",
+     };
+     if (format === "knockout" || format === "groups_knockout") {
+       insertPayload.knockout_legs = knockoutLegs;
+@@ -5844,12 +5847,15 @@
+   // or its first offer declined/expired) never stopped showing on the
+   // standings table — it just dropped out of matchmaking, same as any
+   // other "eliminated" row. This is the missing other half: let that club
+-  // choose to rejoin. reborn() (formats/ladderCup.js) archives the
++  // choose to rejoin — now for a flat LADDER_CUP_REBIRTH_FEE_NETS (6N)
++  // "buy your life back" fee, charged atomically with the reset inside
++  // rebirth_ladder_cup_entry() itself (see
++  // supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) — nothing to
++  // debit client-side here. reborn() (formats/ladderCup.js) archives the
+   // finished life and resets live stats to a fresh day-one run; the RPC
+-  // (supabase/migrations/20260823_ladder_cup_rebirth.sql) is what actually
+-  // persists it — same RLS-safe pattern as every other ladder_cup_entries
+-  // write, self-serve only (no admin path; reviving your own club isn't
+-  // something an admin does on your behalf). badge_walkover isn't part of
++  // is what actually persists it — same RLS-safe pattern as every other
++  // ladder_cup_entries write, self-serve only (no admin path; reviving
++  // your own club isn't something an admin does on your behalf). badge_walkover isn't part of
+   // the engine's badge_counts (see applyLadderCupEntryPatch's comment on
+   // that same asymmetry), so it's folded into the archived life here,
+   // straight off the row, before it's sent to the RPC.
+@@ -5875,7 +5881,10 @@
+     const { error } = await supabase.rpc("rebirth_ladder_cup_entry", {
+       p_entry_id: row.id, p_league_id: league.id, p_team_id: teamId, p_past_life: finishedLife,
+     });
+-    if (error) { showToast(`Couldn't complete the rebirth: ${error.message}`); return; }
++    if (error) {
++      showToast(/insufficient/i.test(error.message || "") ? `You need ${formatNets(LADDER_CUP_REBIRTH_FEE_NETS)} to buy your life back.` : `Couldn't complete the rebirth: ${error.message}`);
++      return;
++    }
+ 
+     await refreshLeague(league.id);
+     showToast(rebirthAnnouncement(clubName, finishedLife));
+@@ -12420,8 +12429,8 @@
+             // there's no fixed Nets amount to show here for those.
+             const entryFee = l.league_type === "fun" ? entryFeeForLeagueFormat(l.format) : null;
+             return (
+-              <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="w-full font-body text-[11px] font-bold px-2 py-1.5 rounded-full"
+-                style={{ background: c.accent, color: c.accentText }}>Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}</button>
++              <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="btn-join w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full"
++                style={{ color: "#1A1206" }}>Join{entryFee ? ` — ${formatNets(entryFee)}` : ""}</button>
+             );
+           })()}
+         </div>

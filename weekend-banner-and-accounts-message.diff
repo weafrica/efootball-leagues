@@ -1,0 +1,351 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 631f5dd..e77f071 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3163,6 +3163,14 @@ export default function App() {
+   // since the spotlight's live/paused badge is one global state shared by
+   // every weekend league at once — see APP-SETTINGS-MIGRATION.md.
+   const [weekendOverride, setWeekendOverrideState] = useState(null);
++  // Site-wide custom WhatsApp message admins send from the "All accounts"
++  // page — same idea as a league's wa_message_template (MemberMessageEditor)
++  // but scoped to the whole platform instead of one league, since accounts
++  // don't belong to a single league. Lives on the same single-row
++  // `app_settings` table (id=1) as weekendOverride above — see
++  // ACCOUNTS-MESSAGE-MIGRATION.md. {name} is swapped in per account, same
++  // placeholder convention as the league version.
++  const [accountsMessageTemplate, setAccountsMessageTemplate] = useState("");
+   // A hard refresh re-mounts the whole app from scratch, so React state
+   // always starts from these defaults — but the browser itself preserves
+   // window.history.state across a reload of the same entry (it's tied to
+@@ -3559,9 +3567,13 @@ export default function App() {
+   // admin and returns nothing otherwise, so this is safe even if someone
+   // calls it directly.
+   const loadAccounts = useCallback(async () => {
+-    const { data, error } = await supabase.rpc("get_all_accounts");
++    const [{ data, error }, { data: settingsRow }] = await Promise.all([
++      supabase.rpc("get_all_accounts"),
++      supabase.from("app_settings").select("accounts_wa_message_template").eq("id", 1).maybeSingle(),
++    ]);
+     if (error) { showToast("Couldn't load accounts."); setAccounts([]); return; }
+     setAccounts(data || []);
++    setAccountsMessageTemplate(settingsRow?.accounts_wa_message_template || "");
+   }, [showToast]);
+ 
+   // Admin-only — same shape as loadAccounts above: routed through a
+@@ -3613,6 +3625,65 @@ export default function App() {
+     setAccounts((prev) => (prev || []).map((a) => (a.user_id === account.user_id ? { ...a, approved: true } : a)));
+   };
+ 
++  // Overrides the generic "Hi {username}, this is weAfrica admin Saul."
++  // WhatsApp opener on the All accounts page — same idea as
++  // updateLeagueMemberMessage, just site-wide (app_settings) instead of
++  // per-league, since accounts aren't scoped to one league. Persists until
++  // an admin edits or clears it again. Pass "" to go back to the default.
++  const updateAccountsMessageTemplate = async (text) => {
++    const { error } = await supabase.from("app_settings").update({ accounts_wa_message_template: text || null }).eq("id", 1);
++    if (error) { showToast(`Couldn't save the message: ${error.message}`); return; }
++    setAccountsMessageTemplate(text || "");
++    showToast(text ? "Message updated — used for every account's WhatsApp icon from now on." : "Message cleared — back to the default greeting.");
++  };
++
++  // Flags an account's row red for every admin (mirrors markWaReminder for
++  // league members) — a normal client update to another user's profiles row
++  // is blocked by RLS (same reasoning as admin_delete_account /
++  // admin_set_account_approved above), so this goes through a
++  // security-definer RPC instead of a direct table write. See
++  // ACCOUNTS-MESSAGE-MIGRATION.md for the required column + function.
++  const markAccountReminder = async (account) => {
++    const sentAt = new Date().toISOString();
++    setAccounts((prev) => (prev || []).map((a) => (a.user_id === account.user_id ? { ...a, wa_reminder_due_at: sentAt } : a)));
++    const { error } = await supabase.rpc("admin_mark_account_reminded", { target_user_id: account.user_id, due_at: sentAt });
++    if (error) console.error("[accounts-reminder] mark failed", error);
++  };
++
++  // Manually clears one account's highlight before its normal
++  // WA_REMINDER_WINDOW_MS auto-clear — same pattern as clearWaReminder.
++  const clearAccountReminder = async (account) => {
++    setAccounts((prev) => (prev || []).map((a) => (a.user_id === account.user_id ? { ...a, wa_reminder_due_at: null } : a)));
++    const { error } = await supabase.rpc("admin_clear_account_reminder", { target_user_id: account.user_id });
++    if (error) { console.error("[accounts-reminder] clear failed", error); showToast(`Couldn't clear the highlight: ${error.message}`); }
++  };
++
++  // Bulk version — clears every currently-highlighted account at once.
++  const clearAllAccountReminders = async () => {
++    setAccounts((prev) => (prev || []).map((a) => ({ ...a, wa_reminder_due_at: null })));
++    const { error } = await supabase.rpc("admin_clear_all_account_reminders");
++    if (error) { console.error("[accounts-reminder] clear-all failed", error); showToast(`Couldn't clear highlights: ${error.message}`); }
++  };
++
++  // "Notify everyone now" for the All accounts page. Unlike
++  // notifyAllMembers (which can post to a league's shared comment feed),
++  // there's no platform-wide feed every account already reads, so this
++  // can't be a genuine one-tap broadcast — it flags every account's row
++  // red as a "needs messaging" worklist and leaves the actual send to each
++  // row's WhatsApp icon (which now opens with accountsMessageTemplate
++  // filled in), same honest no-push-API tradeoff notifyAllMembers's own
++  // comment calls out.
++  const notifyAllAccounts = (accountList) => {
++    if (!accountsMessageTemplate) { showToast("Set a custom message first, then you can flag everyone to message with it."); return; }
++    const count = (accountList || []).length;
++    requestConfirm([
++      `Flag all ${count} account${count === 1 ? "" : "s"} to message right now? Highlights every row red — tap each account's WhatsApp icon to actually send.`,
++    ], async () => {
++      (accountList || []).forEach((a) => markAccountReminder(a));
++      showToast(`Flagged ${count} account${count === 1 ? "" : "s"} — use each row's WhatsApp icon to send.`);
++    });
++  };
++
+   // Every other member on the platform, for the "who do you want to challenge"
+   // picker — just enough to browse and pick someone (username + photo), never
+   // phone numbers. Calls a SECURITY DEFINER function since normal client
+@@ -7464,7 +7535,10 @@ export default function App() {
+       <main className="max-w-3xl mx-auto px-4 pb-24">
+         <ErrorBoundary resetKey={view} onGoHome={() => setView("home")}>
+         {view === "accounts" && isAdmin ? (
+-          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount} onBack={goBack} showToast={showToast} c={c} />
++          <AccountsPanel accounts={accounts} leagues={leagues} session={session} onDelete={deleteAccount} onApprove={approveAccount}
++            messageTemplate={accountsMessageTemplate} onUpdateMessageTemplate={updateAccountsMessageTemplate} onNotifyAll={notifyAllAccounts}
++            onMarkReminder={markAccountReminder} onClearReminder={clearAccountReminder} onClearAllReminders={clearAllAccountReminders}
++            onBack={goBack} showToast={showToast} c={c} />
+         ) : view === "activity" && isAdmin ? (
+           <ActivityLogPanel activityLog={activityLog} onBack={goBack} c={c} />
+         ) : view === "challenges" ? (
+@@ -8121,29 +8195,6 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick,
+   const isLiveNow = isWithinWeekend && !isPaused;
+   const isOverridden = isWithinWeekend && (override === "paused" || override === "live");
+ 
+-  // Paused: counting down to the 9am SAST resume — unless the weekend
+-  // window itself wraps up first (Sunday night's pause has no Monday
+-  // morning to resume into), in which case it's just counting down to the
+-  // end. Live: counting down to whichever comes first — the 9pm SAST pause
+-  // or the weekend ending. Not started: counting down to weekendStart.
+-  let targetTime, liveTargetIsEnd = true, pausedTargetIsEnd = false;
+-  if (isPaused) {
+-    const resumeAt = nextSastHourBoundary(now, 9);
+-    if (resumeAt > weekendEnd) { targetTime = weekendEnd; pausedTargetIsEnd = true; }
+-    else { targetTime = resumeAt; }
+-  } else if (isLiveNow) {
+-    const nextPause = nextSastHourBoundary(now, 21);
+-    if (nextPause < weekendEnd) { targetTime = nextPause; liveTargetIsEnd = false; }
+-    else { targetTime = weekendEnd; }
+-  } else {
+-    targetTime = weekendStart;
+-  }
+-  const diffMs = Math.max(0, targetTime.getTime() - now.getTime());
+-  const diffDays = Math.floor(diffMs / 86400000);
+-  const diffHours = Math.floor((diffMs % 86400000) / 3600000);
+-  const diffMins = Math.floor((diffMs % 3600000) / 60000);
+-  const countdownLabel = diffDays > 0 ? `${diffDays}d ${diffHours}h` : diffHours > 0 ? `${diffHours}h ${diffMins}m` : `${diffMins}m`;
+-
+   const totalMatches = items.reduce((sum, it) => sum + it.matchCount, 0);
+   const maxMatches = Math.max(1, ...items.map((it) => it.matchCount));
+   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+@@ -8159,16 +8210,16 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick,
+         </div>
+         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
+           {isPaused ? (
+-            <><Pause size={10} /> Paused · {isOverridden ? "admin override" : `${pausedTargetIsEnd ? "ends" : "resumes"} in ${countdownLabel}`}</>
++            <><Pause size={10} /> Paused{isOverridden ? " · admin override" : ""}</>
+           ) : isLiveNow ? (
+             <>
+               <span className="relative flex h-1.5 w-1.5">
+                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
+               </span>
+-              Live · {isOverridden ? "admin override" : `${liveTargetIsEnd ? "ends" : "pauses"} in ${countdownLabel}`}
++              Live{isOverridden ? " · admin override" : ""}
+             </>
+           ) : (
+-            <><Clock size={10} /> Starts in {countdownLabel}</>
++            <><Clock size={10} /> Starts this weekend</>
+           )}
+         </div>
+       </div>
+@@ -9046,7 +9097,7 @@ function ActivityLogPanel({ activityLog, onBack, c }) {
+   );
+ }
+ 
+-function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack, showToast, c }) {
++function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, messageTemplate, onUpdateMessageTemplate, onNotifyAll, onMarkReminder, onClearReminder, onClearAllReminders, onBack, showToast, c }) {
+   const [query, setQuery] = useState("");
+ 
+   if (accounts === null) return <div className="pt-8"><Loader c={c} /></div>;
+@@ -9069,6 +9120,7 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack
+     : sorted;
+   const flaggedCount = accounts.filter((a) => (a.phone || "").includes("(DUPLICATE-")).length;
+   const pendingCount = accounts.filter((a) => !a.approved).length;
++  const remindedCount = accounts.filter((a) => isWaReminderActive(a)).length;
+ 
+   const exportCsv = () => {
+     const rows = [["Username", "Phone", "Google account", "Joined"], ...filtered.map((a) => [a.efootball_username, a.phone, a.email, a.created_at])];
+@@ -9101,12 +9153,23 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack
+         {flaggedCount > 0 && <span style={{ color: c.red }}> · {flaggedCount} still need{flaggedCount === 1 ? "s" : ""} a phone number fixed</span>}
+       </div>
+ 
++      <AccountsMessageEditor messageTemplate={messageTemplate} onUpdateMessageTemplate={onUpdateMessageTemplate}
++        onNotifyAll={() => onNotifyAll(filtered)} c={c} />
++
+       <div className="relative mb-4">
+         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by username, phone, or Google account..."
+           className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+       </div>
+ 
++      {remindedCount > 0 && (
++        <div className="flex justify-end mb-2">
++          <button onClick={onClearAllReminders} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}>
++            <X size={11} /> Clear all highlights
++          </button>
++        </div>
++      )}
++
+       {filtered.length === 0 ? (
+         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+           {accounts.length === 0 ? "No accounts yet." : `No accounts match "${query}".`}
+@@ -9115,8 +9178,9 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, onBack
+         <div className="space-y-1.5">
+           {filtered.map((a) => (
+             <AccountRow key={a.user_id} account={a} leagueCounts={leagueCountsFor(a.user_id)}
+-              isSelf={session && a.user_id === session.user.id}
+-              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} onApprove={() => onApprove(a)} showToast={showToast} c={c} />
++              isSelf={session && a.user_id === session.user.id} messageTemplate={messageTemplate}
++              onDelete={() => onDelete(a, leagueCountsFor(a.user_id))} onApprove={() => onApprove(a)}
++              onMarkReminder={() => onMarkReminder(a)} onClearReminder={() => onClearReminder(a)} showToast={showToast} c={c} />
+           ))}
+         </div>
+       )}
+@@ -9164,13 +9228,106 @@ export function GoalExtremesBar({ top, least, c }) {
+   );
+ }
+ 
+-function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, showToast, c }) {
++// Site-wide sibling of MemberMessageEditor (see that component for the
++// original per-league version) — lets an admin override the generic
++// "Hi {username}, this is weAfrica admin Saul." WhatsApp opener with their
++// own wording for every account on the platform, plus a bulk "flag
++// everyone" action that mirrors notifyAllMembers's highlight step. Only
++// {name} is available here (no {league}/{round}/{due}/{start} — accounts
++// aren't scoped to a league or fixture the way a league's members are).
++function AccountsMessageEditor({ messageTemplate, onUpdateMessageTemplate, onNotifyAll, c }) {
++  const [editing, setEditing] = useState(false);
++  const [text, setText] = useState(messageTemplate || "");
++  const [saving, setSaving] = useState(false);
++  const MAX_LEN = 500;
++
++  useEffect(() => { setText(messageTemplate || ""); }, [messageTemplate]);
++
++  const save = async () => {
++    setSaving(true);
++    await onUpdateMessageTemplate(text.trim());
++    setSaving(false);
++    setEditing(false);
++  };
++
++  const clear = async () => {
++    setSaving(true);
++    await onUpdateMessageTemplate("");
++    setText("");
++    setSaving(false);
++    setEditing(false);
++  };
++
++  if (!editing) {
++    return (
++      <div className="rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-2 flex-wrap" style={{ background: c.surface }}>
++        <div className="min-w-0 font-mono text-[11px] uppercase tracking-wide" style={{ color: c.textFaint }}>
++          {messageTemplate ? "Custom WhatsApp message active for all accounts" : "Using the default greeting"}
++        </div>
++        <div className="flex items-center gap-3 shrink-0">
++          {messageTemplate && (
++            <button onClick={onNotifyAll} className="font-mono text-[11px] uppercase tracking-wide flex items-center gap-1" style={{ color: WHATSAPP_GREEN }}>
++              <MessageCircle size={11} /> Notify everyone now
++            </button>
++          )}
++          <button onClick={() => setEditing(true)} className="font-mono text-[11px] uppercase tracking-wide" style={{ color: c.accent }}>
++            {messageTemplate ? "Edit" : "Customize"}
++          </button>
++        </div>
++      </div>
++    );
++  }
++
++  const preview = text.trim() ? text.replace(/\{name\}/g, "Alex") : "";
++
++  return (
++    <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
++      <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
++        Used when tapping any account's WhatsApp icon — use <strong>{"{name}"}</strong> for their username.
++      </div>
++      <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
++        placeholder="Hey {name}! This is weAfrica admin Saul — quick heads up..."
++        className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
++      <div className="font-mono text-[10px] text-right mb-2" style={{ color: text.length >= MAX_LEN ? c.red : c.textFaint }}>
++        {text.length}/{MAX_LEN}
++      </div>
++      {preview && (
++        <div className="rounded-lg px-3 py-2 mb-2 font-body text-xs whitespace-pre-wrap" style={{ background: c.surfaceHover, color: c.textDim }}>
++          <span className="font-mono text-[10px] uppercase tracking-wide block mb-1" style={{ color: c.textFaint }}>
++            Preview — as Alex would see it
++          </span>
++          {preview}
++        </div>
++      )}
++      <div className="flex items-center gap-2 justify-end">
++        {messageTemplate && (
++          <button onClick={clear} disabled={saving} className="mr-auto font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.red, opacity: saving ? 0.6 : 1 }}>
++            Reset to default
++          </button>
++        )}
++        <button onClick={() => { setText(messageTemplate || ""); setEditing(false); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
++        <button onClick={save} disabled={saving || !text.trim()} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !text.trim() ? 0.6 : 1 }}>
++          {saving ? "Saving…" : "Save"}
++        </button>
++      </div>
++    </div>
++  );
++}
++
++function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, onApprove, onMarkReminder, onClearReminder, showToast, c }) {
++  useNow();
+   const [copiedField, setCopiedField] = useState(null); // "phone" | "username" | null
+   const [grantOpen, setGrantOpen] = useState(false);
+   const [grantAmount, setGrantAmount] = useState("100");
+   const [granting, setGranting] = useState(false);
+   const isFlagged = (account.phone || "").includes("(DUPLICATE-");
+   const digitsOnly = (account.phone || "").replace(/\D/g, "");
++  const reminded = isWaReminderActive(account);
++  // Same {name} placeholder convention as the league version — falls back
++  // to the old generic greeting when no custom message has been saved.
++  const waText = messageTemplate
++    ? messageTemplate.replace(/\{name\}/g, account.efootball_username || "there")
++    : `Hi ${account.efootball_username || "there"}, this is weAfrica admin Saul.`;
+ 
+   const copy = (field, value) => {
+     navigator.clipboard?.writeText(value || "");
+@@ -9195,7 +9352,7 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, showTo
+   };
+ 
+   return (
+-    <div className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
++    <div className="rounded-lg px-4 py-2.5 border transition-colors" style={reminded ? { background: c.redSoft, borderColor: c.red } : { background: c.surface, borderColor: "transparent" }}>
+     <div className="flex items-center gap-3">
+       <div className="w-7 h-7 rounded-full flex items-center justify-center font-body text-xs font-bold shrink-0" style={{ background: c.green, color: c.text }}>
+         {(account.efootball_username || "?")[0]?.toUpperCase()}
+@@ -9237,11 +9394,17 @@ function AccountRow({ account, leagueCounts, isSelf, onDelete, onApprove, showTo
+         <Copy size={13} />
+       </button>
+       {!isFlagged && digitsOnly && (
+-        <a href={waLink(account.phone, `Hi ${account.efootball_username || "there"}, this is weAfrica admin Saul.`)} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp"
++        <a href={waLink(account.phone, waText)} target="_blank" rel="noopener noreferrer" title="Message on WhatsApp"
++          onClick={() => onMarkReminder?.()}
+           className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: WHATSAPP_GREEN }}>
+           <MessageCircle size={13} />
+         </a>
+       )}
++      {reminded && (
++        <button onClick={onClearReminder} title="Clear reminder highlight" className="w-6 h-6 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}>
++          <X size={12} />
++        </button>
++      )}
+       {!isSelf && (
+         <button onClick={onDelete} title="Delete account" className="w-7 h-7 flex items-center justify-center rounded-full shrink-0" style={{ color: c.red }}>
+           <Trash2 size={13} />

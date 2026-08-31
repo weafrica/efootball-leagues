@@ -1,0 +1,90 @@
+--- /tmp/orig.jsx	2026-08-12 07:04:55.786272532 +0000
++++ /tmp/new.jsx	2026-08-12 07:04:55.794272532 +0000
+@@ -142,6 +142,19 @@
+   const q = query.trim().toLowerCase();
+   const filtered = q ? standings.filter((r) => r.club_name.toLowerCase().includes(q)) : standings;
+   const scrolls = filtered.length > LADDER_CUP_STANDINGS_VISIBLE_ROWS;
++  // Same top/bottom zone tint the round-robin/knockout StandingsPanel uses
++  // (App.jsx's zoneFor, mirrored here since this table doesn't share that
++  // component) — purely a visual read of the pack at a glance, no ruleset
++  // meaning of its own (Ladder Cup eliminates match-by-match, not by a
++  // table cutoff). idx is 0-based off rank_position, n is the full,
++  // unfiltered standings count so the bands don't shift while searching.
++  const n = standings.length;
++  const zoneFor = (idx) => {
++    if (idx === 0 && n > 4) return c.accent;
++    if (idx < Math.ceil(n / 3) && n > 6) return c.green;
++    if (idx >= n - Math.max(1, Math.floor(n / 4)) && n > 6) return c.red;
++    return "transparent";
++  };
+   const shareRows = standings.map((r) => ({
+     rank: r.rank_position, name: r.club_name, p: r._row.w + r._row.l, w: r._row.w, l: r._row.l,
+     gd: r.gd, streak: r._row.streak, pts: r.pts, eliminated: r._row.status === "eliminated",
+@@ -202,7 +215,7 @@
+                 <tr key={r.club_id} role="button" tabIndex={0} onClick={() => setProfileRow(r)} onKeyDown={(e) => { if (e.key === "Enter") setProfileRow(r); }}
+                   className="border-b align-top cursor-pointer" style={{ borderColor: c.border, opacity: eliminated ? 0.45 : 1, height: LADDER_CUP_STANDINGS_ROW_HEIGHT, background: myTeamId && r.club_id === myTeamId ? c.surfaceHover : "transparent" }}>
+                 <td className="py-2.5 pl-2 relative">
+-                  <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: r.rank_position === 1 && !eliminated ? c.accent : "transparent" }} />
++                  <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: eliminated ? "transparent" : zoneFor(r.rank_position - 1) }} />
+                   <span style={{ color: c.textFaint }}>{r.rank_position}</span>
+                 </td>
+                 <td className="py-2.5 font-body font-medium">
+@@ -386,7 +399,7 @@
+ // track (LadderCupWalkoverClaimSection) runs independently underneath —
+ // messaging for a walkover doesn't require a Challenge to exist first,
+ // since the whole point is an opponent who won't engage at all.
+-function LadderCupOpponentRow({ opponent, myTeamId, match, walkoverClaim, onInitiate, onSetLength, onCancel, onOpenResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
++function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverClaim, canSeePhones, opponentPhone, onInitiate, onSetLength, onCancel, onOpenResult, onMessageWalkover, onSubmitWalkoverClaim, c }) {
+   const [busy, setBusy] = useState(false);
+   const iAmHome = match && match.home_team_id === myTeamId;
+ 
+@@ -408,7 +421,18 @@
+           {opponent.club_name[0]?.toUpperCase()}
+         </div>
+         <div className="flex-1 min-w-0">
+-          <div className="font-body text-sm font-semibold truncate">{opponent.club_name}</div>
++          <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5">
++            {opponent.club_name}
++            {/* Same call-to-arrange entry point the fixture-based formats offer for
++                a scheduled opponent — shown once a match actually exists here (before
++                that there's nothing yet to arrange a time for). Silently renders
++                nothing without a number on file, same guard every other WhatsAppCallLink
++                use in this file relies on. */}
++            {match && canSeePhones && opponentPhone && (
++              <WhatsAppCallLink phone={opponentPhone} iconOnly
++                text={`Hi, it's ${myTeamName || "your Ladder Cup opponent"} 🔥 Call me when you're ready to play our Ladder Cup match — let's lock in the time ⚽🕹️`} c={c} />
++            )}
++          </div>
+           <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.textFaint }}>{opponent.ladder_rating} rating</div>
+         </div>
+         {!match && (
+@@ -495,7 +519,8 @@
+ // for matchmaking consent. Refreshes automatically off the live `league` prop,
+ // same as the standings table, so logging any result elsewhere in the app
+ // widens/narrows this club's slate without a separate re-fetch.
+-function LadderCupOpponentBoard({ league, myTeam, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, c }) {
++function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onInitiateMatch, onSetMatchLength, onCancelMatch, onOpenResult, onRespondSecondLife, onMessageWalkover, onSubmitWalkoverClaim, c }) {
++  const teamsById = useMemo(() => Object.fromEntries((league.teams || []).map((t) => [t.id, t])), [league.teams]);
+   // Hooks stay unconditional (called every render, same order) — the
+   // eliminated/pending-second-life/no-entry short-circuits below happen
+   // after both useMemo calls, not before, so React never sees a different
+@@ -543,8 +568,9 @@
+   return (
+     <div className="mt-3 space-y-1.5">
+       {opponents.map((op) => (
+-        <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} match={matchWith(op.club_id)}
++        <LadderCupOpponentRow key={op.club_id} opponent={op} myTeamId={myTeam.id} myTeamName={myTeam.name} match={matchWith(op.club_id)}
+           walkoverClaim={walkoverClaimWith(op.club_id)}
++          canSeePhones={canSeePhones} opponentPhone={teamsById[op.club_id]?.phone}
+           onInitiate={onInitiateMatch} onSetLength={onSetMatchLength} onCancel={onCancelMatch} onOpenResult={onOpenResult}
+           onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
+       ))}
+@@ -697,7 +723,7 @@
+         {league.ladder_cup_finalized_at ? (
+           <LadderCupFinalizedBanner league={league} c={c} />
+         ) : myTeam ? (
+-          <LadderCupOpponentBoard league={league} myTeam={myTeam} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife}
++          <LadderCupOpponentBoard league={league} myTeam={myTeam} canSeePhones={canSeePhones} onInitiateMatch={onInitiateMatch} onSetMatchLength={onSetMatchLength} onCancelMatch={onCancelMatch} onOpenResult={onOpenResult} onRespondSecondLife={onRespondSecondLife}
+             onMessageWalkover={onMessageWalkover} onSubmitWalkoverClaim={onSubmitWalkoverClaim} c={c} />
+         ) : (
+           <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>Join with a club to see who you can challenge.</div>

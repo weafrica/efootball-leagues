@@ -1,0 +1,53 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 4bdd291..c1de833 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1626,6 +1626,14 @@ function computeMyLeagueWins(leagues, userId) {
+           championTeamId = computeStandings(displayTeams, stageFixtures, league)[0]?.id ?? null;
+         }
+       }
++    } else if (league.format === "ladder_cup") {
++      // Champion is decided server-side at finalize time (see
++      // _ladder_cup_finalize_internal / the Sunday 11:59 UTC auto-finalize
++      // cron) — ladder_cup_finalized_at is the completion signal (mirrors
++      // isLeagueCompleted's own ladder_cup branch), ladder_cup_champion_team_id
++      // is who won. Can legitimately be null even once finalized (every
++      // club eliminated before cutoff) — that's not a win for anyone.
++      if (league.ladder_cup_finalized_at) championTeamId = league.ladder_cup_champion_team_id || null;
+     } else {
+       const leagueComplete = leagueFixtures.length > 0 && leagueFixtures.every((f) => f.played);
+       if (leagueComplete) championTeamId = computeStandings(leagueTeams, leagueFixtures, league)[0]?.id ?? null;
+@@ -1667,6 +1675,7 @@ function computeAllLeagueChampionships(leagues) {
+ 
+     let championTeamId = null;
+     let deciderFixtures = null;
++    let championWonAt = null; // only ladder_cup sets this directly — see its branch below
+     if (inKnockoutBracket) {
+       const bracketStage = isGroupsKnockout ? 2 : 1;
+       const stageFixtures = leagueFixtures.filter((f) => f.stage === bracketStage);
+@@ -1683,6 +1692,16 @@ function computeAllLeagueChampionships(leagues) {
+           deciderFixtures = stageFixtures;
+         }
+       }
++    } else if (league.format === "ladder_cup") {
++      // Same completion/champion signal as computeMyLeagueWins's ladder_cup
++      // branch. No generic `fixtures` array to derive a decider date from
++      // here (ladder_cup_matches is its own table, never loaded into
++      // league.fixtures), so wonAt is just the finalize timestamp itself —
++      // the moment _ladder_cup_finalize_internal actually crowned them.
++      if (league.ladder_cup_finalized_at) {
++        championTeamId = league.ladder_cup_champion_team_id || null;
++        championWonAt = league.ladder_cup_finalized_at;
++      }
+     } else {
+       const leagueComplete = leagueFixtures.length > 0 && leagueFixtures.every((f) => f.played);
+       if (leagueComplete) {
+@@ -1695,7 +1714,7 @@ function computeAllLeagueChampionships(leagues) {
+     const championMember = (league.members || []).find((m) => m.team_id === championTeamId);
+     if (!championMember?.user_id) continue;
+ 
+-    const wonAt = (deciderFixtures || []).reduce((latest, f) => {
++    const wonAt = championWonAt || (deciderFixtures || []).reduce((latest, f) => {
+       if (!f.played) return latest;
+       const d = fixturePlayedDate(f);
+       return !latest || d > latest ? d : latest;

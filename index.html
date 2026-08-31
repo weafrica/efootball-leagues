@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Matchday — eFootball Leagues</title>
+
+    <!-- PWA: installable on Android/Chrome via manifest, and on iOS Safari
+         via the apple-* meta tags below (iOS ignores the manifest itself). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0a0e0c" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Matchday" />
+
+    <!-- Full-bleed launch splash: shown instantly (inline CSS, no external
+         stylesheet to wait on) covering the whole screen with the trophy
+         photo, then faded out by main.jsx once the app has actually
+         mounted. Exists mainly for the installed-app launch (tapping the
+         home-screen icon on Android/iPhone), where there'd otherwise be a
+         blank/white flash while the JS bundle loads.
+
+         splash.jpg is a tall portrait photo (750x1117) shot for a phone
+         screen. `cover` on a narrow mobile viewport barely has to crop it,
+         so it fills edge-to-edge cleanly — but on a wide laptop/desktop
+         viewport `cover` has to blow the image up until it fills the
+         width, which crops almost everything except a tight, zoomed-in
+         slice around the trophy. Past a landscape-ish width, switch to
+         `contain` instead so the full photo shows, letterboxed on the
+         same dark background color rather than cropped into a close-up. -->
+    <link rel="preload" as="image" href="/splash.jpg" />
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #0a0e0c url(/splash.jpg) center center / cover no-repeat;
+        transition: opacity 0.4s ease;
+      }
+      @media (min-width: 700px) {
+        #splash {
+          background-size: contain;
+        }
+      }
+      #splash.splash-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@600;700;800;900&family=Cinzel:wght@500;600;700;800&family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&family=Bitter:wght@400;500;600;700&family=Baloo+2:wght@500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="splash"></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
