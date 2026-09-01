@@ -19,7 +19,7 @@ Deployed live. Unblocked a real player who was stuck due to the mislabeling. (Mi
 ## 3. League-by-league history cleanup — 🔄 In progress
 
 - **League 2:** ✅ Done. 30 leftover/duplicate games from a mislabeled batch were identified and removed. The ledger records logging the reward payout for 3 of those games were removed too (balances themselves were left untouched — the reward money stays with the players, only the duplicate log entries were deleted). League 2 now shows only genuine history: 30 real week-1 games, plus the real week-2 fixtures in progress across its 5 active players.
-- **Leagues 3, 4, 5, 8:** ⏳ Not started. Same approach as League 2 — pull each league's data, sort genuine vs. leftover vs. duplicate, flag anything with money attached before touching it.
+- **Leagues 3, 4, 5, 8 (tiers 3, 4, 5, 8):** ✅ Done, and clean. Checked each for duplicate fixtures, fixtures involving players not actually rostered that week, and duplicate reward-ledger payouts on the same match — found none of any of those in any of the four. Rosters also reconcile exactly to 6 for both week 1 and week 2 in all four. Unlike League 2, there was nothing to remove here.
 - **Tiers 1, 10, 11, 12, 14 (and likely deeper):** ⏳ Not started, new since item 10 below. These sit below the 6-per-league rule (5, 3, 3, 2, 3 players respectively) — mostly players already marked `eliminated` from before this cleanup effort started, not caused by the overflow bug fixed in item 10. Needs the same per-league audit as League 2 got.
 
 ---
@@ -83,6 +83,7 @@ Not investigated — flagged as likely to resolve on its own.
 - Rewrote the overflow function so an overflowing league only ever pushes its extra player one tier further down (creating that tier if it doesn't exist), never to the ladder's bottom. For the entry league this is unchanged — it IS the bottom tier already. Migration: `20260919_ladder_overflow_push_one_tier_not_bottom.sql`.
 - Along the way, found and fixed a second bug this exposed: the fixture-schedule rebuild (which runs whenever a league's roster changes mid-week) compared "already played" pairings in a fixed home/away order, but the round-robin rotation can flip which side is home/away once the roster changes — so it could try to re-insert an already-played match with sides swapped and crash against the database's own duplicate-pairing rule. Migration: `20260920_ladder_fixture_regen_order_independent_played_check.sql`.
 - Manually corrected the 4 players already misplaced in week 2 (moved to their correct one-tier-below destination), then re-ran the fixed rebalance for week 2. Every league is now at exactly 6 or below the historical debt in item 3 — no league is over 6.
+- **Follow-up check (all leagues, not just 3/4/5/8):** re-ran the same duplicate-fixture / orphaned-fixture / duplicate-payout checks from item 3 across every league. Found one leftover — 6 stray pending fixtures in tier 14 for one of the 4 manually-moved players, left behind because the manual move only updated their membership row, not their fixtures. Deleted those and resynced tier 14's schedule. No duplicate reward payouts anywhere, and no other leftover fixtures anywhere.
 
 ---
 
