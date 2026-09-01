@@ -25,7 +25,7 @@ All tiers audited (League 2, tiers 3/4/5/8, and later 1/10/11/12/14). Zero true 
 
 ## 4. Re-run proper closing for each league's real first week — ✅ Done
 
-Tiers 1–12 closed correctly. Tier 13 was broken (all fixtures forfeited, decay penalty wrongly eliminated the sole real stayer, Ben) — fixed by removing the decay step entirely (`20260921_ladder_remove_decay_penalty_step.sql`) and reverting Ben to `active`.
+Tiers 1–12 closed correctly. Tier 13 was broken (all fixtures forfeited, decay penalty wrongly eliminated the sole real stayer, Ben) — fixed by removing the decay step entirely (`20260921_ladder_remove_decay_penalty_step.sql`) and reverting Ben to `active`. (Tier 13 itself was later fully drained and its league row deleted — see Housekeeping below. This history is preserved here for context only; the league no longer exists live.)
 
 ---
 
@@ -110,6 +110,7 @@ Ran across every tier (1–11): checked that week-1 `promoted` players landed on
 ## Housekeeping — ✅ Done this session
 
 - **Empty league shells removed.** Tiers 14, 15, 16, 17 in `ladder_leagues` had zero memberships and zero fixtures — leftover clutter from a pre-`20260919` overflow-cascade bug, corrected by hand at the time but leaving the empty rows behind. Confirmed clean (no fixtures referencing them) and deleted.
+- **Tier 13 removed (later session).** Fully drained to 0 players in week 2. Unlike the 14–17 shells, this one had real history (3 week-1 memberships, 6 forfeited fixtures — Ben's broken week from item 4) but no fee events, no bids, and no matches actually played. Deleted at the user's request since the league was no longer needed. If any future note still references "Tier 13," re-query live first — the league row no longer exists.
 - **Week 2 match legitimacy verified.** Tier 1 (6 matches) and Tier 6 (1 match) show real played results from Aug 31. Confirmed genuine via `ladder_fixture_result_submissions` (distinct submission times, photo proof attached, real reviewer or auto-approve) and matching `ladder_reward_ledger` payouts — not seeded or bulk-inserted data. All other tiers/weeks are correctly at zero (pending, unplayed).
 
 ---
