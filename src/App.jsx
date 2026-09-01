@@ -164,7 +164,7 @@ const SHOP_PROMO_TEXT = "Sale";
 // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
 // to false once the Ladder is back to normal — the notice just won't fire
 // again, no redeploy-adjacent cleanup needed.
-const LADDER_MAINTENANCE_ACTIVE = true;
+const LADDER_MAINTENANCE_ACTIVE = false;
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 export const ENTRY_FEE_MIN = 10;
