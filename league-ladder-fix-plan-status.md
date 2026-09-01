@@ -51,9 +51,9 @@ Cap confirmed live at 6 (`_rebalance_ladder_overflow_internal`, splits when a le
 
 ---
 
-## 7. "Asked to join again" complaint — ⏳ Waiting on your answer
+## 7. "Asked to join again" complaint — ✅ Resolved (as a side effect of item 11)
 
-Still needs a decision: admin view or member's own page? Not investigated further.
+No dedicated fix exists for this specifically — investigation this session traced it to item 11's root cause: stayers only get carried into the new week by `_ladder_open_week_internal`, which only ran if the prior Sunday's `_ladder_close_week_internal` completed. Before item 11's guard fix, an unhandled balance-check exception could abort that whole transaction, silently skipping the stayer carry-forward and leaving already-active players looking "unjoined" next time they opened the app. Confirmed live: nobody currently has a stale `active` row sitting behind the current week, and the `ladder-close-week-sunday` cron is active and correctly scheduled. User confirmed as done.
 
 ---
 
@@ -63,9 +63,18 @@ New `ladder_champion` achievement merged into the homepage trophy ranking; old i
 
 ---
 
-## 9. Minor bid edge case — ⏳ Low priority
+## 9. Minor bid edge case — ✅ Fixed and deployed live
 
-Not investigated — flagged as likely to resolve on its own.
+Never documented beyond the one-line summary — investigated fresh this session by reading `place_ladder_bid` end to end.
+
+**The bug:** the bottom-most league (currently Tier 12) has entry fee `0` by design (normal join via `join_ladder_league()` is free). But `place_ladder_bid` required every bid amount to be strictly positive, and a winning bid's escrow is never refunded. So a relegation-zone player "buying back" their own spot in that same free league via a bid — rather than just staying as a normal reseated stayer — would have been forced to pay at least 1 Net for something that's supposed to cost nothing. Confirmed live: this had never actually happened (zero bid history for the bottom tier, ever), so it was a real but dormant inconsistency.
+
+**Fix (option chosen: relax validation, don't block bidding):** deployed live, migration `ladder_allow_zero_amount_bid_on_free_league`. Changed the top-level amount check from "must be positive" to "must not be negative." Nothing else needed to change — the existing floor/leader-beat logic already does the right thing with just that: a `0` bid only clears the floor when the league's real entry fee is `0`, and a second bidder still has to actually exceed `0` to dethrone a free first bid. Every place that moves wallet/pool money (self-raise refund, dethrone refund, new escrow) now skips the call when the amount involved is `0`, since the underlying debit/credit helpers reject non-positive amounts themselves.
+
+**Verified live**, without risking a real money-moving test bid:
+- Negative amounts still rejected everywhere (regression check, using a fabricated auth context via `request.jwt.claim.sub`).
+- `0` on a paid league (Tier 5, entry fee 10) still correctly rejected by the floor (`"amount 0 is below this league's 10 bid floor"`).
+- `0` on the free league (Tier 12) now passes the amount check and reaches the eligibility check — only blocked there because Tier 12 is currently fully drained (0 players), not by amount validation. Full end-to-end confirmation (an actual won 0-amount bid settling correctly) isn't possible until a real relegation-zone player exists in a free league again.
 
 ---
 
@@ -118,10 +127,7 @@ Ran across every tier (1–11): checked that week-1 `promoted` players landed on
 
 ## What's actually left
 
-1. **Item 7** — needs your call: admin view or member's own page?
-2. **Item 9** — low priority, whenever.
-
-That's it — everything else, including the full 7-phase redesign, is confirmed live.
+Nothing. Every item in this plan (1–13), the full 7-phase redesign, and the two loose ends (7, 9) are confirmed done and live as of this session.
 
 ---
 
