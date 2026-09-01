@@ -1,43 +1,43 @@
 # Continue-from-here notes
-_Written after the session that fixed item 4 (and removed the decay-penalty step) in `league-ladder-fix-plan-status.md`_
+_Written after the session that finished item 3 (history-cleanup audit) in `league-ladder-fix-plan-status.md`_
 
 ## Project facts
 - Repo: `efootball-leagues-repo` (weafrica.co.za)
 - Live Supabase project: `weafrica Leagues`, project ref `jobgzxljuczzqljwavyq`
-- No CI/CD — migrations are applied manually. **Always check live vs. repo before trusting a file** (this has caused several of the bugs already fixed). `pg_get_functiondef` on the live project is the source of truth, not the repo.
+- No CI/CD — migrations are applied manually. **Always check live vs. repo before trusting a file.** `pg_get_functiondef` on the live project is the source of truth, not the repo.
 
 ## What's done this session
-- **Item 4** (Re-run proper closing for each league's real first week): audited every league's week-1 close.
-  - Tiers 1–12: already properly closed, no action needed.
-  - Tier 13: broken — all week-1 fixtures forfeited (nobody played), and one real player (Ben) got stranded with no week-2 membership at all, because the inactivity-decay step marked him `eliminated` with no fallback seat.
-  - **Decision: removed the inactivity-decay step from the weekly close entirely** (not covered by the redesign spec's Phase B, which only flags fall-through's affordability crash — decay had the same "no fallback" problem, worse, since it doesn't even try to re-seat the player). Migration written and applied live:
-    - `20260921_ladder_remove_decay_penalty_step.sql`
-    - **Not yet pushed to git** — sitting in this repo checkout, needs `git add` / `commit` / `push`.
-  - Ben resolved: reverted to `active` week 1, seated `active` in Tier 13 week 2 (same as any normal stayer). No money involved. He's currently alone in Tier 13 for week 2 (his 2 former leaguemates are in Tier 14) — no fixtures generated, needs company or a manual move.
+- **Item 3** (League-by-league history cleanup) — ✅ now fully done. Ran the same three checks League 2 got — duplicate played/forfeited fixtures, fixtures involving players not actually rostered that week, duplicate reward-ledger payouts — against every tier the status doc had flagged as unaudited (1, 10, 11, 12, 14), and against the whole ladder while at it.
+  - **False alarm caught and corrected:** a naive duplicate-pairing check flags 2 rows per pairing in *every* tier — that's the double round-robin's home leg + away leg (see `20260920`'s comment), not a bug. Re-scoped the check by `leg` as well as pairing before trusting it.
+  - Result: **zero true duplicate fixtures, zero orphaned fixtures, zero duplicate payouts, ladder-wide.** No SQL was needed — nothing to fix.
+  - Spot-checked Tier 12's placement trail (it's fully drained — 0 actives left in week 2) to be sure nobody got stranded: all 6 of its week-1 players trace correctly to their next-week destination (1 promoted → Tier 10 active, 2 relegated → Tier 11 active, 3 eliminated → correctly carry nothing forward).
+  - **Housekeeping spotted, not fixed:** `ladder_leagues` has 4 empty shell rows — tiers 14, 15, 16, 17 — zero memberships, zero fixtures in any of them. 15–17 were all created at the identical timestamp `2026-08-31 23:59:47`, which looks like a leftover cascade from the pre-`20260919` overflow bug (relegated player exiled several tiers down, then corrected by hand, leaving the empty league rows behind). Harmless, nothing points at them — just clutter. Low-priority cleanup: `delete from ladder_leagues where tier in (14,15,16,17)`.
+  - Also noted in passing (not part of item 3, no action taken): Ben, changara05, and Fabio's — the three players item 4 fixed in Tier 13 last session — have since all been manually moved into Tier 11 together (joined_at timestamps Aug 31–Sep 1), so Tier 13 is now correctly drained to zero for week 2. This matches item 6's Tier 10/11 consolidation; nothing to do here.
 
 ## Full status — see `league-ladder-fix-plan-status.md` for details
 | Item | Status |
 |---|---|
 | 1. Audit core system vs. live | ✅ Done |
 | 2. Auction-winner labeling bug | ✅ Done, live |
-| 3. League history cleanup | ✅ Done (League 2, and 3/4/5/8) |
-| 4. Re-close each league's real week 1 | ✅ Done this session — Tier 13/Ben fixed, decay step removed |
-| 5. Promotion/relegation skip-unaffordable fix | ✅ Decided, ⏳ **still not deployed live** — repo migration `20260916` has it, live DB doesn't |
-| 6. Roster cap recheck | 🔄 In progress — cap mechanism fixed (earlier session); tiers 1,10,11,12,14 still under 6 (pre-existing data debt, item 3 territory); Tier 13 now also under 6 (1 player, this session) |
+| 3. League history cleanup | ✅ **Done — all tiers audited clean this session** |
+| 4. Re-close each league's real week 1 | ✅ Done (prior session) — Tier 13/Ben fixed, decay step removed |
+| 5. Promotion/relegation skip-unaffordable fix | ⏳ Decided, **still not deployed live** — repo migration `20260916` has it, live DB doesn't |
+| 6. Roster cap recheck | 🔄 Paused pending item 13 (per prior session's notes) — worth re-checking headcounts now that item 3's audit is clean, since some of the placements it was worried about (Tier 12) now check out fine |
 | 7. "Asked to join again" complaint | ⏳ Waiting on you: admin view or member's own page? |
 | 8. Wall of Fame display | ✅ Done |
 | 9. Minor bid edge case | ⏳ Low priority, not investigated |
-| 10. Relegation teleport bug | ✅ Fixed (earlier session) |
+| 10. Relegation teleport bug | ✅ Fixed |
 | 11. Sunday auto-close/open not firing | ✅ Fixed |
-| 12. Redesign build spec (Phases A–G) | ⏳ Not started — **Phase A recommended next**, everything else builds on it |
+| 12. Redesign build spec (Phases A–G) | ⏳ Not started — Phase A recommended next |
+| 13. Full week-1 → week-2 placement audit | ⏳ Not started — blocks resuming item 6's cascade |
 
 ## Recommended next step
 Three candidates, your call:
-- **Ben** — currently alone in Tier 13 with no fixtures. Needs a decision: leave him waiting for company, or move him somewhere with people.
 - **Item 5** — deploy the skip-unaffordable promotion fix that's already written (`20260916`) but not live. Quick, low-risk, already decided.
-- **Phase A of the redesign spec (item 12)** — bigger, but everything else in the redesign depends on it.
+- **Item 13** — the full placement audit that's blocking item 6's cascade resume. Item 3's clean result today is a good sign, but item 13 checks a different thing (promoted/relegated/stayer landing in the *right* tier, not just fixture/payout integrity), so it's still open.
+- **The orphaned tier 14–17 shells** — trivial delete, whenever convenient.
 
 ## Gotchas learned this session (don't repeat these)
-- The weekly close runs promotion/relegation → Wall of Fame → fees → bids → fall-through, **then used to run decay penalty last, before opening the next week** (decay step now removed — see item 4). Any step in that chain that changes a member's status away from `'active'` *before* the open-week carry-forward query runs will silently strand that player with no next-week seat, since carry-forward only picks up rows still `'active'`. Worth remembering if a new step is ever added to this pipeline.
-- If you ever manually move a player's `league_id` in `ladder_memberships` via raw SQL (not through the proper functions), **their old league keeps stale fixtures for them** — you have to delete those and re-run `_ladder_sync_fixtures_internal` on both the old and new league afterward. This bit us once already (tier 14 leftovers).
-- The "6 players per league" rule is enforced by `_rebalance_ladder_overflow_internal` — it only ever pushes overflow one tier down, never to the ladder's bottom (fixed in an earlier session). If you see anyone in a far-flung near-empty tier again, that function (or something calling it wrong) is the first place to check.
+- This is a **double round-robin**: every pairing legitimately gets 2 fixtures (leg 1 home, leg 2 away). Don't flag 2-per-pairing as a duplicate — scope any duplicate check by `leg` too, or you'll drown in false positives across every league.
+- Tier numbers and league IDs are not stable landmarks across sessions — leagues get consolidated, drained, and recreated. Before auditing "Tier N," re-query live for what's actually in it now; don't assume the tier layout from an older status doc still holds.
+- Empty `ladder_leagues` rows (0 memberships, 0 fixtures) can be leftover from corrected overflow-cascade bugs — harmless, but worth a periodic `select tier from ladder_leagues where id not in (select distinct league_id from ladder_memberships)` sweep to catch clutter like tiers 14–17.
