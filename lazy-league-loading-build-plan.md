@@ -1,57 +1,52 @@
 # Build Plan: Load League Banners Only, Fetch Details on Click
 
-## Goal
-Right now `loadLeagues()` fetches **every league on the platform**, fully expanded — `teams(*)`, `fixtures(*)`, `members(*)`, `ladder_cup_entries(*)`, `ladder_cup_matches(*)`, `ladder_cup_walkover_claims(*)`, `ladder_cup_second_life_offers(*)`, `ladder_cup_pool_sightings(*)` — on every sign-in. That's the entire dataset for every league, for every player, whether or not they ever open most of them.
+## Status — verified against the live repo (`src/App.jsx`, `src/LeagueDetail.jsx`) this session
+**Items 1–3 and 5 are done, live in the codebase. Item 4 is done but implemented differently than proposed (stronger, not weaker). Item 2 has one real gap (no loading skeleton). Item 6 turns out not to apply at all. Item 7 is an operational to-do that can't be checked from code.**
 
-The fix: the Home screen only needs enough per league to render `LeagueCard` (the banner) and the Home-wide aggregates (Up Next strip, attention badges, progress). Everything else — comments, full member rows, ladder cup sub-tables, admin-only fields — should load only when a player taps a specific league.
-
-This plan is ordered by impact. Do 1–3 first; that's the actual fix. 4–7 are correctness/UX guardrails you need alongside it, not optional polish.
+This plan was apparently written before (or without knowledge of) the actual implementation — the code doesn't just partially match this plan, it deliberately re-scoped several items after a real audit found broader Home-wide usage than this doc assumed. Details below, item by item.
 
 ---
 
-## 1. Split `LEAGUE_LIST_SELECT` into a summary select and a detail select (highest priority)
+## 1. Split `LEAGUE_LIST_SELECT` into a summary select and a detail select — ✅ Done, but narrower split than proposed
 
-Audit confirmed what `LeagueCard` and the Home-wide helpers (`computeStandings`, `computeMyUpcomingFixtures`, `computeMyProgress`, `resultEscalationReason`, `ladderCupResultEscalationReason`, `LeagueReactionBar`) actually read off a league row. Nothing on Home reads `comments`, full `members` rows (phone numbers, proof photos), or any of the three `ladder_cup_*` sub-tables beyond `ladder_cup_matches`.
+Implemented as `LEAGUE_SUMMARY_SELECT` / `LEAGUE_SELECT` (not `LEAGUE_LIST_SELECT` / `LEAGUE_DETAIL_SELECT` as this doc names them — same idea, different names).
 
-**`LEAGUE_SUMMARY_SELECT`** (what Home/`loadLeagues()` fetches — narrow every nested table, same treatment you already gave the `public_*` guest views):
-- League columns: `id, name, format, league_type, photo_url, current_stage, final_stage_started, starts_at, group_stage_due_at, groups_count, group_qualifiers, survivor_elimination_percent, survivor_target_count, round_period_hours, entry_closes_at, created_at`
-- `teams(id, name, eliminated, league_id, group_number)`
-- `fixtures(id, league_id, home_team_id, away_team_id, home_score, away_score, played, stage, due_at)`
-- `members(user_id, league_id, payment_status, entry_fee)`
-- `result_submissions(id, fixture_id, status, created_at, submitted_by)`
-- `ladder_cup_matches(id, league_id, finalized_at, result_status, result_dispute_count, result_reported_at)`
-- `league_reactions(id, user_id, reaction)`
+**What actually got cut to detail-only:** just `comments` and the three narrow ladder-cup sub-tables (`ladder_cup_walkover_claims`, `ladder_cup_second_life_offers`, `ladder_cup_pool_sightings`) — tracked as `LEAGUE_DETAIL_ONLY_KEYS`.
 
-Drop entirely from the summary: `comments`, `ladder_cup_entries`, `ladder_cup_walkover_claims`, `ladder_cup_second_life_offers`, `ladder_cup_pool_sightings`, and any team/member/league columns only used on the detail screen (phone numbers, proof photos, `description`, `wa_message_template`, `created_by`, etc.).
+**What this doc proposed cutting but the actual audit kept full-width in the summary, on purpose:** `teams`, `fixtures`, `members`, `ladder_cup_entries`, `ladder_cup_matches` are all still `(*)` in `LEAGUE_SUMMARY_SELECT`, not narrowed to specific columns and not deferred to detail. The code's own comment documents why: these are genuinely read **Home-wide** (across *all* leagues at once, not just one open league) by `attentionScore`'s `result_submissions` check, `LeagueReactionBar`, `computeMyUpcomingFixtures`/`computeMyProgress`'s fixture scans, and the platform-wide Leaderboard/season/head-to-head passes — narrowing or deferring them the way this doc proposed would have broken those screens. This doc's audit (the numbered field list under "Drop entirely from the summary") didn't catch that Home-wide usage; the actual implementation's audit did.
 
-**`LEAGUE_DETAIL_SELECT`** = today's `LEAGUE_SELECT` (everything, including `comments`). This becomes the "one league, fully expanded" query — only ever fetched for a single `id`, never for the whole list.
+`result_submissions` also stayed in summary, but narrowed to specific columns (`id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away`) rather than `(*)` — a lighter-touch version of what this doc proposed for the whole summary select.
 
-Treat this column audit as a first pass, not gospel — grep every place that reads `l.members`, `l.teams`, etc. off a Home-scope league object before shipping, the same way you already did for `public_leagues`.
+**Net effect:** less aggressive than this doc's proposal, but for a real reason, not an oversight — worth keeping in mind if anyone revisits this select later and is tempted to "finish" narrowing `teams`/`fixtures`/`members` per the original plan. Don't, without re-running that Home-wide usage audit first.
 
-## 2. Fetch the detail select on click, merge it into state
+## 2. Fetch the detail select on click, merge it into state — ✅ Mostly done — one real gap
 
-- On `LeagueCard`'s `onOpen(l.id)` (i.e. when `activeLeagueId` gets set), fire `supabase.from("leagues").select(LEAGUE_DETAIL_SELECT).eq("id", id).single()` and merge the result into `leagues` via the existing `mergeLeaguesById`.
-- This is the same pattern already built for lazy-loading comments (`if (!current || current.comments) return`) — extend that effect (or add a sibling one keyed off `activeLeagueId`) to also backfill the rest of the detail-only fields, not just `comments`.
-- Show a loading state in `LeagueDetail` while this is in flight (skeleton or spinner) — the banner data is already in `leagues` from the summary load, so the screen can render immediately with what it has and progressively fill in members/ladder-cup sub-tables/comments.
+The fetch-on-click-and-merge mechanics are implemented essentially exactly as this doc describes: an effect keyed on `activeLeagueId` fetches `LEAGUE_SELECT` for that one league and merges it in via `mergeLeaguesById`, tagging the row with `_detailLoadedAt` once loaded.
 
-## 3. Don't let a background summary refresh clobber an already-loaded detail (critical correctness gotcha)
+**Gap: no loading state.** This doc explicitly calls for "a loading state in `LeagueDetail` while this is in flight (skeleton or spinner)." That part wasn't built — `LeagueDetail.jsx` reads `league.comments || []` and similar with no check for whether detail has loaded yet, so a freshly opened league's comments (and the three detail-only ladder-cup collections) just render as empty/absent and silently pop in once the fetch resolves, rather than showing a skeleton. Minor UX gap, not a correctness one — worth a follow-up if the pop-in is noticeable in practice.
 
-This is the part that will bite you silently if skipped: `mergeLeaguesById` does a shallow merge (`{...existing, ...newRow}`). Once a league has its full detail loaded (comments, full members, etc.), any *other* code path that re-fetches that league with the narrow `LEAGUE_SUMMARY_SELECT` — e.g. some other player's action triggering a summary-level refresh — will overwrite the rich `members` array with the stripped-down summary version, silently downgrading a screen the user already has open.
+## 3. Don't let a background summary refresh clobber an already-loaded detail — ✅ Done, exactly as specified
 
-Fix: track which leagues have detail loaded (e.g. a `detailLoadedAt` timestamp on the row, or a separate `Set` of ids), and make any refresh path choose `LEAGUE_DETAIL_SELECT` instead of `LEAGUE_SUMMARY_SELECT` for a league that already has detail loaded. `refreshLeague`/`refreshLeagues` should branch on this instead of always using one fixed select string.
+This is the part the doc flagged as the critical gotcha, and it's fully handled: `mergeSummaryPreservingDetail` (module scope) preserves the `LEAGUE_DETAIL_ONLY_KEYS` fields from the existing row whenever a narrower summary row comes in for a league that already has `_detailLoadedAt` set, and `mergeLeaguesById` routes every summary-shaped row through it. `loadLeagues()` itself also uses this on every bulk reload. Confirmed correct in the code, not just present.
 
-## 4. Add a freshness guard so reopening a league doesn't always refetch
+## 4. Add a freshness guard so reopening a league doesn't always refetch — ✅ Done, but stronger than proposed (no TTL)
 
-Mirror the guest-data `GUEST_DATA_CACHE_MS` pattern: if `activeLeagueId` points at a league whose detail was loaded in, say, the last 20–30 seconds, skip the fetch and reuse what's in state. Combined with the 30s poll already running while a league is open (see #5), this mostly matters for the rapid open → close → reopen case.
+This doc proposed a 20–30 second cache window, "mirroring the guest-data `GUEST_DATA_CACHE_MS` pattern." Two corrections:
+- **That constant doesn't exist anywhere in the codebase** — checked directly, no `GUEST_DATA_CACHE_MS` or equivalent. The guest-data flow has no time-based cache at all.
+- **What's actually implemented for the signed-in flow is stronger than a TTL:** the `activeLeagueId` effect only fetches detail when the league is missing `_detailLoadedAt` entirely — once a league's detail has loaded in a session, reopening it later never triggers an automatic refetch on that path, no matter how much time has passed. Freshness while a league is open instead comes from the 30-second poll and the two realtime subscriptions (see #5) — not from re-checking on every open. This fully covers the "rapid open → close → reopen" case this doc worried about, and then some.
 
-## 5. Confirm polling/realtime stay scoped to the open league only
+## 5. Confirm polling/realtime stay scoped to the open league only — ✅ Done, exactly as specified
 
-`useVisibilityPoll(refreshActiveLeagueCb, 30000, !!activeLeagueId)` and the `ladder_cup_walkover_claims` / `ladder_cup_matches` realtime subscriptions already key off `activeLeagueId`, so they're only touching one league — good, no change needed there. Just make sure `refreshActiveLeagueCb` is pointed at `LEAGUE_DETAIL_SELECT` (via #3's branching), since this is the one place a full detail refetch is actually supposed to happen every 30s.
+Confirmed in the code: `useVisibilityPoll(refreshActiveLeagueCb, 30000, !!activeLeagueId)` and the `ladder_cup_walkover_claims`/`ladder_cup_matches` realtime subscriptions are all gated on `!!activeLeagueId`. `refreshActiveLeagueCb` calls `refreshLeague(activeLeagueId)`, which branches on `_detailLoadedAt` — since the open league always has detail loaded by the time this poll is running, it correctly always re-fetches via `LEAGUE_SELECT` (full detail), not the summary shape. No change needed, matches this doc's expectation precisely.
 
-## 6. Do the same split for the guest landing page (fast follow, not blocking)
+## 6. Do the same split for the guest landing page — ❌ Not done, and turns out not to apply
 
-The guest `Promise.all` fetch has the same shape at a smaller scale: it pulls `public_league_fixtures` and `public_league_teams` for **every** public league up front to feed Home-wide stats (`totalClubs`, `totalMatches`) and every `PublicLeagueCard`. Once the signed-in split (1–5) is working, apply the identical summary/detail split to the guest views — `public_leagues`/`public_league_teams`/`public_league_fixtures` stay as the summary, and add a `public_league_detail`-style view fetched only when a guest opens a specific league (if guests can even drill into one — if not, this step may not apply and can be dropped).
+Checked both halves of this doc's own stated condition ("if guests can even drill into one — if not, this step may not apply and can be dropped"):
+- Guest data (`guestData`) is still one bulk `Promise.all` fetch — `teams`, `fixtures`, `leagues`, `extras`, `ladder` all loaded upfront together, exactly as this doc describes the current (pre-fix) state. No `public_league_detail` view or equivalent exists.
+- **Guests cannot drill into an individual league at all.** `PublicLeagueCard` renders everything about a league inline from the bulk `guestData` already in memory — including "View all matches," which is a plain `useState` show/hide toggle over already-fetched fixtures, not a new fetch. There's no guest-side equivalent of `activeLeagueId`/a league-detail screen to fetch into.
 
-## 7. Measure before/after
+So per this doc's own fallback clause: **this step doesn't apply and should be dropped**, not just deprioritized. If guest drill-in ever gets built as a feature, this split would become relevant again and should be revisited then — but there's nothing to build against today's guest UI.
 
-Once 1–3 ship, watch the Supabase dashboard's Egress panel for a few days. `loadLeagues()` firing once per sign-in with the narrow select, instead of the full nested payload, should show up as a clear drop in daily PostgREST egress. If it doesn't move much, that's a signal the per-league detail fetches (from players actually opening leagues) or the guest page (#6) are the bigger contributor, not the bulk load — worth confirming with real numbers rather than assuming.
+## 7. Measure before/after — ⏳ Still open, can't be verified from code
+
+This is an operational step (watching the Supabase dashboard's Egress panel), not something a repo/live-DB audit can confirm either way. Given items 1–3 and 5 are confirmed live, this measurement is worth actually doing if it hasn't been — but no code-side signal can substitute for checking the real dashboard numbers.
