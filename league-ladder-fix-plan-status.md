@@ -1,77 +1,65 @@
 # League Ladder — Fix Plan Status (detailed)
 
 _Matchday / efootball-leagues-repo — weafrica.co.za_
+_Updated after the session that closed out items 6 and 13, and cleaned up 4 empty league shells._
 
 ---
 
 ## 1. Audit core system vs. live — ✅ Done
 
-Compared what the migration files in the repo claim is deployed against what's actually running on the live Supabase project (`weafrica Leagues`, project ref `jobgzxljuczzqljwavyq`). This surfaced the recurring pattern behind most of the bugs below: there's no CI/CD pipeline and no `supabase/config.toml` in this repo, so migrations are applied manually and sometimes never actually make it to production even though the file exists in the repo. Several of the items below trace back to exactly this — a fix committed as a `.sql` file that was never run against the live database.
+Compared what the migration files in the repo claim is deployed against what's actually running on the live Supabase project (`weafrica Leagues`, project ref `jobgzxljuczzqljwavyq`). No CI/CD and no `supabase/config.toml` — migrations are applied manually and sometimes never actually make it to production even though the file exists in the repo. **Always check live vs. repo before trusting a file** — `pg_get_functiondef` on the live project is the source of truth, not the repo.
 
 ---
 
 ## 2. Fix auction-winner labeling bug — ✅ Done
 
-Deployed live. Unblocked a real player who was stuck due to the mislabeling. (Migration: `20260918_ladder_auction_winner_active_label_fix.sql`.)
+Deployed live. (Migration: `20260918_ladder_auction_winner_active_label_fix.sql`.)
 
 ---
 
-## 3. League-by-league history cleanup — 🔄 In progress
+## 3. League-by-league history cleanup — ✅ Done
 
-- **League 2:** ✅ Done. 30 leftover/duplicate games from a mislabeled batch were identified and removed. The ledger records logging the reward payout for 3 of those games were removed too (balances themselves were left untouched — the reward money stays with the players, only the duplicate log entries were deleted). League 2 now shows only genuine history: 30 real week-1 games, plus the real week-2 fixtures in progress across its 5 active players.
-- **Leagues 3, 4, 5, 8 (tiers 3, 4, 5, 8):** ✅ Done, and clean. Checked each for duplicate fixtures, fixtures involving players not actually rostered that week, and duplicate reward-ledger payouts on the same match — found none of any of those in any of the four. Rosters also reconcile exactly to 6 for both week 1 and week 2 in all four. Unlike League 2, there was nothing to remove here.
-- **Tiers 1, 10, 11, 12, 14 (and likely deeper):** ⏳ Not started, new since item 10 below. These sit below the 6-per-league rule (5, 3, 3, 2, 3 players respectively) — mostly players already marked `eliminated` from before this cleanup effort started, not caused by the overflow bug fixed in item 10. Needs the same per-league audit as League 2 got.
+All tiers audited (League 2, tiers 3/4/5/8, and later 1/10/11/12/14). Zero true duplicate fixtures, zero orphaned fixtures, zero duplicate payouts, ladder-wide. The only false-alarm to watch for: a naive duplicate-pairing check flags 2 rows per pairing in every tier — that's the double round-robin's home leg + away leg, not a bug. Scope any duplicate check by `leg` as well as pairing.
 
 ---
 
 ## 4. Re-run proper closing for each league's real first week — ✅ Done
 
-Audited every league's week-1 close against the current live data. **Tiers 1–12:** already properly closed — each shows the expected 1-promoted/2-relegated pattern, sitting correctly in week 2, League 1's champion recorded in Wall of Fame. No action needed.
-
-**Tier 13 was broken.** All 6 of its week-1 fixtures were forfeited — nobody ever played, a leftover from the original mislabeled-batch problem (same root cause as the "27 stuck games" from before item 1). Of its 3 real players, 2 (changara05, Fabio's) landed correctly in Tier 14 for week 2 via the normal relegation path. The third, Ben, did not: he was never promoted or relegated (stayed a "stayer"), and the weekly close's inactivity-decay step then marked him `eliminated` for having played 0 matches that week — decay has no fallback, unlike fall-through, so this left him with no week-2 membership anywhere.
-
-**This is a gap the `league-ladder-redesign-build-spec.md` doesn't cover.** Its Phase B (step 7) flags fall-through's lack of a graceful affordability fallback, but says nothing about decay — which had the same "no graceful fallback" problem in a worse form: fall-through at least re-seats the player back in their own league on failure; decay just flips them to `eliminated` and stops.
-
-**Decision: remove the decay step entirely** rather than patch it (admin call, not from the redesign spec). Deployed live and committed as `20260921_ladder_remove_decay_penalty_step.sql` — `_ladder_close_week_internal` no longer calls `_ladder_apply_decay_penalty_internal`. The function itself is left in place, unused, in case it's revisited later with a proper fallback instead of removal.
-
-**Ben, resolved:** reverted to `active` for week 1, seated `active` in Tier 13 for week 2 — the same treatment any normal stayer gets. No money was involved (his decay penalty would have been 0 — no lifetime match-reward earnings to base it on). He's currently alone in Tier 13 for week 2 (his 2 former leaguemates are in Tier 14 now), so no fixtures were generated — he has no one to play until the league gets more players or he's moved somewhere with people.
+Tiers 1–12 closed correctly. Tier 13 was broken (all fixtures forfeited, decay penalty wrongly eliminated the sole real stayer, Ben) — fixed by removing the decay step entirely (`20260921_ladder_remove_decay_penalty_step.sql`) and reverting Ben to `active`.
 
 ---
 
-## 5. Deploy the promotion/relegation fix — ✅ Decided, ⏳ not yet live
+## 5. Deploy the promotion/relegation fix — ✅ Decided, ⏳ still not live
 
-**Decision: skip unaffordable players.** Promotion walks the standings in rank order and promotes the first player who can afford the destination league's entry fee. If rank 1 can't afford it, they stay put and get skipped over — someone else gets promoted instead. If nobody in the league can afford it, promotion is left empty for that league that week.
+**Decision:** skip unaffordable players during promotion — walk standings in rank order, promote the first player who can afford the destination league's entry fee. Relegation stays "bottom 2 of whoever's left."
 
-- Relegation stays "bottom 2" either way — it's just bottom 2 of whoever's left *after* the promoted player is pulled out. If a lower-ranked player gets promoted instead of rank 1, rank 1 simply stays a stayer; nobody extra gets relegated because of this rule. Skipping doesn't add a relegation, it just picks a different promotion.
-
-**Checked live vs. repo — they don't match:**
-- Repo migration `20260916` has the correct skip-unaffordable logic.
-- What's actually running live right now is "always rank 1, balance irrelevant" — and there is **no migration file anywhere for that live version.** It was changed straight on the database, never committed.
-
-**Next step:** write and run a new migration that puts `20260916`'s skip-unaffordable version back live, so the database and the repo agree again. Do this before leagues 3–5/8 get cleaned up (item 3/4) and promotion starts actually moving real players.
+**Status unchanged:** repo migration `20260916` has the correct logic; live is still "always rank 1, balance irrelevant," with no migration file for that live version (changed straight on the database). **This is the top remaining action item.**
 
 ---
 
-## 6. Recheck roster cap (max 6) — 🔄 In progress
+## 6. Recheck roster cap (max 6) — ✅ Done
 
-Confirmed in the repo (`20260876_ladder_double_round_robin_groups_of_6_and_utc_cutoff.sql`) that the cap is meant to be 6 (a league splits once a 7th player lands), down from the earlier cap of 8.
+Cap confirmed live at 6 (`_rebalance_ladder_overflow_internal`, splits when a league exceeds 6). Full cascade now complete:
 
-Re-verified against what's actually enforced live — see item 10: the cap itself was fine, but the mechanism handling a league that briefly exceeds 6 was badly broken and has now been fixed. Still open: tiers 1, 10, 11, 12, 14 currently sit *under* 6 (pre-existing data debt, see item 3).
+- Tiers 10–14 consolidated, Tier 1 backfilled (Nikkodm), Tier 2 backfilled (Avuyilegimba) — from the earlier session.
+- Maxtentation's misplacement (Tier 3 → correct Tier 2) fixed.
+- SAMBULO12345 and 953a1133/collinschileshe900 — both had winning bids that a prior "fix" had wrongly reverted. Restored to their bid-won tiers (Tier 3, Tier 8 respectively); overflow cascade absorbed cleanly.
+- Majola_ZN confirmed correct (winning Tier 7 bid, not a bug).
+- **This session, closing the cascade:** Tier 5 was short one seat. Root cause — **NtuanakaTsiki** (`255be657`) was rightfully Tier 5's rank-4 stayer (by points/GD, forfeits counted) but her week-1 status was wrongly `eliminated` instead of `active`, so she never carried into week 2. Backfilled her stayer seat directly (no fee — stayers don't pay a new entry fee) and resynced Tier 5's fixtures.
+  - Also checked and ruled out a false alarm along the way: **a2d48754**'s move from Tier 4 to Tier 3 looked like a misplacement but was a legitimate won bid (15 nets). **70c34d31**'s move into Tier 4 is the correct "2nd-best-by-points" backfill for the seat a2d48754 vacated — also legitimate.
+- **Result: every tier (1–11) is now at exactly 6, ladder-wide, with every bid winner honored and no matches or payouts disturbed.**
 
 ---
 
 ## 7. "Asked to join again" complaint — ⏳ Waiting on your answer
 
-Still needs a decision: should this be checked from the **admin view** or the **member's own page**? Not investigated further yet pending that answer.
+Still needs a decision: admin view or member's own page? Not investigated further.
 
 ---
 
 ## 8. Wall of Fame display check — ✅ Done
 
-- Added a new `ladder_champion` achievement/badge: earned by finishing #1 in League 1 at the Sunday 23:59 UTC cutoff (sourced from `ladder_wall_of_fame`, tier 1 only).
-- This badge merges into the same trophy/badge ranking as regular league wins (`league_champion`) — a League 1 ladder win now shows up as a title on the homepage Wall of Fame, ranked by the same weighted trophy score.
-- Removed the separate, smaller "Wall of Fame" section that used to live inside the League Ladder detail page (League 1 only, last 5 weeks) — that data now surfaces exclusively via the homepage.
-- Files changed: `src/App.jsx` (new achievement, `loadLadderChampions`, `computeLadderTitlesByUserId`, merged into `computeWallOfFame`), `src/LeagueLadderDetail.jsx` (removed the old in-page block and its query).
+New `ladder_champion` achievement merged into the homepage trophy ranking; old in-page Wall of Fame block removed from the League Ladder detail page.
 
 ---
 
@@ -81,54 +69,66 @@ Not investigated — flagged as likely to resolve on its own.
 
 ---
 
-## 10. Relegated players teleporting to the wrong tier — ✅ Fixed (new item, found this session)
+## 10. Relegated players teleporting to the wrong tier — ✅ Fixed
 
-**Symptom:** relegated players weren't showing up one tier below where they were relegated from. Some landed 10+ tiers away in a near-empty league at the bottom of the whole ladder. Several leagues also sat under 6 players as a result, with the missing player usually turning up in one of those far-away almost-empty leagues.
-
-**Root cause, confirmed via live query:** the overflow-handling function (meant only for brand-new joiners piling up past 6 in the entry-level league) was also running against *every* league at every week's open, not just the entry league. Whenever a mid-ladder league briefly had 7 players — completely normal, e.g. it just received 2 relegated arrivals and 1 promoted arrival in the same moment — it exiled the newest arrival to a brand-new league at the very bottom of the entire ladder instead of just holding the league at 6.
-
-**Fix:**
-- Rewrote the overflow function so an overflowing league only ever pushes its extra player one tier further down (creating that tier if it doesn't exist), never to the ladder's bottom. For the entry league this is unchanged — it IS the bottom tier already. Migration: `20260919_ladder_overflow_push_one_tier_not_bottom.sql`.
-- Along the way, found and fixed a second bug this exposed: the fixture-schedule rebuild (which runs whenever a league's roster changes mid-week) compared "already played" pairings in a fixed home/away order, but the round-robin rotation can flip which side is home/away once the roster changes — so it could try to re-insert an already-played match with sides swapped and crash against the database's own duplicate-pairing rule. Migration: `20260920_ladder_fixture_regen_order_independent_played_check.sql`.
-- Manually corrected the 4 players already misplaced in week 2 (moved to their correct one-tier-below destination), then re-ran the fixed rebalance for week 2. Every league is now at exactly 6 or below the historical debt in item 3 — no league is over 6.
-- **Follow-up check (all leagues, not just 3/4/5/8):** re-ran the same duplicate-fixture / orphaned-fixture / duplicate-payout checks from item 3 across every league. Found one leftover — 6 stray pending fixtures in tier 14 for one of the 4 manually-moved players, left behind because the manual move only updated their membership row, not their fixtures. Deleted those and resynced tier 14's schedule. No duplicate reward payouts anywhere, and no other leftover fixtures anywhere.
+Root cause: the overflow-handling function was running against every league at every week's open, not just the entry league, exiling the newest arrival of any briefly-over-6 league to the ladder's bottom. Fixed (`20260919`), plus a related fixture-regen crash bug (`20260920`). All 4 players misplaced by this bug were manually corrected.
 
 ---
 
 ## 11. Sunday auto-start/auto-finish not firing — ✅ Fixed
 
-**Symptom:** the ladder didn't auto-close week 2 or auto-open the next week at the Sunday 23:59 UTC cutoff.
-
-**Root cause, confirmed via `cron.job_run_details` on the live database:** the Sunday close job (`ladder-close-week-sunday`) failed with `insufficient balance for user ... (have 7, need 10)` — a player couldn't cover their weekly fee, and because the whole close routine runs in one transaction (promotion/relegation → Wall of Fame → fee settlement → bid settlement → fall-through → decay penalty → open next week), that one failure rolled back everything, including the open-next-week step.
-
-The underlying bug (fee settlement having no balance guard) had already been fixed in the repo's `20260916` migration, and that fix **was** live in the database by the time we checked — but too late, since it landed after Sunday's failed run already happened. The `cron.job` listing also confirmed no stray leftover cron job was interfering — that part of the earlier `20260917` fix was clean.
-
-**Action taken:** manually ran the close routine to catch the week up now that the guard is in place.
-
-**Complication — this manual run was itself a mistake, and was rolled back:** week 2 had only just opened that same morning (08:11 UTC), so closing it again a few hours later was wrong — it charged real entry/table fees to real players, generated a premature week 3, and advanced `current_week` to 3. This was fully reverted:
-- Refunded every fee/decay-penalty debit from that erroneous run, per-user, back to their wallets.
-- Reversed the matching pool credit.
-- Deleted the erroneous ledger rows (`ladder_fee_events`, `nets_transactions`, `ladder_pool_transactions`, `ladder_wall_of_fame` entries) created by that run.
-- Deleted the premature week 3 fixtures and memberships.
-- Reverted week 2 membership statuses (`promoted`/`relegated`/`eliminated`) back to `active`.
-- Reset `ladder_cycle` back to `current_week = 2`, `bidding_open = true`, `fixtures_locked = false`.
-
-**Net result:** week 2 is now genuinely mid-week again, exactly as it should be. It will close naturally on its own this Sunday at 23:59 UTC via the now-working cron job — no further manual action needed for this week.
+Root cause: an unguarded balance check in fee settlement rolled back the entire Sunday close transaction, including the open-next-week step. Guard now live (`20260916`). A subsequent accidental early manual close was fully reverted (fees refunded, pool credit reversed, premature week 3 deleted, statuses reset). Week 2 will now close naturally via the working cron at Sunday 23:59 UTC.
 
 ---
 
 ## 12. Redesign build spec (`league-ladder-redesign-build-spec.md`) — ⏳ Not started
 
-New item, from the document you uploaded. Supersedes parts of the original build plan. Seven phases, in dependency order:
+Seven phases, in dependency order. Confirmed live vs. spec this session:
 
-- **Phase A — Live tier pricing** (foundation everything else reads from). Replace the stale, un-renumbered hardcoded reward/fee tables with formulas driven off `_ladder_current_max_tier_internal()`. Note: `20260903` already lowered the Match Reward coefficient from `0.5` to `0.1` per match — confirm Phase A's implementation reflects that current rate, not the spec's original `0.5` example.
-- **Phase B — Affordability fallbacks.** Directly relevant to item 5 above — see the conflict flagged there.
-- **Phase C — Live open-bid auction**, replacing the sealed-bid model: new bids must beat the current leader, immediate refund-on-outbid, simplified Sunday settlement.
-- **Phase D — Live (not snapshot) bid eligibility**, including re-checking eligibility whenever a fixture result lands.
-- **Phase E — Mid-week auto-start leagues.** Move the overflow/split check into `join_ladder_league()` itself instead of waiting for a weekly cron — ties in with the fact that (per the spec's own addendum) there's no separate "open" cron left at all anymore; `_ladder_close_week_internal` calls the open-week step directly.
-- **Phase F — Retroactive global top-up** — ✅ already done per the spec (`20260877`), confirmed present in the migrations folder.
+- **Phase A — Live tier pricing** (foundation everything else reads from). Confirmed live: `_ladder_match_reward_for_tier` = `4 + round(0.1 * d)`, matching `20260903`'s lowered coefficient. Repo/spec should be double-checked to reflect `0.1`, not the original `0.5` example.
+- **Phase B — Affordability fallbacks.** Directly relevant to item 5 above.
+- **Phase C — Live open-bid auction**, replacing the sealed-bid model.
+- **Phase D — Live (not snapshot) bid eligibility.**
+- **Phase E — Mid-week auto-start leagues.** Confirmed live: roster cap is 6 (not 8), fixtures are double round-robin, cutoff is Sunday 23:59 UTC direct (no SAST conversion), and there's no separate "open" cron anymore — `_ladder_close_week_internal` calls the open-week step directly.
+- **Phase F — Retroactive global top-up** — ✅ done (`20260877`), confirmed live: `_ladder_retroactive_topup_internal` exists and is wired into the overflow rebalance.
 - **Phase G — UI**: surface the live bid leader's name in the bid ticker.
 
-Two addenda in the doc are already reflected live and don't need action: the `20260902` pool ring-fencing (separating live bid escrow from reward payouts) and `20260903`'s reward-growth-rate change — both migrations exist in the repo and are worth a quick live-vs-file drift check given the pattern in item 1, but aren't flagged as broken.
+Two addenda confirmed live and working as intended, no action needed:
+- **`20260902`** — `ladder_pool` ring-fencing (`_ladder_pool_reward_debit` confirmed live), separating live bid escrow from reward payouts.
+- **`20260903`** — Match Reward coefficient lowered to `0.1`, confirmed live.
 
 **Recommended next step:** Phase A, since B–E all build on it.
+
+---
+
+## 13. Full week-1 → week-2 placement audit — ✅ Done
+
+Ran across every tier (1–11): checked that week-1 `promoted` players landed one tier up, `relegated` players landed one tier down, and `active` stayers landed in the same tier, against who's actually there. All confirmed correct except Tier 5 (see item 6) — now fixed. No other mismatches found ladder-wide.
+
+---
+
+## Housekeeping — ✅ Done this session
+
+- **Empty league shells removed.** Tiers 14, 15, 16, 17 in `ladder_leagues` had zero memberships and zero fixtures — leftover clutter from a pre-`20260919` overflow-cascade bug, corrected by hand at the time but leaving the empty rows behind. Confirmed clean (no fixtures referencing them) and deleted.
+- **Week 2 match legitimacy verified.** Tier 1 (6 matches) and Tier 6 (1 match) show real played results from Aug 31. Confirmed genuine via `ladder_fixture_result_submissions` (distinct submission times, photo proof attached, real reviewer or auto-approve) and matching `ladder_reward_ledger` payouts — not seeded or bulk-inserted data. All other tiers/weeks are correctly at zero (pending, unplayed).
+
+---
+
+## What's actually left
+
+1. **Item 5** — deploy the skip-unaffordable promotion fix (`20260916`'s logic) live. Quick, low-risk, already decided, not yet applied.
+2. **Item 7** — needs your call: admin view or member's own page?
+3. **Item 9** — low priority, whenever.
+4. **Item 12** — the redesign. Phase A recommended first, since B–E all depend on it.
+
+---
+
+## Gotchas learned (don't repeat these)
+
+- **Double round-robin:** every pairing legitimately gets 2 fixtures (leg 1 home, leg 2 away). Scope any duplicate check by `leg` too.
+- **Forfeited fixtures still count as "played."** The standings logic (`case when status in ('played','forfeited') then 1 else 0 end`) means a player who forfeits every match still shows `played > 0` — don't assume no-shows sort to the bottom on that basis alone. Some forfeited fixtures also carry real (non-null) scores if an admin entered a result despite the forfeit status — those count fully in points/GD, not just as a 0-0 no-show.
+- **Bid winners always override the normal relegation/backfill path.** Before treating a tier as short and backfilling by points, check `ladder_bids` for a `won` bid targeting that league first.
+- **Backfill order, when there's no bid winner:** 2nd-best-by-points from the tier below. Confirm they haven't already legitimately moved elsewhere (e.g. via their own won bid) before assuming they belong in the gap.
+- **Don't disturb an already-played, already-paid match** when correcting a placement — redirect the go-forward schedule only, keep history intact.
+- **Tier numbers and league IDs are not stable landmarks across sessions** — leagues get consolidated, drained, and recreated. Re-query live for what's actually in a tier now.
+- **Identical microsecond timestamps across multiple rows usually mean a batch operation** (a manual fix, an auto-approve sweep), not necessarily fake data — check `ladder_fixture_result_submissions` / `ladder_reward_ledger` for independent corroboration before assuming either way.
