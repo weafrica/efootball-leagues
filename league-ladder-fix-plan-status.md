@@ -29,11 +29,11 @@ Tiers 1–12 closed correctly. Tier 13 was broken (all fixtures forfeited, decay
 
 ---
 
-## 5. Deploy the promotion/relegation fix — ✅ Decided, ⏳ still not live
+## 5. Deploy the promotion/relegation fix — ✅ Done, confirmed live
 
 **Decision:** skip unaffordable players during promotion — walk standings in rank order, promote the first player who can afford the destination league's entry fee. Relegation stays "bottom 2 of whoever's left."
 
-**Status unchanged:** repo migration `20260916` has the correct logic; live is still "always rank 1, balance irrelevant," with no migration file for that live version (changed straight on the database). **This is the top remaining action item.**
+**Correction (this session):** the migration number previously cited here (`20260916`) was wrong — that file is actually `ladder_close_week_insufficient_balance_guard` (item 11's fix), unrelated to this item. The real fix is `20260870_ladder_affordability_fallbacks.sql`, which rewrites `_ladder_fall_through_internal` and `_ladder_resolve_promotion_relegation_internal`. Pulled both functions' live `pg_get_functiondef` and confirmed the affordability-skip logic (and the matching relegation-index fix) is already running live — this item was actually done, just mislabeled. No deploy needed.
 
 ---
 
@@ -116,10 +116,9 @@ Ran across every tier (1–11): checked that week-1 `promoted` players landed on
 
 ## What's actually left
 
-1. **Item 5** — deploy the skip-unaffordable promotion fix (`20260916`'s logic) live. Quick, low-risk, already decided, not yet applied.
-2. **Item 7** — needs your call: admin view or member's own page?
-3. **Item 9** — low priority, whenever.
-4. **Item 12** — the redesign. Phase A recommended first, since B–E all depend on it.
+1. **Item 7** — needs your call: admin view or member's own page?
+2. **Item 9** — low priority, whenever.
+3. **Item 12** — the redesign. Phase A recommended first, since B–E all depend on it.
 
 ---
 

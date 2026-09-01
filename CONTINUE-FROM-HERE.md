@@ -21,7 +21,7 @@ _Written after the session that finished item 3 (history-cleanup audit) in `leag
 | 2. Auction-winner labeling bug | ✅ Done, live |
 | 3. League history cleanup | ✅ **Done — all tiers audited clean this session** |
 | 4. Re-close each league's real week 1 | ✅ Done (prior session) — Tier 13/Ben fixed, decay step removed |
-| 5. Promotion/relegation skip-unaffordable fix | ⏳ Decided, **still not deployed live** — repo migration `20260916` has it, live DB doesn't |
+| 5. Promotion/relegation skip-unaffordable fix | ✅ Confirmed live — was mislabeled as pending; real migration is `20260870`, not `20260916` |
 | 6. Roster cap recheck | 🔄 Paused pending item 13 (per prior session's notes) — worth re-checking headcounts now that item 3's audit is clean, since some of the placements it was worried about (Tier 12) now check out fine |
 | 7. "Asked to join again" complaint | ⏳ Waiting on you: admin view or member's own page? |
 | 8. Wall of Fame display | ✅ Done |
@@ -32,10 +32,10 @@ _Written after the session that finished item 3 (history-cleanup audit) in `leag
 | 13. Full week-1 → week-2 placement audit | ⏳ Not started — blocks resuming item 6's cascade |
 
 ## Recommended next step
-Three candidates, your call:
-- **Item 5** — deploy the skip-unaffordable promotion fix that's already written (`20260916`) but not live. Quick, low-risk, already decided.
 - **Item 13** — the full placement audit that's blocking item 6's cascade resume. Item 3's clean result today is a good sign, but item 13 checks a different thing (promoted/relegated/stayer landing in the *right* tier, not just fixture/payout integrity), so it's still open.
 - **The orphaned tier 14–17 shells** — trivial delete, whenever convenient.
+
+(Item 5 turned out to already be live, mislabeled — see status table above. No longer a candidate.)
 
 ## Gotchas learned this session (don't repeat these)
 - This is a **double round-robin**: every pairing legitimately gets 2 fixtures (leg 1 home, leg 2 away). Don't flag 2-per-pairing as a duplicate — scope any duplicate check by `leg` too, or you'll drown in false positives across every league.
