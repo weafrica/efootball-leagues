@@ -40,7 +40,10 @@ Build in this order — each phase is testable on its own before the next depend
 12. Replace `_ladder_bid_eligible_pool_internal`'s end-of-week-snapshot read with a **live standings query** — needed because eligibility can no longer be determined once at Sunday; it has to be checked at whatever moment a bid is placed, mid-week.
 13. Exclude the live rank-1 of the league below from the eligible pool (they're on track for free auto-promotion — no need to bid).
 14. Restrict the 2 players currently sitting in relegation position (bottom of standings) to bidding *only* on their own current league (buy-back) — confirm this holds under the new live check, not just the old end-of-week one.
-15. **Live re-eligibility check, tied to fixture results:** whenever a fixture result is recorded, re-check whether the affected league's current bid leader has newly become rank 1. If so: void their bid, refund immediately (reuses Phase C's refund path), promote the 2nd-highest pending bid (if any) to leader automatically.
+15. ✅ done (`ladder_live_bid_reeligibility_on_fixture_result`). **Live re-eligibility check, tied to fixture results:** whenever a fixture result is recorded, re-check whether the affected league's current bid leader has newly become rank 1. If so: void their bid, refund immediately (reuses Phase C's refund path), promote the 2nd-highest pending bid (if any) to leader automatically.
+    - Built as `_ladder_recheck_bid_leader_eligibility_internal(league_id, week_number)` plus an `after insert or update` trigger on `ladder_fixtures` that fires when a fixture's status becomes `played`/`forfeited` or an already-recorded result's score is corrected.
+    - "Promote the 2nd-highest pending bid" turned out to be a no-op under the live model: Phase C's beat-the-leader auction refunds a dethroned bidder immediately at bid time, so there's never a second `pending` bid sitting behind a league's leader to promote. If that invariant is ever relaxed, the next `place_ladder_bid` call or Sunday's `_ladder_settle_bids_internal` will naturally pick up the next-highest pending bid — nothing here needs to do that itself.
+    - No JS mirror, by the same logic as Phase F's retroactive top-up: this is backend orchestration tied to a live trigger, not a pure pricing function.
 
 ---
 

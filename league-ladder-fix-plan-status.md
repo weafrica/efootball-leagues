@@ -81,25 +81,26 @@ Root cause: an unguarded balance check in fee settlement rolled back the entire 
 
 ---
 
-## 12. Redesign build spec (`league-ladder-redesign-build-spec.md`) — ⏳ Not started
+## 12. Redesign build spec (`league-ladder-redesign-build-spec.md`) — ✅ Done (all 7 phases confirmed live)
 
-Seven phases, in dependency order. Confirmed live vs. spec this session:
+Prior sessions' doc said "Not started" — that was badly stale. A full live audit this session (function-by-function, not just spot checks) found almost the entire redesign was already deployed, just never confirmed or written down:
 
-- **Phase A — Live tier pricing** (foundation everything else reads from). Confirmed live: `_ladder_match_reward_for_tier` = `4 + round(0.1 * d)`, matching `20260903`'s lowered coefficient. Repo/spec should be double-checked to reflect `0.1`, not the original `0.5` example.
-- **Phase B — Affordability fallbacks.** Directly relevant to item 5 above.
-- **Phase C — Live open-bid auction**, replacing the sealed-bid model.
-- **Phase D — Live (not snapshot) bid eligibility.**
-- **Phase E — Mid-week auto-start leagues.** Confirmed live: roster cap is 6 (not 8), fixtures are double round-robin, cutoff is Sunday 23:59 UTC direct (no SAST conversion), and there's no separate "open" cron anymore — `_ladder_close_week_internal` calls the open-week step directly.
+- **Phase A — Live tier pricing** — ✅ confirmed fully live, not just the coefficient. `_ladder_current_max_tier_internal`, `_ladder_match_reward_for_tier` (`4 + round(0.1 * d)`, matching `20260903`), `_ladder_entry_fee_for_tier`, and `_ladder_early_bonus_for_tier` all exist live and match the spec exactly. JS mirror in `src/economy.js`'s `ladderTierRow()` also confirmed matching, same formulas.
+- **Phase B — Affordability fallbacks** — ✅ done (item 5 above; migration is `20260870`, not the `20260916` previously cited).
+- **Phase C — Live open-bid auction** — ✅ confirmed live. `place_ladder_bid` beats-the-leader logic, immediate dethrone-and-refund in the same transaction, and the `for update` row-lock pattern all match spec steps 9–10. `_ladder_settle_bids_internal` is the simplified single-bidder version (step 11).
+- **Phase D — Live bid eligibility** — ✅ **now fully done.** Steps 12–14 (live standings query, excluding the league-below's rank-1, restricting relegation-zone players to buy-back only) were already live via `_ladder_bid_eligible_pool_internal`. Step 15 (live re-eligibility tied to fixture results) was the one genuine gap — nothing rechecked an *already-placed* bid when a result made its leader newly rank-1. Closed this session: `_ladder_recheck_bid_leader_eligibility_internal` + an `after insert or update` trigger on `ladder_fixtures` (`ladder_fixture_result_recheck_bid_leader`), migration `ladder_live_bid_reeligibility_on_fixture_result`. Voids and refunds the leader's bid via the same path Phase C's dethrone case uses. No "promote 2nd-highest pending bid" step needed — under the live beat-the-leader model there's never a second pending bid waiting, by construction. Verified: trigger registered on both INSERT and UPDATE, dry-run against a real league returned a clean no-op (no pending bids exist right now to disturb).
+- **Phase E — Mid-week auto-start leagues** — ✅ confirmed live. `join_ladder_league()` runs the overflow check and calls `_rebalance_ladder_overflow_internal` immediately after each join (not on a cron), then resyncs fixtures right away. Roster cap 6, double round-robin, Sunday 23:59 UTC cutoff.
 - **Phase F — Retroactive global top-up** — ✅ done (`20260877`), confirmed live: `_ladder_retroactive_topup_internal` exists and is wired into the overflow rebalance.
-- **Phase G — UI**: surface the live bid leader's name in the bid ticker.
+- **Phase G — UI** — ✅ confirmed live. `currentLeader` is computed in `ladderBidTicker.js` and consumed end-to-end in `LeagueLadderDetail.jsx` (explicitly commented `// Phase G` in the code).
 
 Two addenda confirmed live and working as intended, no action needed:
 - **`20260902`** — `ladder_pool` ring-fencing (`_ladder_pool_reward_debit` confirmed live), separating live bid escrow from reward payouts.
 - **`20260903`** — Match Reward coefficient lowered to `0.1`, confirmed live.
 
-**Recommended next step:** Phase A, since B–E all build on it.
+**Nothing left to do here.** All 7 phases are live and verified against the actual database and repo, not assumed from notes.
 
 ---
+
 
 ## 13. Full week-1 → week-2 placement audit — ✅ Done
 
@@ -119,7 +120,8 @@ Ran across every tier (1–11): checked that week-1 `promoted` players landed on
 
 1. **Item 7** — needs your call: admin view or member's own page?
 2. **Item 9** — low priority, whenever.
-3. **Item 12** — the redesign. Phase A recommended first, since B–E all depend on it.
+
+That's it — everything else, including the full 7-phase redesign, is confirmed live.
 
 ---
 
