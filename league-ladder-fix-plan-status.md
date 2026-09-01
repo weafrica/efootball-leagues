@@ -24,9 +24,17 @@ Deployed live. Unblocked a real player who was stuck due to the mislabeling. (Mi
 
 ---
 
-## 4. Re-run proper closing for each league's real first week — ⏳ Not started
+## 4. Re-run proper closing for each league's real first week — ✅ Done
 
-Depends on item 3 being finished first — can't correctly close a league's "real" week 1 while it still has leftover/duplicate fixtures mixed in.
+Audited every league's week-1 close against the current live data. **Tiers 1–12:** already properly closed — each shows the expected 1-promoted/2-relegated pattern, sitting correctly in week 2, League 1's champion recorded in Wall of Fame. No action needed.
+
+**Tier 13 was broken.** All 6 of its week-1 fixtures were forfeited — nobody ever played, a leftover from the original mislabeled-batch problem (same root cause as the "27 stuck games" from before item 1). Of its 3 real players, 2 (changara05, Fabio's) landed correctly in Tier 14 for week 2 via the normal relegation path. The third, Ben, did not: he was never promoted or relegated (stayed a "stayer"), and the weekly close's inactivity-decay step then marked him `eliminated` for having played 0 matches that week — decay has no fallback, unlike fall-through, so this left him with no week-2 membership anywhere.
+
+**This is a gap the `league-ladder-redesign-build-spec.md` doesn't cover.** Its Phase B (step 7) flags fall-through's lack of a graceful affordability fallback, but says nothing about decay — which had the same "no graceful fallback" problem in a worse form: fall-through at least re-seats the player back in their own league on failure; decay just flips them to `eliminated` and stops.
+
+**Decision: remove the decay step entirely** rather than patch it (admin call, not from the redesign spec). Deployed live and committed as `20260921_ladder_remove_decay_penalty_step.sql` — `_ladder_close_week_internal` no longer calls `_ladder_apply_decay_penalty_internal`. The function itself is left in place, unused, in case it's revisited later with a proper fallback instead of removal.
+
+**Ben, resolved:** reverted to `active` for week 1, seated `active` in Tier 13 for week 2 — the same treatment any normal stayer gets. No money was involved (his decay penalty would have been 0 — no lifetime match-reward earnings to base it on). He's currently alone in Tier 13 for week 2 (his 2 former leaguemates are in Tier 14 now), so no fixtures were generated — he has no one to play until the league gets more players or he's moved somewhere with people.
 
 ---
 
