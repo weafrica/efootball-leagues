@@ -70,7 +70,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
-import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, recordLadderCupWin, recordLadderCupDraw, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import {
   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
@@ -164,7 +164,7 @@ const SHOP_PROMO_TEXT = "Sale";
 // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
 // to false once the Ladder is back to normal — the notice just won't fire
 // again, no redeploy-adjacent cleanup needed.
-const LADDER_MAINTENANCE_ACTIVE = true;
+const LADDER_MAINTENANCE_ACTIVE = false;
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 export const ENTRY_FEE_MIN = 10;
@@ -3101,12 +3101,18 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
   const [eta, setEta] = useState(0);
   const [ph, setPh] = useState("");
   const [pa, setPa] = useState("");
+  const [isDraw, setIsDraw] = useState(false); // step 16: only ever true while regulationLevel
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const regulationLevel = Number(h) === Number(a);
+  // A level scoreline no longer forces extra time/penalties — the reporter
+  // picks "Draw" or "Play extra time" first; isDraw is reset the moment
+  // the scoreline stops being level so it can never survive into a
+  // decisive-result submission.
+  useEffect(() => { if (!regulationLevel && isDraw) setIsDraw(false); }, [regulationLevel, isDraw]);
   const extraTimeLevel = Number(eth) === Number(eta);
-  const needsPens = regulationLevel && extraTimeLevel;
+  const needsPens = regulationLevel && !isDraw && extraTimeLevel;
   const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
 
   const submit = async () => {
@@ -3114,7 +3120,8 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
     setSaving(true);
     await onSubmit({
       homeGoals: Number(h), awayGoals: Number(a),
-      extraTimeHomeGoals: Number(eth), extraTimeAwayGoals: Number(eta),
+      isDraw,
+      extraTimeHomeGoals: isDraw ? 0 : Number(eth), extraTimeAwayGoals: isDraw ? 0 : Number(eta),
       pensHome: needsPens ? Number(ph) : null, pensAway: needsPens ? Number(pa) : null,
       file,
     });
@@ -3149,7 +3156,33 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
 
         {regulationLevel && (
           <div className="mb-4">
-            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — extra time score</div>
+            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — draw, or play extra time?</div>
+            {/* Step 16: a level scoreline is no longer forced into extra
+                time/penalties — pick a draw (2 pts + 3 Nets each, no life
+                lost) or go to extra time toward a decisive result. */}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setIsDraw(true)}
+                className="font-body text-sm font-semibold px-3 py-2.5 rounded-xl border transition-colors"
+                style={isDraw ? { background: c.accent, color: c.accentText, borderColor: c.accent } : { background: c.surfaceHover, color: c.text, borderColor: c.border }}>
+                Draw
+              </button>
+              <button type="button" onClick={() => setIsDraw(false)}
+                className="font-body text-sm font-semibold px-3 py-2.5 rounded-xl border transition-colors"
+                style={!isDraw ? { background: c.accent, color: c.accentText, borderColor: c.accent } : { background: c.surfaceHover, color: c.text, borderColor: c.border }}>
+                Play extra time
+              </button>
+            </div>
+            {isDraw && (
+              <div className="font-mono text-[11px] mt-2" style={{ color: c.textFaint }}>
+                A draw pays both clubs {LADDER_CUP_RULES.DRAW_POINTS} pts and <NetsAmount amount={LADDER_CUP_RULES.DRAW_NETS_REWARD} /> each — no life lost, no elimination.
+              </div>
+            )}
+          </div>
+        )}
+
+        {regulationLevel && !isDraw && (
+          <div className="mb-4">
+            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Extra time score</div>
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (ET)</div>
@@ -6110,7 +6143,7 @@ export default function App() {
   const ladderCupEntryFromRow = (row, clubName) => ({
     club_id: row.team_id,
     club_name: clubName,
-    pts: row.pts, w: row.w, l: row.l, gd: row.gd, streak: row.streak,
+    pts: row.pts, w: row.w, l: row.l, d: row.d || 0, gd: row.gd, streak: row.streak,
     // Separate from pts — see formats/ladderCup.js. Falls back to the
     // starting rating for any row written before this column existed.
     ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
@@ -6132,7 +6165,7 @@ export default function App() {
     past_lives: row.past_lives || [],
   });
   const ladderCupRowPatchFromEntry = (entry) => ({
-    pts: entry.pts, w: entry.w, l: entry.l, gd: entry.gd, streak: entry.streak,
+    pts: entry.pts, w: entry.w, l: entry.l, d: entry.d || 0, gd: entry.gd, streak: entry.streak,
     ladder_rating: entry.ladder_rating,
     status: entry.status,
     second_life_used: entry.second_life_used,
@@ -6201,19 +6234,22 @@ export default function App() {
   // dispute and an admin's reject) wipes a reported-but-not-yet-applied
   // result back to scratch so either side can re-log it, same as
   // disputeChallengeResult/adminRejectChallengeResult do for challenges.
-  const submitLadderCupMatchResult = async (league, match, teamId, { homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
+  const submitLadderCupMatchResult = async (league, match, teamId, { homeGoals, awayGoals, isDraw = false, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
     if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this result can't be logged."); return false; }
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return false; }
     if (!teamId) { showToast("Couldn't tell which club you're logging this for — try refreshing."); return false; }
 
     let winnerSide, decidedBy;
     try {
-      ({ winnerSide, decidedBy } = resolveMatchWinner({ homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway }));
+      ({ winnerSide, decidedBy } = resolveMatchWinner({ homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, isDraw }));
     } catch (err) {
       showToast(err.message);
       return false;
     }
-    const winnerTeamId = winnerSide === "home" ? match.home_team_id : match.away_team_id;
+    // Step 16: a draw has no winner side — resolveMatchWinner returns
+    // { isDraw: true, decidedBy: "draw" } instead of a winnerSide for this
+    // case, so winnerTeamId stays null.
+    const winnerTeamId = decidedBy === "draw" ? null : (winnerSide === "home" ? match.home_team_id : match.away_team_id);
 
     const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
     const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
@@ -6229,11 +6265,12 @@ export default function App() {
     const { error } = await supabase.rpc("submit_ladder_cup_match_result", {
       p_match_id: match.id, p_team_id: teamId,
       p_home_goals: homeGoals, p_away_goals: awayGoals,
-      p_extra_time_home_goals: decidedBy === "regulation" ? null : extraTimeHomeGoals,
-      p_extra_time_away_goals: decidedBy === "regulation" ? null : extraTimeAwayGoals,
+      p_extra_time_home_goals: decidedBy === "regulation" || decidedBy === "draw" ? null : extraTimeHomeGoals,
+      p_extra_time_away_goals: decidedBy === "regulation" || decidedBy === "draw" ? null : extraTimeAwayGoals,
       p_pens_home: decidedBy === "penalties" ? pensHome : null,
       p_pens_away: decidedBy === "penalties" ? pensAway : null,
       p_decided_by: decidedBy, p_winner_team_id: winnerTeamId, p_proof_url: proofUrl,
+      p_is_draw: decidedBy === "draw",
     });
     if (error) {
       // Mirrors initiateLadderCupMatch's handling of the same race one step
@@ -6277,12 +6314,13 @@ export default function App() {
   const applyLadderCupMatchResult = async (league, match) => {
     const decidedBy = match.decided_by;
     const winnerTeamId = match.winner_team_id;
-    const winnerSide = winnerTeamId === match.home_team_id ? "home" : "away";
-    const loserTeamId = winnerSide === "home" ? match.away_team_id : match.home_team_id;
+    const isDraw = decidedBy === "draw"; // step 16: no winner/loser side on a draw
+    const winnerSide = isDraw ? null : (winnerTeamId === match.home_team_id ? "home" : "away");
+    const loserTeamId = isDraw ? null : (winnerSide === "home" ? match.away_team_id : match.home_team_id);
 
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
-    if (!rowsById[winnerTeamId] || !rowsById[loserTeamId]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
+    if (!rowsById[match.home_team_id] || !rowsById[match.away_team_id]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
 
     // Routed through confirm_ladder_cup_match_result (RPC, security
     // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql
@@ -6306,7 +6344,16 @@ export default function App() {
     let scoreLine = `${homeName} ${match.home_goals} – ${match.away_goals} ${awayName}`;
     if (decidedBy === "extra_time") scoreLine += ` (aet ${match.extra_time_home_goals}-${match.extra_time_away_goals})`;
     if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
+    if (isDraw) scoreLine += " (draw)";
     await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, match.proof_url, true, null, null, match.id);
+
+    if (isDraw) {
+      // Neither side is eliminated or offered a second life on a draw —
+      // nothing to read back, unlike the win/loss path below.
+      await refreshLeague(league.id);
+      showToast(`Result confirmed — draw, both clubs get ${LADDER_CUP_RULES.DRAW_POINTS} pts.`);
+      return true;
+    }
 
     // Read back the loser's post-confirm status for the toast — the
     // server (not this client) decided whether that was elimination or a
@@ -7924,6 +7971,18 @@ export default function App() {
     const events = [];
     for (const m of (league.ladder_cup_matches || [])) {
       if (!m.finalized_at) continue; // never confirmed, or disputed away — never happened
+      // Step 16 (draws): decided_by === "draw" has no winner_team_id — push
+      // a draw event instead of forcing it through the winner/loser shape,
+      // otherwise winner_team_id === null !== home_team_id would silently
+      // misreplay it as an away win.
+      if (m.decided_by === "draw") {
+        events.push({
+          at: new Date(m.finalized_at).getTime(),
+          isDraw: true,
+          teamAId: m.home_team_id, teamBId: m.away_team_id,
+        });
+        continue;
+      }
       const winnerIsHome = m.winner_team_id === m.home_team_id;
       events.push({
         at: new Date(m.finalized_at).getTime(),
@@ -7952,6 +8011,20 @@ export default function App() {
     const walkoverBadgeCount = new Map(); // team_id -> count; recordLadderCupWin doesn't touch this counter itself
 
     for (const ev of events) {
+      // Step 16 (draws): symmetric, no winner/loser — handled entirely
+      // separately from the win/loss branch below, since recordLadderCupWin
+      // trusts winner/loser completely and a draw has neither.
+      if (ev.isDraw) {
+        const teamAEntry = entries.get(ev.teamAId);
+        const teamBEntry = entries.get(ev.teamBId);
+        if (!teamAEntry || !teamBEntry) continue;
+        if (teamAEntry.status === "pending_second_life" || teamBEntry.status === "pending_second_life") continue;
+        const { teamA, teamB } = recordLadderCupDraw({ teamA: teamAEntry, teamB: teamBEntry });
+        entries.set(ev.teamAId, teamA);
+        entries.set(ev.teamBId, teamB);
+        continue;
+      }
+
       const winnerEntry = entries.get(ev.winnerTeamId);
       const loserEntry = entries.get(ev.loserTeamId);
       // Missing club (removed from the league since?) — skip this one
@@ -8243,6 +8316,9 @@ export default function App() {
   // draws by leaving phone off the everyone-sees-everyone member picker.
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); if (isAdmin) loadAccounts(); };
   const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
+  // No separate load — completed leagues are just a filter over the same
+  // `leagues` list every other screen already has loaded.
+  const openCompletedLeaguesScreen = () => setView("completedLeagues");
 
   // Everything reachable from the header's hamburger menu or Home's old
   // action grid, now assembled once here so the floating Quick actions dock
@@ -8320,6 +8396,7 @@ export default function App() {
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
+    { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
@@ -8342,7 +8419,7 @@ export default function App() {
           onOpenCreate={() => setView("create")}
           onOpenTutorial={() => setTutorialOpen(true)}
           grabbableCount={grabbableCount}
-          onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} onOpenLadder={openLadderScreen}
+          onOpenSuggestion={() => setSuggestionOpen(true)} onOpenLeaderboard={() => setView("leaderboard")} onOpenLadder={openLadderScreen} onOpenCompletedLeagues={openCompletedLeaguesScreen}
           onShareApp={shareApp} />
       )}
       {tutorialOpen && <TutorialTour onClose={() => setTutorialOpen(false)} onSetQuickActionsOpen={setQuickActionsOpen} c={c} />}
@@ -8389,7 +8466,7 @@ export default function App() {
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
                 ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder} onOpenLadderLeague={openLeagueLadder}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
+                onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} onOpenCompletedLeagues={openCompletedLeaguesScreen} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
             )}
             {view === "create" && (
@@ -8449,6 +8526,12 @@ export default function App() {
                 <LeaderboardPage leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack}
                   quickActions={quickActionItems.filter((it) => it.label !== "Leaderboard")} c={c} />
               </Suspense>
+            )}
+            {view === "completedLeagues" && (
+              <CompletedLeaguesPage leagues={(leagues || []).filter(isLeagueCompleted)} isAdmin={isAdmin} isMemberOf={isMemberOf}
+                entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague}
+                onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
+                onJoin={startJoin} session={session} onToggleLeagueReaction={toggleLeagueReaction} onBack={goBack} c={c} />
             )}
             {view === "ladder" && (
               <Suspense fallback={<Loader c={c} />}>
@@ -10509,7 +10592,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
 
-function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenActivity, onOpenChallenges, challengeBadge, notifications, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCreate, onOpenTutorial, grabbableCount, showInstall, onInstallApp, onShareApp }) {
+function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut, userEmail, avatarUrl, onEditProfile, isAdmin, onOpenAccounts, onOpenActivity, onOpenChallenges, challengeBadge, notifications, onOpenSuggestion, onOpenLeaderboard, onOpenLadder, onOpenCompletedLeagues, onOpenCreate, onOpenTutorial, grabbableCount, showInstall, onInstallApp, onShareApp }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const menuRef = useRef(null);
@@ -10538,6 +10621,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
   const menuItems = [
     { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
     { icon: Trophy, label: "Leaderboard", onClick: onOpenLeaderboard },
+    { icon: Award, label: "Completed Leagues", onClick: onOpenCompletedLeagues },
     // Hidden once the site is already running as an installed PWA
     // (showInstall = !isStandalone, see usePwaInstall.js) — no point
     // offering to install an app you're already inside.
@@ -10793,7 +10877,7 @@ function LadderMaintenanceModal({ onClose, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -11146,7 +11230,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
 
       <LeagueListsSection leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague}
         myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
-        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} onOpenTransferMarket={onOpenTransferMarket} onOpenLadderLeague={onOpenLadderLeague} c={c} />
+        session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} onOpenTransferMarket={onOpenTransferMarket} onOpenLadderLeague={onOpenLadderLeague} onOpenCompletedLeagues={onOpenCompletedLeagues} c={c} />
 
       {/* Live event banner — sits below LeagueListsSection now, specifically
           below the Survival Ladder Cup marquee (the last thing that section
@@ -11479,15 +11563,43 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
   );
 }
 
+// A single compact widget pointing at the Completed Leagues page (view ===
+// "completedLeagues") — this used to be a full horizontal-scroll
+// LeagueSection sitting inline on Home; now that finished leagues live on
+// their own page (also reachable from Quick Actions and the header menu),
+// this is just the "here's where they went" pointer from the leagues list,
+// same spirit as KitRoomSpotlight just below it but a plain single-row
+// banner rather than a marketplace-style spotlight.
+function CompletedLeaguesWidget({ count, onOpen, c }) {
+  return (
+    <section className="mt-6">
+      <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
+        className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left cursor-pointer transition-transform active:scale-[0.99]"
+        style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+        <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+          <Trophy size={16} style={{ color: c.accent }} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-extrabold uppercase tracking-tight text-sm leading-none">Completed Leagues</div>
+          <div className="font-mono text-[11px] mt-1" style={{ color: c.textFaint }}>
+            {count} finished league{count === 1 ? "" : "s"} — final tables, past champions
+          </div>
+        </div>
+        <ChevronRight size={16} style={{ color: c.textFaint }} className="shrink-0" />
+      </div>
+    </section>
+  );
+}
+
 // The Kit Room — a standalone marketplace spotlight for club transfers and
 // eFootball team sales (see TransferMarket.jsx), placed at the bottom of
-// the Home leagues list, after Completed Leagues, so it reads as "done
-// with this season? here's where clubs and teams change hands" rather than
-// competing with the active-league sections above it. Deliberately built
-// as a "retail tag" rather than another soft-glow event card (see
-// KIT_ROOM_COBALT/KIT_ROOM_STEEL): a solid left rail, a faint diagonal
-// fabric-stripe texture (evoking a kit/jersey), and a rotated corner tag —
-// its own visual family, not a WildcardMatchSpotlight reskin.
+// the Home leagues list, after the Completed Leagues widget, so it reads
+// as "done with this season? here's where clubs and teams change hands"
+// rather than competing with the active-league sections above it.
+// Deliberately built as a "retail tag" rather than another soft-glow event
+// card (see KIT_ROOM_COBALT/KIT_ROOM_STEEL): a solid left rail, a faint
+// diagonal fabric-stripe texture (evoking a kit/jersey), and a rotated
+// corner tag — its own visual family, not a WildcardMatchSpotlight reskin.
 function KitRoomSpotlight({ onOpenTransferMarket, c }) {
   return (
     <section className="mt-6">
@@ -13275,7 +13387,72 @@ function LadderFindUserModal({ username, leagueNumber, onChangeUsername, onChang
   );
 }
 
-function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, onOpenLadderLeague, c }) {
+// Full page for finished leagues — reachable from Quick Actions, the
+// header menu, and the CompletedLeaguesWidget pointer on Home. Used to be
+// a horizontal-scroll section living inline on Home (LeagueSection); this
+// is the same LeagueCard grid, just as its own page (same back-button/
+// title pattern as ActivityLogPanel/LeaderboardPage) with a plain
+// flex-wrap grid instead of a horizontal scroller, since there's room for
+// one here.
+function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onBack, c }) {
+  const [query, setQuery] = useState("");
+
+  // Same "still needs the viewer's attention" boost LeagueListsSection
+  // uses for the live sections — a completed cash league can still have a
+  // payment sitting in pending review, and that shouldn't get buried once
+  // the league itself is archived here.
+  const attentionScore = (l) => {
+    const pendingCount = l.league_type === "cash" ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0;
+    return canManageLeague(l) && pendingCount > 0 ? 1 : 0;
+  };
+  const filtered = leagues.filter((l) => l.name?.toLowerCase().includes(query.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) =>
+    attentionScore(b) - attentionScore(a) || new Date(b.created_at) - new Date(a.created_at));
+
+  const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
+
+  return (
+    <div className="pt-8">
+      <div className="flex items-center justify-between mb-5">
+        <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> All leagues</button>
+      </div>
+
+      <div className="flex items-center gap-2 mb-1">
+        <Trophy size={20} style={{ color: c.accent }} />
+        <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Completed Leagues</h1>
+      </div>
+      <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
+        {leagues.length} finished league{leagues.length === 1 ? "" : "s"} — final tables, past champions
+      </div>
+
+      {leagues.length > 4 && (
+        <div className="relative mb-5">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search completed leagues…"
+            className="w-full font-body text-sm rounded-full pl-9 pr-4 py-2.5 outline-none" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }} />
+        </div>
+      )}
+
+      {sorted.length === 0 ? (
+        <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          {query ? `No completed league matches "${query}".` : "No completed leagues yet."}
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-3">
+          {sorted.map((l) => (
+            <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
+              blockedByLeague={isMemberOf(l) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, l)}
+              qualified={qualifiesForLeague(l)}
+              myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+              session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, onOpenLadderLeague, onOpenCompletedLeagues, c }) {
   useNow(60000);
   // hideLeagueIds excludes whatever's already shown in the Weekend League
   // spotlight above (see Home) — otherwise a weekend league appeared both
@@ -13291,8 +13468,10 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
   // Finished leagues move here instead of lingering in the sections above —
   // a completed round robin/knockout/cash league or a finalized Ladder Cup
   // has nothing left for anyone to act on, so it no longer belongs among
-  // the leagues someone might still join or play in. One combined section
-  // covers every format, same as the plain "Leagues" grid does.
+  // the leagues someone might still join or play in. Used to be its own
+  // inline section on Home; now it's a dedicated page (view ===
+  // "completedLeagues", reachable from Quick Actions and the header menu)
+  // — CompletedLeaguesWidget below is just the pointer to it from here.
   const completedLeagues = leagues.filter((l) => isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
 
   // Leagues that need the viewer's attention (something to review, or their
@@ -13349,9 +13528,7 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
       )}
 
       {completedLeagues.length > 0 && (
-        <LeagueSection title="Completed Leagues" icon={Trophy} leagues={sortLeagues(completedLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
-          entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
-          session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
+        <CompletedLeaguesWidget count={completedLeagues.length} onOpen={onOpenCompletedLeagues} c={c} />
       )}
 
       <KitRoomSpotlight onOpenTransferMarket={onOpenTransferMarket} c={c} />

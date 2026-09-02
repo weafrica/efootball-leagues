@@ -234,14 +234,15 @@ function LadderCupPodium({ standings, avatarByTeamId, c }) {
   );
 }
 
-// Same shape as SHARE_STANDINGS_COLUMNS (App.jsx) but without the Draws
-// column — Ladder Cup has no draws — and with Streak added since it's the
-// one extra stat that actually matters for this format's share image.
+// Same shape as SHARE_STANDINGS_COLUMNS (App.jsx), with Streak added since
+// it's the one extra stat that actually matters for this format's share
+// image. Draws (step 16) sit between W and L, same order as the table.
 const LADDER_CUP_SHARE_COLUMNS = [
   { key: "rank", label: "#", width: 64, align: "center", isRank: true },
   { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " · OUT" : r.statusLabel ? ` · ${r.statusLabel.toUpperCase()}` : "") },
   { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
   { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
+  { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
   { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
   { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
   { key: "streak", label: "Streak", width: 96, align: "center", get: (r) => String(r.streak) },
@@ -325,7 +326,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
     return "transparent";
   };
   const shareRows = standings.map((r) => ({
-    rank: r.rank_position, name: r.club_name, p: r._row.w + r._row.l, w: r._row.w, l: r._row.l,
+    rank: r.rank_position, name: r.club_name, p: r._row.w + (r._row.d || 0) + r._row.l, w: r._row.w, d: r._row.d || 0, l: r._row.l,
     gd: r.gd, streak: r._row.streak, pts: r.pts, eliminated: r._row.status === "eliminated",
     statusLabel: r._row.status !== "active" && r._row.status !== "eliminated" ? LADDER_CUP_STATUS_LABEL[r._row.status]
       : isFinalized && r._row.status === "active" ? LADDER_CUP_STATUS_LABEL.survived : null,
@@ -373,6 +374,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
               <th className="text-left py-2 font-medium">Club</th>
               <th className="text-center py-2 font-medium">P</th>
               <th className="text-center py-2 font-medium">W</th>
+              <th className="text-center py-2 font-medium">D</th>
               <th className="text-center py-2 font-medium">L</th>
               <th className="text-center py-2 font-medium">GD</th>
               <th className="text-center py-2 font-medium">Streak</th>
@@ -381,7 +383,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} className="py-8 text-center font-body text-sm" style={{ color: c.textFaint }}>No club matches "{query}".</td></tr>
+              <tr><td colSpan={9} className="py-8 text-center font-body text-sm" style={{ color: c.textFaint }}>No club matches "{query}".</td></tr>
             ) : filtered.map((r) => {
               const row = r._row;
               const eliminated = row.status === "eliminated";
@@ -453,13 +455,14 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
                       readable even once pts/w/l reset to zero on rebirth. */}
                   {eliminated && (
                     <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
-                      Final: {row.pts} pts · {row.w}W-{row.l}L
+                      Final: {row.pts} pts · {row.w}W-{row.d || 0}D-{row.l}L
                     </div>
                   )}
                   <LadderCupBadgeRow row={row} c={c} />
                 </td>
-                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + row.l}</td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + (row.d || 0) + row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w}</td>
+                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.d || 0}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
                 <td className="text-center py-2.5" style={{ color: c.textDim }}>
@@ -880,7 +883,7 @@ function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
         <Skull size={26} className="mx-auto mb-2" style={{ color: c.textFaint }} />
         <div className="font-display font-extrabold text-lg uppercase tracking-wide" style={{ color: c.text }}>Fallen</div>
         <div className="font-body text-xs mt-2 mb-1" style={{ color: c.textDim }}>
-          Eliminated with {entryRow.pts} pts ({entryRow.w}W-{entryRow.l}L) on the board — that record stays yours
+          Eliminated with {entryRow.pts} pts ({entryRow.w}W-{entryRow.d || 0}D-{entryRow.l}L) on the board — that record stays yours
           whether you buy back in or not.
         </div>
         {rebirthCount > 0 && (
@@ -916,7 +919,26 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSigh
   // hook count between renders.
   const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
   const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
-  const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
+  // "Opponents only face each other once": exclude any club this club has
+  // a FINALIZED ladder_cup_matches row against, in either home/away slot.
+  // finalized_at covers both played results and approved walkover claims
+  // (approve_ladder_cup_walkover_claim inserts a real matches row and runs
+  // it through _apply_ladder_cup_match_win, which sets finalized_at) — so
+  // one check here catches both routes to "these two have already met".
+  const alreadyFacedClubIds = useMemo(() => {
+    if (!myTeam) return new Set();
+    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
+    const ids = new Set();
+    for (const m of finalized) {
+      if (m.home_team_id === myTeam.id) ids.add(m.away_team_id);
+      else if (m.away_team_id === myTeam.id) ids.add(m.home_team_id);
+    }
+    return ids;
+  }, [league.ladder_cup_matches, myTeam]);
+  const opponents = useMemo(
+    () => (myEntry ? getOpponentPool(myEntry, mapped, alreadyFacedClubIds) : []),
+    [myEntry, mapped, alreadyFacedClubIds]
+  );
 
   // 12h pool visibility timer (see ladderCupOpponentTimerState /
   // ladder_cup_pool_sightings) — mySightings is just this club's own rows
@@ -1248,7 +1270,16 @@ function LadderCupFindOpponent({ league, c }) {
     if (!team) { setResult({ notFound: true, reason: "No club with that exact name — pick one from the suggestions." }); return; }
     const entry = mapped.find((e) => e.club_id === team.id);
     if (!entry) { setResult({ notFound: true, reason: `${team.name} hasn't been placed on the ladder yet.` }); return; }
-    const pool = entry.status === "active" ? getOpponentPool(entry, mapped) : [];
+    // Same "already faced" exclusion LadderCupOpponentBoard applies —
+    // otherwise this finder would surface a rematch pairing as available
+    // when the actual Challenge flow (and the server-side RPC) refuses it.
+    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
+    const alreadyFacedClubIds = new Set();
+    for (const m of finalized) {
+      if (m.home_team_id === team.id) alreadyFacedClubIds.add(m.away_team_id);
+      else if (m.away_team_id === team.id) alreadyFacedClubIds.add(m.home_team_id);
+    }
+    const pool = entry.status === "active" ? getOpponentPool(entry, mapped, alreadyFacedClubIds) : [];
     setResult({ team, entry, pool });
   };
 

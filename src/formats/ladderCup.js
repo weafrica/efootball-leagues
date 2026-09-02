@@ -14,8 +14,10 @@
 //   - badge display logic beyond the raw counters recordLadderCupWin tracks
 //
 // Pure functions only — no React, no Supabase. Field names mirror the rest
-// of the codebase's format engines (`pts`, `w`, `l`, `gd`); no `d` since
-// this format has no draws.
+// of the codebase's format engines (`pts`, `w`, `l`, `d`, `gd`). STEP 16
+// added draws: a level scoreline can now be logged as a draw (no extra
+// time/penalties needed) instead of always being forced to a decisive
+// result — see recordLadderCupDraw and resolveMatchWinner's isDraw path.
 //
 // FORMATS registration (add to the FORMATS array in App.jsx):
 //   { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup",
@@ -69,6 +71,10 @@ export const LADDER_CUP_RULES = {
   UPSET_BONUS: 1,
   HEATER_BONUS: 1,
   BOUNTY_BONUS: 2,
+  // STEP 16 (draws): flat, same for both clubs — no upset/heater/bounty
+  // stacking, same shape as a walkover's flat scoring.
+  DRAW_POINTS: 2,
+  DRAW_NETS_REWARD: 3, // Nets paid to EACH club's members on a draw (see _credit_ladder_battle_draw_reward)
   // OPEN DECISION (see ruleset "STILL OPEN"): does extra-time scoring count
   // toward goal difference? Penalties never do, that's settled. Regulation
   // always does. This flag is the one switch to flip once that's decided.
@@ -90,6 +96,7 @@ export function createLadderCupEntry(clubId, clubName) {
     pts: 0,
     w: 0,
     l: 0,
+    d: 0,                  // draws (step 16) — never resets a streak into a positive one, just to 0
     gd: 0,                // regulation-time goal difference only (see COUNT_EXTRA_TIME_IN_GD)
     streak: 0,             // current consecutive-win streak, resets to 0 on any loss
     // Second, independent rating — see the "Matchmaking rating" section
@@ -268,6 +275,32 @@ export function recordLadderCupWin({
   const newLoser = { ...loserAfterLoss, gd: loserAfterLoss.gd - gdDelta, ladder_rating: loserRating };
 
   return { winner: newWinner, loser: newLoser, winnerPointsBreakdown: breakdown };
+}
+
+/**
+ * STEP 16 (draws): applies a draw to both entries. Flat DRAW_POINTS each —
+ * no upset/heater/bounty bonuses, same "flat, no stacking" shape a
+ * walkover's scoring already uses. Neither side loses a life or moves
+ * toward elimination (a draw isn't a loss); streak (a WIN streak) resets
+ * to 0 for both, same as applyLoss already does on a loss — a draw breaks
+ * a run just as much as losing does, it just doesn't cost a life. gd is
+ * unaffected (the scoreline is level by definition). Nets for a draw
+ * (DRAW_NETS_REWARD each) are credited server-side
+ * (_credit_ladder_battle_draw_reward) — nothing here touches Nets.
+ *
+ * Returns new (not mutated) entry objects: { teamA, teamB }. Call
+ * rankLadderCupStandings on the full entry list again afterward, same as
+ * recordLadderCupWin.
+ */
+export function recordLadderCupDraw({ teamA, teamB }) {
+  const gained = LADDER_CUP_RULES.DRAW_POINTS;
+  const apply = (entry) => ({
+    ...entry,
+    pts: entry.pts + gained,
+    d: (entry.d || 0) + 1,
+    streak: 0,
+  });
+  return { teamA: apply(teamA), teamB: apply(teamB) };
 }
 
 // ---------------------------------------------------------------------------
@@ -503,11 +536,23 @@ export function computeEloUpdate(winnerRating, loserRating, kFactor = LADDER_CUP
  * Re-run this after any result is logged (played or walkover) — that's the
  * "logging a result refreshes your opponent slate" rule; it's just calling
  * this again with fresh entries, not a separate mechanism.
+ *
+ * alreadyFacedClubIds (optional) excludes clubs this entry has already
+ * played a finalized match against (played or walkover) in this Survivor
+ * Ladder Cup — the "opponents only face each other once" rule. Pass the
+ * set of club_ids derived from finalized ladder_cup_matches rows; omitting
+ * it (undefined) preserves the old no-restriction behavior for any caller
+ * that hasn't been updated yet.
  */
-export function getOpponentPool(entry, allEntries) {
+export function getOpponentPool(entry, allEntries, alreadyFacedClubIds) {
   const R = LADDER_CUP_RULES;
   const myRating = entry.ladder_rating ?? R.RATING_START;
-  const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
+  const eligible = allEntries.filter(
+    (e) =>
+      e.club_id !== entry.club_id &&
+      e.status === "active" &&
+      !(alreadyFacedClubIds && alreadyFacedClubIds.has(e.club_id))
+  );
   if (eligible.length === 0) return [];
 
   const ratingOf = (e) => e.ladder_rating ?? R.RATING_START;
@@ -732,9 +777,15 @@ export function substitutionsAllowed(decidedBy) {
  * applies points — so everything that could make a result nonsensical has
  * to be caught here first.
  *
+ * STEP 16 (draws): pass isDraw: true instead of an extra time/penalty
+ * score to log a level scoreline as a draw rather than forcing it to a
+ * decisive result. Only valid when homeGoals === awayGoals — throws
+ * otherwise, same as every other inconsistent combination here.
+ *
  * Doesn't touch entries or points itself. Returns { winnerSide: "home" |
- * "away" }; throws an Error with a message safe to show the user directly
- * on anything inconsistent.
+ * "away", decidedBy } for a decisive result, or { isDraw: true, decidedBy:
+ * "draw" } for a draw; throws an Error with a message safe to show the
+ * user directly on anything inconsistent.
  *
  * @param {object} p
  * @param {number} p.homeGoals - regulation-time goals
@@ -743,11 +794,18 @@ export function substitutionsAllowed(decidedBy) {
  * @param {number} [p.extraTimeAwayGoals]
  * @param {number|null} [p.pensHome]
  * @param {number|null} [p.pensAway]
+ * @param {boolean} [p.isDraw]
  */
 export function resolveMatchWinner({
   homeGoals, awayGoals, extraTimeHomeGoals = 0, extraTimeAwayGoals = 0,
-  pensHome = null, pensAway = null,
+  pensHome = null, pensAway = null, isDraw = false,
 }) {
+  if (isDraw) {
+    if (homeGoals !== awayGoals) {
+      throw new Error("Scores aren't level — this can't be logged as a draw.");
+    }
+    return { isDraw: true, decidedBy: "draw" };
+  }
   if (homeGoals !== awayGoals) {
     return { winnerSide: homeGoals > awayGoals ? "home" : "away", decidedBy: "regulation" };
   }
@@ -755,7 +813,7 @@ export function resolveMatchWinner({
     return { winnerSide: extraTimeHomeGoals > extraTimeAwayGoals ? "home" : "away", decidedBy: "extra_time" };
   }
   if (pensHome == null || pensAway == null) {
-    throw new Error("Match finished level — add an extra time or penalty shootout score.");
+    throw new Error("Match finished level — add an extra time or penalty shootout score, or log it as a draw.");
   }
   if (pensHome === pensAway) {
     throw new Error("Penalties can't be level too — someone has to win.");
