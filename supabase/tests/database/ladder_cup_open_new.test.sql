@@ -25,7 +25,7 @@ begin;
 
 create extension if not exists pgtap;
 
-select plan(5);
+select plan(6);
 
 -- ============================================================================
 -- Fixture: a finished "previous" Survivor Cup with two clubs, so there's
@@ -135,6 +135,11 @@ select is(
     where t.league_id = (select new_league_id from test_result) and t.name = 'Club B'),
   1,
   'Club B (unrelated to the failure) still carries forward normally'
+);
+
+select ok(
+  (select ladder_cup_started_at from leagues where id = (select new_league_id from test_result)) is not null,
+  'the new cup starts itself automatically — no admin click needed'
 );
 
 select * from finish();
