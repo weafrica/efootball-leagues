@@ -2167,6 +2167,23 @@ export function weekendWindow(now = new Date()) {
   return [start, end];
 }
 
+// The next real moment (UTC) SAST wall-clock reaches 17:00 on a Saturday,
+// strictly after `refDate` — used as a Weekend League's group-stage
+// cutoff/knockout kickoff (see group_stage_due_at below and doGenerateFixtures).
+// Mirrors the SAST wall-clock technique nextSundayCutoffSAST/
+// nextSastHourBoundary already use elsewhere in this file (SAST_OFFSET_MS,
+// fixed UTC+2, no DST), just walking to Saturday 17:00 instead of Sunday
+// 22:00. Called with "now" at the moment fixtures are generated (normally
+// right around Friday 18:00 SAST kickoff), so this reliably lands on the
+// very next day.
+export function weekendKnockoutCutoffSAST(refDate = new Date()) {
+  const sastNow = new Date(refDate.getTime() + SAST_OFFSET_MS);
+  const day = sastNow.getUTCDay(); // 0 Sun .. 6 Sat
+  const daysToSaturday = (6 - day + 7) % 7;
+  const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate() + daysToSaturday, 17, 0, 0, 0) - SAST_OFFSET_MS);
+  return candidate > refDate ? candidate : new Date(candidate.getTime() + 7 * ONE_DAY_MS);
+}
+
 // The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
 // wall-clock window too — not whatever timezone the visitor's device happens
 // to be in. South Africa doesn't observe DST, so SAST is a fixed UTC+2.
@@ -5922,7 +5939,15 @@ export default function App() {
     if (groupAssignments) {
       const ok = await persistGroupAssignments(groupAssignments);
       if (!ok) return;
-      await supabase.from("leagues").update({ groups_count: groupsCount }).eq("id", league.id);
+      // Weekend League groups_knockout gets its group_stage_due_at set
+      // automatically to Saturday 17:00 SAST — the group stage auto-ends
+      // and the knockout bracket auto-generates right at that moment (see
+      // 20260925_weekend_league_group_stage_auto_advance.sql), instead of
+      // an admin having to set this manually the way every other
+      // groups_knockout league still does.
+      const groupStageUpdate = { groups_count: groupsCount };
+      if (isWeekendLeague(league)) groupStageUpdate.group_stage_due_at = weekendKnockoutCutoffSAST(new Date()).toISOString();
+      await supabase.from("leagues").update(groupStageUpdate).eq("id", league.id);
     }
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
     if (!ok) return;
@@ -14404,7 +14429,9 @@ export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, 
     <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 mt-1">
       <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: passed ? c.red : c.textFaint }}>
         <Clock size={11} />
-        {league.group_stage_due_at ? `Group stage due ${fmtDate(league.group_stage_due_at)}${passed ? " · expired" : ""}` : "Group stage due date not set"}
+        {league.group_stage_due_at
+          ? `Group stage due ${fmtDate(league.group_stage_due_at)}${passed ? " · expired" : ""}${isWeekendLeague(league) ? " · knockout auto-starts then" : ""}`
+          : "Group stage due date not set"}
       </div>
       {canManage && (
         <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
