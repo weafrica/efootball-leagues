@@ -1,0 +1,31 @@
+name: Database tests
+
+# Runs the full migration history against a local Postgres inside the runner
+# (via `supabase start`) and then runs the pgTAP tests in
+# supabase/tests/database/ against it. No hosted Supabase branch involved —
+# this works on the Free plan, same as everyone's local dev setup.
+on:
+  push:
+  pull_request:
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Starts local Postgres + the rest of the Supabase stack, applying
+      # every migration in supabase/migrations/ in order.
+      - name: Start Supabase local stack
+        run: supabase start
+
+      - name: Run pgTAP tests
+        run: supabase test db
+
+      - name: Stop Supabase local stack
+        if: always()
+        run: supabase stop
