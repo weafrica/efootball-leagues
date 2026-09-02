@@ -11,7 +11,7 @@ import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
-import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS } from "./economy.js";
+import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS } from "./economy.js";
 import { computeStandings as computeLeagueLadderStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
@@ -164,7 +164,7 @@ const SHOP_PROMO_TEXT = "Sale";
 // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
 // to false once the Ladder is back to normal — the notice just won't fire
 // again, no redeploy-adjacent cleanup needed.
-const LADDER_MAINTENANCE_ACTIVE = false;
+const LADDER_MAINTENANCE_ACTIVE = true;
 
 // Cash league entry fees: members choose their own amount in this range when they join.
 export const ENTRY_FEE_MIN = 10;
@@ -6464,6 +6464,28 @@ export default function App() {
     showToast(rebirthAnnouncement(clubName, finishedLife));
   };
 
+  // Unlock one more opponent on the challenge board for
+  // LADDER_CUP_OPPONENT_SLOT_FEE_NETS (1N), via buy_ladder_cup_opponent_slot
+  // (see supabase/migrations/20260904_ladder_cup_opponent_slot_purchase.sql).
+  // Nothing to compute or debit client-side — the RPC charges and bumps
+  // purchased_opponent_slots atomically; refreshing the league afterward
+  // is what actually reveals the next row on LadderCupOpponentBoard.
+  const buyLadderCupOpponentSlot = async (league, teamId) => {
+    if (!league || !teamId) return;
+    const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
+    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+
+    const { error } = await supabase.rpc("buy_ladder_cup_opponent_slot", {
+      p_entry_id: row.id, p_league_id: league.id, p_team_id: teamId,
+    });
+    if (error) {
+      showToast(/insufficient/i.test(error.message || "") ? `You need ${formatNets(LADDER_CUP_OPPONENT_SLOT_FEE_NETS)} to add another opponent.` : `Couldn't unlock another opponent: ${error.message}`);
+      return;
+    }
+
+    await refreshLeague(league.id);
+  };
+
   // Step 12: walkover claims — claim with screenshot proof, straight to
   // admin review. No messaging step, no wait: the button uploads a
   // screenshot and creates the claim (already at pending_review) in one
@@ -8396,6 +8418,7 @@ export default function App() {
                 onAdminResolveLadderCupMatchResult={(match, approve) => adminResolveLadderCupMatchResult(activeLeague, match, approve)}
                 onRespondLadderCupSecondLife={(accept) => respondLadderCupSecondLife(activeLeague, myTeam(activeLeague)?.id, accept)}
                 onRejoinLadderCup={() => rejoinLadderCup(activeLeague, myTeam(activeLeague)?.id)}
+                onBuyLadderCupOpponentSlot={() => buyLadderCupOpponentSlot(activeLeague, myTeam(activeLeague)?.id)}
                 onClaimLadderCupWalkover={(opponentTeamId, file) => claimLadderCupWalkover(activeLeague, myTeam(activeLeague)?.id, opponentTeamId, file)}
                 onApproveLadderCupWalkoverClaim={(claim) => approveLadderCupWalkoverClaim(activeLeague, claim)}
                 onRejectLadderCupWalkoverClaim={(claim) => rejectLadderCupWalkoverClaim(activeLeague, claim)}

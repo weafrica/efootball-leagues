@@ -128,6 +128,19 @@ export const LADDER_JOIN_FEE_NETS = 5;
 // sync with that migration's v_fee constant if it ever changes.
 export const LADDER_CUP_REBIRTH_FEE_NETS = 6;
 
+// How many opponents a Survival Ladder Cup club sees for free on its
+// challenge board, and the cost to reveal one more beyond that (up to
+// LADDER_CUP_RULES.SHOWN_OPPONENTS = 10, formats/ladderCup.js — the same
+// ceiling the underlying matchmaking pool already used). Charged and the
+// entry's purchased_opponent_slots incremented together by the
+// buy_ladder_cup_opponent_slot() RPC (see
+// supabase/migrations/20260904_ladder_cup_opponent_slot_purchase.sql) —
+// keep these in sync with that migration's v_fee/v_base/v_max constants
+// if they ever change.
+export const LADDER_CUP_BASE_VISIBLE_OPPONENTS = 3;
+export const LADDER_CUP_OPPONENT_SLOT_FEE_NETS = 1;
+export const LADDER_CUP_MAX_VISIBLE_OPPONENTS = 10;
+
 export function entryFeeForLeagueFormat(format) {
   if (format === "single_round_robin" || format === "double_round_robin" || format === "survivor") {
     return ENTRY_FEES_NETS.league;
