@@ -8929,21 +8929,20 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </div>
         </section>
 
-        {/* Weekend League spotlight — the most time-sensitive thing on the
-            page, so it leads right after the hero rather than waiting down
-            with the general Leagues list. Always rendered now rather than
-            hidden outside a qualifying window — the League Ladder's own
-            pass inside it (LadderWeekendCard) has no weekend window at
-            all, so an empty weekendLeagues list no longer means an empty
-            banner. */}
-        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} override={guestData?.weekendOverride ?? null}
-          onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} onRequireAuth={() => onRequireAuth("Sign in to join the League Ladder.")} c={c} />
-
         <div ref={ladderRef}>
           {guestData ? (
             <GuestLadderStrip ladder={guestData.ladder} onClimb={() => onRequireAuth("Sign in to challenge your way up the ladder.")} c={c} />
           ) : <div className="pt-8 flex justify-center"><Loader c={c} /></div>}
         </div>
+
+        {/* Weekend League spotlight — now placed below the League Ladder
+            per request (was previously right after the hero, ahead of the
+            ladder). Always rendered rather than hidden outside a
+            qualifying window — the League Ladder's own pass inside it
+            (LadderWeekendCard) has no weekend window at all, so an empty
+            weekendLeagues list no longer means an empty banner. */}
+        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} override={guestData?.weekendOverride ?? null}
+          onCardClick={() => onRequireAuth("Sign in to join this weekend's action.")} onRequireAuth={() => onRequireAuth("Sign in to join the League Ladder.")} c={c} />
 
         <div ref={tablesRef}>
           {guestData && weekendLeagues.length > 0 && (
