@@ -186,8 +186,17 @@ player_gets    = invested_share × 20%   (on top of self_share, and on top of ba
   - `_rapid_cup_sweep_internal()` cron job, every 2 minutes: advances any bracket that's ready, then finishes any lobby past its shared 4hr deadline
   - Tested against a live schema clone: clean win-by-wins, win-by-goals-tiebreak after undecided semis, a 4-way full tie, a genuine 2-way split, and a nobody-played refund — all matched hand-calculated payouts exactly; idempotency and the due_at gate (untouched lobbies stay untouched) also verified
   - **Not yet wired:** Phase 5's result-submission pipeline is what actually gets `played`/`pens_home`/`pens_away` set from real matches — until then this phase's logic is correct but has nothing to react to
-- ⬜ Phase 5 — not started
-- ⬜ Phase 6 — not started
+- ✅ **Phase 5 — shipped** (`supabase/migrations/20260903200000_rapid_cup_result_auto_sweep.sql`)
+  - 2min opponent / 2min admin auto-resolve on top of the existing generic result pipeline (`fixtures` + `result_submissions`) — no porting needed, Rapid Cup fixtures already sit in those tables
+  - Scoped to Rapid Cup leagues only via the `rapid_cup_lobbies` join; guarded against auto-accepting a submission after Phase 4's sweep already finished the lobby and paid out (fixed after being caught: a submission sitting pending right as the 4hr deadline passed could otherwise get applied to `fixtures` minutes after the payout was already finalized on the pre-submission state)
+  - Not covered: walkover claims (deferred, needs its own design pass for a 4-team bracket)
+- ✅ **Phase 6 — shipped** (`supabase/migrations/20260903210000_rapid_cup_prize_collection.sql`, `src/RapidCupPrizeCollection.jsx`)
+  - `collect_rapid_cup_winbox()` — flat per-match-win reward (3 Nets — DESIGN CALL, plan only said "flat/small reward"; matched to this app's existing `random_match_reward` win payout, 2 base + 1 participation. Easy to change: `v_winbox_reward` in the migration)
+  - `collect_rapid_cup_cupbox()` — pays whatever Phase 3/4 already calculated (`rapid_cup_payouts` for a single winner, `rapid_cup_payout_recipients` for split/refund); a non-winner gets an honest $0 box rather than an error
+  - New `rapid_cup_collections` claim ledger — its unique constraint (`user_id, box_type, ref_id`) is the double-collect guard: both RPCs insert the claim FIRST and only credit Nets if that insert actually landed
+  - **This is the phase that actually pays people** — neither Phase 3's `finalize_rapid_cup_payout` nor Phase 4/5 credited any Nets; they only recorded amounts. Every prior phase's math was correct but inert until this one.
+  - Tested against a live schema clone (throwaway league/lobby/fixture/payout, cleaned up after): winbox happy-path, double-collect blocked, losing player rejected, non-Rapid-Cup fixture rejected, cupbox 'winner' outcome, cupbox 'split' outcome, non-winner $0 box — one real bug caught and fixed in that pass: Nets are integer-only (`bigint`) but Phase 3's payout math is computed to 2 decimal places, which errored on the very first live cupbox call. Fixed by rounding to the nearest whole Net at the point of payment (see the migration's fix note).
+- ⬜ Phase 7 — not started
 - ⬜ Phase 7 — not started
 - ⬜ Phase 8 — not started
 - ⬜ Phase 9 — not started
