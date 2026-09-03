@@ -4,6 +4,7 @@ import {
   Flame, Globe, Heart, LogOut, Medal, MessageCircle, Pencil, Phone, ReceiptText, RotateCcw, Search, Send, Settings2,
   Shield, Skull, Sparkles, Swords, Target, ThumbsDown, ThumbsUp, Trash2, Trophy, Users, Volume2, X, XCircle, Zap,
 } from "lucide-react";
+import { supabase } from "./supabaseClient";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { countryCodeToFlagEmoji, countryName, formatLocalTimeNow, suggestPlayTime } from "./utils/timezone";
 import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
@@ -1692,6 +1693,20 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
   const [rulesOpen, setRulesOpen] = useState(false);
   const isCreator = session && league.created_by === session.user.id;
   const canManage = isCreator || isAdmin;
+  // Rapid Cup only ever has 4 teams (3 possible opponents), so "search for
+  // your opponent by name" is pointless friction — just show every fixture
+  // straight away. Same self-detection pattern as RapidCupTournamentExtras
+  // (a Rapid Cup league is just a normal `leagues` row under the hood, so
+  // this checks rapid_cup_lobbies for one pointing at this league id rather
+  // than needing an "is this Rapid Cup" flag threaded down from App.jsx).
+  const [isRapidCup, setIsRapidCup] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!league?.id) { setIsRapidCup(false); return; }
+    supabase.from("rapid_cup_lobbies").select("id").eq("league_id", league.id).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsRapidCup(!!data); });
+    return () => { cancelled = true; };
+  }, [league?.id]);
   // Results (auto-posted scorelines/photo-proof rows) live under the Table
   // tab; everything else stays under Fixtures as regular chat. Both are
   // still just rows in `comments` — this only decides which panel shows them.
@@ -2059,9 +2074,15 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
             <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} myUsername={myUsername} showToast={showToast} c={c} />
           )}
           {(joined || canManage) && (
-            <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
-              getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-              canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} leagues={leagues} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
+            isRapidCup ? (
+              <KnockoutFixturesList league={league} bracketFixtures={stageFixtures} canManage={canManage} joined={joined}
+                getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+                onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} canSeePhones={canSeePhones} c={c} />
+            ) : (
+              <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
+                getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+                canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} leagues={leagues} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
+            )
           )}
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {joined && !canSeePhones && (

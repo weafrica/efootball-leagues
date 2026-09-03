@@ -43,7 +43,21 @@ function usePlayerFees(lobbyId) {
       .select("user_id, entry_fee")
       .eq("lobby_id", lobbyId)
       .order("joined_at", { ascending: true });
-    setPlayers(data || []);
+    const rows = data || [];
+    // Usernames — profiles is publicly readable to any signed-in member
+    // (profiles_select_public_fields), same source every other screen in
+    // the app uses for a display name. Without this, players only ever
+    // saw each other as "Player a1b2c3" (a sliced user id).
+    if (rows.length) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("user_id, efootball_username")
+        .in("user_id", rows.map((r) => r.user_id));
+      const nameByUserId = {};
+      (profileRows || []).forEach((p) => { nameByUserId[p.user_id] = p.efootball_username; });
+      rows.forEach((r) => { r.display_name = nameByUserId[r.user_id] || null; });
+    }
+    setPlayers(rows);
   }, [lobbyId]);
 
   useEffect(() => {
@@ -129,7 +143,7 @@ export function RapidCupLiveFees({ lobbyId, myUserId, showToast, c }) {
         return (
           <div key={p.user_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}>
             <div>
-              {isMe ? "You" : `Player ${p.user_id.slice(0, 6)}`}
+              {isMe ? "You" : (p.display_name || `Player ${p.user_id.slice(0, 6)}`)}
               {p.entry_fee === maxStake && p.entry_fee > 0 && <span style={{ opacity: 0.6 }}> · highest</span>}
             </div>
             <div style={{ textAlign: "right" }}>

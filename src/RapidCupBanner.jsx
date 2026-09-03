@@ -12,6 +12,17 @@ import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 // 15/5/1 min warnings.
 const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
 
+// Module-level, not component state — this has to survive RapidCupBanner
+// being unmounted/remounted, which happens every single time Home itself
+// unmounts (App.jsx only renders <Home> while view === "home", and this
+// banner lives inside Home). A ref or useState resets on that remount, so
+// a player who'd already been auto-dropped into their live tournament once
+// got yanked straight back in on every later visit to Home — this was the
+// actual cause of "can't get back to the homepage during Rapid Cup". This
+// Set persists for the page's lifetime, so each league_id only auto-opens
+// once per session, not once per Home mount.
+const autoOpenedLeagueIds = new Set();
+
 function useOpenRapidCupLobby() {
   const [lobby, setLobby] = useState(null);
   const [playerCount, setPlayerCount] = useState(0);
@@ -125,18 +136,11 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
   // to the tournament page as soon as league_id is set — but only the
-  // first time we see this league_id, not on every 5s poll tick. myEntry
-  // is a freshly-fetched object on every poll (even when its data hasn't
-  // changed), so using it directly in this effect's deps re-fired
-  // onOpenLeague every ~5s for as long as the banner stayed mounted on
-  // Home — which yanked a player straight back into the tournament the
-  // moment they tapped Back, since Home (and this banner) is still there
-  // underneath. autoOpenedLeagueId tracks the last league_id we already
-  // auto-opened so a deliberate "go back to Home" tap actually sticks.
-  const autoOpenedLeagueId = useRef(null);
+  // first time ever, not on every 5s poll tick and not on every remount
+  // of this banner (see autoOpenedLeagueIds above).
   useEffect(() => {
-    if (lobby?.status === "live" && lobby?.league_id && myEntry && autoOpenedLeagueId.current !== lobby.league_id) {
-      autoOpenedLeagueId.current = lobby.league_id;
+    if (lobby?.status === "live" && lobby?.league_id && myEntry && !autoOpenedLeagueIds.has(lobby.league_id)) {
+      autoOpenedLeagueIds.add(lobby.league_id);
       onOpenLeague?.(lobby.league_id);
     }
   }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);

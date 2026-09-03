@@ -1610,6 +1610,16 @@ export function computeStandings(teams, fixtures, league) {
       a.gf += f.away_score; a.ga += f.home_score;
       if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
       else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
+      // Level on regulation score. If a penalty shootout actually decided
+      // this fixture (knockout ties/finals record pens_home/pens_away —
+      // see isFinalFixture/isDeciderFixture), credit that as a real win,
+      // not a draw — this is what already decides who advances in the
+      // bracket (knockoutBracketWinners), so the table should agree with
+      // it instead of showing both sides 1pt-each like a genuine draw.
+      else if (f.pens_home != null && f.pens_away != null && f.pens_home !== f.pens_away) {
+        if (f.pens_home > f.pens_away) { h.w++; h.pts += 3; a.l++; }
+        else { a.w++; a.pts += 3; h.l++; }
+      }
       else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
     } else if (isFixtureLocked(f, league)) {
       h.p++; a.p++; h.l++; a.l++;
