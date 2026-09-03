@@ -24,7 +24,7 @@ Quick 4-player knockout tournament. Fills fast, auto-starts, auto-finishes, epic
 ## 3. Entry Fee Engine
 
 - Fee slider: **0–400 Nets**.
-- Players set their fee when joining. **Increase-only** — can raise again before their own next match, never mid-match.
+- Players set their fee when joining. **Increase-only** — can raise again at any point while the cup is active (open, filling, or live), no mid-match restriction, **except** the last 40 minutes before the 4hr auto-finish, when fees lock so payout can't be gamed at the last second.
 - Live display on the tournament page: all 4 players' fees + expected payout, updating live as fees change.
 - `max_stake` = the highest fee among the 4 players. Used as the 100% baseline for the bonus-pool proportion (Section 4).
 
@@ -172,9 +172,13 @@ player_gets    = invested_share × 20%   (on top of self_share, and on top of ba
 - ✅ **Phase 1 — shipped** (`supabase/migrations/20260903090000_rapid_cup_lobby_phase1.sql`, `src/RapidCupBanner.jsx`)
   - Lobby tables, `join_rapid_cup_lobby()` RPC, `expire_rapid_cup_lobbies()` cron RPC
   - Home banner: live count, countdown, 15/5/1 min toasts, join flow, auto-chain to next lobby
-  - **Open item:** flipping a full lobby from `filling` → `live` (generating the actual bracket, setting `league_id`) needs the real `leagues`/`fixtures` table column names — not found in a tracked migration. Blocked on that schema before this can be wired end-to-end.
-- ⬜ Phase 2 — not started
-- ⬜ Phase 3 — not started
+- ✅ **Phase 2 — shipped** (`supabase/migrations/20260903100000_rapid_cup_bracket_generation.sql`, `20260903120000_rapid_cup_raise_entry_fee.sql`, `20260903150000_rapid_cup_allow_fee_raise_anytime.sql`, `20260903160000_rapid_cup_lock_fee_raise_last_40min.sql`, `src/RapidCupFeeSlider.jsx`, `src/RapidCupFeeDisplay.jsx`)
+  - `generate_rapid_cup_bracket()` flips `filling` → `live`, creates the league/teams/members/round-1 fixtures, race-safe (idempotent on repeat calls)
+  - `raise_rapid_cup_entry_fee()` — increase-only, 0–400 cap, raisable any time the lobby is open/filling/live, locked in the last 40 minutes before the 4hr auto-finish
+- ✅ **Phase 3 — shipped** (`supabase/migrations/20260903140000_rapid_cup_payout_calculation.sql`)
+  - `compute_rapid_cup_payout()` — pure guaranteed-stake-back formula from Section 4a, verified against both Section 4b worked examples
+  - `finalize_rapid_cup_payout()` — records the payout in the new `rapid_cup_payouts` table, marks the lobby `completed`, idempotent on repeat calls
+  - **Open item:** not granted to `authenticated` on purpose. It takes `p_winner_user_id` as a parameter — nothing yet determines the real winner from match results (that's the Section 4d tiebreaker logic). Phase 4/5's auto-finish should call this itself once it can compute a server-verified winner; a client should never be able to call it and name itself the winner.
 - ⬜ Phase 4 — not started
 - ⬜ Phase 5 — not started
 - ⬜ Phase 6 — not started
