@@ -12,16 +12,44 @@ import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 // 15/5/1 min warnings.
 const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
 
-// Module-level, not component state — this has to survive RapidCupBanner
-// being unmounted/remounted, which happens every single time Home itself
-// unmounts (App.jsx only renders <Home> while view === "home", and this
-// banner lives inside Home). A ref or useState resets on that remount, so
-// a player who'd already been auto-dropped into their live tournament once
-// got yanked straight back in on every later visit to Home — this was the
-// actual cause of "can't get back to the homepage during Rapid Cup". This
-// Set persists for the page's lifetime, so each league_id only auto-opens
-// once per session, not once per Home mount.
-const autoOpenedLeagueIds = new Set();
+// sessionStorage-backed, not component state or a module-level Set — this
+// has to survive two different resets:
+//   1. RapidCupBanner unmounting/remounting, which happens every time Home
+//      itself unmounts (App.jsx only renders <Home> while view === "home").
+//      A ref or useState resets on that remount alone.
+//   2. A full page reload/refresh, which wipes any plain in-memory JS
+//      value (module-level Set included) back to empty.
+// Case 2 was the actual cause of "can't get back to the homepage during
+// Rapid Cup": a player leaves their live lobby to browse Home, refreshes
+// the page, the in-memory guard forgets it already auto-opened that
+// league_id, and the effect below fires again and yanks them straight back
+// into the tournament. sessionStorage survives the reload (it's scoped to
+// the tab, not the JS heap) so "already auto-opened" sticks for the rest
+// of that browser session, while still resetting for a genuinely new
+// session (new tab) — matching the "once per session" intent the old
+// comment described but the old Set didn't actually deliver.
+const AUTO_OPENED_STORAGE_KEY = "rapidCup:autoOpenedLeagueIds";
+
+function loadAutoOpenedLeagueIds() {
+  try {
+    const raw = sessionStorage.getItem(AUTO_OPENED_STORAGE_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    // Storage unavailable (private mode, etc.) — fail open to "never
+    // remembered," which just costs an extra redirect worst case.
+    return new Set();
+  }
+}
+
+function markLeagueAutoOpened(leagueId) {
+  const ids = loadAutoOpenedLeagueIds();
+  ids.add(leagueId);
+  try {
+    sessionStorage.setItem(AUTO_OPENED_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Nothing we can do if storage is unavailable/full — swallow it.
+  }
+}
 
 function useOpenRapidCupLobby() {
   const [lobby, setLobby] = useState(null);
@@ -167,8 +195,13 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   // first time ever, not on every 5s poll tick and not on every remount
   // of this banner (see autoOpenedLeagueIds above).
   useEffect(() => {
-    if (lobby?.status === "live" && lobby?.league_id && myEntry && !autoOpenedLeagueIds.has(lobby.league_id)) {
-      autoOpenedLeagueIds.add(lobby.league_id);
+    if (
+      lobby?.status === "live" &&
+      lobby?.league_id &&
+      myEntry &&
+      !loadAutoOpenedLeagueIds().has(lobby.league_id)
+    ) {
+      markLeagueAutoOpened(lobby.league_id);
       onOpenLeague?.(lobby.league_id);
     }
   }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);
