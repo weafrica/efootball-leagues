@@ -22,7 +22,7 @@
 // system entirely.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle } from "lucide-react";
+import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Send, Heart, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
@@ -927,7 +927,27 @@ function OpponentTimezoneInfo({ theirLocation, myTimezone, c }) {
   );
 }
 
+// WIDGET_TABS — the four lazy-loaded widgets shown below the Standings
+// table (Results, Bids, Fixtures, Comments). Module-level (not per-render)
+// since it's static; the tab bar just maps over it and only the active
+// one's content actually mounts (see activeWidget below).
+const WIDGET_TABS = [
+  { id: "results", label: "Results", Icon: ListChecks },
+  { id: "bids", label: "Bids", Icon: Gavel },
+  { id: "fixtures", label: "Fixtures", Icon: CalendarDays },
+  { id: "comments", label: "Comments", Icon: MessageCircle },
+];
+
 export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack, showToast, onOpenLadderLeague, onOpenLadderPoolAdmin, myTimezone, c: appTheme }) {
+  // activeWidget — which of Results/Bids/Fixtures/Comments is currently
+  // shown below Standings. Only this one's content mounts (see the tab
+  // section near the bottom of the return) — LiveBidTicker's own
+  // polling/subscriptions and the comment thread's own fetch only kick in
+  // once a player actually opens that tab, rather than all four widgets
+  // loading on every visit to this screen. Defaults to Fixtures — the
+  // most commonly-needed widget (this week's matchups) — rather than
+  // nothing, so the screen isn't empty on first open.
+  const [activeWidget, setActiveWidget] = useState("fixtures");
   const [cycle, setCycle] = useState(null); // { current_week, fixtures_locked, bidding_open }
   // displayWeek — the week whose fixtures this screen actually shows.
   // NOT the same thing as cycle.current_week: join_ladder_league() always
@@ -1513,239 +1533,20 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
       (Date.now() - new Date(sub.created_at).getTime()) < SELF_CANCEL_WINDOW_MS;
   };
 
-  return (
-    <div className="p-4 flex flex-col gap-6" style={{ background: c.bg, fontFamily: c.font, minHeight: "100%" }}>
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
-          <ArrowLeft size={14} /> Back
-        </button>
-        {tier != null && (
-          <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
-            style={{ color: c.accentText, background: c.accent }}>
-            League {tier} · {c.name}
-          </span>
-        )}
-      </div>
+  // resultsFixtures / upcomingFixtures — the Fixtures list split by
+  // status so Results and Fixtures can be separate lazy-loaded tabs
+  // instead of one long combined list. Both reuse renderFixtureRow
+  // below so the submit/confirm/dispute/correct/cancel workflow only
+  // has to live in one place.
+  const resultsFixtures = visibleFixtures.filter(isFixtureDone);
+  const upcomingFixtures = filteredFixtures.filter((f) => !isFixtureDone(f));
 
-      {!isMember && (
-        <JoinLadderLeagueBanner tier={tier} maxTier={maxTier} joining={joining} joinError={joinError} onJoin={joinLadderLeague} c={c} />
-      )}
-
-      {standings.length === 0 && (
-        <JoinedPlayersList members={members} profilesById={profilesById} session={session} c={c} />
-      )}
-
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: c.textFaint }}>
-          Week {displayWeek} {displayWeek > (cycle?.current_week ?? 0)
-            ? "· scheduled"
-            : cycle?.fixtures_locked ? "· locked" : "· in progress"}
-        </div>
-        <div className="flex items-center gap-2 mb-3">
-          <Trophy size={16} style={{ color: c.accent }} />
-          <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
-        </div>
-        {/* overflow-x-auto (not overflow-hidden) on its own inner wrapper —
-            Zone now sits after Pts (per request), so a phone that can't
-            fit every column at once scrolls horizontally to reach it
-            rather than the table clipping it. min-w-[560px] on the table
-            keeps every column at a legible width so the scroll is always
-            available instead of columns getting squeezed illegibly thin. */}
-        <div className="rounded-xl overflow-hidden border" style={{ borderColor: c.border }}>
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-xs font-mono">
-            <thead>
-              <tr style={{ background: c.surface, color: c.textFaint }}>
-                <th className="text-left p-2">#</th>
-                <th className="text-left p-2">Player</th>
-                <th className="p-2">P</th>
-                <th className="p-2">W</th>
-                <th className="p-2">D</th>
-                <th className="p-2">L</th>
-                <th className="p-2">GD</th>
-                <th className="p-2">Pts</th>
-                <th className="text-left p-2 whitespace-nowrap">Zone</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((row, i) => {
-                const zone = zones[row.user_id];
-                const zoneColor = zone === "elite_safe" ? c.accent : zone === "danger_zone" ? c.red : zone === "checkpoint_safe" ? c.text : c.textFaint;
-                return (
-                  <tr key={row.user_id} style={{ borderTop: `1px solid ${c.border}`, color: c.text }}>
-                    <td className="p-2">{i + 1}</td>
-                    <td className="p-2 font-semibold whitespace-nowrap max-w-[110px] overflow-hidden text-ellipsis">
-                      {nameFor(row.user_id)}
-                      {/* Rank 1 in any non-top tier auto-promotes
-                          (resolveLadderWeek) — named here so a player can
-                          see exactly which league that lands them in
-                          without having to know the tier numbering
-                          convention. */}
-                      {i === 0 && tier > 1 && (
-                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded-full font-mono text-[9px] uppercase font-bold whitespace-nowrap" style={{ background: `${c.accent}22`, color: c.accent, border: `1px solid ${c.accent}55` }}>
-                          Promotion pace
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-2 text-center">{row.p}</td>
-                    <td className="p-2 text-center">{row.w}</td>
-                    <td className="p-2 text-center">{row.d}</td>
-                    <td className="p-2 text-center">{row.l}</td>
-                    <td className="p-2 text-center">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
-                    <td className="p-2 text-center font-bold">{row.pts}</td>
-                    {/* Highlighted pill (filled background, not just
-                        colored text) so Elite Safety Zone / Danger Zone
-                        actually stand out at the end of a long row of
-                        numbers instead of blending in as one more
-                        font-mono cell. */}
-                    <td className="p-2 whitespace-nowrap">
-                      {zone && (
-                        <span className="px-1.5 py-0.5 rounded-full font-mono text-[9px] uppercase font-bold whitespace-nowrap" style={{ background: `${zoneColor}22`, color: zoneColor, border: `1px solid ${zoneColor}55` }}>
-                          {ZONE_LABEL[zone]}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              {standings.length === 0 && (
-                <tr><td colSpan={9} className="p-3 text-center" style={{ color: c.textFaint }}>No fixtures yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
-
-        </div>
-      </div>
-
-      {isAdmin && (
-        <LadderMembersPanel leagueId={leagueId} tier={tier} members={members} profilesById={profilesById}
-          standings={standings} fixtures={fixtures} session={session}
-          reminders={memberReminders}
-          onSent={(uid, sentAt) => setMemberReminders((prev) => ({ ...prev, [uid]: sentAt }))}
-          onCleared={(uid) => setMemberReminders((prev) => ({ ...prev, [uid]: null }))}
-          c={c} />
-      )}
-
-      {/* Ladder Pool used to be an inline card mounted right here — it's
-          now its own screen (see LadderPoolAdminPanel.jsx's header), since
-          the pool is a global singleton, not scoped to this league. This
-          is just a link over to it. */}
-      {isAdmin && (
-        <button onClick={onOpenLadderPoolAdmin}
-          className="rounded-xl border p-3 flex items-center justify-between gap-3 text-left"
-          style={{ borderColor: c.border }}>
-          <div className="flex items-center gap-2">
-            <PiggyBank size={14} style={{ color: c.accent }} />
-            <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Ladder Pool (Admin)</span>
-          </div>
-          <ChevronRight size={14} style={{ color: c.textFaint }} />
-        </button>
-      )}
-
-      {/* PromotionBidBanner + embedded ticker — this league's OWN bid
-          ticker (right below) is for bidding on THIS league's spot from
-          below; this section is the opposite direction — a non-promoted,
-          non-danger-zone active member of THIS league is eligible to bid
-          their way into the league one tier up. Excludes danger_zone on
-          top of the existing rank-1 exclusion: a player fighting to
-          avoid the bottom 2 isn't in a position to also be chasing a
-          promoted spot above them — that banner would just be noise (see
-          myZone's own comment above for why the server doesn't need to
-          enforce this too). The bid itself now happens right here inline
-          (an embedded LiveBidTicker targeting the league above) instead
-          of a "Go bid" button that navigated to League {tier - 1}'s own
-          screen — the eligibility is identical either way (place_ladder_bid
-          checks the bidder server-side against the TARGET league, not
-          which screen they were on), so this is purely about not losing
-          the moment: watching your own league's table next to the league
-          above's live bid ticker, both open at once, is the suspense the
-          request asked for that a navigate-away button couldn't give. */}
-      {cycle?.bidding_open && displayWeek === cycle?.current_week && isMember
-        && myRankPosition != null && myRankPosition !== 1 && myZone !== "danger_zone" && tier > 1 && biddingTargetLeagueId && (
-        <div className="flex flex-col gap-2">
-          <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
-            <div className="font-body text-xs" style={{ color: c.text }}>
-              Bidding's open — you're eligible to bid for a promoted spot in <span className="font-bold">League {tier - 1}</span>.
-            </div>
-          </div>
-          <LiveBidTicker leagueId={biddingTargetLeagueId} weekNumber={cycle.current_week} tier={tier - 1} maxTier={maxTier} session={session} c={c} />
-        </div>
-      )}
-
-      {/* DangerZoneBanner — the symmetric case: a member currently sitting
-          in the bottom-2 badge (myZone === 'danger_zone') isn't chasing
-          promotion, they're one bad result from being relegated OUT of
-          League {tier} altogether. They don't get a second embedded
-          ticker here — the eligible pool for buying a fast return only
-          ever includes players ALREADY relegated (last week) plus this
-          league's own risers from League {tier + 1} (see
-          20260861_ladder_bidding.sql's _ladder_bid_eligible_pool_internal);
-          a still-active danger_zone player isn't in that pool yet, so an
-          interactive bid box here would just be rejected server-side.
-          What they get instead is the same "Aim For League {tier}" ticker
-          already rendered just below, reframed for them specifically: if
-          Sunday's standings drop them into the bottom 2, THIS is the exact
-          battle — against League {tier + 1}'s own risers — they'll need to
-          win to buy their way straight back in rather than sit out a full
-          cycle down a tier. */}
-      {myZone === "danger_zone" && (
-        <div className="rounded-xl border p-3" style={{ borderColor: c.red, background: `${c.red}14` }}>
-          <div className="font-body text-xs" style={{ color: c.text }}>
-            ⚠️ You're in the <span className="font-bold">Danger Zone</span>. Finish Sunday in the bottom 2 and you're relegated — the ticker below is exactly the fight you'd face to buy your way straight back into <span className="font-bold">League {tier}</span>, against League {(tier ?? 0) + 1}'s own risers.
-          </div>
-        </div>
-      )}
-
-      {cycle?.bidding_open && displayWeek === cycle?.current_week && (
-        tier === 1 ? (
-          // League 1 has no league above it and isn't part of its own
-          // ticker's bidder pool either way (that pool is previously-
-          // relegated players + League 2 risers, never a currently-safe
-          // League 1 member — see the DangerZoneBanner comment above), so
-          // only the bottom-2 Danger Zone members — the ones actually at
-          // risk and who WILL be in that pool the moment they're
-          // relegated — see the ticker. Every other member (isMember
-          // guards out non-members, who genuinely could be eligible
-          // bidders) gets a Kit Room congratulations message instead.
-          myZone === "danger_zone" ? (
-            <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
-          ) : isMember ? (
-            <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
-              <div className="font-body text-xs font-semibold" style={{ color: c.text }}>
-                {KIT_ROOM_MESSAGES[kitRoomMsgIndex](nameFor(session?.user?.id))}
-              </div>
-            </div>
-          ) : (
-            <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
-          )
-        ) : myRankPosition === 1 ? (
-          // Rank 1 in a non-top tier auto-promotes regardless of who bids
-          // what — this league's own bidding war is for everyone else's
-          // seat, not theirs, so showing the ticker here would wrongly
-          // suggest they might need to bid to stay. A congratulations
-          // message instead, picked from RANK1_SAFE_MESSAGES.
-          <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
-            <div className="font-body text-xs font-semibold" style={{ color: c.text }}>
-              {RANK1_SAFE_MESSAGES[rank1MsgIndex](tier)}
-            </div>
-          </div>
-        ) : (
-          <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
-        )
-      )}
-
-      <div>
-        <div className="text-sm font-bold mb-3" style={{ color: c.text, fontFamily: c.font }}>Fixtures</div>
-        <div className="relative mb-3">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: c.textFaint }} />
-          <input type="text" value={opponentQuery} onChange={(e) => setOpponentQuery(e.target.value)}
-            placeholder="Find my opponent…"
-            className="w-full font-mono text-xs rounded-lg pl-8 pr-3 py-2 outline-none"
-            style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-        </div>
-        <div className="flex flex-col gap-2">
-          {filteredFixtures.map((f) => (
+  // renderFixtureRow — one fixture's row, exactly as before this tab
+  // split, just pulled out to a function so both the Results tab
+  // (played/forfeited fixtures) and the Fixtures tab (pending ones)
+  // can call it via .map(renderFixtureRow) without duplicating the
+  // ~300 lines of submit/confirm/dispute/correct/cancel logic inside.
+  const renderFixtureRow = (f) => (
             <div key={f.id} className="rounded-lg border p-3 flex flex-col gap-1.5" style={{ borderColor: c.border }}>
               <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-mono text-xs" style={{ color: c.text }}>
@@ -2060,14 +1861,461 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                 <OpponentTimezoneInfo theirLocation={opponentFor(f)} myTimezone={myTimezone} c={c} />
               )}
             </div>
-          ))}
-          {filteredFixtures.length === 0 && (
-            <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
-              {oq ? `No fixture matching "${opponentQuery}".` : isAdmin ? "No fixtures for this league yet." : "You have no fixture this week."}
-            </div>
-          )}
+  );
+
+  return (
+    <div className="p-4 flex flex-col gap-6" style={{ background: c.bg, fontFamily: c.font, minHeight: "100%" }}>
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
+          <ArrowLeft size={14} /> Back
+        </button>
+        {tier != null && (
+          <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
+            style={{ color: c.accentText, background: c.accent }}>
+            League {tier} · {c.name}
+          </span>
+        )}
+      </div>
+
+      {!isMember && (
+        <JoinLadderLeagueBanner tier={tier} maxTier={maxTier} joining={joining} joinError={joinError} onJoin={joinLadderLeague} c={c} />
+      )}
+
+      {standings.length === 0 && (
+        <JoinedPlayersList members={members} profilesById={profilesById} session={session} c={c} />
+      )}
+
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: c.textFaint }}>
+          Week {displayWeek} {displayWeek > (cycle?.current_week ?? 0)
+            ? "· scheduled"
+            : cycle?.fixtures_locked ? "· locked" : "· in progress"}
+        </div>
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy size={16} style={{ color: c.accent }} />
+          <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
+        </div>
+        {/* overflow-x-auto (not overflow-hidden) on its own inner wrapper —
+            Zone now sits after Pts (per request), so a phone that can't
+            fit every column at once scrolls horizontally to reach it
+            rather than the table clipping it. min-w-[560px] on the table
+            keeps every column at a legible width so the scroll is always
+            available instead of columns getting squeezed illegibly thin. */}
+        <div className="rounded-xl overflow-hidden border" style={{ borderColor: c.border }}>
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-xs font-mono">
+            <thead>
+              <tr style={{ background: c.surface, color: c.textFaint }}>
+                <th className="text-left p-2">#</th>
+                <th className="text-left p-2">Player</th>
+                <th className="p-2">P</th>
+                <th className="p-2">W</th>
+                <th className="p-2">D</th>
+                <th className="p-2">L</th>
+                <th className="p-2">GD</th>
+                <th className="p-2">Pts</th>
+                <th className="text-left p-2 whitespace-nowrap">Zone</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((row, i) => {
+                const zone = zones[row.user_id];
+                const zoneColor = zone === "elite_safe" ? c.accent : zone === "danger_zone" ? c.red : zone === "checkpoint_safe" ? c.text : c.textFaint;
+                return (
+                  <tr key={row.user_id} style={{ borderTop: `1px solid ${c.border}`, color: c.text }}>
+                    <td className="p-2">{i + 1}</td>
+                    <td className="p-2 font-semibold whitespace-nowrap max-w-[110px] overflow-hidden text-ellipsis">
+                      {nameFor(row.user_id)}
+                      {/* Rank 1 in any non-top tier auto-promotes
+                          (resolveLadderWeek) — named here so a player can
+                          see exactly which league that lands them in
+                          without having to know the tier numbering
+                          convention. */}
+                      {i === 0 && tier > 1 && (
+                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded-full font-mono text-[9px] uppercase font-bold whitespace-nowrap" style={{ background: `${c.accent}22`, color: c.accent, border: `1px solid ${c.accent}55` }}>
+                          Promotion pace
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-2 text-center">{row.p}</td>
+                    <td className="p-2 text-center">{row.w}</td>
+                    <td className="p-2 text-center">{row.d}</td>
+                    <td className="p-2 text-center">{row.l}</td>
+                    <td className="p-2 text-center">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
+                    <td className="p-2 text-center font-bold">{row.pts}</td>
+                    {/* Highlighted pill (filled background, not just
+                        colored text) so Elite Safety Zone / Danger Zone
+                        actually stand out at the end of a long row of
+                        numbers instead of blending in as one more
+                        font-mono cell. */}
+                    <td className="p-2 whitespace-nowrap">
+                      {zone && (
+                        <span className="px-1.5 py-0.5 rounded-full font-mono text-[9px] uppercase font-bold whitespace-nowrap" style={{ background: `${zoneColor}22`, color: zoneColor, border: `1px solid ${zoneColor}55` }}>
+                          {ZONE_LABEL[zone]}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {standings.length === 0 && (
+                <tr><td colSpan={9} className="p-3 text-center" style={{ color: c.textFaint }}>No fixtures yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+          </div>
+
         </div>
       </div>
+
+      {isAdmin && (
+        <LadderMembersPanel leagueId={leagueId} tier={tier} members={members} profilesById={profilesById}
+          standings={standings} fixtures={fixtures} session={session}
+          reminders={memberReminders}
+          onSent={(uid, sentAt) => setMemberReminders((prev) => ({ ...prev, [uid]: sentAt }))}
+          onCleared={(uid) => setMemberReminders((prev) => ({ ...prev, [uid]: null }))}
+          c={c} />
+      )}
+
+      {/* Ladder Pool used to be an inline card mounted right here — it's
+          now its own screen (see LadderPoolAdminPanel.jsx's header), since
+          the pool is a global singleton, not scoped to this league. This
+          is just a link over to it. */}
+      {isAdmin && (
+        <button onClick={onOpenLadderPoolAdmin}
+          className="rounded-xl border p-3 flex items-center justify-between gap-3 text-left"
+          style={{ borderColor: c.border }}>
+          <div className="flex items-center gap-2">
+            <PiggyBank size={14} style={{ color: c.accent }} />
+            <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Ladder Pool (Admin)</span>
+          </div>
+          <ChevronRight size={14} style={{ color: c.textFaint }} />
+        </button>
+      )}
+
+      {/* Results / Bids / Fixtures / Comments — four widgets sharing one
+          spot below the Standings table. Only the active tab's content
+          mounts, so LiveBidTicker (its own polling) and the comment
+          thread (its own fetch) only load once a player actually opens
+          that tab, instead of every widget fetching on every visit. */}
+      <div>
+        <div className="flex gap-1.5 mb-3 overflow-x-auto">
+          {WIDGET_TABS.map((w) => (
+            <button key={w.id} onClick={() => setActiveWidget(w.id)}
+              className="shrink-0 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest px-3 py-2 rounded-lg"
+              style={activeWidget === w.id
+                ? { background: c.accent, color: c.accentText }
+                : { background: c.surfaceHover, color: c.textFaint, border: `1px solid ${c.border}` }}>
+              <w.Icon size={12} /> {w.label}
+            </button>
+          ))}
+        </div>
+
+        {activeWidget === "results" && (
+          <div className="flex flex-col gap-2">
+            {resultsFixtures.map(renderFixtureRow)}
+            {resultsFixtures.length === 0 && (
+              <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
+                No results yet this week.
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeWidget === "bids" && (
+          <div className="flex flex-col gap-3">
+      {/* PromotionBidBanner + embedded ticker — this league's OWN bid
+          ticker (right below) is for bidding on THIS league's spot from
+          below; this section is the opposite direction — a non-promoted,
+          non-danger-zone active member of THIS league is eligible to bid
+          their way into the league one tier up. Excludes danger_zone on
+          top of the existing rank-1 exclusion: a player fighting to
+          avoid the bottom 2 isn't in a position to also be chasing a
+          promoted spot above them — that banner would just be noise (see
+          myZone's own comment above for why the server doesn't need to
+          enforce this too). The bid itself now happens right here inline
+          (an embedded LiveBidTicker targeting the league above) instead
+          of a "Go bid" button that navigated to League {tier - 1}'s own
+          screen — the eligibility is identical either way (place_ladder_bid
+          checks the bidder server-side against the TARGET league, not
+          which screen they were on), so this is purely about not losing
+          the moment: watching your own league's table next to the league
+          above's live bid ticker, both open at once, is the suspense the
+          request asked for that a navigate-away button couldn't give. */}
+      {cycle?.bidding_open && displayWeek === cycle?.current_week && isMember
+        && myRankPosition != null && myRankPosition !== 1 && myZone !== "danger_zone" && tier > 1 && biddingTargetLeagueId && (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
+            <div className="font-body text-xs" style={{ color: c.text }}>
+              Bidding's open — you're eligible to bid for a promoted spot in <span className="font-bold">League {tier - 1}</span>.
+            </div>
+          </div>
+          <LiveBidTicker leagueId={biddingTargetLeagueId} weekNumber={cycle.current_week} tier={tier - 1} maxTier={maxTier} session={session} c={c} />
+        </div>
+      )}
+
+      {/* DangerZoneBanner — the symmetric case: a member currently sitting
+          in the bottom-2 badge (myZone === 'danger_zone') isn't chasing
+          promotion, they're one bad result from being relegated OUT of
+          League {tier} altogether. They don't get a second embedded
+          ticker here — the eligible pool for buying a fast return only
+          ever includes players ALREADY relegated (last week) plus this
+          league's own risers from League {tier + 1} (see
+          20260861_ladder_bidding.sql's _ladder_bid_eligible_pool_internal);
+          a still-active danger_zone player isn't in that pool yet, so an
+          interactive bid box here would just be rejected server-side.
+          What they get instead is the same "Aim For League {tier}" ticker
+          already rendered just below, reframed for them specifically: if
+          Sunday's standings drop them into the bottom 2, THIS is the exact
+          battle — against League {tier + 1}'s own risers — they'll need to
+          win to buy their way straight back in rather than sit out a full
+          cycle down a tier. */}
+      {myZone === "danger_zone" && (
+        <div className="rounded-xl border p-3" style={{ borderColor: c.red, background: `${c.red}14` }}>
+          <div className="font-body text-xs" style={{ color: c.text }}>
+            ⚠️ You're in the <span className="font-bold">Danger Zone</span>. Finish Sunday in the bottom 2 and you're relegated — the ticker below is exactly the fight you'd face to buy your way straight back into <span className="font-bold">League {tier}</span>, against League {(tier ?? 0) + 1}'s own risers.
+          </div>
+        </div>
+      )}
+
+      {cycle?.bidding_open && displayWeek === cycle?.current_week && (
+        tier === 1 ? (
+          // League 1 has no league above it and isn't part of its own
+          // ticker's bidder pool either way (that pool is previously-
+          // relegated players + League 2 risers, never a currently-safe
+          // League 1 member — see the DangerZoneBanner comment above), so
+          // only the bottom-2 Danger Zone members — the ones actually at
+          // risk and who WILL be in that pool the moment they're
+          // relegated — see the ticker. Every other member (isMember
+          // guards out non-members, who genuinely could be eligible
+          // bidders) gets a Kit Room congratulations message instead.
+          myZone === "danger_zone" ? (
+            <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
+          ) : isMember ? (
+            <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
+              <div className="font-body text-xs font-semibold" style={{ color: c.text }}>
+                {KIT_ROOM_MESSAGES[kitRoomMsgIndex](nameFor(session?.user?.id))}
+              </div>
+            </div>
+          ) : (
+            <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
+          )
+        ) : myRankPosition === 1 ? (
+          // Rank 1 in a non-top tier auto-promotes regardless of who bids
+          // what — this league's own bidding war is for everyone else's
+          // seat, not theirs, so showing the ticker here would wrongly
+          // suggest they might need to bid to stay. A congratulations
+          // message instead, picked from RANK1_SAFE_MESSAGES.
+          <div className="rounded-xl border p-3" style={{ borderColor: c.accent, background: `${c.accent}14` }}>
+            <div className="font-body text-xs font-semibold" style={{ color: c.text }}>
+              {RANK1_SAFE_MESSAGES[rank1MsgIndex](tier)}
+            </div>
+          </div>
+        ) : (
+          <LiveBidTicker leagueId={leagueId} weekNumber={cycle.current_week} tier={tier} maxTier={maxTier} session={session} c={c} />
+        )
+      )}
+            {/* Nothing eligible to show — bidding's closed for this week
+                and the viewer isn't in the Danger Zone (the one bid-related
+                banner that doesn't depend on bidding being open). */}
+            {!(cycle?.bidding_open && displayWeek === cycle?.current_week) && myZone !== "danger_zone" && (
+              <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
+                No bidding activity right now — check back when bidding opens.
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeWidget === "fixtures" && (
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: c.textFaint }} />
+              <input type="text" value={opponentQuery} onChange={(e) => setOpponentQuery(e.target.value)}
+                placeholder="Find my opponent…"
+                className="w-full font-mono text-xs rounded-lg pl-8 pr-3 py-2 outline-none"
+                style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+            </div>
+            <div className="flex flex-col gap-2">
+              {upcomingFixtures.map(renderFixtureRow)}
+              {upcomingFixtures.length === 0 && (
+                <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
+                  {oq ? `No fixture matching "${opponentQuery}".` : isAdmin ? "No fixtures for this league yet." : "You have no fixture this week."}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeWidget === "comments" && (
+          <LadderLeagueComments leagueId={leagueId} session={session} isAdmin={isAdmin} isMember={isMember} nameFor={nameFor} c={c} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// timeAgoShort — minimal relative timestamp for comment rows (just this
+// widget's needs; the app's other comment threads have their own richer
+// version in App.jsx, not exported for reuse here).
+function timeAgoShort(iso) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(iso).toLocaleDateString();
+}
+
+// LadderLeagueComments — this League Ladder tier's own comment wall,
+// backed by ladder_league_comments/ladder_league_comment_likes (separate
+// from the regular-league `comments` table and from the OLD 1v1 challenge
+// Ladder's single global `ladder_comments` — see the migration header for
+// why this needed its own tables). Self-contained: fetches on its own
+// mount, which — since it's only ever rendered while
+// activeWidget === "comments" above — is exactly the lazy-load behavior
+// the other three widgets get too.
+function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, c }) {
+  const [comments, setComments] = useState(null); // null = loading
+  const [body, setBody] = useState("");
+  const [replyTo, setReplyTo] = useState(null); // comment being replied to, or null
+  const [posting, setPosting] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from("ladder_league_comments")
+      .select("*, ladder_league_comment_likes(*)")
+      .eq("league_id", leagueId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) { console.error("Couldn't load comments:", error.message); setComments([]); return; }
+    setComments(data || []);
+  }, [leagueId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const post = async () => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    setPosting(true);
+    const { error } = await supabase.from("ladder_league_comments").insert({
+      league_id: leagueId,
+      user_id: session.user.id,
+      username: nameFor(session.user.id),
+      body: trimmed,
+      parent_comment_id: replyTo?.id || null,
+    });
+    setPosting(false);
+    if (error) { console.error("Couldn't post comment:", error.message); return; }
+    setBody("");
+    setReplyTo(null);
+    await load();
+  };
+
+  const remove = async (comment) => {
+    const { error } = await supabase.from("ladder_league_comments").delete().eq("id", comment.id);
+    setDeletingId(null);
+    if (error) { console.error("Couldn't delete comment:", error.message); return; }
+    await load();
+  };
+
+  const toggleLike = async (comment) => {
+    const mine = (comment.ladder_league_comment_likes || []).find((l) => l.user_id === session.user.id);
+    if (mine) {
+      const { error } = await supabase.from("ladder_league_comment_likes").delete().eq("id", mine.id);
+      if (error) { console.error("Couldn't remove reaction:", error.message); return; }
+    } else {
+      const { error } = await supabase.from("ladder_league_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction: "👍" });
+      if (error) { console.error("Couldn't react:", error.message); return; }
+    }
+    await load();
+  };
+
+  if (comments === null) {
+    return (
+      <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>Loading comments…</div>
+    );
+  }
+
+  const topLevel = comments.filter((cm) => !cm.parent_comment_id);
+  const repliesOf = (id) => comments.filter((cm) => cm.parent_comment_id === id).slice().reverse();
+
+  const canDelete = (cm) => isAdmin || cm.user_id === session?.user?.id;
+
+  const CommentRow = ({ cm, isReply }) => {
+    const mine = (cm.ladder_league_comment_likes || []).find((l) => l.user_id === session?.user?.id);
+    const likeCount = (cm.ladder_league_comment_likes || []).length;
+    return (
+      <div className={isReply ? "ml-6 pt-2" : "pt-3"} style={!isReply ? { borderTop: `1px solid ${c.border}` } : undefined}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-xs font-bold" style={{ color: c.text }}>{cm.username}</span>
+              <span className="font-mono text-[9px]" style={{ color: c.textFaint }}>{timeAgoShort(cm.created_at)}</span>
+            </div>
+            <div className="text-xs mt-0.5 whitespace-pre-wrap break-words" style={{ color: c.text, fontFamily: c.font }}>{cm.body}</div>
+            <div className="flex items-center gap-3 mt-1">
+              <button onClick={() => toggleLike(cm)} className="flex items-center gap-1 font-mono text-[9px]" style={{ color: mine ? c.accent : c.textFaint }}>
+                <Heart size={10} fill={mine ? c.accent : "none"} /> {likeCount > 0 ? likeCount : ""}
+              </button>
+              {!isReply && isMember && (
+                <button onClick={() => setReplyTo(cm)} className="font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>Reply</button>
+              )}
+              {canDelete(cm) && (
+                deletingId === cm.id ? (
+                  <span className="flex items-center gap-2">
+                    <button onClick={() => remove(cm)} className="font-mono text-[9px] uppercase" style={{ color: c.red }}>Confirm delete</button>
+                    <button onClick={() => setDeletingId(null)} className="font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>Cancel</button>
+                  </span>
+                ) : (
+                  <button onClick={() => setDeletingId(cm.id)} className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
+                    <Trash2 size={10} />
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+        {repliesOf(cm.id).map((r) => <CommentRow key={r.id} cm={r} isReply />)}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {isMember ? (
+        <div className="rounded-lg border p-2" style={{ borderColor: c.border }}>
+          {replyTo && (
+            <div className="flex items-center justify-between mb-1.5 font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>
+              <span>Replying to {replyTo.username}</span>
+              <button onClick={() => setReplyTo(null)} style={{ color: c.textFaint }}>✕</button>
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
+              placeholder="Say something to the league…"
+              className="flex-1 font-mono text-xs rounded-lg p-2 outline-none resize-none"
+              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+            <button onClick={post} disabled={posting || !body.trim()}
+              className="font-mono text-[10px] uppercase px-3 py-2 rounded-lg flex items-center gap-1 shrink-0 disabled:opacity-50"
+              style={{ background: c.accent, color: c.accentText }}>
+              <Send size={12} /> {posting ? "…" : "Post"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="font-mono text-[10px] uppercase text-center py-2" style={{ color: c.textFaint }}>
+          Join this league to post.
+        </div>
+      )}
+
+      {topLevel.length === 0 ? (
+        <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>No comments yet — be the first to say something.</div>
+      ) : (
+        topLevel.map((cm) => <CommentRow key={cm.id} cm={cm} isReply={false} />)
+      )}
     </div>
   );
 }

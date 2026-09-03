@@ -13038,18 +13038,14 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const [findBusy, setFindBusy] = useState(false);
   const [findError, setFindError] = useState(null);
   // scrollRef/cardRefs — the horizontal strip container and a league_id ->
-  // card-DOM-node map, used purely so the strip can auto-scroll a
-  // player's own league into view on load (below) instead of always
-  // opening on League 1 and making them hunt for their own tier by hand.
+  // card-DOM-node map. The strip itself now opens with the viewer's own
+  // league (or, for a new user, the joinable league) placed first — see
+  // displayLeagues below — so there's no scrolling needed to reach it;
+  // cardRefs is kept only because individual cards still register
+  // themselves against it (harmless, and cheap to keep around in case a
+  // future jump-to-card use needs it again).
   const scrollRef = useRef(null);
   const cardRefs = useRef({});
-  // hasAutoScrolledRef — scrollIntoView should only fire once per mount,
-  // not on every re-render this section's own realtime-free polling
-  // (load() re-running after a join, a leader-picture refresh, etc.)
-  // triggers — otherwise the strip would keep yanking a player back to
-  // their league every few seconds instead of leaving scroll position
-  // alone once they've moved it themselves.
-  const hasAutoScrolledRef = useRef(false);
 
   const load = useCallback(async () => {
     const [{ data: leagueRows }, { data: cycleRow }] = await Promise.all([
@@ -13122,30 +13118,6 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-scroll the STRIP (horizontally, inside scrollRef) to whichever
-  // league the viewer is actually active in, once. Deliberately NOT
-  // card.scrollIntoView() — that scrolls every scrollable ancestor
-  // needed to satisfy it, including the page itself if this section
-  // starts below the fold on load, which reads as "the whole homepage
-  // jumped" rather than "the ladder strip scrolled". Computing scrollLeft
-  // by hand and calling scrollTo directly on scrollRef's own container
-  // keeps this to strictly horizontal movement inside that one strip —
-  // the page's own scroll position is never touched.
-  useEffect(() => {
-    if (hasAutoScrolledRef.current) return;
-    if (!ladderLeagues || ladderLeagues.length === 0) return;
-    if (!membership) return;
-    const currentWeek = cycle?.current_week ?? 0;
-    const isActive = membership.status === "active" && membership.week_number >= currentWeek;
-    if (!isActive) return;
-    const container = scrollRef.current;
-    const card = cardRefs.current[membership.league_id];
-    if (!container || !card) return;
-    hasAutoScrolledRef.current = true;
-    const targetLeft = card.offsetLeft - (container.clientWidth - card.clientWidth) / 2;
-    container.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
-  }, [ladderLeagues, membership, cycle?.current_week]);
-
   if (!ladderLeagues || ladderLeagues.length === 0) return null;
 
   const currentWeek = cycle?.current_week ?? 0;
@@ -13161,6 +13133,22 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const isMemberOf = (leagueId) => hasActiveMembership && membership.league_id === leagueId;
   const bottomLeague = ladderLeagues[ladderLeagues.length - 1];
   const myTier = hasActiveMembership ? ladderLeagues.find((l) => l.id === membership.league_id)?.tier : null;
+
+  // displayLeagues — ladderLeagues reordered so the viewer never has to
+  // scroll to find the one card that matters to them: their own active
+  // league goes first if they're on the ladder, or — for a brand new
+  // player with no membership yet — the joinable league (always the
+  // bottom/highest tier; join_ladder_league always seats new joiners
+  // there) goes first instead, so "where do I coin in?" is the first
+  // card they see. ladderLeagues itself (tier order) is left untouched —
+  // bottomLeague/myTier/tier lookups elsewhere still depend on it.
+  const displayLeagues = (() => {
+    const arr = ladderLeagues.slice();
+    const priorityId = hasActiveMembership ? membership.league_id : bottomLeague?.id;
+    const idx = arr.findIndex((l) => l.id === priorityId);
+    if (idx > 0) arr.unshift(arr.splice(idx, 1)[0]);
+    return arr;
+  })();
 
   const join = async () => {
     setJoining(true);
@@ -13252,7 +13240,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
             it stays — just appended after the full list now instead of
             swapped in for one specific card, so every tier (bottom
             included) always has a card here for every viewer. */}
-        {ladderLeagues.map((lg) => {
+        {displayLeagues.map((lg) => {
           const mine = isMemberOf(lg.id);
           // Admins aren't a member of every tier, but still need to be able
           // to open any of them — to review fixtures, approve/reject
@@ -13295,9 +13283,25 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                   </div>
                 )}
               </div>
-              <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
-                {currentWeek > 0 ? `Week ${currentWeek}` : "Join anytime — no fixed start date"}
-              </div>
+              {/* Week number only shown on the viewer's OWN league card —
+                  every other tier can be sitting on a different week
+                  (overflow/newly-split leagues start at week 1 while
+                  older ones are already several weeks in), so a single
+                  shared "Week N" across every card would just be wrong
+                  for most of them. mine uses membership.week_number (this
+                  player's actual week in THIS league), not the global
+                  cycle.current_week. */}
+              {mine ? (
+                <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
+                  Week {membership.week_number}
+                </div>
+              ) : currentWeek === 0 ? (
+                <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
+                  Join anytime — no fixed start date
+                </div>
+              ) : (
+                <div className="mb-2" />
+              )}
               {mine ? (
                 <button onClick={(e) => { e.stopPropagation(); onOpenLadderLeague(lg.id); }}
                   className="w-full font-mono text-[10px] uppercase px-3 py-2 rounded"
