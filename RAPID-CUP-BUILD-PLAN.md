@@ -179,7 +179,13 @@ player_gets    = invested_share × 20%   (on top of self_share, and on top of ba
   - `compute_rapid_cup_payout()` — pure guaranteed-stake-back formula from Section 4a, verified against both Section 4b worked examples
   - `finalize_rapid_cup_payout()` — records the payout in the new `rapid_cup_payouts` table, marks the lobby `completed`, idempotent on repeat calls
   - **Open item:** not granted to `authenticated` on purpose. It takes `p_winner_user_id` as a parameter — nothing yet determines the real winner from match results (that's the Section 4d tiebreaker logic). Phase 4/5's auto-finish should call this itself once it can compute a server-verified winner; a client should never be able to call it and name itself the winner.
-- ⬜ Phase 4 — not started
+- ✅ **Phase 4 — shipped** (`supabase/migrations/20260903170000_rapid_cup_bracket_advance.sql`, `20260903180000_rapid_cup_auto_finish_tiebreakers.sql`)
+  - `_rapid_cup_advance_bracket_internal()` — creates the final once both semis are decided (score, or penalties on a level scoreline — same single-leg rule as every other round); idempotent, waits patiently if a semi's still level with no pens entered
+  - `_rapid_cup_finish_lobby_internal()` — Section 4d in order: most wins -> most goals -> even split among the tied -> full refund if nobody played at all; the two single-winner cases call Phase 3's `finalize_rapid_cup_payout()` directly
+  - `rapid_cup_payouts` extended with an `outcome` column (`winner`/`split`/`refund`); new `rapid_cup_payout_recipients` table holds the per-player breakdown for split/refund, since those pay more than one person — the existing single-winner shape from Phase 3 is untouched
+  - `_rapid_cup_sweep_internal()` cron job, every 2 minutes: advances any bracket that's ready, then finishes any lobby past its shared 4hr deadline
+  - Tested against a live schema clone: clean win-by-wins, win-by-goals-tiebreak after undecided semis, a 4-way full tie, a genuine 2-way split, and a nobody-played refund — all matched hand-calculated payouts exactly; idempotency and the due_at gate (untouched lobbies stay untouched) also verified
+  - **Not yet wired:** Phase 5's result-submission pipeline is what actually gets `played`/`pens_home`/`pens_away` set from real matches — until then this phase's logic is correct but has nothing to react to
 - ⬜ Phase 5 — not started
 - ⬜ Phase 6 — not started
 - ⬜ Phase 7 — not started
