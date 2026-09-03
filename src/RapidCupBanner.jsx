@@ -254,11 +254,35 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   const isMine = !!myEntry;
   const isFull = playerCount >= 4;
 
+  // Tapping the banner used to be hard-wired to the "tap Join" nudge no
+  // matter what — fine for a viewer who hasn't joined, but wrong once
+  // they have: they'd tap their own "You're in" / "Open" banner and just
+  // get told to join again instead of being let back in. Route by what's
+  // actually true for this viewer instead:
+  //   - already seated AND the lobby has a league (bracket generated,
+  //     filling or live) -> take them straight there, same handler the
+  //     auto-redirect effect above uses, so it's a no-op if they're
+  //     already on it.
+  //   - already seated but still waiting on the 4th player -> nothing to
+  //     enter yet; say so instead of nudging them to "Join" again.
+  //   - not seated -> original light nudge toward the Join button.
+  const handleBannerClick = () => {
+    if (myEntry && lobby.league_id) {
+      onOpenLeague?.(lobby.league_id);
+      return;
+    }
+    if (myEntry) {
+      showToast?.("You're in — hang tight, the tournament opens once the lobby fills.");
+      return;
+    }
+    onOpenLobby?.(lobby.id);
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => onOpenLobby?.(lobby.id)}
+      onClick={handleBannerClick}
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 16px", borderRadius: 12, cursor: "pointer",
