@@ -26,6 +26,13 @@ declare
   v_now timestamptz := now();
   v_final_exists boolean;
 begin
+  -- Closes a check-then-insert race: two overlapping calls for the same
+  -- league (e.g. two overlapping sweep-cron runs) could otherwise both
+  -- pass the "does the final exist?" check below before either had
+  -- inserted, producing two finals. This serializes concurrent calls
+  -- for the same league; released automatically at transaction end.
+  perform pg_advisory_xact_lock(hashtext(p_league_id::text)::bigint);
+
   select exists(select 1 from fixtures where league_id = p_league_id and round = 2 and stage = 1)
   into v_final_exists;
 
