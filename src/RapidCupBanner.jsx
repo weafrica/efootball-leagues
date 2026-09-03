@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 
 // RapidCupBanner — horizontal banner for the home screen, sits under
 // Quick Actions (see App.jsx home layout). Shows the current open
@@ -53,8 +54,8 @@ function useOpenRapidCupLobby() {
 export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c }) {
   const { lobby, playerCount, myEntry, reload } = useOpenRapidCupLobby();
   const [now, setNow] = useState(() => Date.now());
-  const [entryFeeInput, setEntryFeeInput] = useState(0);
   const [joining, setJoining] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
   const firedThresholds = useRef(new Set());
   const lastLobbyId = useRef(null);
 
@@ -119,11 +120,15 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
     });
   }, [lobby?.status, lobby?.league_id, lobby?.id, myEntry, reload]);
 
-  const join = async () => {
+  // Fee is chosen in RapidCupJoinModal (Section 3's 0–400 Nets slider) —
+  // join() itself no longer guesses at 0, it just carries whatever the
+  // modal confirms.
+  const join = async (fee) => {
     setJoining(true);
-    const { error } = await supabase.rpc("join_rapid_cup_lobby", { p_entry_fee: entryFeeInput });
+    const { error } = await supabase.rpc("join_rapid_cup_lobby", { p_entry_fee: fee });
     setJoining(false);
     if (error) { showToast?.(error.message || "Couldn't join Rapid Cup."); return; }
+    setShowJoinModal(false);
     await reload();
   };
 
@@ -168,7 +173,7 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
           <span style={{ fontSize: 13, opacity: 0.8 }}>You're in</span>
         ) : (
           <button
-            onClick={(e) => { e.stopPropagation(); join(); }}
+            onClick={(e) => { e.stopPropagation(); setShowJoinModal(true); }}
             disabled={joining}
             style={{ padding: "8px 16px", borderRadius: 8, fontWeight: 600 }}
           >
@@ -182,6 +187,14 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
           {isMine ? "Open" : "Join next"}
         </span>
       )}
+
+      <RapidCupJoinModal
+        open={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        onConfirm={join}
+        joining={joining}
+        c={c}
+      />
     </div>
   );
 }
