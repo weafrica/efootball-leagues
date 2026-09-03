@@ -18,13 +18,48 @@ function useOpenRapidCupLobby() {
   const [myEntry, setMyEntry] = useState(null); // this viewer's row in the current lobby, if joined
 
   const load = useCallback(async () => {
-    const { data: lobbyRow } = await supabase
-      .from("rapid_cup_lobbies")
-      .select("*")
-      .in("status", ["open", "filling", "live"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: { user } = {} } = await supabase.auth.getUser();
+
+    // Prefer a lobby the viewer is actually IN and still filling/live over
+    // "whatever lobby is newest." Once a lobby fills, join_rapid_cup_lobby
+    // immediately creates a fresh empty "open" lobby to chain into — that
+    // new lobby has a LATER created_at than the one that just filled, so
+    // ordering by created_at desc alone would show the 4 players who just
+    // filled it an empty lobby that isn't theirs (myEntry would come back
+    // null there, which silently breaks both bracket generation and the
+    // live-tournament redirect below).
+    let lobbyRow = null;
+    if (user?.id) {
+      const { data: myRows } = await supabase
+        .from("rapid_cup_lobby_players")
+        .select("lobby_id")
+        .eq("user_id", user.id);
+      const myLobbyIds = (myRows || []).map((r) => r.lobby_id);
+      if (myLobbyIds.length) {
+        const { data: myActive } = await supabase
+          .from("rapid_cup_lobbies")
+          .select("*")
+          .in("id", myLobbyIds)
+          .in("status", ["filling", "live"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        lobbyRow = myActive || null;
+      }
+    }
+
+    // Not in an active (filling/live) lobby of our own — fall back to
+    // showing whatever the current open lobby is, for the "Join" flow.
+    if (!lobbyRow) {
+      const { data: latest } = await supabase
+        .from("rapid_cup_lobbies")
+        .select("*")
+        .in("status", ["open", "filling", "live"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      lobbyRow = latest;
+    }
 
     if (!lobbyRow) { setLobby(null); setPlayerCount(0); setMyEntry(null); return; }
 
@@ -35,7 +70,6 @@ function useOpenRapidCupLobby() {
 
     setLobby(lobbyRow);
     setPlayerCount(players?.length || 0);
-    const { data: { user } = {} } = await supabase.auth.getUser();
     setMyEntry((players || []).find((p) => p.user_id === user?.id) || null);
   }, []);
 
@@ -194,29 +228,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
         onConfirm={join}
         joining={joining}
         c={c}
-      />
-    </div>
-  );
-}
-
-// Entry-fee slider — separate small component so it can be dropped into
-// the join flow (e.g. a modal before calling join()) without cluttering
-// the banner above. Wire this up wherever the "Join" tap should open a
-// fee-picker first, per the 0–400 Nets / increase-only rule from the
-// build plan.
-export function EntryFeeSlider({ value, onChange, min = 0, disabled }) {
-  return (
-    <div>
-      <label style={{ fontSize: 13, opacity: 0.8 }}>Entry fee: {value} Nets</label>
-      <input
-        type="range"
-        min={min}
-        max={400}
-        step={5}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: "100%" }}
       />
     </div>
   );
