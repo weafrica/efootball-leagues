@@ -2167,21 +2167,19 @@ export function weekendWindow(now = new Date()) {
   return [start, end];
 }
 
-// The next real moment (UTC) SAST wall-clock reaches 17:00 on a Saturday,
-// strictly after `refDate` — used as a Weekend League's group-stage
-// cutoff/knockout kickoff (see group_stage_due_at below and doGenerateFixtures).
-// Mirrors the SAST wall-clock technique nextSundayCutoffSAST/
-// nextSastHourBoundary already use elsewhere in this file (SAST_OFFSET_MS,
-// fixed UTC+2, no DST), just walking to Saturday 17:00 instead of Sunday
-// 22:00. Called with "now" at the moment fixtures are generated (normally
-// right around Friday 18:00 SAST kickoff), so this reliably lands on the
-// very next day.
-export function weekendKnockoutCutoffSAST(refDate = new Date()) {
-  const sastNow = new Date(refDate.getTime() + SAST_OFFSET_MS);
-  const day = sastNow.getUTCDay(); // 0 Sun .. 6 Sat
-  const daysToSaturday = (6 - day + 7) % 7;
-  const candidate = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate() + daysToSaturday, 17, 0, 0, 0) - SAST_OFFSET_MS);
-  return candidate > refDate ? candidate : new Date(candidate.getTime() + 7 * ONE_DAY_MS);
+// Weekend League timing now runs on plain UTC clock times, not SAST:
+// league starts Friday 17:00 UTC, group stage ends / knockout kicks off
+// exactly 24h later (Saturday 17:00 UTC), and the whole knockout bracket
+// (every round, auto-forfeiting any match not both-submitted within 2h)
+// wraps up by Sunday 23:59 UTC — see the 20260901071500-onward Supabase
+// migrations for the server-side half of this (group stage + every
+// knockout round now advance on their own, no admin click required).
+// This helper just mirrors the "+24h from kickoff" half of that on the
+// client so group_stage_due_at is set correctly the moment fixtures are
+// generated, matching whatever the league's real starts_at is rather than
+// assuming "right now" is close to kickoff.
+export function weekendGroupStageCutoffUTC(startsAt) {
+  return new Date(new Date(startsAt).getTime() + ONE_DAY_MS);
 }
 
 // The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
@@ -5946,7 +5944,7 @@ export default function App() {
       // an admin having to set this manually the way every other
       // groups_knockout league still does.
       const groupStageUpdate = { groups_count: groupsCount };
-      if (isWeekendLeague(league)) groupStageUpdate.group_stage_due_at = weekendKnockoutCutoffSAST(new Date()).toISOString();
+      if (isWeekendLeague(league)) groupStageUpdate.group_stage_due_at = weekendGroupStageCutoffUTC(league.starts_at).toISOString();
       await supabase.from("leagues").update(groupStageUpdate).eq("id", league.id);
     }
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
