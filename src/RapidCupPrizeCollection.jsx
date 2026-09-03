@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { MessageCircle } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupLiveFees } from "./RapidCupFeeDisplay.jsx";
+import { getRapidCupTheme } from "./rapidCupThemes.js";
 import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
 
 // Rapid Cup — Phase 6: Winbox / Cup box tap-to-collect (Section 8).
@@ -165,7 +166,7 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
       if (!league?.id) { setLobby(false); return; }
       const { data } = await supabase
         .from("rapid_cup_lobbies")
-        .select("id, status")
+        .select("id, status, cup_number")
         .eq("league_id", league.id)
         .maybeSingle();
       if (!cancelled) setLobby(data || false);
@@ -175,6 +176,14 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
   }, [league?.id]);
 
   if (!lobby) return null;
+
+  // Every cup's own look (Section — theme cycling, see rapidCupThemes.js):
+  // overrides the generic app `c` theme for everything Rapid-Cup-specific
+  // on this page, so a Neon Blitz cup and a Golden Strike cup don't look
+  // like the same screen. cardBg is an alias for surface — the fee/box
+  // components below were written against the app's generic `c.cardBg`
+  // key, so this fills that in rather than editing every call site.
+  const cupTheme = { ...getRapidCupTheme(lobby.cup_number), cardBg: getRapidCupTheme(lobby.cup_number).surface };
 
   const myUserId = session?.user?.id || null;
   const myTeamId = myTeam?.id || null;
@@ -190,13 +199,13 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
 
   return (
     <div className="space-y-2">
-      <RapidCupHelpButton league={league} myUsername={myUsername} c={c} />
-      <RapidCupLiveFees lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={c} />
+      <RapidCupHelpButton league={league} myUsername={myUsername} c={cupTheme} />
+      <RapidCupLiveFees lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
       {showBoxes && myPlayedFixtures.map((f) => (
-        <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={c} />
+        <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={cupTheme} />
       ))}
       {lobby.status === "completed" && (
-        <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={c} />
+        <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
       )}
     </div>
   );

@@ -14008,6 +14008,15 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
   const rounds = {};
   bracketFixtures.forEach((f) => { (rounds[f.round] ||= []).push(f); });
   const roundNumbers = Object.keys(rounds).map(Number).sort((a, b) => a - b);
+  const maxRoundNumber = roundNumbers.length ? Math.max(...roundNumbers) : null;
+  // A generic "Round 3" doesn't read as anything special — give the last
+  // round (and, for a short bracket like Rapid Cup's 2-round shape, the
+  // one right before it) an actual name instead.
+  const roundLabel = (r) => {
+    if (r === maxRoundNumber) return "🏆 The Final";
+    if (r === maxRoundNumber - 1) return "Semi-Finals";
+    return `Round ${r}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -14027,7 +14036,7 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
         });
         return (
           <div key={r}>
-            <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>Round {r}</div>
+            <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>{roundLabel(r)}</div>
             <div className="rounded-xl border divide-y" style={{ borderColor: c.border, background: c.surface }}>
               {ties.map((legs) => {
                 const f0 = legs[0];
