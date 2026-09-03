@@ -124,9 +124,19 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   }, [msLeft, lobby, showToast]);
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
-  // to the tournament page as soon as league_id is set.
+  // to the tournament page as soon as league_id is set — but only the
+  // first time we see this league_id, not on every 5s poll tick. myEntry
+  // is a freshly-fetched object on every poll (even when its data hasn't
+  // changed), so using it directly in this effect's deps re-fired
+  // onOpenLeague every ~5s for as long as the banner stayed mounted on
+  // Home — which yanked a player straight back into the tournament the
+  // moment they tapped Back, since Home (and this banner) is still there
+  // underneath. autoOpenedLeagueId tracks the last league_id we already
+  // auto-opened so a deliberate "go back to Home" tap actually sticks.
+  const autoOpenedLeagueId = useRef(null);
   useEffect(() => {
-    if (lobby?.status === "live" && lobby?.league_id && myEntry) {
+    if (lobby?.status === "live" && lobby?.league_id && myEntry && autoOpenedLeagueId.current !== lobby.league_id) {
+      autoOpenedLeagueId.current = lobby.league_id;
       onOpenLeague?.(lobby.league_id);
     }
   }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);

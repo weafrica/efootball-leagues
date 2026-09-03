@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { MessageCircle } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { RapidCupLiveFees } from "./RapidCupFeeDisplay.jsx";
 import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
 
 // Rapid Cup — Phase 6: Winbox / Cup box tap-to-collect (Section 8).
@@ -190,6 +191,7 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
   return (
     <div className="space-y-2">
       <RapidCupHelpButton league={league} myUsername={myUsername} c={c} />
+      <RapidCupLiveFees lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={c} />
       {showBoxes && myPlayedFixtures.map((f) => (
         <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={c} />
       ))}
