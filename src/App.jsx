@@ -11213,18 +11213,20 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             ))}
           </div>
         )}
-        {/* League Ladder's own standalone banner — placed directly below
-            the Quick actions row per request, rather than as a small card
-            inside WeekendLeagueSpotlight's carousel (that carousel gets
-            hideLadderPass={true} below so it isn't duplicated). */}
-        <LeagueLadderQuickBanner session={session} onOpenLadderLeague={onOpenLadderLeague} c={c} />
-        {/* Weekend League — moved up to sit directly below the League
-            Ladder banner and above the Leaderboard preview, per request.
-            Always rendered — the League Ladder pass inside it
-            (LadderWeekendCard) isn't weekend-gated, so this no longer
-            disappears entirely just because no fun league kicks off this
-            Friday-Sunday. hideLadderPass stays true since the standalone
-            LeagueLadderQuickBanner right above already covers that. */}
+        {/* League Ladder section — moved up to sit directly below the Quick
+            actions row per request (was further down inside
+            LeagueListsSection, after the plain Leagues grid). Replaces the
+            old standalone LeagueLadderQuickBanner here, which is removed
+            entirely now that the real section (with live League 1-5 cards)
+            sits in this spot instead of a banner just pointing at it. */}
+        <LadderLeagueSection session={session} isAdmin={isAdmin} onOpenLadderLeague={onOpenLadderLeague} c={c} />
+        {/* Weekend League — sits directly below the League Ladder section
+            and above the Leaderboard preview, per request. Always
+            rendered — the League Ladder pass inside it (LadderWeekendCard)
+            isn't weekend-gated, so this no longer disappears entirely just
+            because no fun league kicks off this Friday-Sunday.
+            hideLadderPass stays true since the League Ladder section right
+            above already covers that. */}
         <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
           isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
           onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} session={session} onOpenLadderLeague={onOpenLadderLeague}
@@ -13540,8 +13542,6 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
       <LeagueSection title="Leagues" icon={Gamepad2} leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
         entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
-
-      <LadderLeagueSection session={session} isAdmin={isAdmin} onOpenLadderLeague={onOpenLadderLeague} c={c} />
 
       {cashLeagues.length > 0 && (
         <LeagueSection title="Cash leagues" icon={Wallet} leagues={sortLeagues(cashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
