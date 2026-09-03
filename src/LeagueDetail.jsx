@@ -2163,7 +2163,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
 const COMMENT_PAGE_SIZE = 6;
 const MAX_INDENT_DEPTH = 4;
 
-function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, onEditResult, onCancelResult, onEditLadderCupResult, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
+export function CommentsSection({ league, session, canComment, onPost, onDelete, onEdit, onEditResult, onCancelResult, onEditLadderCupResult, canEditResults = false, onToggleReaction, myUsername, c, comments, heading = "Comments", icon: HeadingIcon = MessageCircle, allowCompose = true, emptyText = "No comments yet — be the first to say something.", showFindMyResults = false }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortBy, setSortBy] = useState("newest"); // "newest" | "top" — top sorts root comments by reaction count

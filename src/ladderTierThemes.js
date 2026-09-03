@@ -7,9 +7,9 @@
 // palette, its own font, its own accent shape — rather than every tier
 // sharing one identical theme. This module is the single source of truth
 // for that: LeagueLadderDetail.jsx (the standings/fixtures page) and
-// LeagueLadderQuickBanner/LadderWeekendCard in App.jsx (the Home widget)
-// all pull from getLadderTierTheme(tier) instead of hardcoding a look, so
-// the widget and the page always agree on "what League N looks like".
+// LadderWeekendCard in App.jsx (the Home widget) all pull from
+// getLadderTierTheme(tier) instead of hardcoding a look, so the widget
+// and the page always agree on "what League N looks like".
 //
 // Each theme keeps the exact same key shape as THEMES.dark/LADDER_THEME
 // (bg/surface/border/text/accent/etc.) so it can be dropped in as a

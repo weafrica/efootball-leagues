@@ -331,18 +331,6 @@ const WILDCARD_AMBER = "#FFB703";
 const LADDER_WEEKEND_ICE = "#BEE3F8";
 const LADDER_WEEKEND_MINT = "#B7EFCB";
 
-// LADDER_QUICK_VOLT / LADDER_QUICK_BANNER_FONT — the standalone League
-// Ladder banner that now sits on Home right under the inline Quick actions
-// row (see LeagueLadderQuickBanner below), replacing the carousel-only
-// LadderWeekendCard pass for signed-in players. A light "volt" lime rather
-// than gold/red (LADDER_THEME) or teal/amber (Wildcard) keeps it in the
-// same cool, light ICE/MINT family and — like those — well clear of pink/
-// purple. Orbitron is loaded (see index.html) just for this banner's
-// headline so it reads as its own distinct, angular "HUD" identity rather
-// than the app's usual Barlow Condensed/JetBrains Mono pairing.
-const LADDER_QUICK_VOLT = "#EAFC7A";
-const LADDER_QUICK_BANNER_FONT = "'Orbitron', 'Barlow Condensed', sans-serif";
-
 // The Kit Room (club transfers + eFootball team sales) — sits at the
 // bottom of the Home leagues list as its own marketplace spotlight, so it
 // needs a look that doesn't compete with LADDER_THEME's gold or
@@ -9100,9 +9088,9 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
             "Weekend League" header that the pass in front of them (see
             LadderWeekendCard, first in the row below) isn't tied to the
             countdown above it. Skipped entirely when hideLadderPass is set —
-            signed-in Home now has its own standalone LeagueLadderQuickBanner
-            below the Quick actions row, so this badge would just be
-            pointing at a card that's no longer here. */}
+            signed-in Home now has its own League Ladder section below the
+            Quick actions row, so this badge would just be pointing at a
+            card that's no longer here. */}
         {!hideLadderPass && (
           <span className="flex items-center gap-0.5 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${LADDER_WEEKEND_ICE}55`, color: c.text }}>
             <Trophy size={9} /> Ladder always open
@@ -9141,7 +9129,7 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
             "off". See LadderWeekendCard below for why it self-fetches
             rather than taking ladder data as a prop. Dropped entirely when
             hideLadderPass is set (signed-in Home) so it isn't shown twice
-            alongside the standalone LeagueLadderQuickBanner. */}
+            alongside the signed-in Home's own League Ladder section. */}
         {!hideLadderPass && (
           <LadderWeekendCard session={session} onOpenLadderLeague={onOpenLadderLeague} onRequireAuth={onRequireAuth} c={c} />
         )}
@@ -9204,8 +9192,8 @@ function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
 
   if (!state) return null;
   const isMember = !!state.memberLeagueId;
-  // Same per-tier theme LeagueLadderQuickBanner and LeagueLadderDetail use
-  // (see ladderTierThemes.js) — this carousel card previews whichever
+  // Same per-tier theme LeagueLadderDetail uses (see ladderTierThemes.js)
+  // — this carousel card previews whichever
   // league tapping it would open.
   const theme = getLadderTierTheme(isMember ? state.tier : state.bottomTier);
 
@@ -9250,118 +9238,6 @@ function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
   );
 }
 
-// LeagueLadderQuickBanner — the League Ladder's standalone, full-width
-// banner on signed-in Home, placed right below the inline Quick actions row
-// (see quickActions block in Home's return below) per request — a home for
-// its own screen real estate rather than a small card buried at the end of
-// the WeekendLeagueSpotlight carousel (WeekendLeagueSpotlight gets
-// hideLadderPass={true} from Home now so it isn't shown in both places).
-// Same self-fetch pattern and light ICE/MINT palette as the
-// LadderWeekendCard it replaces here — still deliberately clear of pink/
-// purple — but built as its own wide "HUD strip" rather than a carousel
-// card: angular hexagon icon badge, a diagonal hazard-stripe texture, a
-// volt-lime detail color, and the Orbitron display font (see
-// LADDER_QUICK_VOLT/LADDER_QUICK_BANNER_FONT above) so it reads as a
-// distinct, gamified identity rather than another app-standard card.
-function LeagueLadderQuickBanner({ session, onOpenLadderLeague, onRequireAuth, c }) {
-  const [state, setState] = useState(null); // { bottomLeagueId, memberLeagueId, tier, playerCount } | null (still loading / no active league)
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: leagueRows } = await supabase.from("ladder_leagues")
-        .select("id, tier").eq("status", "active").order("tier", { ascending: true });
-      if (!leagueRows || leagueRows.length === 0) { if (!cancelled) setState(null); return; }
-      const bottomLeague = leagueRows[leagueRows.length - 1];
-
-      let memberLeagueId = null, tier = null;
-      if (session?.user?.id) {
-        const [{ data: memberRow }, { data: cycleRow }] = await Promise.all([
-          supabase.from("ladder_memberships").select("league_id, week_number, status").eq("user_id", session.user.id)
-            .order("week_number", { ascending: false }).limit(1).maybeSingle(),
-          supabase.from("ladder_cycle").select("current_week").eq("id", true).maybeSingle(),
-        ]);
-        const currentWeek = cycleRow?.current_week ?? 0;
-        if (memberRow && memberRow.status === "active" && memberRow.week_number >= currentWeek) {
-          memberLeagueId = memberRow.league_id;
-          tier = leagueRows.find((l) => l.id === memberRow.league_id)?.tier ?? null;
-        }
-      }
-
-      const { count } = await supabase.from("ladder_memberships")
-        .select("user_id", { count: "exact", head: true })
-        .eq("league_id", bottomLeague.id).eq("status", "active");
-
-      if (!cancelled) setState({ bottomLeagueId: bottomLeague.id, memberLeagueId, tier, bottomTier: bottomLeague.tier ?? null, playerCount: count ?? 0 });
-    })();
-    return () => { cancelled = true; };
-  }, [session?.user?.id]);
-
-  if (!state) return null;
-  const isMember = !!state.memberLeagueId;
-  // Whichever league this banner would actually take you into — your own
-  // tier if you're already seated, otherwise the entry-level bottom
-  // league — decides its look, so the widget always previews the same
-  // tier identity the page you're about to open will show (see
-  // ladderTierThemes.js; LeagueLadderDetail.jsx pulls from the same
-  // function for the page itself).
-  const theme = getLadderTierTheme(isMember ? state.tier : state.bottomTier);
-  const inkColor = theme.accentText; // dark ink color that reads on this tier's accent
-
-  const handleClick = () => {
-    if (!session) { onRequireAuth?.(); return; }
-    onOpenLadderLeague?.(isMember ? state.memberLeagueId : state.bottomLeagueId);
-  };
-
-  return (
-    <button onClick={handleClick} className="relative w-full text-left cursor-pointer transition-transform active:scale-[0.99] mb-4">
-      <div className="relative overflow-hidden"
-        style={{
-          clipPath: "polygon(0 0, calc(100% - 28px) 0, 100% 28px, 100% 100%, 22px 100%, 0 calc(100% - 22px))",
-          background: `linear-gradient(115deg, ${theme.surface}, ${theme.bg} 65%, ${theme.surface})`,
-          border: `1px solid ${theme.borderStrong}`,
-        }}>
-        {/* Folded corner accent, echoing WeekendLeagueCard/LadderWeekendCard's
-            "pass" silhouette so this still reads as part of the same visual
-            family even though the shape and layout are otherwise its own. */}
-        <div className="absolute top-0 right-0 w-[28px] h-[28px]" style={{ background: theme.accent, clipPath: "polygon(100% 0, 0 0, 100% 100%)" }} />
-        {/* Faint diagonal hazard-stripe texture — the "HUD strip" gaming cue
-            that sets this apart from every other soft-gradient card in the
-            app. */}
-        <div className="pointer-events-none absolute inset-0 opacity-[0.12]"
-          style={{ backgroundImage: `repeating-linear-gradient(135deg, ${theme.accent} 0px, ${theme.accent} 2px, transparent 2px, transparent 13px)` }} />
-
-        <div className="relative flex items-center gap-3 px-4 py-3.5">
-          <span className="relative w-11 h-11 shrink-0 flex items-center justify-center"
-            style={{ background: theme.accent, clipPath: "polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)" }}>
-            <Swords size={18} style={{ color: inkColor }} />
-          </span>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold uppercase text-[13px] leading-none truncate" style={{ fontFamily: theme.font, letterSpacing: "0.03em", color: theme.text }}>
-                League Ladder
-              </span>
-              <span className="shrink-0 flex items-center gap-0.5 font-mono text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full" style={{ background: theme.accent, color: inkColor }}>
-                <Zap size={8} /> Always live
-              </span>
-            </div>
-            <div className="font-mono text-[10px] mt-1 truncate" style={{ color: theme.textDim }}>
-              {isMember
-                ? `You're in League ${state.tier} (${theme.name}) — tap to continue`
-                : `${state.playerCount} player${state.playerCount === 1 ? "" : "s"} in the entry league · free to join`}
-            </div>
-          </div>
-
-          <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2.5 py-1.5"
-            style={{ background: theme.accent, color: inkColor }}>
-            {isMember ? "Continue" : "Join"} <ChevronRight size={11} />
-          </span>
-        </div>
-      </div>
-    </button>
-  );
-}
 
 // The weekend spotlight's own take on a league card — deliberately built to
 // echo LeagueCard's real info (crest, format/stage, club count, progress,
@@ -13038,12 +12914,13 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const [findBusy, setFindBusy] = useState(false);
   const [findError, setFindError] = useState(null);
   // scrollRef/cardRefs — the horizontal strip container and a league_id ->
-  // card-DOM-node map. The strip itself now opens with the viewer's own
-  // league (or, for a new user, the joinable league) placed first — see
-  // displayLeagues below — so there's no scrolling needed to reach it;
-  // cardRefs is kept only because individual cards still register
-  // themselves against it (harmless, and cheap to keep around in case a
-  // future jump-to-card use needs it again).
+  // card-DOM-node map. Leagues render in their natural tier order (League
+  // 1, League 2, ...) rather than the viewer's own league being pulled to
+  // the front — jumping the tier order around per-viewer read as
+  // confusing/unnatural. Instead, once the viewer's own (or, for a brand
+  // new player, the joinable bottom) league's card has mounted, an effect
+  // below scrolls the strip so that card is in view — same destination,
+  // without reshuffling what everyone else sees.
   const scrollRef = useRef(null);
   const cardRefs = useRef({});
 
@@ -13134,21 +13011,33 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const bottomLeague = ladderLeagues[ladderLeagues.length - 1];
   const myTier = hasActiveMembership ? ladderLeagues.find((l) => l.id === membership.league_id)?.tier : null;
 
-  // displayLeagues — ladderLeagues reordered so the viewer never has to
-  // scroll to find the one card that matters to them: their own active
-  // league goes first if they're on the ladder, or — for a brand new
-  // player with no membership yet — the joinable league (always the
-  // bottom/highest tier; join_ladder_league always seats new joiners
-  // there) goes first instead, so "where do I coin in?" is the first
-  // card they see. ladderLeagues itself (tier order) is left untouched —
-  // bottomLeague/myTier/tier lookups elsewhere still depend on it.
-  const displayLeagues = (() => {
-    const arr = ladderLeagues.slice();
-    const priorityId = hasActiveMembership ? membership.league_id : bottomLeague?.id;
-    const idx = arr.findIndex((l) => l.id === priorityId);
-    if (idx > 0) arr.unshift(arr.splice(idx, 1)[0]);
-    return arr;
-  })();
+  // displayLeagues — the strip always renders in natural tier order
+  // (League 1, League 2, ...); which card matters most to the viewer is
+  // handled by auto-scrolling to it (see effect below) rather than
+  // reordering the list itself, which felt unnatural — a "League 1, 2, 3"
+  // strip where League 4 sometimes leads is more confusing than it is
+  // convenient.
+  const displayLeagues = ladderLeagues;
+
+  // priorityLeagueId — the one card the auto-scroll effect below should
+  // bring into view: the viewer's own active league if they're on the
+  // ladder, or — for a brand new player with no membership yet — the
+  // joinable league (always the bottom/highest tier; join_ladder_league
+  // always seats new joiners there), so "where do I join?" is what
+  // scrolls into view for them.
+  const priorityLeagueId = hasActiveMembership ? membership.league_id : bottomLeague?.id;
+
+  // Auto-scroll the strip to priorityLeagueId once its card exists. Runs
+  // after ladderLeagues/membership load (and again if the priority
+  // league changes, e.g. promotion/relegation), scrolling the horizontal
+  // strip so that card is centered rather than jumping the page itself —
+  // scrollIntoView with a block:'nearest' container match keeps this
+  // strip-local instead of also fighting the outer page scroll.
+  useEffect(() => {
+    if (!priorityLeagueId) return;
+    const node = cardRefs.current[priorityLeagueId];
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [priorityLeagueId, ladderLeagues]);
 
   const join = async () => {
     setJoining(true);

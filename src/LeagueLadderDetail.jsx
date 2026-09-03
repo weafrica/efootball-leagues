@@ -22,7 +22,7 @@
 // system entirely.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Send, Heart, Trash2 } from "lucide-react";
+import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
@@ -32,6 +32,7 @@ import { NetsAmount } from "./NetCoinIcon";
 import CountdownBadge from "./CountdownBadge.jsx";
 import { FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import { WhatsAppLink, WhatsAppCallLink, waLink, WHATSAPP_GREEN } from "./App.jsx";
+import { CommentsSection } from "./LeagueDetail.jsx";
 import { Globe } from "lucide-react";
 import { countryCodeToFlagEmoji, countryName, formatLocalTimeNow, suggestPlayTime } from "./utils/timezone.js";
 // Same upload path Survivor Ladder Cup's submitLadderCupMatchResult uses
@@ -2147,26 +2148,11 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
         )}
 
         {activeWidget === "comments" && (
-          <LadderLeagueComments leagueId={leagueId} session={session} isAdmin={isAdmin} isMember={isMember} nameFor={nameFor} c={c} />
+          <LadderLeagueComments leagueId={leagueId} session={session} isAdmin={isAdmin} isMember={isMember} nameFor={nameFor} showToast={showToast} c={c} />
         )}
       </div>
     </div>
   );
-}
-
-// timeAgoShort — minimal relative timestamp for comment rows (just this
-// widget's needs; the app's other comment threads have their own richer
-// version in App.jsx, not exported for reuse here).
-function timeAgoShort(iso) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(iso).toLocaleDateString();
 }
 
 // LadderLeagueComments — this League Ladder tier's own comment wall,
@@ -2177,60 +2163,123 @@ function timeAgoShort(iso) {
 // mount, which — since it's only ever rendered while
 // activeWidget === "comments" above — is exactly the lazy-load behavior
 // the other three widgets get too.
-function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, c }) {
+//
+// Renders through the exact same CommentsSection/CommentNode/CommentRow
+// used by regular leagues' Discussion tab (imported from LeagueDetail.jsx
+// rather than reimplemented) so League Ladder gets the same feature set —
+// threaded replies at any depth, multi-emoji reactions, photo/voice
+// attachments, newest/top sorting, pagination, optimistic posting, and
+// read-aloud — instead of the old text-only/single-reaction/one-level-
+// reply thread this used to be. Only the data layer here is
+// ladder-specific: comment_likes is aliased in the select below so the
+// shared components (which read `comment.comment_likes`) don't need to
+// know the relationship is actually named ladder_league_comment_likes on
+// this table. league is passed to CommentsSection as a minimal
+// { id: leagueId } shim — the shared components only ever reach for
+// league.teams/fixtures/creator_phone/etc. on the Results-tab code path
+// (canEditResults/isResultRow), which never applies here since League
+// Ladder results live in their own Results widget, not this comment
+// thread — so nothing beyond league.id (needed to insert new rows) is
+// actually read for this use.
+function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, showToast, c }) {
   const [comments, setComments] = useState(null); // null = loading
-  const [body, setBody] = useState("");
-  const [replyTo, setReplyTo] = useState(null); // comment being replied to, or null
-  const [posting, setPosting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  // deleteArmedId — the one comment a repeat tap of the trash icon within
+  // the next few seconds will actually delete. CommentRow's delete button
+  // fires a single onDelete(cm, league) call with no confirmation UI of
+  // its own (regular leagues gate it behind App.jsx's multi-step
+  // requestConfirm modal instead, which isn't reachable from this
+  // self-contained screen) — this is the lightweight, modal-free
+  // equivalent: first tap arms it and prompts via showToast, second tap
+  // within the window deletes for real, so an accidental single tap can
+  // never lose a comment.
+  const [deleteArmedId, setDeleteArmedId] = useState(null);
+  const deleteArmTimer = useRef(null);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("ladder_league_comments")
-      .select("*, ladder_league_comment_likes(*)")
+      .select("*, comment_likes:ladder_league_comment_likes(*)")
       .eq("league_id", leagueId)
-      .order("created_at", { ascending: false })
-      .limit(200);
+      .order("created_at", { ascending: true })
+      .limit(500);
     if (error) { console.error("Couldn't load comments:", error.message); setComments([]); return; }
     setComments(data || []);
   }, [leagueId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { if (deleteArmTimer.current) clearTimeout(deleteArmTimer.current); }, []);
 
-  const post = async () => {
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    setPosting(true);
+  // postComment — same signature CommentsSection/CommentNode call onPost
+  // with (league, body, parentComment, file, photoUrl, isResult,
+  // voiceClip); isResult is always false here (League Ladder has no
+  // result-as-comment concept) and league is the { id: leagueId } shim,
+  // so leagueArg.id is used rather than the closed-over leagueId purely
+  // for consistency with the shared components' call shape.
+  const postComment = async (leagueArg, body, parentComment, file, photoUrl, _isResult, voiceClip) => {
+    const trimmed = (body || "").trim();
+    if (!trimmed && !file && !photoUrl && !voiceClip) return false;
+    let photo_url = photoUrl || null;
+    if (!photo_url && file) {
+      const compressed = await compressImage(file, { maxDimension: 900, quality: 0.85 });
+      const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      try {
+        photo_url = await uploadToR2("comment-photos", path, compressed, compressed.type);
+      } catch (uploadErr) { showToast?.(`Couldn't upload photo: ${uploadErr.message}`); return false; }
+    }
+    let voice_url = null;
+    let voice_duration = null;
+    if (voiceClip) {
+      const ext = (voiceClip.blob.type || "").includes("mp4") ? "m4a" : (voiceClip.blob.type || "").includes("ogg") ? "ogg" : "webm";
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      try {
+        voice_url = await uploadToR2("comment-voice-notes", path, voiceClip.blob, voiceClip.blob.type || "audio/webm");
+      } catch (uploadErr) { showToast?.(`Couldn't upload voice note: ${uploadErr.message}`); return false; }
+      voice_duration = voiceClip.duration || null;
+    }
     const { error } = await supabase.from("ladder_league_comments").insert({
-      league_id: leagueId,
-      user_id: session.user.id,
-      username: nameFor(session.user.id),
-      body: trimmed,
-      parent_comment_id: replyTo?.id || null,
+      league_id: leagueArg?.id || leagueId, user_id: session.user.id, username: nameFor(session.user.id),
+      body: trimmed, parent_comment_id: parentComment?.id || null, photo_url, voice_url, voice_duration,
     });
-    setPosting(false);
-    if (error) { console.error("Couldn't post comment:", error.message); return; }
-    setBody("");
-    setReplyTo(null);
+    if (error) { showToast?.(`Couldn't post ${parentComment ? "reply" : "comment"}: ${error.message}`); return false; }
     await load();
+    return true;
   };
 
-  const remove = async (comment) => {
+  const deleteComment = async (comment) => {
+    if (deleteArmedId !== comment.id) {
+      setDeleteArmedId(comment.id);
+      showToast?.("Tap delete again to confirm.");
+      if (deleteArmTimer.current) clearTimeout(deleteArmTimer.current);
+      deleteArmTimer.current = setTimeout(() => setDeleteArmedId((cur) => (cur === comment.id ? null : cur)), 4000);
+      return;
+    }
+    if (deleteArmTimer.current) clearTimeout(deleteArmTimer.current);
+    setDeleteArmedId(null);
     const { error } = await supabase.from("ladder_league_comments").delete().eq("id", comment.id);
-    setDeletingId(null);
-    if (error) { console.error("Couldn't delete comment:", error.message); return; }
+    if (error) { showToast?.(`Couldn't delete comment: ${error.message}`); return; }
     await load();
   };
 
-  const toggleLike = async (comment) => {
-    const mine = (comment.ladder_league_comment_likes || []).find((l) => l.user_id === session.user.id);
-    if (mine) {
+  // toggleReaction — mirrors App.jsx's toggleCommentReaction (regular
+  // leagues), just against ladder_league_comment_likes instead of
+  // comment_likes: one row per (comment, user), switching emoji updates
+  // the existing row rather than delete+insert, tapping your current
+  // reaction removes it.
+  const toggleReaction = async (comment, reaction) => {
+    const mine = (comment.comment_likes || []).find((l) => l.user_id === session.user.id);
+    if (reaction === null) {
+      if (!mine) return true;
       const { error } = await supabase.from("ladder_league_comment_likes").delete().eq("id", mine.id);
-      if (error) { console.error("Couldn't remove reaction:", error.message); return; }
+      if (error) { showToast?.(`Couldn't remove reaction: ${error.message}`); return false; }
+    } else if (mine) {
+      const { error } = await supabase.from("ladder_league_comment_likes").update({ reaction }).eq("id", mine.id);
+      if (error) { showToast?.(`Couldn't update reaction: ${error.message}`); return false; }
     } else {
-      const { error } = await supabase.from("ladder_league_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction: "👍" });
-      if (error) { console.error("Couldn't react:", error.message); return; }
+      const { error } = await supabase.from("ladder_league_comment_likes").insert({ comment_id: comment.id, user_id: session.user.id, reaction });
+      if (error) { showToast?.(`Couldn't react: ${error.message}`); return false; }
     }
     await load();
+    return true;
   };
 
   if (comments === null) {
@@ -2239,83 +2288,11 @@ function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, c
     );
   }
 
-  const topLevel = comments.filter((cm) => !cm.parent_comment_id);
-  const repliesOf = (id) => comments.filter((cm) => cm.parent_comment_id === id).slice().reverse();
-
-  const canDelete = (cm) => isAdmin || cm.user_id === session?.user?.id;
-
-  const CommentRow = ({ cm, isReply }) => {
-    const mine = (cm.ladder_league_comment_likes || []).find((l) => l.user_id === session?.user?.id);
-    const likeCount = (cm.ladder_league_comment_likes || []).length;
-    return (
-      <div className={isReply ? "ml-6 pt-2" : "pt-3"} style={!isReply ? { borderTop: `1px solid ${c.border}` } : undefined}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-xs font-bold" style={{ color: c.text }}>{cm.username}</span>
-              <span className="font-mono text-[9px]" style={{ color: c.textFaint }}>{timeAgoShort(cm.created_at)}</span>
-            </div>
-            <div className="text-xs mt-0.5 whitespace-pre-wrap break-words" style={{ color: c.text, fontFamily: c.font }}>{cm.body}</div>
-            <div className="flex items-center gap-3 mt-1">
-              <button onClick={() => toggleLike(cm)} className="flex items-center gap-1 font-mono text-[9px]" style={{ color: mine ? c.accent : c.textFaint }}>
-                <Heart size={10} fill={mine ? c.accent : "none"} /> {likeCount > 0 ? likeCount : ""}
-              </button>
-              {!isReply && isMember && (
-                <button onClick={() => setReplyTo(cm)} className="font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>Reply</button>
-              )}
-              {canDelete(cm) && (
-                deletingId === cm.id ? (
-                  <span className="flex items-center gap-2">
-                    <button onClick={() => remove(cm)} className="font-mono text-[9px] uppercase" style={{ color: c.red }}>Confirm delete</button>
-                    <button onClick={() => setDeletingId(null)} className="font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>Cancel</button>
-                  </span>
-                ) : (
-                  <button onClick={() => setDeletingId(cm.id)} className="opacity-60 hover:opacity-100" style={{ color: c.textFaint }}>
-                    <Trash2 size={10} />
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-        {repliesOf(cm.id).map((r) => <CommentRow key={r.id} cm={r} isReply />)}
-      </div>
-    );
-  };
-
   return (
-    <div className="flex flex-col gap-2">
-      {isMember ? (
-        <div className="rounded-lg border p-2" style={{ borderColor: c.border }}>
-          {replyTo && (
-            <div className="flex items-center justify-between mb-1.5 font-mono text-[9px] uppercase" style={{ color: c.textFaint }}>
-              <span>Replying to {replyTo.username}</span>
-              <button onClick={() => setReplyTo(null)} style={{ color: c.textFaint }}>✕</button>
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
-              placeholder="Say something to the league…"
-              className="flex-1 font-mono text-xs rounded-lg p-2 outline-none resize-none"
-              style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
-            <button onClick={post} disabled={posting || !body.trim()}
-              className="font-mono text-[10px] uppercase px-3 py-2 rounded-lg flex items-center gap-1 shrink-0 disabled:opacity-50"
-              style={{ background: c.accent, color: c.accentText }}>
-              <Send size={12} /> {posting ? "…" : "Post"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="font-mono text-[10px] uppercase text-center py-2" style={{ color: c.textFaint }}>
-          Join this league to post.
-        </div>
-      )}
-
-      {topLevel.length === 0 ? (
-        <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>No comments yet — be the first to say something.</div>
-      ) : (
-        topLevel.map((cm) => <CommentRow key={cm.id} cm={cm} isReply={false} />)
-      )}
-    </div>
+    <CommentsSection league={{ id: leagueId }} session={session} canComment={isMember || isAdmin}
+      comments={comments} heading="Comments" allowCompose
+      onPost={postComment} onDelete={deleteComment} onEdit={async () => false} onToggleReaction={toggleReaction}
+      myUsername={nameFor(session?.user?.id)} c={c} />
   );
 }
+
