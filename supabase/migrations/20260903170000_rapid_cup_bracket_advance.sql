@@ -57,8 +57,13 @@ begin
   end loop;
 
   -- Unexpected shape (not exactly 2 semis found) — bail out safely rather
-  -- than generate a malformed final.
-  if array_length(v_winners, 1) <> 2 then
+  -- than generate a malformed final. coalesce matters here: array_length
+  -- of an empty array is NULL, not 0, so a bare "<> 2" silently passes
+  -- when v_winners never got anything pushed onto it (e.g. no round-1
+  -- fixtures exist for this league at all) — NULL <> 2 is NULL, not
+  -- true, so an unguarded check here would fall through to the insert
+  -- below with v_winners[1]/v_winners[2] both NULL.
+  if coalesce(array_length(v_winners, 1), 0) <> 2 then
     return;
   end if;
 
