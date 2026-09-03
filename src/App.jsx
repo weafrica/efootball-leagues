@@ -12995,6 +12995,33 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // priorityLeagueId — the one card the auto-scroll effect below should
+  // bring into view: the viewer's own active league if they're on the
+  // ladder, or — for a brand new player with no membership yet — the
+  // joinable league (always the bottom/highest tier; join_ladder_league
+  // always seats new joiners there), so "where do I join?" is what
+  // scrolls into view for them. Computed here (null-safe, ahead of the
+  // "no leagues yet" bailout below) so the effect that reads it stays
+  // unconditional — every hook in this component must run on every
+  // render, or React throws "Rendered more hooks than during the
+  // previous render" (error #310) the first time ladderLeagues goes
+  // from empty to populated.
+  const hasActiveMembershipForScroll = !!membership && membership.status === "active" && membership.week_number >= (cycle?.current_week ?? 0);
+  const bottomLeagueForScroll = ladderLeagues && ladderLeagues.length > 0 ? ladderLeagues[ladderLeagues.length - 1] : null;
+  const priorityLeagueId = hasActiveMembershipForScroll ? membership.league_id : bottomLeagueForScroll?.id;
+
+  // Auto-scroll the strip to priorityLeagueId once its card exists. Runs
+  // after ladderLeagues/membership load (and again if the priority
+  // league changes, e.g. promotion/relegation), scrolling the horizontal
+  // strip so that card is centered rather than jumping the page itself —
+  // scrollIntoView with a block:'nearest' container match keeps this
+  // strip-local instead of also fighting the outer page scroll.
+  useEffect(() => {
+    if (!priorityLeagueId) return;
+    const node = cardRefs.current[priorityLeagueId];
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [priorityLeagueId, ladderLeagues]);
+
   if (!ladderLeagues || ladderLeagues.length === 0) return null;
 
   const currentWeek = cycle?.current_week ?? 0;
@@ -13013,31 +13040,11 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
 
   // displayLeagues — the strip always renders in natural tier order
   // (League 1, League 2, ...); which card matters most to the viewer is
-  // handled by auto-scrolling to it (see effect below) rather than
+  // handled by auto-scrolling to it (see effect above) rather than
   // reordering the list itself, which felt unnatural — a "League 1, 2, 3"
   // strip where League 4 sometimes leads is more confusing than it is
   // convenient.
   const displayLeagues = ladderLeagues;
-
-  // priorityLeagueId — the one card the auto-scroll effect below should
-  // bring into view: the viewer's own active league if they're on the
-  // ladder, or — for a brand new player with no membership yet — the
-  // joinable league (always the bottom/highest tier; join_ladder_league
-  // always seats new joiners there), so "where do I join?" is what
-  // scrolls into view for them.
-  const priorityLeagueId = hasActiveMembership ? membership.league_id : bottomLeague?.id;
-
-  // Auto-scroll the strip to priorityLeagueId once its card exists. Runs
-  // after ladderLeagues/membership load (and again if the priority
-  // league changes, e.g. promotion/relegation), scrolling the horizontal
-  // strip so that card is centered rather than jumping the page itself —
-  // scrollIntoView with a block:'nearest' container match keeps this
-  // strip-local instead of also fighting the outer page scroll.
-  useEffect(() => {
-    if (!priorityLeagueId) return;
-    const node = cardRefs.current[priorityLeagueId];
-    if (node) node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-  }, [priorityLeagueId, ladderLeagues]);
 
   const join = async () => {
     setJoining(true);
