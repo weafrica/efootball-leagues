@@ -36,6 +36,14 @@
 -- generic (non-ladder) walkover RPC to build on, and it needs its own
 -- design pass for a 4-team single-elimination bracket rather than a
 -- 1v1 ladder challenge. Flagging as a known gap, not silently dropped.
+--
+-- Guarded against a real timing bug: without checking the lobby is still
+-- 'live', a submission sitting pending right as the 4hr auto-finish
+-- deadline passes could get auto-accepted here a few minutes AFTER
+-- Phase 4's sweep already finished the lobby and paid out based on the
+-- state at that moment — leaving a fixture marked played with a score
+-- the payout never reflected. Guarded the same way
+-- _rapid_cup_finish_lobby_internal guards itself.
 create or replace function _rapid_cup_result_auto_sweep_internal()
 returns integer
 language plpgsql
@@ -55,6 +63,7 @@ begin
     from result_submissions s
     join rapid_cup_lobbies rcl on rcl.league_id = s.league_id
     where s.status = 'pending'
+      and rcl.status = 'live'
       and s.created_at + interval '2 minutes' + interval '2 minutes' <= now()
     order by s.created_at
     for update of s skip locked
