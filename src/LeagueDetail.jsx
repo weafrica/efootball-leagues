@@ -2056,7 +2056,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
           {joined && myTeam && (
-            <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} showToast={showToast} c={c} />
+            <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} myUsername={myUsername} showToast={showToast} c={c} />
           )}
           {(joined || canManage) && (
             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}

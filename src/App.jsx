@@ -14,6 +14,7 @@ import { creditNets, debitNets, formatNets } from "./nets.js";
 import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS } from "./economy.js";
 import { computeStandings as computeLeagueLadderStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
+import RapidCupBanner from "./RapidCupBanner.jsx";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -2333,8 +2334,11 @@ export function avatarColor(seed) {
 export const WHATSAPP_GREEN = "#25D366";
 
 // The one support line for the whole site — shown as a floating button on
-// every screen (signed in or not) so anyone can reach a human fast.
-const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
+// every screen (signed in or not) so anyone can reach a human fast. Exported
+// so a specific screen (e.g. RapidCupTournamentExtras' Help button) can build
+// its own richer prefilled message against the same number, rather than only
+// getting the generic SupportWhatsAppButton context string.
+export const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
 
 // How long a member's row stays highlighted red after an admin taps their
 // WhatsApp icon (see markWaReminder / isWaReminderActive below). Simple
@@ -11089,6 +11093,22 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             ))}
           </div>
         )}
+        {/* Rapid Cup — horizontal banner right under Quick Actions (see
+            RAPID-CUP-BUILD-PLAN.md Section 12). Self-contained: it polls
+            for the current open/filling/live lobby itself and renders
+            nothing when there isn't one, so it never pushes the rest of
+            Home down when Rapid Cup is quiet. onOpenLeague reuses the
+            same "open a league by id" handler every other card on this
+            page already uses; there's no separate lobby page yet, so
+            onOpenLobby (tapping the banner before it's live/full) is just
+            a light nudge toward the Join button rather than a real
+            navigation. */}
+        <RapidCupBanner
+          onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
+          onOpenLeague={onOpen}
+          showToast={showToast}
+          c={c}
+        />
         {/* League Ladder section — moved up to sit directly below the Quick
             actions row per request (was further down inside
             LeagueListsSection, after the plain Leagues grid). Replaces the

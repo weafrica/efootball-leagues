@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { MessageCircle } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
 
 // Rapid Cup — Phase 6: Winbox / Cup box tap-to-collect (Section 8).
 //
@@ -153,7 +155,7 @@ export function RapidCupCupbox({ lobbyId, myUserId, showToast, c }) {
 // through every caller, this queries rapid_cup_lobbies for the league id
 // itself and renders nothing if no lobby points at it — a normal league
 // gets nothing extra here, a Rapid Cup league gets its boxes automatically.
-export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c }) {
+export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, showToast, c }) {
   const [lobby, setLobby] = useState(null); // null = loading; false = not a Rapid Cup league
 
   useEffect(() => {
@@ -183,16 +185,39 @@ export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c
     ? (league.fixtures || []).filter((f) => f.played && (f.home_team_id === myTeamId || f.away_team_id === myTeamId))
     : [];
 
-  if (!myPlayedFixtures.length && lobby.status !== "completed") return null;
+  const showBoxes = myPlayedFixtures.length > 0 || lobby.status === "completed";
 
   return (
     <div className="space-y-2">
-      {myPlayedFixtures.map((f) => (
+      <RapidCupHelpButton league={league} myUsername={myUsername} c={c} />
+      {showBoxes && myPlayedFixtures.map((f) => (
         <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={c} />
       ))}
       {lobby.status === "completed" && (
         <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={c} />
       )}
     </div>
+  );
+}
+
+// Rapid Cup Help button (Section 11) — reuses the same wa.me link builder
+// and support number every other WhatsApp entry point in the app uses
+// (see WhatsAppLink/SupportWhatsAppButton in App.jsx), but with a richer
+// prefilled message than the generic floating support button: which
+// tournament this is, who's asking, and a direct link straight back into
+// this league so the admin doesn't have to go hunting for it.
+function RapidCupHelpButton({ league, myUsername, c }) {
+  const leagueUrl = typeof window !== "undefined"
+    ? `${window.location.origin}${window.location.pathname}?league=${league.id}`
+    : "";
+  const text = `Hi, I need help with my Rapid Cup${myUsername ? ` (${myUsername})` : ""}: ${league.name}. ${leagueUrl}`;
+  const href = waLink(SUPPORT_WHATSAPP_NUMBER, text);
+  if (!href) return null;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" title="Get help with this Rapid Cup on WhatsApp"
+      className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full"
+      style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
+      <MessageCircle size={12} /> Help — WhatsApp
+    </a>
   );
 }
