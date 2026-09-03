@@ -96,6 +96,29 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
     }
   }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);
 
+  // Bracket generation — as soon as the lobby flips to "filling" (4th
+  // player joined) but hasn't got a league_id yet, one of the 4 players'
+  // clients calls generate_rapid_cup_bracket to create the leagues/teams/
+  // fixtures rows. The RPC itself is the real race guard (locks the lobby
+  // row, no-ops if already live) — triedGeneration just stops every one
+  // of the 4 open tabs from firing the RPC on every 5s poll tick.
+  const triedGeneration = useRef(new Set());
+  useEffect(() => {
+    if (lobby?.status !== "filling" || lobby?.league_id || !myEntry) return;
+    if (triedGeneration.current.has(lobby.id)) return;
+    triedGeneration.current.add(lobby.id);
+    supabase.rpc("generate_rapid_cup_bracket", { p_lobby_id: lobby.id }).then(({ error }) => {
+      if (error) {
+        // Another of the 4 clients likely already generated it — clear the
+        // guard so the next poll tick can pick up the resulting league_id
+        // via the normal reload, instead of getting stuck on a failed try.
+        triedGeneration.current.delete(lobby.id);
+      } else {
+        reload();
+      }
+    });
+  }, [lobby?.status, lobby?.league_id, lobby?.id, myEntry, reload]);
+
   const join = async () => {
     setJoining(true);
     const { error } = await supabase.rpc("join_rapid_cup_lobby", { p_entry_fee: entryFeeInput });
