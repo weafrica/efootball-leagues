@@ -10,38 +10,18 @@ import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 // Notification thresholds fire once each per lobby — trackedThresholds
 // resets whenever the lobby id changes so a new lobby gets its own
 // 15/5/1 min warnings.
-// Rapid Cup — Phase 1: Lobby & Auto-Start.
-//
-// "Every Rapid Cup gets its own theme" — RapidCupBanner shows the current
-// cup's theme name/colors on the Home banner (see rapidCupThemes.js, same
-// cycling-by-number pattern as League Ladder's per-tier themes in
-// ladderTierThemes.js). The league itself is also named after its theme
-// server-side, in generate_rapid_cup_bracket.
-import { getRapidCupTheme } from "./rapidCupThemes.js";
-
 const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
 
-// Whether this browser tab has already auto-opened this particular Rapid
-// Cup league once. sessionStorage (not a module-level variable, and not a
-// React ref/state) is deliberate: a ref/module variable only survives
-// RapidCupBanner being unmounted/remounted (e.g. leaving and returning to
-// Home within the same page load) — it's wiped out by an actual page
-// reload, which is common on mobile (backgrounding an installed PWA,
-// pull-to-refresh, the OS discarding and reloading a background tab).
-// Without this, a reload while still inside the live-tournament window
-// looked identical to the original bug: land on Home, wait for the
-// lobby fetch (a couple seconds), then get pulled straight back in.
-// sessionStorage survives a reload but still clears itself once the tab
-// actually closes, so it never traps someone in a tournament that's long
-// finished.
-function hasAutoOpenedRapidCupLeague(leagueId) {
-  try { return sessionStorage.getItem(`rapid_cup_auto_opened:${leagueId}`) === "1"; }
-  catch { return false; }
-}
-function markRapidCupLeagueAutoOpened(leagueId) {
-  try { sessionStorage.setItem(`rapid_cup_auto_opened:${leagueId}`, "1"); }
-  catch { /* private browsing / storage disabled — worst case, re-prompts once */ }
-}
+// Module-level, not component state — this has to survive RapidCupBanner
+// being unmounted/remounted, which happens every single time Home itself
+// unmounts (App.jsx only renders <Home> while view === "home", and this
+// banner lives inside Home). A ref or useState resets on that remount, so
+// a player who'd already been auto-dropped into their live tournament once
+// got yanked straight back in on every later visit to Home — this was the
+// actual cause of "can't get back to the homepage during Rapid Cup". This
+// Set persists for the page's lifetime, so each league_id only auto-opens
+// once per session, not once per Home mount.
+const autoOpenedLeagueIds = new Set();
 
 function useOpenRapidCupLobby() {
   const [lobby, setLobby] = useState(null);
@@ -76,6 +56,34 @@ function useOpenRapidCupLobby() {
           .limit(1)
           .maybeSingle();
         lobbyRow = myActive || null;
+
+        // A lobby stays "live" for all 4 players until the WHOLE bracket
+        // finishes — rapid_cup_lobbies has no per-player elimination
+        // state, only teams.eliminated on the underlying league. Without
+        // this check, a player who's already lost their match stays
+        // pinned to this dead-for-them lobby (no Join button ever
+        // renders once status !== "open") until every other player's
+        // matches finish too — this was the actual cause of "can't join
+        // back into Rapid Cup even before the cup is over." Once we know
+        // our own team is eliminated, drop lobbyRow so the fallback
+        // query below can pick up the fresh lobby chained via
+        // next_lobby_id instead.
+        if (lobbyRow?.status === "live" && lobbyRow.league_id) {
+          const { data: myMember } = await supabase
+            .from("members")
+            .select("team_id")
+            .eq("league_id", lobbyRow.league_id)
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (myMember?.team_id) {
+            const { data: myTeamRow } = await supabase
+              .from("teams")
+              .select("eliminated")
+              .eq("id", myMember.team_id)
+              .maybeSingle();
+            if (myTeamRow?.eliminated) lobbyRow = null;
+          }
+        }
       }
     }
 
@@ -155,13 +163,12 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   }, [msLeft, lobby, showToast]);
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
-  // to the tournament page as soon as league_id is set — but only ever
-  // once for this league, on this device (see hasAutoOpenedRapidCupLeague
-  // above), not on every 5s poll tick, not on every remount of this
-  // banner, and not on every reload while the cup's still live.
+  // to the tournament page as soon as league_id is set — but only the
+  // first time ever, not on every 5s poll tick and not on every remount
+  // of this banner (see autoOpenedLeagueIds above).
   useEffect(() => {
-    if (lobby?.status === "live" && lobby?.league_id && myEntry && !hasAutoOpenedRapidCupLeague(lobby.league_id)) {
-      markRapidCupLeagueAutoOpened(lobby.league_id);
+    if (lobby?.status === "live" && lobby?.league_id && myEntry && !autoOpenedLeagueIds.has(lobby.league_id)) {
+      autoOpenedLeagueIds.add(lobby.league_id);
       onOpenLeague?.(lobby.league_id);
     }
   }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);
@@ -203,8 +210,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
 
   if (!lobby) return null;
 
-  const theme = getRapidCupTheme(lobby.cup_number);
-
   const fmtCountdown = (ms) => {
     if (ms == null) return "";
     const totalSec = Math.floor(ms / 1000);
@@ -224,13 +229,13 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 16px", borderRadius: 12, cursor: "pointer",
-        background: theme.surface, border: `1px solid ${theme.border}`,
-        marginBottom: 12, fontFamily: theme.font,
+        background: c?.cardBg || "#1a1a1a", border: `1px solid ${c?.border || "#333"}`,
+        marginBottom: 12,
       }}
     >
       <div>
-        <div style={{ fontWeight: 700, color: theme.accent }}>⚡ {theme.name}</div>
-        <div style={{ fontSize: 13, color: theme.textDim }}>
+        <div style={{ fontWeight: 700 }}>⚡ Rapid Cup</div>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>
           {lobby.status === "live"
             ? "Tournament live"
             : isFull
@@ -241,12 +246,12 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
 
       {lobby.status === "open" && !isFull && (
         isMine ? (
-          <span style={{ fontSize: 13, color: theme.textDim }}>You're in</span>
+          <span style={{ fontSize: 13, opacity: 0.8 }}>You're in</span>
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); setShowJoinModal(true); }}
             disabled={joining}
-            style={{ padding: "8px 16px", borderRadius: 8, fontWeight: 600, background: theme.accent, color: theme.accentText }}
+            style={{ padding: "8px 16px", borderRadius: 8, fontWeight: 600 }}
           >
             {joining ? "Joining…" : "Join"}
           </button>
