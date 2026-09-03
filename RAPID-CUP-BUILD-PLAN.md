@@ -164,3 +164,20 @@ player_gets    = invested_share × 20%   (on top of self_share, and on top of ba
 7. **Phase 7** — History archive + Help button (WhatsApp) + Home banner.
 8. **Phase 8** — Spectator investment (adds complexity — build once core is stable).
 9. **Phase 9** — Epic extras polish pass.
+
+---
+
+## Build Status
+
+- ✅ **Phase 1 — shipped** (`supabase/migrations/20260903090000_rapid_cup_lobby_phase1.sql`, `src/RapidCupBanner.jsx`)
+  - Lobby tables, `join_rapid_cup_lobby()` RPC, `expire_rapid_cup_lobbies()` cron RPC
+  - Home banner: live count, countdown, 15/5/1 min toasts, join flow, auto-chain to next lobby
+  - **Open item:** flipping a full lobby from `filling` → `live` (generating the actual bracket, setting `league_id`) needs the real `leagues`/`fixtures` table column names — not found in a tracked migration. Blocked on that schema before this can be wired end-to-end.
+- ⬜ Phase 2 — not started
+- ⬜ Phase 3 — not started
+- ⬜ Phase 4 — not started
+- ⬜ Phase 5 — not started
+- ⬜ Phase 6 — not started
+- ⬜ Phase 7 — not started
+- ⬜ Phase 8 — not started
+- ⬜ Phase 9 — not started
