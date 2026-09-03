@@ -13882,12 +13882,12 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
   return (
     <div className="flex flex-wrap items-center gap-2 py-2">
       {legLabel && <span className="font-mono text-[10px] uppercase tracking-wide shrink-0 w-12" style={{ color: c.textFaint }}>{legLabel}</span>}
-      <span className="flex-1 min-w-0 truncate font-body text-sm text-right">{homeTeam.name}</span>
+      <span className="flex-1 min-w-[64px] truncate font-body text-sm text-right">{homeTeam.name}</span>
       {offerContact && awayTeam.phone && (
         <WhatsAppCallLink phone={awayTeam.phone} iconOnly text={callText(homeTeam)} c={c} />
       )}
       {canManage ? (
-        <>
+        <div className="flex items-center gap-2 basis-full sm:basis-auto justify-center order-last sm:order-none">
           <input type="number" min={0} value={h} onChange={(e) => { setH(Number(e.target.value)); setSaveState("idle"); }}
             className="w-11 text-center rounded font-mono text-sm px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
           <span className="shrink-0" style={{ color: c.textFaint }}>–</span>
@@ -13903,7 +13903,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
                 className="w-9 text-center rounded font-mono text-xs px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
             </>
           )}
-        </>
+        </div>
       ) : (
         <span className="font-mono text-sm w-14 text-center shrink-0" style={{ color: c.text }}>
           {fixture.played ? `${fixture.home_score} – ${fixture.away_score}` : "– : –"}
@@ -13915,7 +13915,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
       {offerContact && homeTeam.phone && (
         <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
-      <span className="flex-1 min-w-0 truncate font-body text-sm">{awayTeam.name}</span>
+      <span className="flex-1 min-w-[64px] truncate font-body text-sm">{awayTeam.name}</span>
       {/* For a two-legged tie, both legs now share one due_at — showing it
           on every row would just repeat the same date twice. The shared
           start–expiry window is shown once instead, at the tie level (see
