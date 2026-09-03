@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabaseClient";
-import { EntryFeeSlider } from "./RapidCupBanner";
+import { EntryFeeSlider } from "./RapidCupFeeSlider";
 
 // Rapid Cup — Phase 2: fee slider join modal + live fee/payout display.
 //
