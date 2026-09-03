@@ -145,3 +145,54 @@ export function RapidCupCupbox({ lobbyId, myUserId, showToast, c }) {
     </div>
   );
 }
+
+// RapidCupTournamentExtras — drops the Winbox/Cup box into a league's own
+// Fixtures tab (LeagueDetail). Self-gating: a Rapid Cup league is just a
+// regular `leagues` row under the hood (see generate_rapid_cup_bracket),
+// so rather than threading an "is this Rapid Cup" flag down from App.jsx
+// through every caller, this queries rapid_cup_lobbies for the league id
+// itself and renders nothing if no lobby points at it — a normal league
+// gets nothing extra here, a Rapid Cup league gets its boxes automatically.
+export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c }) {
+  const [lobby, setLobby] = useState(null); // null = loading; false = not a Rapid Cup league
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!league?.id) { setLobby(false); return; }
+      const { data } = await supabase
+        .from("rapid_cup_lobbies")
+        .select("id, status")
+        .eq("league_id", league.id)
+        .maybeSingle();
+      if (!cancelled) setLobby(data || false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [league?.id]);
+
+  if (!lobby) return null;
+
+  const myUserId = session?.user?.id || null;
+  const myTeamId = myTeam?.id || null;
+
+  // Every fixture the viewer's own team has already played, not just the
+  // current round — a Rapid Cup player can have a collectable Winbox from
+  // their semi-final sitting around while the final is still in progress.
+  const myPlayedFixtures = myTeamId
+    ? (league.fixtures || []).filter((f) => f.played && (f.home_team_id === myTeamId || f.away_team_id === myTeamId))
+    : [];
+
+  if (!myPlayedFixtures.length && lobby.status !== "completed") return null;
+
+  return (
+    <div className="space-y-2">
+      {myPlayedFixtures.map((f) => (
+        <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={c} />
+      ))}
+      {lobby.status === "completed" && (
+        <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={c} />
+      )}
+    </div>
+  );
+}

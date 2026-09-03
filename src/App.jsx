@@ -8516,7 +8516,7 @@ export default function App() {
                 onDownloadResultProof={downloadResultProof} onApproveResult={approveResult} onRejectResult={rejectResult}
                 onRespondToResultSubmission={respondToResultSubmission}
                 onPostComment={postComment} onDeleteComment={deleteComment} onEditComment={editComment} onEditResult={editResultForFixture} onCancelResult={cancelFixtureResult} onEditLadderCupResult={editLadderCupMatchResult} onToggleReaction={toggleCommentReaction}
-                onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} playerLocations={playerLocations} myTimezone={profile?.timezone} c={c} />
+                onToggleLeagueReaction={toggleLeagueReaction} avatarByTeamId={teamAvatars} playerLocations={playerLocations} myTimezone={profile?.timezone} showToast={showToast} c={c} />
               </Suspense>
             )}
             {view === "leagueLadder" && activeLadderLeagueId && (

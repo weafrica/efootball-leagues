@@ -10,6 +10,7 @@ import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHigh
 import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, winScaledFee, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import { entryFeeForLeagueFormat, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_BASE_VISIBLE_OPPONENTS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS, LADDER_CUP_MAX_VISIBLE_OPPONENTS } from "./economy.js";
 import { NetsAmount } from "./NetCoinIcon";
+import { RapidCupTournamentExtras } from "./RapidCupPrizeCollection.jsx";
 
 // Live "Xh Ym left" text for a deadline, ticking against a shared `now`
 // (passed down from a parent's own setInterval rather than each row
@@ -1685,7 +1686,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
   );
 }
 
-export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onCancelResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onClaimLadderCupWalkover, onBuyLadderCupOpponentSlot, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, playerLocations, myTimezone, c }) {
+export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onCancelResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onClaimLadderCupWalkover, onBuyLadderCupOpponentSlot, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, playerLocations, myTimezone, showToast, c }) {
   const [tab, setTab] = useState("table");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -2054,6 +2055,9 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
+          {joined && myTeam && (
+            <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} showToast={showToast} c={c} />
+          )}
           {(joined || canManage) && (
             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
               getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
