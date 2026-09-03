@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 
@@ -152,11 +153,43 @@ function useOpenRapidCupLobby() {
   return { lobby, playerCount, myEntry, reload: load };
 }
 
+// Short "what is this" explainer, opened from the (?) button on the banner.
+// Same fixed-overlay pattern as RapidCupJoinModal in RapidCupFeeDisplay.jsx,
+// kept local here since it has nothing to share with that one beyond the
+// look — just a title, one explaining sentence, and a close button.
+function RapidCupHelpModal({ open, onClose, c }) {
+  if (!open) return null;
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+      }}
+    >
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background: c?.cardBg || "#1a1a1a", border: `1px solid ${c?.border || "#333"}`, borderRadius: 12, padding: 20, width: 320 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontWeight: 700 }}>⚡ What's Rapid Cup?</div>
+          <button onClick={onClose} aria-label="Close" style={{ color: c?.textFaint || "#888" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.85 }}>
+          An instant 4-player knockout — join a lobby, pay your entry fee in Nets, get matched the moment it fills, and the winner takes the pooled bonus.
+        </div>
+        <button onClick={onClose} style={{ width: "100%", marginTop: 16, padding: "8px 0", borderRadius: 8, fontWeight: 600 }}>
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c }) {
   const { lobby, playerCount, myEntry, reload } = useOpenRapidCupLobby();
   const [now, setNow] = useState(() => Date.now());
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const firedThresholds = useRef(new Set());
   const lastLobbyId = useRef(null);
 
@@ -291,7 +324,20 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
       }}
     >
       <div>
-        <div style={{ fontWeight: 700 }}>⚡ Rapid Cup</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontWeight: 700 }}>⚡ Rapid Cup</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
+            title="What's Rapid Cup?" aria-label="What's Rapid Cup?"
+            style={{
+              width: 18, height: 18, borderRadius: "50%", display: "flex",
+              alignItems: "center", justifyContent: "center", flexShrink: 0,
+              background: "rgba(255,255,255,0.12)", color: c?.textDim || "#aaa",
+            }}
+          >
+            <Info size={12} />
+          </button>
+        </div>
         <div style={{ fontSize: 13, opacity: 0.8 }}>
           {lobby.status === "live"
             ? "Tournament live"
@@ -328,6 +374,8 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
         joining={joining}
         c={c}
       />
+
+      <RapidCupHelpModal open={showHelp} onClose={() => setShowHelp(false)} c={c} />
     </div>
   );
 }
