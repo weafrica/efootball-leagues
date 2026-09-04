@@ -340,8 +340,16 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
     }
     ctxRef.current = ctx;
     setIsRinging(true);
-    saveAlarmSyncCredentials(lobbyId); // Step 6: so sw.js can stop this alarm even with zero tabs open
-    showLeagueStartNotification(lobbyId);
+    // Step 6 fix: save the sync credentials FIRST, and only show the
+    // notification once that's actually finished — otherwise there was a
+    // narrow window where a lightning-fast tap on the notification could
+    // beat the (unawaited) credential save, leaving sw.js with nothing to
+    // read if that same tap happened to be "Stop" with zero other tabs open.
+    // Sequencing them like this doesn't delay the audio alarm below at all,
+    // it only delays the notification (which can't be tapped before it
+    // exists anyway) by however long the save itself takes — normally a
+    // few milliseconds.
+    saveAlarmSyncCredentials(lobbyId).then(() => showLeagueStartNotification(lobbyId));
 
     playAlarmCycle(ctx); // ring immediately, then keep looping
     const interval = setInterval(() => playAlarmCycle(ctx), RING_LOOP_MS);
