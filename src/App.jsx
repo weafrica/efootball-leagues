@@ -8810,7 +8810,11 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // stats, empty states) is derived from funLeagues/funLeagueIds so nothing
   // on this page hints that cash leagues exist before sign-in.
   const isCashLeague = (l) => guestData?.extras.find((e) => e.league_id === l.id)?.league_type === "cash";
-  const funLeagues = guestData ? guestData.leagues.filter((l) => !isCashLeague(l)) : [];
+  // Also drop already-completed leagues here — otherwise a finished knockout
+  // (e.g. a Rapid Cup with a decided final) can still surface in the Weekend
+  // League spotlight below just because one of its old fixtures had a due_at
+  // that happened to fall in this Fri–Sun window.
+  const funLeagues = guestData ? guestData.leagues.filter((l) => !isCashLeague(l) && !isLeagueCompleted(l)) : [];
   const funLeagueIds = new Set(funLeagues.map((l) => l.id));
   const totalClubs = guestData ? guestData.teams.filter((t) => funLeagueIds.has(t.league_id)).length : 0;
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played && funLeagueIds.has(f.league_id)).length : 0;
@@ -10820,7 +10824,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   // its own (a result's confirm window silently expiring), so that tick —
   // and the sort/attention-score work it drives — now lives in
   // LeagueListsSection instead, scoped to just that piece of the tree.
-  const funLeagues = leagues.filter((l) => l.league_type !== "cash");
+  // Excludes completed leagues too — same reasoning as PublicHome's funLeagues
+  // below: a finished Rapid Cup shouldn't reappear in the Weekend League
+  // spotlight just because an old fixture's due_at falls in this weekend.
+  const funLeagues = leagues.filter((l) => l.league_type !== "cash" && !isLeagueCompleted(l));
   const myId = session?.user?.id;
 
   // Same Weekend League spotlight PublicHome shows guests, surfaced here
