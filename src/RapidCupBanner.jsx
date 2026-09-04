@@ -215,10 +215,12 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   // "open" (filling), same gating as the 15/5/1 min toasts below.
   useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
 
-  // League-start alarm — rings once this lobby hits 4 players and starts,
-  // for this viewer only if they're actually one of the 4 (myEntry), not
-  // for someone just browsing the open lobby before joining.
-  useLeagueStartAlarm(lobby?.status, lobby?.id ?? null, !!myEntry);
+  // League-start alarm — rings on a loop once this lobby hits 4 players
+  // and starts, for this viewer only if they're actually one of the 4
+  // (myEntry), not for someone just browsing the open lobby before
+  // joining. Stops the moment they tap in (handleBannerClick / the
+  // auto-redirect effect below both call stopAlarm()).
+  const { stopAlarm, isRinging } = useLeagueStartAlarm(lobby?.status, lobby?.id ?? null, !!myEntry);
 
   // Countdown notifications at 15/5/1 min remaining — fires once per
   // threshold per lobby.
@@ -246,9 +248,10 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
       !loadAutoOpenedLeagueIds().has(lobby.league_id)
     ) {
       markLeagueAutoOpened(lobby.league_id);
+      stopAlarm(); // they're being taken in automatically — "entering the app"
       onOpenLeague?.(lobby.league_id);
     }
-  }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);
+  }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague, stopAlarm]);
 
   // Bracket generation — as soon as the lobby flips to "filling" (4th
   // player joined) but hasn't got a league_id yet, one of the 4 players'
@@ -312,11 +315,17 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   //   - not seated -> original light nudge toward the Join button.
   const handleBannerClick = () => {
     if (myEntry && lobby.league_id) {
+      stopAlarm(); // tapping in is exactly the "entering the app" that stops it
       onOpenLeague?.(lobby.league_id);
       return;
     }
     if (myEntry) {
-      showToast?.("You're in — hang tight, the tournament opens once the lobby fills.");
+      // Bracket's still being generated (a moment, usually) — stop the
+      // ringing since they've acknowledged it, but there's no league page
+      // to send them to yet. The auto-redirect effect above will take
+      // them in itself the instant league_id shows up.
+      stopAlarm();
+      showToast?.("Starting… you'll be taken in automatically in a moment.");
       return;
     }
     onOpenLobby?.(lobby.id);
@@ -330,13 +339,23 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 16px", borderRadius: 12, cursor: "pointer",
-        background: c?.cardBg || "#1a1a1a", border: `1px solid ${c?.border || "#333"}`,
+        background: isRinging ? "#3a1a1a" : (c?.cardBg || "#1a1a1a"),
+        border: `1px solid ${isRinging ? "#ff4d4d" : (c?.border || "#333")}`,
         marginBottom: 12,
+        animation: isRinging ? "rapidCupAlarmPulse 1s ease-in-out infinite" : "none",
       }}
     >
+      {isRinging && (
+        <style>{`
+          @keyframes rapidCupAlarmPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0.5); }
+            50% { box-shadow: 0 0 0 8px rgba(255,77,77,0); }
+          }
+        `}</style>
+      )}
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontWeight: 700 }}>⚡ Rapid Cup</span>
+          <span style={{ fontWeight: 700 }}>{isRinging ? "🔔 Rapid Cup" : "⚡ Rapid Cup"}</span>
           <button
             onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
             title="What's Rapid Cup?" aria-label="What's Rapid Cup?"
@@ -349,12 +368,14 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
             <Info size={12} />
           </button>
         </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>
-          {lobby.status === "live"
-            ? "Tournament live"
-            : isFull
-              ? "Full — next lobby opening"
-              : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
+        <div style={{ fontSize: 13, opacity: isRinging ? 1 : 0.8, fontWeight: isRinging ? 700 : 400 }}>
+          {isRinging
+            ? "Your league has started — tap to enter!"
+            : lobby.status === "live"
+              ? "Tournament live"
+              : isFull
+                ? "Full — next lobby opening"
+                : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
         </div>
       </div>
 

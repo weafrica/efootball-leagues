@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // Rapid Cup — Phase 9: Epic Extras (Section 13).
 //
@@ -136,47 +136,84 @@ export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// League-start alarm — rings once a lobby reaches 4 players and the league
-// is starting. Fires for players actually in that lobby, not spectators
-// browsing an open one.
+// League-start alarm — rings on a loop once a lobby reaches 4 players and
+// the league is starting, until the player taps into the Rapid Cup page
+// (the banner below calls the returned stopAlarm() the moment they do).
+// Fires for players actually in that lobby, not spectators browsing an
+// open one.
 //
-// Can't use a plain ref like the drumroll above: the drumroll's window
-// (10s inside an "open" lobby) closes on its own, so a remount after that
-// can't refire it. This lobby stays "filling"/"live" for the ENTIRE
-// tournament, sometimes a long time — RapidCupBanner.jsx's own comment
-// block explains why Home (and this banner with it) remounts constantly
-// during that window. A plain ref resets on every one of those remounts,
-// so the alarm would ring again each time a player left and came back to
-// Home mid-tournament. Same problem AUTO_OPENED_STORAGE_KEY already
-// solved for the auto-redirect-into-league effect — reusing that
-// sessionStorage approach here instead of a ref.
-const ALARMED_LOBBY_STORAGE_KEY = "rapidCup:alarmedLobbyIds";
+// "Stopped" has to survive a remount the same way "already alarmed" did
+// in the earlier one-shot version — RapidCupBanner.jsx's own comment
+// block explains why Home remounts constantly during a live tournament.
+// The difference here: while NOT yet stopped, a remount should actually
+// RESUME ringing (that's the point — it rings until they come back and
+// enter), so sessionStorage only needs to remember "stopped," never
+// "already rang."
+const STOPPED_ALARM_STORAGE_KEY = "rapidCup:stoppedAlarmLobbyIds";
 
-function loadAlarmedLobbyIds() {
+function loadStoppedAlarmLobbyIds() {
   try {
-    const raw = sessionStorage.getItem(ALARMED_LOBBY_STORAGE_KEY);
+    const raw = sessionStorage.getItem(STOPPED_ALARM_STORAGE_KEY);
     return new Set(raw ? JSON.parse(raw) : []);
   } catch {
-    return new Set(); // fail open, same reasoning as the auto-open guard
+    return new Set(); // fail open — worst case it rings again once more
   }
 }
 
-function markLobbyAlarmed(lobbyId) {
-  const ids = loadAlarmedLobbyIds();
+function markAlarmStopped(lobbyId) {
+  const ids = loadStoppedAlarmLobbyIds();
   ids.add(lobbyId);
   try {
-    sessionStorage.setItem(ALARMED_LOBBY_STORAGE_KEY, JSON.stringify([...ids]));
+    sessionStorage.setItem(STOPPED_ALARM_STORAGE_KEY, JSON.stringify([...ids]));
   } catch {
-    // Storage unavailable — worst case the alarm can refire once more.
+    // Storage unavailable — nothing we can do, same as elsewhere in this file.
+  }
+}
+
+const RING_LOOP_MS = 2600; // one 6-beep cycle (~2s) plus a short gap before repeating
+
+function playAlarmCycle(ctx) {
+  const start = ctx.currentTime + 0.02;
+  const pulseDur = 0.25;
+  const gapDur = 0.12;
+  let t = start;
+  for (let i = 0; i < 6; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = i % 2 === 0 ? 880 : 660;
+    const gainNode = ctx.createGain();
+    gainNode.gain.setValueAtTime(0.0001, t);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+    gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
+    osc.connect(gainNode).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + pulseDur);
+    t += pulseDur + gapDur;
   }
 }
 
 export function useLeagueStartAlarm(status, lobbyId, enabled) {
+  const ctxRef = useRef(null);
+  const intervalRef = useRef(null);
+  const [isRinging, setIsRinging] = useState(false);
+
+  const stopAlarm = useCallback(() => {
+    if (lobbyId != null) markAlarmStopped(lobbyId);
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
+    setIsRinging(false);
+  }, [lobbyId]);
+
   useEffect(() => {
-    if (!enabled || lobbyId == null) return;
-    if (status !== "filling" && status !== "live") return;
-    if (loadAlarmedLobbyIds().has(lobbyId)) return;
-    markLobbyAlarmed(lobbyId);
+    if (!enabled || lobbyId == null || (status !== "filling" && status !== "live")) {
+      setIsRinging(false);
+      return;
+    }
+    if (loadStoppedAlarmLobbyIds().has(lobbyId)) {
+      setIsRinging(false);
+      return;
+    }
 
     let ctx;
     try {
@@ -186,35 +223,28 @@ export function useLeagueStartAlarm(status, lobbyId, enabled) {
     } catch {
       return; // no Web Audio support — silently skip, this is pure polish
     }
+    ctxRef.current = ctx;
+    setIsRinging(true);
 
-    // Classic alarm-clock ring: two alternating tones, 6 short pulses.
-    const start = ctx.currentTime + 0.05;
-    const pulseDur = 0.25;
-    const gapDur = 0.12;
-    let t = start;
-    for (let i = 0; i < 6; i++) {
-      const osc = ctx.createOscillator();
-      osc.type = "square";
-      osc.frequency.value = i % 2 === 0 ? 880 : 660;
-      const gainNode = ctx.createGain();
-      gainNode.gain.setValueAtTime(0.0001, t);
-      gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
-      gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
-      osc.connect(gainNode).connect(ctx.destination);
-      osc.start(t);
-      osc.stop(t + pulseDur);
-      t += pulseDur + gapDur;
-    }
+    playAlarmCycle(ctx); // ring immediately, then keep looping
+    const interval = setInterval(() => playAlarmCycle(ctx), RING_LOOP_MS);
+    intervalRef.current = interval;
 
-    // Same navigate-away fix as the drumroll: close immediately on
-    // unmount instead of only scheduling the close for later, so leaving
-    // the page actually stops the ringing instead of leaving it playing
-    // in the background.
-    const cleanupMs = (t + 0.3 - ctx.currentTime) * 1000;
-    const cleanupTimer = setTimeout(() => { ctx.close?.(); }, Math.max(0, cleanupMs));
-    return () => { clearTimeout(cleanupTimer); ctx.close?.(); };
+    // Unmount/navigate-away or a status change (e.g. filling -> live)
+    // tears this cycle's context down — same immediate-close fix as the
+    // drumroll and the one-shot alarm before it, so leaving the page (or
+    // the lobby moving on) actually stops the sound instead of leaving a
+    // stray context ringing in the background. If still eligible, the
+    // effect re-runs right after and opens a fresh context to keep going.
+    return () => {
+      clearInterval(interval);
+      ctx.close?.();
+      if (ctxRef.current === ctx) ctxRef.current = null;
+      if (intervalRef.current === interval) intervalRef.current = null;
+    };
   }, [status, lobbyId, enabled]);
+
+  return { stopAlarm, isRinging };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
