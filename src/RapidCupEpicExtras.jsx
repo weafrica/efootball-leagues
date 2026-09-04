@@ -193,17 +193,86 @@ function playAlarmCycle(ctx) {
   }
 }
 
-export function useLeagueStartAlarm(status, lobbyId, enabled) {
+// Local (no-push) notification — Option 2: only reaches this device
+// while some tab of the app is still open somewhere, even backgrounded;
+// there's no server involved, so this can't reach a fully-closed app.
+// Needs the service worker (public/sw.js) to actually show it with
+// action buttons — showNotification() with `actions` only works via a
+// ServiceWorkerRegistration, not the plain `new Notification()`
+// constructor. sw.js's own notificationclick listener is what makes the
+// "Stop alarm" / "Enter Rapid Cup" buttons do anything.
+const NOTIFICATION_ACTIONS = [
+  { action: "enter", title: "Enter Rapid Cup" },
+  { action: "stop", title: "Stop alarm" },
+];
+
+async function showLeagueStartNotification(lobbyId) {
+  if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
+  try {
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== "granted") return; // denied, or the prompt was dismissed — the in-page alarm still covers them
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("⚡ Rapid Cup", {
+      body: "Your league has started — tap to enter!",
+      tag: `rapid-cup-alarm-${lobbyId}`, // re-showing replaces the same one instead of piling up
+      requireInteraction: true, // stays put until acted on, where the browser supports it (e.g. Android Chrome); harmlessly ignored elsewhere (e.g. iOS Safari)
+      actions: NOTIFICATION_ACTIONS,
+      data: { lobbyId },
+    });
+  } catch {
+    // Purely additive — the in-page audio alarm and banner work either way.
+  }
+}
+
+async function closeLeagueStartNotification(lobbyId) {
+  if (!("serviceWorker" in navigator) || lobbyId == null) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const notifications = await reg.getNotifications({ tag: `rapid-cup-alarm-${lobbyId}` });
+    notifications.forEach((n) => n.close());
+  } catch {
+    // Same "purely additive" reasoning — nothing to fall back to here.
+  }
+}
+
+export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
   const [isRinging, setIsRinging] = useState(false);
 
+  // Ref, not a dependency — so a caller passing a fresh onEnter closure
+  // every render (RapidCupBanner does, via an inline function) doesn't
+  // force the message-listener effect below to keep tearing down and
+  // resubscribing.
+  const onEnterRef = useRef(onEnter);
+  useEffect(() => { onEnterRef.current = onEnter; }, [onEnter]);
+
   const stopAlarm = useCallback(() => {
-    if (lobbyId != null) markAlarmStopped(lobbyId);
+    if (lobbyId != null) { markAlarmStopped(lobbyId); closeLeagueStartNotification(lobbyId); }
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     setIsRinging(false);
   }, [lobbyId]);
+
+  // Taps on the phone notification arrive here as a postMessage from
+  // sw.js's notificationclick listener (a service worker can't call
+  // React state setters directly). "stop" silences it exactly like
+  // tapping the in-app banner does; "enter" does the same AND hands off
+  // to the caller's own navigation logic (RapidCupBanner decides whether
+  // the league's actually ready to open yet).
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const handler = (event) => {
+      const msg = event.data;
+      if (!msg || msg.type !== "rapid-cup-alarm-action" || msg.lobbyId !== lobbyId) return;
+      stopAlarm();
+      if (msg.action === "enter") onEnterRef.current?.();
+    };
+    navigator.serviceWorker.addEventListener("message", handler);
+    return () => navigator.serviceWorker.removeEventListener("message", handler);
+  }, [lobbyId, stopAlarm]);
 
   useEffect(() => {
     if (!enabled || lobbyId == null || (status !== "filling" && status !== "live")) {
@@ -225,6 +294,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled) {
     }
     ctxRef.current = ctx;
     setIsRinging(true);
+    showLeagueStartNotification(lobbyId);
 
     playAlarmCycle(ctx); // ring immediately, then keep looping
     const interval = setInterval(() => playAlarmCycle(ctx), RING_LOOP_MS);

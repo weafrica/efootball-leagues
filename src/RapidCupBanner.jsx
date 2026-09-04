@@ -219,8 +219,21 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   // and starts, for this viewer only if they're actually one of the 4
   // (myEntry), not for someone just browsing the open lobby before
   // joining. Stops the moment they tap in (handleBannerClick / the
-  // auto-redirect effect below both call stopAlarm()).
-  const { stopAlarm, isRinging } = useLeagueStartAlarm(lobby?.status, lobby?.id ?? null, !!myEntry);
+  // auto-redirect effect below / the phone notification's own buttons
+  // all call stopAlarm()).
+  const handleNotificationEnter = useCallback(() => {
+    if (myEntry && lobby?.league_id) {
+      onOpenLeague?.(lobby.league_id);
+    } else if (myEntry) {
+      // Same "bracket's still generating" gap as handleBannerClick below —
+      // the auto-redirect effect will take them in itself once it's ready.
+      showToast?.("Starting… you'll be taken in automatically in a moment.");
+    }
+  }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
+
+  const { stopAlarm, isRinging } = useLeagueStartAlarm(
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter
+  );
 
   // Countdown notifications at 15/5/1 min remaining — fires once per
   // threshold per lobby.

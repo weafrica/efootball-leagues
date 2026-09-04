@@ -9,6 +9,31 @@
 const CACHE_NAME = "matchday-shell-v1";
 const SHELL_URLS = ["/", "/manifest.webmanifest", "/splash.jpg"];
 
+// Rapid Cup league-start alarm — locally-shown notifications only (no
+// push subscription, no server; that's the "Option 2" build). The page
+// itself calls registration.showNotification() while it's still open
+// (even backgrounded) the moment a lobby it's tracking starts ringing;
+// this listener just handles what happens when the person taps the
+// notification or one of its action buttons, since that has to happen
+// here in the service worker, not in the page.
+self.addEventListener("notificationclick", (event) => {
+  const action = event.action || "enter"; // tapping the body (no action) behaves like "enter"
+  const lobbyId = event.notification?.data?.lobbyId ?? null;
+  event.notification.close();
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        client.postMessage({ type: "rapid-cup-alarm-action", action, lobbyId });
+      }
+      // Bring an existing tab to the front rather than opening a new one,
+      // same "don't fragment the session" spirit as the rest of this app.
+      if (clients.length) return clients[0].focus();
+      return self.clients.openWindow("/");
+    })
+  );
+});
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)).catch(() => {})
