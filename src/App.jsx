@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
@@ -17,16 +17,16 @@ import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
 // Next-match push notifications (League Ladder, regular leagues, random
 // matches) reuse the exact same subscribe/resubscribe plumbing Rapid Cup
-// already shipped — one push_subscriptions table, one VAPID key pair, one
+// already shipped â€” one push_subscriptions table, one VAPID key pair, one
 // browser subscription per device. RapidCupBanner still calls
-// subscribeToRapidCupPush() itself on join (harmless — it's an upsert on
+// subscribeToRapidCupPush() itself on join (harmless â€” it's an upsert on
 // endpoint), but that only ever ran for players who'd opened a Rapid Cup
 // lobby. Every signed-in player now needs a subscription, so this is
 // called from the sessionKey effect below instead of only from there.
 import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
-// initial render — bundling them in eagerly meant every single visitor
+// initial render â€” bundling them in eagerly meant every single visitor
 // downloaded and parsed that code up front even if they never open the
 // shop or read the terms. Splitting them into their own chunks (Vite does
 // this automatically for a dynamic import()) shrinks the JS the browser
@@ -35,18 +35,18 @@ const ShopPage = lazy(() => import("./Shop.jsx"));
 const TransferMarketPage = lazy(() => import("./TransferMarket.jsx"));
 const TermsPage = lazy(() => import("./Terms.jsx"));
 // RulesModal carries its own ~500-line static rules text (league/ladder/
-// challenge reference content) that only a fraction of visitors ever open —
+// challenge reference content) that only a fraction of visitors ever open â€”
 // lazy-loading it the same way keeps that text out of everyone else's
 // initial download.
 const RulesModal = lazy(() => import("./Rules.jsx"));
 // LeagueDetail is the biggest single screen in the app (standings, fixtures,
 // comments, payments, admin controls) and is only ever opened by a signed-in
-// user tapping into a specific league — never on the guest/login page — so
+// user tapping into a specific league â€” never on the guest/login page â€” so
 // it's split out the same way.
 const LeagueDetail = lazy(() => import("./LeagueDetail.jsx"));
 const LeagueLadderDetail = lazy(() => import("./LeagueLadderDetail.jsx"));
 // LadderPoolAdminPanel is now its own full screen (see that file's own
-// header) rather than an inline card on LeagueLadderDetail — admin-only,
+// header) rather than an inline card on LeagueLadderDetail â€” admin-only,
 // reached from a link on LeagueLadderDetail, so it's lazy-loaded the same
 // way every other admin/rarely-visited screen here is.
 const LadderPoolAdminPage = lazy(() => import("./LadderPoolAdminPanel.jsx"));
@@ -76,7 +76,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
 // itself needs the pure engine. Home/away assignment now
 // happens server-side inside initiate_ladder_cup_match (see
 // supabase/migrations/20260815_ladder_cup_match_rpc.sql), so the pure
-// engine's assignHomeTeam isn't imported here anymore — it's still used
+// engine's assignHomeTeam isn't imported here anymore â€” it's still used
 // by the RPC's own logic, mirrored in SQL rather than called from JS.
 // rankLadderCupStandings/getOpponentPool stay imported where they're
 // actually consumed (LeagueDetail.jsx) rather than duplicated here.
@@ -101,13 +101,13 @@ export const DEFAULT_ROUND_PERIOD_HOURS = 48;
 // A two-legged (home & away) knockout tie always gets a fixed 4-day window
 // to play both matches, regardless of whatever the league's own
 // round_period_hours is set to for single-leg fixtures. It used to be
-// derived as roundPeriodMs(league) * 2 — but that silently gave ties a
+// derived as roundPeriodMs(league) * 2 â€” but that silently gave ties a
 // shorter (or longer) window than 4 days whenever a league's round period
 // was configured to something other than the 48-hour default, since that
 // setting was never meant to double as the two-legged tie window too.
 export const KNOCKOUT_TIE_WINDOW_MS = 4 * ONE_DAY_MS;
 // Older leagues created before this setting existed have no round_period_hours
-// column value — fall back to the original fixed 48-hour (2-day) gap so their
+// column value â€” fall back to the original fixed 48-hour (2-day) gap so their
 // schedules don't shift.
 function roundPeriodMs(league) {
   const hours = league?.round_period_hours;
@@ -117,7 +117,7 @@ function roundPeriodMs(league) {
 // Used by every "refresh this every few seconds while a screen is open"
 // effect below. A background tab (phone screen off, switched app,
 // minimized browser) was still firing every poll on schedule for data
-// nobody could see — this skips the actual fetch while hidden, and catches
+// nobody could see â€” this skips the actual fetch while hidden, and catches
 // up immediately the moment it becomes visible again instead of waiting
 // for the next tick.
 function useVisibilityPoll(callback, intervalMs, enabled) {
@@ -132,7 +132,7 @@ function useVisibilityPoll(callback, intervalMs, enabled) {
 }
 
 // Subscribes to Postgres changes on `table` and re-runs `callback` (an
-// existing loader, e.g. loadLadder) whenever a row changes — rather than
+// existing loader, e.g. loadLadder) whenever a row changes â€” rather than
 // hand-merging the changed row into state, which would mean two separate
 // code paths (fetch-and-parse vs. realtime-patch) that could quietly drift
 // out of sync. Re-running the same loader keeps a single source of truth;
@@ -140,7 +140,7 @@ function useVisibilityPoll(callback, intervalMs, enabled) {
 // rows can change in the same instant (e.g. a confirmed result touching
 // both ladder_ranks rows at once) and each would otherwise fire its own
 // refetch. This is deliberately paired with useVisibilityPoll elsewhere as
-// a slow safety net — a dropped realtime connection (which does happen on
+// a slow safety net â€” a dropped realtime connection (which does happen on
 // flaky mobile networks) just means falling back to that poll instead of
 // going stale indefinitely.
 function useRealtimeRefresh(table, callback, enabled) {
@@ -159,12 +159,12 @@ function useRealtimeRefresh(table, callback, enabled) {
   }, [table, callback, enabled]);
 }
 
-// The "Shop now" banner opens the in-app WeAfrica Shop (see Shop.jsx) —
+// The "Shop now" banner opens the in-app WeAfrica Shop (see Shop.jsx) â€”
 // full catalog, cart, and checkout, no external site needed.
 const SHOP_NAME = "WeAfrica Shop";
 const SHOP_GOLD = "#D4A017"; // brand accent, distinct from the app's green so the banner reads as a sponsor/store placement, not another app screen
 
-// Promo badge on the shop banner — flip SHOP_PROMO_ACTIVE to true whenever
+// Promo badge on the shop banner â€” flip SHOP_PROMO_ACTIVE to true whenever
 // you're running a promotion, and edit the text to match. Flip it back to
 // false when the promo ends. No redeploy logic needed beyond editing these
 // two lines and shipping.
@@ -172,7 +172,7 @@ const SHOP_PROMO_ACTIVE = false;
 const SHOP_PROMO_TEXT = "Sale";
 
 // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
-// to false once the Ladder is back to normal — the notice just won't fire
+// to false once the Ladder is back to normal â€” the notice just won't fire
 // again, no redeploy-adjacent cleanup needed.
 const LADDER_MAINTENANCE_ACTIVE = false;
 
@@ -183,7 +183,7 @@ const ENTRY_FEE_STEP = 10;
 const ENTRY_FEE_PRESETS = [10, 20, 50, 100, 150, 200];
 export const formatRand = (n) => `R${Number(n).toLocaleString("en-ZA")}`;
 
-// "Cards accepted" indicator for the card payment option — renders the
+// "Cards accepted" indicator for the card payment option â€” renders the
 // Mastercard/Visa logo image the site owner supplies at
 // /public/card-brands.png (drop the real file in yourself; nothing here
 // reproduces the artwork).
@@ -205,15 +205,15 @@ const MUKURU_DETAILS = {
   receiverPhone: "+27694362789",
 };
 
-// iKhokha Pay-by-Link — a hosted checkout page someone can pay into with a
+// iKhokha Pay-by-Link â€” a hosted checkout page someone can pay into with a
 // card, no bank app or reference number needed. Chosen over a static QR
 // image or a Pay-by-Proxy number because it's just a URL: it drops straight
 // into the same "here are your options" card as the bank/Mukuru details
 // below with no extra image asset, and works the same whether someone taps
 // it on their phone or a desktop.
 // TODO: replace payLink with your real iKhokha Pay-by-Link URL (generate
-// one from the iKhokha merchant dashboard or app — Payment Links / Pay by
-// Link). Left blank for now so the option is hidden until it's set — see
+// one from the iKhokha merchant dashboard or app â€” Payment Links / Pay by
+// Link). Left blank for now so the option is hidden until it's set â€” see
 // the `IKHOKHA_DETAILS.payLink &&` check in PaymentModal below.
 const IKHOKHA_DETAILS = {
   payLink: "https://pay.ikhokha.com/weafrica/mpr/weafrica",
@@ -221,7 +221,7 @@ const IKHOKHA_DETAILS = {
 
 const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.round(Number(n) || 0)));
 
-// Every cash league — however it ends — reserves a flat 5% of the pool for
+// Every cash league â€” however it ends â€” reserves a flat 5% of the pool for
 // the organizer, untouched by anyone's contribution ratio, leaving the
 // remaining 95% to be split across a small number of places. Which places,
 // and how the 95% is divided between them, depends on how the league ends:
@@ -230,27 +230,27 @@ const clampFee = (n) => Math.min(ENTRY_FEE_MAX, Math.max(ENTRY_FEE_MIN, Math.rou
 // gives a clean ranking to the two finalists (everyone knocked out earlier
 // is a genuine tie in how far they got), so it pays just the champion and
 // runner-up (75%/20%). Either way, each place's share is still scaled by
-// how much that member personally put in — same "the more you put in, the
-// bigger your prize" rule — and any shortfall from underpayment gets
+// how much that member personally put in â€” same "the more you put in, the
+// bigger your prize" rule â€” and any shortfall from underpayment gets
 // redistributed back across the paid places, proportional to their own
 // direct prize (see computeCashPrizes). Survivor leagues finish with a
 // round-robin stage, so they use the round-robin split too.
 const ORGANIZER_SHARE = 0.05;
-const KNOCKOUT_PRIZE_SPLIT = [0.75, 0.20]; // champion, runner-up — sums to 0.95, leaving the organizer's 0.05
-const ROUND_ROBIN_PRIZE_SPLIT = [0.55, 0.25, 0.15]; // gold, silver, bronze — sums to 0.95, leaving the organizer's 0.05
+const KNOCKOUT_PRIZE_SPLIT = [0.75, 0.20]; // champion, runner-up â€” sums to 0.95, leaving the organizer's 0.05
+const ROUND_ROBIN_PRIZE_SPLIT = [0.55, 0.25, 0.15]; // gold, silver, bronze â€” sums to 0.95, leaving the organizer's 0.05
 
 function isKnockoutFormat(league) {
   return league.format === "knockout" || league.format === "groups_knockout";
 }
 
-// Which prize-split array applies to this league's format — see the module
+// Which prize-split array applies to this league's format â€” see the module
 // comment above ORGANIZER_SHARE for why knockout/groups_knockout differ
 // from every other (round-robin-ending) format.
 function cashPrizePercentages(league) {
   return isKnockoutFormat(league) ? KNOCKOUT_PRIZE_SPLIT : ROUND_ROBIN_PRIZE_SPLIT;
 }
 
-// The organizer's flat 5% cut of any cash league's pool — 0 if the league
+// The organizer's flat 5% cut of any cash league's pool â€” 0 if the league
 // isn't cash or nobody's paid in yet. Flat off the total pool regardless of
 // anyone's individual contribution ratio.
 function organizerFee(league) {
@@ -282,7 +282,7 @@ const THEMES = {
   },
 };
 
-// Optional accent-color choices layered on top of THEMES.dark/light above —
+// Optional accent-color choices layered on top of THEMES.dark/light above â€”
 // swaps just `accent`/`accentText` (the color used for primary buttons and
 // highlights) while leaving backgrounds, surfaces, and text alone, so every
 // choice stays readable without re-deriving a whole palette per color. Each
@@ -303,13 +303,13 @@ function withAccent(baseTheme, themeKey, accentKey) {
   return { ...baseTheme, accent: a.value, accentText: a.text };
 }
 
-// The Ladder gets its own look — black, gold and red, matching the "Ladder
-// Battles / No Mercy" badge — instead of following the app's normal
+// The Ladder gets its own look â€” black, gold and red, matching the "Ladder
+// Battles / No Mercy" badge â€” instead of following the app's normal
 // light/dark theme toggle. It's the one permanent, always-on competition, so
 // it's meant to read as its own thing wherever it shows up (the Home strip
 // and its own full page). Same key shape as THEMES.dark/light so it can be
 // dropped in as a straight replacement for the `c` prop everywhere the
-// Ladder's components already thread it through — buttons, modals, rows —
+// Ladder's components already thread it through â€” buttons, modals, rows â€”
 // without touching each one by hand.
 export const LADDER_THEME = {
   bg: "#0A0806", surface: "rgba(232,185,35,0.06)", surfaceHover: "rgba(232,185,35,0.12)",
@@ -319,21 +319,21 @@ export const LADDER_THEME = {
   red: "#C81E3A", redSoft: "rgba(200,30,58,0.25)", toastBg: "#F5EEDC", toastText: "#0A0806",
 };
 
-// Wildcard Match (the Home-screen spotlight for open/"random" challenges) —
+// Wildcard Match (the Home-screen spotlight for open/"random" challenges) â€”
 // a teal/amber duo, deliberately its own family rather than reusing
 // c.accent (green, "a league action") or LADDER_THEME's gold (already
 // "ranked ladder"). Panel background still comes from the caller's own
-// theme (c.surface/c.bg) so it keeps respecting light/dark mode — only the
+// theme (c.surface/c.bg) so it keeps respecting light/dark mode â€” only the
 // accent, glow, and CTA colors are fixed, the same way c.red is fixed for
 // "urgent" across both themes.
 const WILDCARD_TEAL = "#2EC4B6";
 const WILDCARD_AMBER = "#FFB703";
 
-// LADDER_WEEKEND_ICE / LADDER_WEEKEND_MINT — the League Ladder's own pass in
+// LADDER_WEEKEND_ICE / LADDER_WEEKEND_MINT â€” the League Ladder's own pass in
 // the Weekend League carousel (see LadderWeekendCard below). Deliberately
 // its own light blue/mint family rather than LADDER_THEME's black-and-gold
 // (that's the older Survival Ladder Cup's identity, still used on Ladder.jsx
-// — reusing gold here would read as the same feature) or SHOP_GOLD (the
+// â€” reusing gold here would read as the same feature) or SHOP_GOLD (the
 // Shop's). Light background, not dark c.surface like every other card in
 // this carousel, is the point: it's meant to visually stand out as "always
 // on" against the weekend-only passes around it, and to stay clear of pink/
@@ -341,10 +341,10 @@ const WILDCARD_AMBER = "#FFB703";
 const LADDER_WEEKEND_ICE = "#BEE3F8";
 const LADDER_WEEKEND_MINT = "#B7EFCB";
 
-// The Kit Room (club transfers + eFootball team sales) — sits at the
+// The Kit Room (club transfers + eFootball team sales) â€” sits at the
 // bottom of the Home leagues list as its own marketplace spotlight, so it
 // needs a look that doesn't compete with LADDER_THEME's gold or
-// WILDCARD_TEAL/WILDCARD_AMBER above. Goes cobalt/steel instead — a
+// WILDCARD_TEAL/WILDCARD_AMBER above. Goes cobalt/steel instead â€” a
 // cooler, more "retail tag" feel (solid left rail + a rotated corner tag,
 // no glow blobs) rather than another soft radial-glow card, so it reads as
 // a different kind of thing (a marketplace) rather than another event.
@@ -358,18 +358,18 @@ export const KIT_ROOM_STEEL = "#94A3B8";
 // each get their own kind, so they only block against themselves.
 export const FORMATS = [
   { id: "single_round_robin", label: "Single Round Robin", kind: "round_robin", desc: "Every club plays every other club once.", available: true },
-  { id: "double_round_robin", label: "Double Round Robin", kind: "round_robin", desc: "Home and away — every club plays every other club twice.", available: true },
+  { id: "double_round_robin", label: "Double Round Robin", kind: "round_robin", desc: "Home and away â€” every club plays every other club twice.", available: true },
   { id: "knockout", label: "Knockout", kind: "knockout", desc: "Single elimination. Lose and you're out.", available: true },
   { id: "survivor", label: "Survivor", kind: "round_robin", desc: "Play a set number of matches, cut the bottom %, repeat until a target number remain, then finish with a round robin.", available: true },
   { id: "groups_knockout", label: "Groups + Knockout", kind: "groups_knockout", desc: "Split into groups for a round robin, then top clubs advance to a knockout stage.", available: true },
   // Own `kind` (not "round_robin") so it doesn't interact with the
-  // one-active-fun-league-per-kind join lock the other formats share —
+  // one-active-fun-league-per-kind join lock the other formats share â€”
   // ladder cup's challenge-based flow is different enough that stacking
   // it against round robin/survivor activity doesn't make sense.
   // Step 7: CreateLeague now has a cutoff picker and league/join creation
   // builds ladder_cup_entries rows (see createLeague/ensureLadderCupEntry
   // below), so this is selectable. Standings (Step 8) and the challenge
-  // board (Step 9) still aren't wired up — LeagueDetail shows a holding
+  // board (Step 9) still aren't wired up â€” LeagueDetail shows a holding
   // panel (LadderCupPendingPanel) for ladder_cup leagues until then.
   { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup", desc: "Ranked ladder, one elimination life each. Most points by the month-end cutoff wins.", available: true },
 ];
@@ -380,7 +380,7 @@ function formatKindLabel(formatId) {
   return FORMAT_KIND_LABELS[kind] || FORMATS.find((f) => f.id === formatId)?.label || "this format";
 }
 
-// True if the signed-in user has a club actively playing in `l` right now —
+// True if the signed-in user has a club actively playing in `l` right now â€”
 // they've claimed a team, it hasn't been eliminated, and the league isn't
 // finished. Used both to build the active-fun-league-by-kind map below and,
 // more generally, to prioritize "leagues I'm currently active in" in list
@@ -395,18 +395,18 @@ function isActiveMember(l, session) {
 }
 
 // Recomputes a knockout bracket's most recent round to figure out whether
-// it's already down to a single winner — mirroring advanceKnockout's own
+// it's already down to a single winner â€” mirroring advanceKnockout's own
 // tie-resolution rules (aggregate score, no-show forfeits, final-round
 // penalties) so this agrees with what the "Advance round" button and its
 // "this league already has a champion" check already conclude.
 //
 // This deliberately does NOT rely on team.eliminated: applyKnockoutElimination
 // only ever updates that flag once every leg of a tie is either played or
-// expired — a tie with one leg actually played and the other simply expiring
+// expired â€” a tie with one leg actually played and the other simply expiring
 // unplayed (nobody ever submits anything for it) never re-triggers that
 // function again after the fact, since nothing about it is event-driven once
 // time alone is what resolves it. team.eliminated can stay stuck stale on a
-// finished bracket's runner-up indefinitely as a result — recomputing from
+// finished bracket's runner-up indefinitely as a result â€” recomputing from
 // the fixtures directly is what actually stays correct.
 export function knockoutBracketWinners(fixtures, bracketStage) {
   const bracketFixtures = (fixtures || []).filter((f) => f.stage === bracketStage);
@@ -429,7 +429,7 @@ export function knockoutBracketWinners(fixtures, bracketStage) {
     legs.forEach((f) => {
       // An expired-unplayed leg contributes nothing to either side's
       // aggregate (same no-points, no-winner treatment computeStandings
-      // already gives it) — so a tie with one leg genuinely played still
+      // already gives it) â€” so a tie with one leg genuinely played still
       // resolves off that leg's real score rather than staying stuck.
       totals[f.home_team_id] = (totals[f.home_team_id] || 0) + (f.played ? f.home_score : 0);
       totals[f.away_team_id] = (totals[f.away_team_id] || 0) + (f.played ? f.away_score : 0);
@@ -437,27 +437,27 @@ export function knockoutBracketWinners(fixtures, bracketStage) {
     const [teamA, teamB] = Object.keys(totals);
     if (totals[teamA] === totals[teamB]) {
       const allLegsNoShow = legs.every((f) => !f.played && isExpired(f));
-      if (allLegsNoShow) return; // both sides knocked out — neither is a winner
+      if (allLegsNoShow) return; // both sides knocked out â€” neither is a winner
       if (!isFinal) { winners.push(teamA, teamB); return; }
       const pensA = pensAggregateFor(legs, teamA);
       const pensB = pensAggregateFor(legs, teamB);
       if (pensA !== null && pensB !== null && pensA !== pensB) { winners.push(pensA > pensB ? teamA : teamB); return; }
-      return; // final still needs a penalty score entered — not decided yet
+      return; // final still needs a penalty score entered â€” not decided yet
     }
     winners.push(totals[teamA] > totals[teamB] ? teamA : teamB);
   });
   return winners;
 }
 
-// General "is this league over" check across every format — used to move a
+// General "is this league over" check across every format â€” used to move a
 // league out of the current-leagues sections and into Completed Leagues.
 // Deliberately mirrors the same signals LeagueDetail.jsx already uses to
 // decide when to show a champion banner for each format, rather than a
-// single generic "every fixture played" check — that check alone misses
+// single generic "every fixture played" check â€” that check alone misses
 // knockout/groups+knockout leagues, since a bracket can finish (one club
-// standing) while irrelevant fixtures elsewhere in the tree — especially
+// standing) while irrelevant fixtures elsewhere in the tree â€” especially
 // group-stage fixtures that stopped mattering once a club advanced or was
-// eliminated — never get marked played themselves. isExpired auto-forfeit
+// eliminated â€” never get marked played themselves. isExpired auto-forfeit
 // fixtures also count as resolved here, same as the champion banners do.
 function isLeagueCompleted(l) {
   if (l.format === "ladder_cup") return !!l.ladder_cup_finalized_at;
@@ -481,7 +481,7 @@ function isLeagueCompleted(l) {
     return stageFixtures.length > 0 && stageFixtures.every((f) => f.played || isExpired(f));
   }
 
-  // Single/double round robin — and groups_knockout still mid group-stage,
+  // Single/double round robin â€” and groups_knockout still mid group-stage,
   // which by definition isn't complete yet either way.
   return fixtures.length > 0 && fixtures.every((f) => f.played || isExpired(f));
 }
@@ -504,7 +504,7 @@ function activeFunLeaguesByKind(leagues, session) {
 
 // Given the map from activeFunLeaguesByKind, returns the other fun league
 // blocking `league` from being joined (same format kind), or null if it's
-// free to join. Only fun leagues are restricted — cash leagues never lock
+// free to join. Only fun leagues are restricted â€” cash leagues never lock
 // each other out.
 function blockingLeagueFor(activeByKind, league) {
   if (!league || league.league_type !== "fun") return null;
@@ -603,16 +603,16 @@ function toFixtureRows(leagueId, rounds, stage, dueBase, roundOffset = 0, period
 
 // Builds fixture rows for one knockout round. legs=1 is a single decisive match;
 // legs=2 plays it home and away, aggregate score deciding the winner (byes are always single-leg).
-// A round that pairs down to exactly one real matchup IS the final — it's
+// A round that pairs down to exactly one real matchup IS the final â€” it's
 // always played as a single decisive match, regardless of the league's
 // home/away legs setting, since a drawn final goes to penalties instead of
 // a second leg (see isFinalRoundFixtures / advanceKnockout).
 // dueOffset controls how many periodMs get added to dueBase for THIS round's
-// due date — defaults to roundNumber so existing callers that pass a fixed
+// due date â€” defaults to roundNumber so existing callers that pass a fixed
 // anchor date (the league's start date, or a bracket's start date) and let
 // roundNumber climb 1, 2, 3... keep working unchanged. Callers that instead
 // reset dueBase to "right now" every time a round advances (see
-// advanceKnockout) need to pass dueOffset: 1 explicitly — otherwise the
+// advanceKnockout) need to pass dueOffset: 1 explicitly â€” otherwise the
 // round's real number (2, 3, 4...) gets used as the multiplier against
 // "now," pushing each new round's deadline further and further out instead
 // of the intended one-period gap from whenever it was actually generated.
@@ -621,8 +621,8 @@ export function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, due
   const isFinalRound = pairs.length === 1 && pairs[0].away !== null;
   if (isFinalRound) legs = 1;
   const singleLegDue = addPausableDuration(dueBase, dueOffset * periodMs, isWeekend);
-  // Two-legged ties share ONE deadline covering both matches — double the
-  // normal single-round window (e.g. 4 days instead of 2) — instead of each
+  // Two-legged ties share ONE deadline covering both matches â€” double the
+  // normal single-round window (e.g. 4 days instead of 2) â€” instead of each
   // leg getting its own separate due date. Either leg can be played any
   // time within that shared window; the tie only counts as expired once
   // this one date passes.
@@ -630,7 +630,7 @@ export function knockoutRoundFixtures(leagueId, teamIds, stage, roundNumber, due
   // starts_at records the round's real start moment directly, rather than
   // making the UI reconstruct it later by subtracting the window back off
   // due_at. That reconstruction silently goes wrong the moment due_at is
-  // ever adjusted after creation (a dispute extension, a manual edit) —
+  // ever adjusted after creation (a dispute extension, a manual edit) â€”
   // storing the true start here means the display never has to guess it.
   const startsAt = dueBase.toISOString();
   const rows = [];
@@ -665,7 +665,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
   const { id: leagueId, format, survivor_matches_per_stage, survivor_target_count, survivor_final_format, group_size, knockout_legs } = league;
   const periodMs = roundPeriodMs(league);
   // Weekend leagues get deadlines that skip over the nightly 9pm-9am SAST
-  // pause (see addPausableDuration) — every fixture-row builder below is
+  // pause (see addPausableDuration) â€” every fixture-row builder below is
   // given this so every format respects it consistently.
   const isWeekend = isWeekendLeague(league);
   if (format === "single_round_robin") return { fixtureRows: toFixtureRows(leagueId, roundRobin(teamIds), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
@@ -678,7 +678,7 @@ function generateOpeningFixtures(league, teamIds, dueBase) {
     return { fixtureRows: toFixtureRows(leagueId, stageSchedule(teamIds, survivor_matches_per_stage), 1, dueBase, 0, periodMs, isWeekend), startsInFinal: false, groups: null };
   }
   if (format === "groups_knockout") {
-    // Groups are sized to the admin's chosen "players per group" — the number of
+    // Groups are sized to the admin's chosen "players per group" â€” the number of
     // groups this actually produces depends on how many clubs are in by the time
     // the league starts, so it's worked out here rather than fixed up front.
     const desiredSize = Math.max(2, group_size || 4);
@@ -697,7 +697,7 @@ function knockoutBracketFixtures(leagueId, teamIds, roundOffset, dueBase, legs, 
 }
 
 // A knockout round is "the final" when it comes down to exactly one real
-// tie — no other simultaneous tie, and not a bye — because whoever wins
+// tie â€” no other simultaneous tie, and not a bye â€” because whoever wins
 // that tie becomes champion. Only the final ever needs penalties: every
 // earlier round instead lets both sides through when level on aggregate,
 // since there's always a next round to sort it out further either way.
@@ -711,7 +711,7 @@ export function isFinalRoundFixtures(roundFixtures) {
   return !hasBye && ties.size === 1;
 }
 
-// Same check, scoped down to whichever tie a single fixture belongs to —
+// Same check, scoped down to whichever tie a single fixture belongs to â€”
 // used by result-entry UI to decide whether to offer a penalty score field.
 export function isFinalFixture(fixture, league) {
   if (!fixture || fixture.away_team_id === null) return false;
@@ -721,15 +721,15 @@ export function isFinalFixture(fixture, league) {
 
 // A knockout tie that's still level after the configured home-and-away legs
 // gets a decider leg added automatically (see advanceKnockout) instead of
-// letting both clubs through — the decider is just the next leg number past
+// letting both clubs through â€” the decider is just the next leg number past
 // however many legs the league is configured for (2 for a normal home &
 // away tie), so a fixture is "the decider" purely by having a leg number
 // higher than that. Same job isFinalFixture does for the bracket final:
 // tells the result-entry UI this scoreline needs a penalty score if it's
 // tied, since (like the final) there's no further leg to fall back on.
 // A league configured for a single leg (knockout_legs === 1) never gets a
-// second leg to fall back on either — that one match IS the tie, the same
-// way the final is — so it's just as decisive as an actual decider leg even
+// second leg to fall back on either â€” that one match IS the tie, the same
+// way the final is â€” so it's just as decisive as an actual decider leg even
 // though its own leg number (1) isn't past the configured count (also 1).
 // Without this, a level scoreline on a single-leg non-final tie would skip
 // the penalty prompt and advanceKnockout would try to bolt on a decider leg
@@ -742,7 +742,7 @@ export function isDeciderFixture(fixture, league) {
 
 // Sums a penalty-shootout score the same way aggregateFor sums regulation
 // goals, but returns null (rather than 0) the moment either leg is missing
-// a penalty entry for that side — unlike a goal, "no penalties recorded
+// a penalty entry for that side â€” unlike a goal, "no penalties recorded
 // yet" and "lost the shootout 0-0" are different things, and callers need
 // to tell them apart.
 function pensAggregateFor(legs, teamId) {
@@ -787,8 +787,8 @@ function isGroupStageFixture(fixture, league) {
 // The real "can this still be submitted / does this count as a no-show
 // loss" check. For every format except a Groups + Knockout group stage this
 // is just isExpired (the fixture's own due_at). For a group-stage fixture,
-// due_at is advisory only — still shown to nudge players on when they're
-// expected to play — but it no longer blocks submission or auto-scores a
+// due_at is advisory only â€” still shown to nudge players on when they're
+// expected to play â€” but it no longer blocks submission or auto-scores a
 // loss. The real cutoff is the whole group's shared due date the admin sets
 // on the league (league.group_stage_due_at), since group results all need
 // to be in before the group as a whole can be finalized.
@@ -801,32 +801,32 @@ export function isFixtureLocked(fixture, league) {
 }
 
 // A no-show tie: every leg of a fixture pairing has gone past its deadline
-// unplayed. Both teams are eliminated the moment that's true — regardless
+// unplayed. Both teams are eliminated the moment that's true â€” regardless
 // of what either side has done earlier in the league; missing this one
 // match (or, for a two-legged knockout tie, both legs of it) is enough on
 // its own. Legs are grouped by round + team pair, so a two-legged tie only
-// counts once BOTH legs are missed — not just one, since the other leg may
-// still genuinely decide it — while a plain single-match fixture (round
+// counts once BOTH legs are missed â€” not just one, since the other leg may
+// still genuinely decide it â€” while a plain single-match fixture (round
 // robin, survivor, a group-stage game) is judged entirely on its own, even
 // if the same two teams happen to meet again in a later round. This is the
 // same aggregate-no-show logic advanceKnockout already applies to the round
 // it's actively advancing, just running continuously across every round,
-// stage, and format — not only knockout, and not only once a round is
+// stage, and format â€” not only knockout, and not only once a round is
 // fully wrapped up enough for an admin to click "advance."
 function findNoShowTeamIds(league) {
   // Only situations where a single missed match is genuinely "win or
   // you're out" get an instant no-show elimination: a pure knockout
   // league, or the bracket rounds of Groups + Knockout. Everywhere
-  // points-based — a group stage, a Survivor stage, plain round robin —
+  // points-based â€” a group stage, a Survivor stage, plain round robin â€”
   // who's actually through is decided by final standings once that
   // stage/group wraps up. A no-show there still counts as a loss (0 pts,
-  // -4 goal difference — see computeStandings) but doesn't, on its own,
+  // -4 goal difference â€” see computeStandings) but doesn't, on its own,
   // end a club's run early: a club that missed one match but still has
   // enough points from its other results to qualify should still
   // qualify. Found the hard way: a group-stage no-show cost Sambulo his
   // spot in the Three-Day Titans League despite him having already won
   // enough of his other group matches to top the group and go on to win
-  // knockout round 1 — the exact case this guards against now.
+  // knockout round 1 â€” the exact case this guards against now.
   if (league.format !== "knockout" && league.format !== "groups_knockout") return [];
   const fixtures = (league.fixtures || [])
     .filter((f) => f.away_team_id !== null)
@@ -861,11 +861,11 @@ export function nextFixtureForTeam(league, teamId) {
     })[0] || null;
 }
 
-// Earliest not-yet-played, fully-paired fixture across the whole league —
+// Earliest not-yet-played, fully-paired fixture across the whole league â€”
 // used as the status message's fallback for spectators or once a member's
 // own club has no games left to schedule. A fixture whose deadline has
 // already passed unplayed is a resolved no-show (auto-loss), not something
-// still "due" — it stays played:false forever in the DB, so it has to be
+// still "due" â€” it stays played:false forever in the DB, so it has to be
 // filtered out here explicitly or it would keep winning as the "next"
 // fixture by due date long after it's no longer relevant.
 function nextFixtureForLeague(league) {
@@ -878,11 +878,11 @@ function nextFixtureForLeague(league) {
     })[0] || null;
 }
 
-// True if `league` counts as a weekend league right now — same definition
+// True if `league` counts as a weekend league right now â€” same definition
 // the homepage's Weekend League spotlight uses (see the comment on
 // setWeekendLeagueDates in the create-league form): admin-created, with a
-// starts_at that falls in the current Fri–Sun window. Deliberately doesn't
-// reuse the spotlight's extra "still has matches due this weekend" reach —
+// starts_at that falls in the current Friâ€“Sun window. Deliberately doesn't
+// reuse the spotlight's extra "still has matches due this weekend" reach â€”
 // that's about what stays visible in the spotlight card, not about which
 // league a fixture's confirmation window belongs to.
 export function isWeekendLeague(league, now = new Date()) {
@@ -894,7 +894,7 @@ export function isWeekendLeague(league, now = new Date()) {
 
 // A submitted result gives the opponent 30 minutes to confirm or dispute it
 // (see respondToResultSubmission) before it escalates to the admin override
-// queue — 10 minutes instead for a weekend league (see isWeekendLeague),
+// queue â€” 10 minutes instead for a weekend league (see isWeekendLeague),
 // since weekend fixtures move faster and shouldn't sit unconfirmed as long.
 // These three helpers are the single source of truth for that window so the
 // opponent panel's countdown and the admin panel's visibility can't drift
@@ -914,7 +914,7 @@ function resultConfirmMinutesLeft(submission, league) {
 }
 
 // Direct/ladder challenges and open (random) challenges get the same
-// 30-minute window as league fixtures above — both tables store the report
+// 30-minute window as league fixtures above â€” both tables store the report
 // time in result_reported_at, so one set of helpers covers both. Once
 // expired, the result is no longer the opponent's to confirm/dispute; it
 // moves into the admin review queue instead (see adminApproveChallengeResult
@@ -934,7 +934,7 @@ export function challengeResultMinutesLeft(ch) {
 
 // If the same fixture has already had this many submissions disputed by the
 // opponent, the next one skips the 30-minute window entirely and goes
-// straight to the admin queue — two honest mistakes is a reasonable benefit
+// straight to the admin queue â€” two honest mistakes is a reasonable benefit
 // of the doubt, a third attempt at the same fixture is a real disagreement
 // that needs a referee, not another round of opponent back-and-forth.
 const DISPUTE_ESCALATION_THRESHOLD = 2;
@@ -955,7 +955,7 @@ export function resultEscalationReason(league, submission) {
 // Ladder Cup matches get the same submit -> confirm/dispute ->
 // admin-escalation shape as everything above, but ladder_cup_matches is a
 // single evolving row per match (like `challenges`), not one row per
-// attempt (like `result_submissions`) — so there's no submissions list to
+// attempt (like `result_submissions`) â€” so there's no submissions list to
 // scan. challengeResultConfirmDeadline/Expired/MinutesLeft below already
 // only read `.result_reported_at` off whatever's passed in, so they're
 // reused as-is; only the dispute-count check needs a ladder-cup-specific
@@ -970,12 +970,12 @@ export function ladderCupResultEscalationReason(match) {
 }
 
 // The signed-in player's next `limit` opponents across every league they've
-// fielded a club in — used for the "Up next" strip at the top of Home.
+// fielded a club in â€” used for the "Up next" strip at the top of Home.
 // Pulled straight off each league's live fixtures (not scoped to one stage),
 // so it naturally follows the player from group stage into a knockout
 // bracket once those fixtures exist. Byes (away_team_id === null),
 // already-played fixtures, and fixtures whose confirm/due window has
-// expired are all skipped — an expired fixture isn't something the player
+// expired are all skipped â€” an expired fixture isn't something the player
 // can act on anymore (it's on its way to auto-forfeit/admin review, same as
 // everywhere else expired fixtures disappear from actionable lists), so it
 // no longer earns a strip slot; fixtures with no due_at yet sort to the end
@@ -1010,14 +1010,14 @@ function computeMyUpcomingFixtures(leagues, myTeam, limit = 5) {
 // across every league they've fielded a club in) into a lightweight game
 // layer for the homepage: a level with an XP bar, and a current win streak.
 // XP is deliberately generous to losses too (5 each) so playing regularly
-// always moves the bar — wins (25) and draws (10) just move it faster. This
+// always moves the bar â€” wins (25) and draws (10) just move it faster. This
 // reads straight off the same played fixtures the Leaderboard uses, so it
 // never needs its own backend table and can't drift out of sync with a
 // player's real record.
 const XP_PER_LEVEL = 150; // cost of the very first level-up (1 -> 2)
 const XP_LEVEL_STEP = 20; // each level after that costs this much more than the last
 
-// XP required to climb out of `level` into `level + 1` — a slowly rising
+// XP required to climb out of `level` into `level + 1` â€” a slowly rising
 // curve so early levels come quickly (something to show right away) while
 // later ones take real time, making the top titles (Ace, Elite, Legend)
 // mean more than "played a lot in week one."
@@ -1038,7 +1038,7 @@ function levelForXp(xp) {
 }
 
 // Resolves which team a given user_id owns in a given league, via that
-// league's members list — the same lookup myTeam() does for the signed-in
+// league's members list â€” the same lookup myTeam() does for the signed-in
 // user (matched by session), just parameterized so it works for any
 // member, not only "me". Used to aggregate a club's owner's XP/level
 // across every league they've fielded a team in, not just the one whose
@@ -1070,7 +1070,7 @@ export function computeMyProgress(leagues, myTeam) {
   const d = matches.filter((m) => m.outcome === "d").length;
   const l = matches.filter((m) => m.outcome === "l").length;
 
-  // Current win streak — consecutive wins counting back from the most
+  // Current win streak â€” consecutive wins counting back from the most
   // recent match, stopping at the first draw or loss.
   let streak = 0;
   for (let i = matches.length - 1; i >= 0; i--) {
@@ -1078,7 +1078,7 @@ export function computeMyProgress(leagues, myTeam) {
     streak++;
   }
 
-  // Career-best win streak — the longest run of consecutive wins anywhere
+  // Career-best win streak â€” the longest run of consecutive wins anywhere
   // in the player's history, kept even after that run ends, so a big streak
   // from weeks ago still shows up instead of disappearing the moment it's
   // broken.
@@ -1088,7 +1088,7 @@ export function computeMyProgress(leagues, myTeam) {
     else run = 0;
   });
 
-  // Career-best unbeaten run (wins + draws) — a looser cousin of the win
+  // Career-best unbeaten run (wins + draws) â€” a looser cousin of the win
   // streak for the "hard to beat" achievement, since a string of draws
   // against tough opponents deserves credit too, not just outright wins.
   let bestNoLossStreak = 0, noLossRun = 0;
@@ -1097,7 +1097,7 @@ export function computeMyProgress(leagues, myTeam) {
     else noLossRun = 0;
   });
 
-  // Wins with a shutout at the back, and the biggest winning margin — feed
+  // Wins with a shutout at the back, and the biggest winning margin â€” feed
   // the "clean sheet" and "demolition job" achievements respectively.
   const cleanSheets = matches.filter((m) => m.outcome === "w" && m.ga === 0).length;
   const biggestWinMargin = matches.reduce((max, m) => (m.outcome === "w" ? Math.max(max, m.gf - m.ga) : max), 0);
@@ -1107,7 +1107,7 @@ export function computeMyProgress(leagues, myTeam) {
   return { played: matches.length, w, d, l, streak, bestStreak, bestNoLossStreak, cleanSheets, biggestWinMargin, xp, level, xpIntoLevel, xpForNextLevel, levelTitle: levelTitleFor(level) };
 }
 
-// Purely cosmetic rank names for the level badge — a light "there's more to
+// Purely cosmetic rank names for the level badge â€” a light "there's more to
 // reach for" hook, not tied to anything mechanical elsewhere in the app.
 function levelTitleFor(level) {
   if (level >= 21) return "Legend";
@@ -1118,7 +1118,7 @@ function levelTitleFor(level) {
   return "Rookie";
 }
 
-// The next title tier up from the given level — what the "next: X" hint in
+// The next title tier up from the given level â€” what the "next: X" hint in
 // the breakdown modal points at. Returns null once a player is already at
 // the top tier (Legend), since there's nothing further to name.
 function nextTitleFor(level) {
@@ -1130,20 +1130,20 @@ function nextTitleFor(level) {
   return null;
 }
 
-// A distinct color per title tier — fixed hex, independent of the active
-// theme, the same way the ladder's top-3 medal colors work — so climbing
+// A distinct color per title tier â€” fixed hex, independent of the active
+// theme, the same way the ladder's top-3 medal colors work â€” so climbing
 // from Rookie to Legend is visually obvious at a glance, not just a text
 // change against the same accent color every time.
 function tierColorFor(level) {
-  if (level >= 21) return "#FFD700"; // Legend — gold
-  if (level >= 16) return "#F97316"; // Elite — orange
-  if (level >= 11) return "#A855F7"; // Ace — purple
-  if (level >= 6) return "#3B82F6"; // Veteran — blue
-  if (level >= 3) return "#22C55E"; // Contender — green
-  return "#9CA3AF"; // Rookie — neutral gray
+  if (level >= 21) return "#FFD700"; // Legend â€” gold
+  if (level >= 16) return "#F97316"; // Elite â€” orange
+  if (level >= 11) return "#A855F7"; // Ace â€” purple
+  if (level >= 6) return "#3B82F6"; // Veteran â€” blue
+  if (level >= 3) return "#22C55E"; // Contender â€” green
+  return "#9CA3AF"; // Rookie â€” neutral gray
 }
 
-// The tap target for the Home player card's level/XP row — spells out the
+// The tap target for the Home player card's level/XP row â€” spells out the
 // math behind the bar (XP to go, full W/D/L record, current streak) instead
 // of leaving a player to guess what moves it.
 function ProgressBreakdownModal({ progress, onClose, c }) {
@@ -1157,10 +1157,10 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: tier }}>
-              <Star size={13} /> Level {progress.level} · {progress.levelTitle}
+              <Star size={13} /> Level {progress.level} Â· {progress.levelTitle}
             </div>
             <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>
-              {xpToGo} XP to Level {progress.level + 1}{next && next !== progress.levelTitle ? ` · next: ${next}` : ""}
+              {xpToGo} XP to Level {progress.level + 1}{next && next !== progress.levelTitle ? ` Â· next: ${next}` : ""}
             </div>
           </div>
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
@@ -1203,15 +1203,15 @@ function ProgressBreakdownModal({ progress, onClose, c }) {
           </div>
         )}
         <div className="font-body text-[11px] leading-relaxed" style={{ color: c.textFaint }}>
-          {progress.played} career {progress.played === 1 ? "match" : "matches"} ·{" "}
-          Wins are worth 25 XP, draws 10 XP, losses 5 XP — every match you play moves the bar.
+          {progress.played} career {progress.played === 1 ? "match" : "matches"} Â·{" "}
+          Wins are worth 25 XP, draws 10 XP, losses 5 XP â€” every match you play moves the bar.
         </div>
       </div>
     </div>
   );
 }
 
-// Milestone badges layered on top of the level/XP system — a second, more
+// Milestone badges layered on top of the level/XP system â€” a second, more
 // permanent "collection" hook next to the streak-and-level bar (which can go
 // up or down in feel from match to match). Every def is derived purely from
 // data Home already has (match record, league membership, ladder rank), so
@@ -1241,23 +1241,23 @@ export const ACHIEVEMENTS_DEF = [
   { id: "level_21", icon: Crown, color: "#FFD700", tier: "platinum", category: "level", label: "Legend Status", desc: "Reach Level 21", target: 21, value: (ctx) => ctx.p.level },
   { id: "join_league", icon: Users, color: "#14B8A6", tier: "bronze", category: "leagues", label: "Joiner", desc: "Join your first league", target: 1, value: (ctx) => ctx.joinedCount },
   { id: "join_3", icon: Layers, color: "#14B8A6", tier: "silver", category: "leagues", label: "Multi-Leaguer", desc: "Join 3 leagues", target: 3, value: (ctx) => ctx.joinedCount },
-  // Gates the Wall of Fame (see computeWallOfFame) — only members holding
+  // Gates the Wall of Fame (see computeWallOfFame) â€” only members holding
   // this badge show up there. "Won" means owning (via `members`) the team
-  // that ends up champion of a completed league, any format — see
+  // that ends up champion of a completed league, any format â€” see
   // computeMyLeagueWins.
   { id: "league_champion", icon: Crown, color: "#FFD700", tier: "platinum", category: "leagues", label: "League Champion", desc: "Win a league", target: 1, value: (ctx) => ctx.leaguesWon },
   { id: "ladder_ranked", icon: TrendingUp, color: "#9CA3AF", tier: "bronze", category: "ladder", label: "On The Board", desc: "Get ranked on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank ? 1 : 0) },
   { id: "ladder_top10", icon: Star, color: "#FFD700", tier: "gold", category: "ladder", label: "Top 10", desc: "Break into the Ladder's Top 10", target: 1, value: (ctx) => (ctx.myLadderRank && ctx.myLadderRank <= 10 ? 1 : 0) },
   { id: "ladder_no1", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "King Of The Hill", desc: "Reach #1 on the Ladder", target: 1, value: (ctx) => (ctx.myLadderRank === 1 ? 1 : 0) },
   // Also gates the Wall of Fame, same as league_champion (see
-  // computeWallOfFame) — finishing #1 in League 1 at the Sunday 23:59 UTC
+  // computeWallOfFame) â€” finishing #1 in League 1 at the Sunday 23:59 UTC
   // cutoff (ladder_wall_of_fame) counts as a title in its own right, not
   // just ladder_no1's live-rank moment. ctx.ladderLeague1Wins comes from
   // ladderChampions (loadLadderChampions), filtered to the signed-in member.
   { id: "ladder_champion", icon: Crown, color: "#FFD700", tier: "platinum", category: "ladder", label: "Ladder Champion", desc: "Finish #1 in League 1 at the Sunday cutoff", target: 1, value: (ctx) => (ctx.ladderLeague1Wins ? 1 : 0) },
 ];
 
-// Fixed display order + label for each achievement category — used to group
+// Fixed display order + label for each achievement category â€” used to group
 // the full list in the modal so browsing reads as "here's everything in
 // Wins, here's everything in Form", not a flat wall of 25 tiles.
 const ACHIEVEMENT_CATEGORIES = [
@@ -1281,13 +1281,13 @@ function groupAchievementsByCategory(achievements) {
   return ACHIEVEMENT_CATEGORIES.filter((cat) => byCategory[cat.id]).map((cat) => ({ ...cat, items: byCategory[cat.id] }));
 }
 
-// Visual weight per rarity tier — how thick the ring is. Gold and platinum
+// Visual weight per rarity tier â€” how thick the ring is. Gold and platinum
 // (the harder badges) also get a soft pulsing glow once earned (see the
 // animate-achievement-glow keyframes in index.css), so the rarest badges
 // are unmistakably the shiniest tiles in the strip.
 const TIER_RING = { bronze: 1.5, silver: 2, gold: 2.5, platinum: 3 };
 
-// Trophy-score weighting per tier for the Wall of Fame ranking — a platinum
+// Trophy-score weighting per tier for the Wall of Fame ranking â€” a platinum
 // badge is worth more than five bronzes, so the board rewards chasing hard
 // badges rather than just racking up easy ones. TIER_ORDER is the same
 // ranking used to pick a player's single "best" badge to show off.
@@ -1296,16 +1296,16 @@ const TIER_ORDER = { bronze: 0, silver: 1, gold: 2, platinum: 3 };
 const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", platinum: "#B9F2FF" };
 
 // Aggregates every row from the shared `achievements` table (every badge,
-// every member) into one ranked row per member — count earned, a weighted
+// every member) into one ranked row per member â€” count earned, a weighted
 // trophy score, and their single best (highest-tier) badge to show off next
 // to their name. Restricted to actual league winners: a member only makes
 // the board if they hold the league_champion badge (see
 // computeMyLeagueWins), everyone else is filtered out regardless of how
 // many other badges they've earned. Members with rows we can't match to a
-// profile (memberAvatars only lists other members — the signed-in player's
+// profile (memberAvatars only lists other members â€” the signed-in player's
 // own name/photo is merged in by the caller) are left out too.
 // championshipsByUserId (see computeAllLeagueChampionships) attaches which
-// specific league(s) each winner actually won, and when — the badge alone
+// specific league(s) each winner actually won, and when â€” the badge alone
 // only says "won something," this is what says "won WHAT, and WHEN."
 function computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId) {
   const byUser = {};
@@ -1326,7 +1326,7 @@ function computeWallOfFame(allAchievements, profileByUserId, championshipsByUser
       profile: profileByUserId.get(e.userId),
       // Regular-league titles and League 1 ladder titles are two separate
       // sources (leagues/fixtures/teams vs ladder_wall_of_fame) merged here
-      // into one combined, re-sorted list — same {leagueId, leagueName,
+      // into one combined, re-sorted list â€” same {leagueId, leagueName,
       // wonAt} shape (see computeLadderTitlesByUserId), so the modal
       // doesn't need to know which kind a given title is.
       titles: [
@@ -1341,7 +1341,7 @@ function computeWallOfFame(allAchievements, profileByUserId, championshipsByUser
 
 // Earned badges sort first (most nearly-complete locked badge next), so the
 // strip's leading tiles are always either something to be proud of or
-// something worth chasing next — never a random pick from the middle.
+// something worth chasing next â€” never a random pick from the middle.
 function computeAchievements(ctx) {
   return ACHIEVEMENTS_DEF.map((def) => {
     const raw = def.value(ctx) || 0;
@@ -1353,7 +1353,7 @@ function computeAchievements(ctx) {
   });
 }
 
-// A single badge tile — a filled, colored ring around the icon once earned
+// A single badge tile â€” a filled, colored ring around the icon once earned
 // (ring thickness and, for gold/platinum, a soft glow scale with rarity
 // tier); a dim outline with a thin progress ring (how close) while locked.
 // Used both in the homepage strip (small) and the full achievements modal
@@ -1394,7 +1394,7 @@ function AchievementBadge({ ach, size = 44, c }) {
   );
 }
 
-// Homepage teaser — a horizontally-scrolling row of badges (earned first,
+// Homepage teaser â€” a horizontally-scrolling row of badges (earned first,
 // then the nearest-to-unlocking locked ones), with an "X/Y" counter that
 // doubles as the tap target for the full list, and a small progress bar
 // underneath so overall collection progress reads at a glance without
@@ -1422,7 +1422,7 @@ function AchievementsStrip({ achievements, earnedCount, onOpen, c }) {
   );
 }
 
-// The full achievements list — every badge, earned and locked, grouped by
+// The full achievements list â€” every badge, earned and locked, grouped by
 // category (Matches, Wins, Form & Style, Level, Leagues, Ladder) so
 // browsing reads as sections rather than one flat wall of tiles. An overall
 // progress bar up top mirrors the strip's, and each locked tile shows
@@ -1450,7 +1450,7 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>{group.label}</div>
             <div className="grid grid-cols-3 gap-x-2 gap-y-4">
               {group.items.map((a) => (
-                <div key={a.id} className="flex flex-col items-center gap-1" title={`${a.desc} · ${a.tier}`}>
+                <div key={a.id} className="flex flex-col items-center gap-1" title={`${a.desc} Â· ${a.tier}`}>
                   <AchievementBadge ach={a} size={54} c={c} />
                   <div className="font-body text-[9px] text-center leading-tight px-0.5 flex items-center justify-center gap-1" style={{ color: c.textFaint }}>
                     <span className="inline-block rounded-full shrink-0" style={{ width: 5, height: 5, background: TIER_COLOR[a.tier] }} />
@@ -1466,7 +1466,7 @@ function AchievementsModal({ achievements, earnedCount, onClose, c }) {
   );
 }
 
-// Compact homepage preview of the platform-wide Wall of Fame — top 3 by
+// Compact homepage preview of the platform-wide Wall of Fame â€” top 3 by
 // trophy score among actual league winners only (see computeWallOfFame),
 // podium-styled like the Leaderboard/Ladder strips it sits next to.
 // Renders nothing until someone has actually won a league, same "don't
@@ -1498,7 +1498,7 @@ function WallOfFameStrip({ standings, onOpen, c }) {
               <span className="font-body font-semibold text-sm truncate max-w-[100px]" style={{ color: c.text }}>{row.profile.username}</span>
               {row.titles.length > 0 ? (
                 <span className="font-mono text-[10px] truncate max-w-[130px]" style={{ color: "#FFD700" }}>
-                  👑 {row.titles[0].leagueName}
+                  ðŸ‘‘ {row.titles[0].leagueName}
                 </span>
               ) : (
                 <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.count} badges</span>
@@ -1511,8 +1511,8 @@ function WallOfFameStrip({ standings, onOpen, c }) {
   );
 }
 
-// The full Wall of Fame — every member who's actually won a league (holds
-// the league_champion badge — see computeWallOfFame), ranked by trophy
+// The full Wall of Fame â€” every member who's actually won a league (holds
+// the league_champion badge â€” see computeWallOfFame), ranked by trophy
 // score across all their badges (rarer badges count for more, so it
 // rewards chasing hard badges, not just racking up easy ones), each row
 // showing their badge count and single best badge as a preview.
@@ -1526,7 +1526,7 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
             <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>
               <Crown size={13} /> Wall of Fame
             </div>
-            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>Ranked by trophy score — rarer badges count for more</div>
+            <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>Ranked by trophy score â€” rarer badges count for more</div>
           </div>
           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
         </div>
@@ -1548,7 +1548,7 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
                   <div className="flex-1 min-w-0 leading-tight">
                     <div className="font-body font-semibold text-sm truncate" style={{ color: c.text }}>{row.profile.username}{isMe ? " (you)" : ""}</div>
                     <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>
-                      {hasTitles ? `${row.titles.length} title${row.titles.length > 1 ? "s" : ""} · ${row.count} badges` : `${row.count} badges`}
+                      {hasTitles ? `${row.titles.length} title${row.titles.length > 1 ? "s" : ""} Â· ${row.count} badges` : `${row.count} badges`}
                     </div>
                   </div>
                   {row.bestBadge && (
@@ -1563,7 +1563,7 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
                       <div key={t.leagueId} className="flex items-center gap-1.5 font-body text-xs" style={{ color: c.text }}>
                         <Crown size={11} className="shrink-0 animate-achievement-glow" style={{ color: "#FFD700", "--badge-glow": "#FFD700" }} />
                         <span className="font-semibold truncate">{t.leagueName}</span>
-                        <span className="shrink-0" style={{ color: c.textFaint }}>· {formatTitleDate(t.wonAt)}</span>
+                        <span className="shrink-0" style={{ color: c.textFaint }}>Â· {formatTitleDate(t.wonAt)}</span>
                       </div>
                     ))}
                   </div>
@@ -1578,26 +1578,26 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
 }
 
 // Expired, unplayed fixtures count as a loss for both sides once past their
-// deadline — and, per the no-show rule, both sides also concede 4 goals
+// deadline â€” and, per the no-show rule, both sides also concede 4 goals
 // (scoring 0 themselves), so each ends up with a -4 goal difference for
 // this fixture. This is a standings-table penalty only, not a real
-// scoreline — the fixture itself stays unplayed/scoreless in the database;
+// scoreline â€” the fixture itself stays unplayed/scoreless in the database;
 // isExpired just tells computeStandings to treat it this way live.
 // The three collections LEAGUE_SELECT carries beyond LEAGUE_SUMMARY_SELECT
-// — kept as their own list so the detail select string (built inline
+// â€” kept as their own list so the detail select string (built inline
 // against App.jsx's LEAGUE_SUMMARY_SELECT) and this merge guard can't
 // silently drift apart. `comments` is included too even though it's
 // already its own top-level key, for the same reason.
 const LEAGUE_DETAIL_ONLY_KEYS = ["comments", "ladder_cup_walkover_claims", "ladder_cup_second_life_offers", "ladder_cup_pool_sightings"];
 
 // Guards against a narrow summary-shaped league row (LEAGUE_SUMMARY_SELECT
-// — the whole-platform bulk load, or a background refresh of a league
+// â€” the whole-platform bulk load, or a background refresh of a league
 // nobody has opened) silently overwriting a league whose full detail is
 // already loaded in state. Without this, any summary-level refetch that
 // happened to touch an already-open league would wipe its comments/
 // ladder-cup sub-tables the instant it landed, even though the player is
 // looking right at that data. If `existing` has no `_detailLoadedAt` yet,
-// there's nothing to protect — the summary row is returned as-is.
+// there's nothing to protect â€” the summary row is returned as-is.
 function mergeSummaryPreservingDetail(existing, summaryRow) {
   if (!existing?._detailLoadedAt) return summaryRow;
   const preserved = {};
@@ -1620,9 +1620,9 @@ export function computeStandings(teams, fixtures, league) {
       if (f.home_score > f.away_score) { h.w++; h.pts += 3; a.l++; }
       else if (f.home_score < f.away_score) { a.w++; a.pts += 3; h.l++; }
       // Level on regulation score. If a penalty shootout actually decided
-      // this fixture (knockout ties/finals record pens_home/pens_away —
+      // this fixture (knockout ties/finals record pens_home/pens_away â€”
       // see isFinalFixture/isDeciderFixture), credit that as a real win,
-      // not a draw — this is what already decides who advances in the
+      // not a draw â€” this is what already decides who advances in the
       // bracket (knockoutBracketWinners), so the table should agree with
       // it instead of showing both sides 1pt-each like a genuine draw.
       else if (f.pens_home != null && f.pens_away != null && f.pens_home !== f.pens_away) {
@@ -1638,7 +1638,7 @@ export function computeStandings(teams, fixtures, league) {
   const rows = Object.values(table);
   rows.forEach((r) => { r.gd = r.gf - r.ga; });
   // Teams that haven't actually played a single fixture yet in this stage
-  // (0 pts, 0 gd — nothing on the board either way) would otherwise tie
+  // (0 pts, 0 gd â€” nothing on the board either way) would otherwise tie
   // with, or even outrank, a team that played and genuinely struggled (real
   // losses drag gd negative). A team with zero games played always sits
   // below any team that's played at least one, so a club that never showed
@@ -1652,7 +1652,7 @@ export function computeStandings(teams, fixtures, league) {
   return rows;
 }
 
-// How many of `leagues` the given user has actually won — checked the same
+// How many of `leagues` the given user has actually won â€” checked the same
 // way each league's own page decides its champion (knockoutChampion /
 // survivorChampion / round-robin standings winner), just run across every
 // league at once so it can feed the League Champion achievement. A user
@@ -1664,7 +1664,7 @@ function computeMyLeagueWins(leagues, userId) {
   for (const league of leagues || []) {
     // Defensive: don't let one league row with a missing teams/fixtures
     // join (a brand-new league mid-creation, a stale/partial row) crash
-    // this useMemo for the whole homepage — just skip it for the win count.
+    // this useMemo for the whole homepage â€” just skip it for the win count.
     const leagueFixtures = league.fixtures || [];
     const leagueTeams = league.teams || [];
     const isKnockout = league.format === "knockout";
@@ -1691,11 +1691,11 @@ function computeMyLeagueWins(leagues, userId) {
     } else if (league.format === "ladder_cup") {
       // Champion is decided server-side at finalize time (see
       // _ladder_cup_finalize_internal / the monthly, last-day-of-month
-      // 23:59 UTC auto-finalize cron) — ladder_cup_finalized_at is the
+      // 23:59 UTC auto-finalize cron) â€” ladder_cup_finalized_at is the
       // completion signal (mirrors isLeagueCompleted's own ladder_cup
       // branch), ladder_cup_champion_team_id is who won. Can legitimately
       // be null even once finalized (every club eliminated before
-      // cutoff) — that's not a win for anyone.
+      // cutoff) â€” that's not a win for anyone.
       if (league.ladder_cup_finalized_at) championTeamId = league.ladder_cup_champion_team_id || null;
     } else {
       const leagueComplete = leagueFixtures.length > 0 && leagueFixtures.every((f) => f.played);
@@ -1709,15 +1709,15 @@ function computeMyLeagueWins(leagues, userId) {
   return wins;
 }
 
-// "Jul 2026" — deliberately coarser than a full date. A trophy cabinet
+// "Jul 2026" â€” deliberately coarser than a full date. A trophy cabinet
 // remembers the season, not the exact afternoon.
 function formatTitleDate(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
-// Same champion-determination logic as computeMyLeagueWins just above —
+// Same champion-determination logic as computeMyLeagueWins just above â€”
 // same three branches (knockout bracket / survivor final stage / round-
-// robin standings), same "team owner via members" attribution — but run
+// robin standings), same "team owner via members" attribution â€” but run
 // across every league for every user at once, and capturing which league
 // it was and when the deciding fixture was played, instead of just a
 // count for one user. This is what lets the Wall of Fame say WHICH league
@@ -1738,7 +1738,7 @@ function computeAllLeagueChampionships(leagues) {
 
     let championTeamId = null;
     let deciderFixtures = null;
-    let championWonAt = null; // only ladder_cup sets this directly — see its branch below
+    let championWonAt = null; // only ladder_cup sets this directly â€” see its branch below
     if (inKnockoutBracket) {
       const bracketStage = isGroupsKnockout ? 2 : 1;
       const stageFixtures = leagueFixtures.filter((f) => f.stage === bracketStage);
@@ -1759,7 +1759,7 @@ function computeAllLeagueChampionships(leagues) {
       // Same completion/champion signal as computeMyLeagueWins's ladder_cup
       // branch. No generic `fixtures` array to derive a decider date from
       // here (ladder_cup_matches is its own table, never loaded into
-      // league.fixtures), so wonAt is just the finalize timestamp itself —
+      // league.fixtures), so wonAt is just the finalize timestamp itself â€”
       // the moment _ladder_cup_finalize_internal actually crowned them.
       if (league.ladder_cup_finalized_at) {
         championTeamId = league.ladder_cup_champion_team_id || null;
@@ -1797,9 +1797,9 @@ function computeAllLeagueChampionships(leagues) {
   return byUser;
 }
 
-// Ladder League 1 championships — same {leagueId, leagueName, wonAt} title
+// Ladder League 1 championships â€” same {leagueId, leagueName, wonAt} title
 // shape as computeAllLeagueChampionships above, built from a completely
-// separate source (ladder_wall_of_fame rows, tier 1 only — see
+// separate source (ladder_wall_of_fame rows, tier 1 only â€” see
 // loadLadderChampions) since League Ladder isn't part of the `leagues`
 // array at all. leagueId here is synthetic (week+user, not a real league
 // row) since it only needs to be a unique React key, not a navigable id.
@@ -1808,7 +1808,7 @@ function computeLadderTitlesByUserId(ladderChampions) {
   (ladderChampions || []).forEach((row) => {
     const title = {
       leagueId: `ladder-week-${row.week_number}-${row.user_id}`,
-      leagueName: `League Ladder — Week ${row.week_number}`,
+      leagueName: `League Ladder â€” Week ${row.week_number}`,
       wonAt: row.recorded_at,
     };
     if (!byUser.has(row.user_id)) byUser.set(row.user_id, []);
@@ -1818,11 +1818,11 @@ function computeLadderTitlesByUserId(ladderChampions) {
   return byUser;
 }
 
-// Points-table standings don't reflect a bracket properly — two teams that
+// Points-table standings don't reflect a bracket properly â€” two teams that
 // both lost in the semifinal are miles apart on points despite going
 // exactly as far. This ranks knockout teams by the round they exited in
 // instead (later round = better), tiebreaking same-round exits by aggregate
-// goal difference across their exit-round leg(s) — the same aggregate rule
+// goal difference across their exit-round leg(s) â€” the same aggregate rule
 // advanceKnockout itself uses to decide a winner. Teams eliminated in a
 // groups_knockout league's group stage (never reached the bracket) rank
 // below every bracket team, ordered by their pooled group-stage record.
@@ -1861,7 +1861,7 @@ function computeKnockoutRanking(league) {
 
 
 // Seasons are 3-month windows that start from the date of the very first
-// match ever played on the platform — not a fixed calendar quarter — so
+// match ever played on the platform â€” not a fixed calendar quarter â€” so
 // "Season 1" kicks off the moment anyone plays their first match, and
 // every result from that day onward counts toward it (instead of results
 // from before some arbitrary Jan/Apr/Jul/Oct boundary getting cut off).
@@ -1878,7 +1878,7 @@ const SEASON_LENGTH_MS = 91 * 24 * 60 * 60 * 1000; // ~3 months per season
 // roughly the right season instead of vanishing from every season filter.
 export function fixturePlayedDate(f) { return f.played_at || f.created_at; }
 
-// The date of the first match anyone ever played, across every league —
+// The date of the first match anyone ever played, across every league â€”
 // this is what Season 1 starts from. Returns null if nothing's been played
 // yet (nothing to anchor a season to).
 export function seasonAnchor(leagues) {
@@ -1900,13 +1900,13 @@ export function currentSeason(anchor) { return anchor ? seasonIndexForDate(new D
 // Platform-wide leaderboard: aggregates every played fixture for every
 // person across every league they've fielded a team in (grouped by user_id,
 // not team, so someone's record follows them between leagues). A club that
-// hasn't been claimed by a signed-up member yet — e.g. a name from a
+// hasn't been claimed by a signed-up member yet â€” e.g. a name from a
 // league's pre-listed open-registration team sheet that nobody has joined
-// under — has no user to attribute its results to, so it's kept as its own
+// under â€” has no user to attribute its results to, so it's kept as its own
 // row keyed by team instead, named after the club. Without this fallback
 // those clubs' wins would silently vanish from the Leaderboard (though they'd
 // still count on that league's own Table, since computeStandings works off
-// fixtures/teams directly) — which is exactly why a club leading its
+// fixtures/teams directly) â€” which is exactly why a club leading its
 // league's table could still be missing from the platform-wide rankings.
 // Pass `bounds` ({start, end} Dates) to scope it to one season; pass
 // null/undefined for the all-time board.
@@ -1916,7 +1916,7 @@ export function computeGlobalLeaderboard(leagues, bounds) {
     const ownerByTeamId = new Map();
     (l.members || []).forEach((m) => { if (m.team_id) ownerByTeamId.set(m.team_id, m); });
     // Defensive: same reasoning as computeMyLeagueWins/computeAllLeagueChampionships
-    // above — don't let one league row with a missing fixtures join crash
+    // above â€” don't let one league row with a missing fixtures join crash
     // this pass (and take the Leaderboard strip down with it).
     const leagueFixtures = l.fixtures || [];
     (l.teams || []).forEach((team) => {
@@ -1950,7 +1950,7 @@ export function computeGlobalLeaderboard(leagues, bounds) {
 // uses (grouped by user_id so a rivalry survives a club rename or the same
 // two people meeting again in a completely different league later). A club
 // nobody has claimed yet falls back to its own team id, same as the
-// Leaderboard's unclaimed-club fallback — that just means an unclaimed
+// Leaderboard's unclaimed-club fallback â€” that just means an unclaimed
 // opponent's history is scoped to whatever they've played under that exact
 // team row, since there's no user to follow them by.
 export function playerKeyForTeam(league, teamId) {
@@ -1960,7 +1960,7 @@ export function playerKeyForTeam(league, teamId) {
 }
 
 // The head-to-head record between two players, across every league they've
-// ever met in — not just the one currently open. Mirrors
+// ever met in â€” not just the one currently open. Mirrors
 // computeGlobalLeaderboard's per-league owner lookup so this stays correct
 // even for a club whose current owner has changed since an old fixture was
 // played. Returns null for a same-person matchup (keyA === keyB, e.g. two
@@ -1997,7 +1997,7 @@ export function computeHeadToHead(leagues, keyA, keyB) {
     if (m.gfA > m.gfB) w++; else if (m.gfA < m.gfB) l++; else d++;
   });
 
-  // Current run, read backwards from the most recent match — stops at the
+  // Current run, read backwards from the most recent match â€” stops at the
   // first result that breaks the streak (or the end of the history).
   let streak = 0, streakType = null;
   for (const m of matches) {
@@ -2032,18 +2032,18 @@ export function goalExtremes(rows) {
 
 
 // member id -> { rank, contribution, directPrize, redistributed, total }
-// for every member who actually won a place (top 3 — gold/silver/bronze —
+// for every member who actually won a place (top 3 â€” gold/silver/bronze â€”
 // for round-robin-ending leagues, champion + runner-up for
-// knockout/groups_knockout — see cashPrizePercentages — among
+// knockout/groups_knockout â€” see cashPrizePercentages â€” among
 // approved/paid members only). Every place is scaled by how much that
 // member personally put in (entryRatio below), and any shortfall from
 // underpayment gets redistributed back across the winners, proportional to
-// their own direct prize — see the module comment near ORGANIZER_SHARE for
+// their own direct prize â€” see the module comment near ORGANIZER_SHARE for
 // how the organizer's flat 5% reservation fits into that. Works off
 // whatever fixtures currently exist, so callers decide whether that's a
-// live projection or the final result — see memberBalance and the
+// live projection or the final result â€” see memberBalance and the
 // "started/complete" lifecycle below. Does NOT include the organizer's
-// cut — that's a flat fee, not a member prize, computed separately by
+// cut â€” that's a flat fee, not a member prize, computed separately by
 // organizerFee().
 function computeCashPrizes(league) {
   const results = new Map();
@@ -2090,7 +2090,7 @@ function computeCashPrizes(league) {
 // shows as balance while registration is open, gets deducted (balance back
 // to R0.00) once the league actually starts and the money is "in play", and
 // then reflects prize winnings once the league is complete. Unapproved
-// members always show R0.00 — they haven't put anything in yet.
+// members always show R0.00 â€” they haven't put anything in yet.
 function memberBalance(league, member) {
   if (!league || league.league_type !== "cash" || member.payment_status !== "approved") return 0;
   const started = league.fixtures.length > 0;
@@ -2102,20 +2102,20 @@ function memberBalance(league, member) {
 
 // Result posts are just rows in the `comments` table, tagged is_result:true
 // when we control the insert (recordResult / approveResult / rejectResult).
-// The one path we don't control — the security-definer approve_result_submission
-// SQL function posting its own "under the submitter's identity" comment — predates
+// The one path we don't control â€” the security-definer approve_result_submission
+// SQL function posting its own "under the submitter's identity" comment â€” predates
 // that column, so this also recognises the scoreline shape it writes
-// ("Home 2 – 1 Away") as a fallback, keeping older/DB-side result posts grouped
+// ("Home 2 â€“ 1 Away") as a fallback, keeping older/DB-side result posts grouped
 // correctly even before that function is updated to set the flag itself.
 export function isResultComment(body, isResultFlag) {
   if (isResultFlag) return true;
   if (!body) return false;
-  if (body.includes("approved result —") || body.includes("result was rejected —")) return true;
-  return /^.+\s\d+\s*–\s*\d+\s.+$/.test(body.trim());
+  if (body.includes("approved result â€”") || body.includes("result was rejected â€”")) return true;
+  return /^.+\s\d+\s*â€“\s*\d+\s.+$/.test(body.trim());
 }
 
-// Splits a league's flat comment list into two flat lists — "results" and
-// "regular" — by walking each comment up to its root and classifying by the
+// Splits a league's flat comment list into two flat lists â€” "results" and
+// "regular" â€” by walking each comment up to its root and classifying by the
 // root. A reply inherits its root's bucket even if the reply text itself
 // doesn't look like a scoreline, so a whole results thread (and its chatter)
 // stays together under the Table tab, separate from general discussion.
@@ -2136,7 +2136,7 @@ export function splitCommentsByRoot(comments) {
 }
 
 // Given a pending result submission, finds the user_id of the player on the
-// *other* side of that fixture — the one who should be confirming or
+// *other* side of that fixture â€” the one who should be confirming or
 // disputing it, as opposed to the submitter or an uninvolved third party.
 // Goes submission -> submitter's member row -> submitter's team_id -> the
 // fixture's other team_id -> that team's member row -> its user_id. Returns
@@ -2155,7 +2155,7 @@ export function findSubmissionOpponentId(league, submission) {
 }
 
 // Fixed to Africa/Johannesburg (UTC+2, no DST) rather than each viewer's own
-// device timezone — so every player and admin sees the exact same time for
+// device timezone â€” so every player and admin sees the exact same time for
 // a fixture regardless of what timezone their phone/browser happens to be
 // set to. This league runs on SAST, not "whatever device opened the app."
 export function fmtDate(iso) {
@@ -2164,7 +2164,7 @@ export function fmtDate(iso) {
 }
 
 // Returns [start, end] Date objects spanning the nearest Friday 00:00 through
-// Sunday 23:59:59 — "this weekend" if today already falls in that window,
+// Sunday 23:59:59 â€” "this weekend" if today already falls in that window,
 // otherwise the upcoming one. Used by the guest homepage's Weekend League
 // spotlight to surface whatever's kicking off or already in play over it.
 export function weekendWindow(now = new Date()) {
@@ -2179,7 +2179,7 @@ export function weekendWindow(now = new Date()) {
 // league starts Friday 17:00 UTC, group stage ends / knockout kicks off
 // exactly 24h later (Saturday 17:00 UTC), and the whole knockout bracket
 // (every round, auto-forfeiting any match not both-submitted within 2h)
-// wraps up by Sunday 23:59 UTC — see the 20260901071500-onward Supabase
+// wraps up by Sunday 23:59 UTC â€” see the 20260901071500-onward Supabase
 // migrations for the server-side half of this (group stage + every
 // knockout round now advance on their own, no admin click required).
 // This helper just mirrors the "+24h from kickoff" half of that on the
@@ -2191,16 +2191,16 @@ export function weekendGroupStageCutoffUTC(startsAt) {
 }
 
 // The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
-// wall-clock window too — not whatever timezone the visitor's device happens
+// wall-clock window too â€” not whatever timezone the visitor's device happens
 // to be in. South Africa doesn't observe DST, so SAST is a fixed UTC+2.
 const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
 
-// True from 9pm through 8:59am SAST — the overnight stretch the Weekend
+// True from 9pm through 8:59am SAST â€” the overnight stretch the Weekend
 // League spotlight shows as "Paused" rather than "Live". Only the spotlight's
 // live/paused badge reads this; it never gates joining a league or submitting
 // a result, so players can still upload results for a match played overnight.
-// `override` ("paused" | "live" | null) is an admin's manual call — see
-// weekendOverride in App() — and always wins over the clock when set, so an
+// `override` ("paused" | "live" | null) is an admin's manual call â€” see
+// weekendOverride in App() â€” and always wins over the clock when set, so an
 // admin can force an early resume or an extra-long pause when necessary.
 function isWeekendPauseHour(now = new Date(), override = null) {
   if (override === "paused") return true;
@@ -2219,7 +2219,7 @@ function nextSastHourBoundary(now, hour) {
 }
 
 // Adds `durationMs` of real elapsed time on top of `startDate`, but for
-// weekend leagues the 9pm-9am SAST pause doesn't count toward that time —
+// weekend leagues the 9pm-9am SAST pause doesn't count toward that time â€”
 // the countdown effectively freezes at 9pm and resumes at 9am, so a
 // deadline that would otherwise land overnight gets pushed out by however
 // many paused hours it crossed. Non-weekend leagues (isWeekend: false) get
@@ -2236,12 +2236,12 @@ function addPausableDuration(startDate, durationMs, isWeekend) {
   while (remaining > 0 && guard < 10000) {
     guard++;
     if (isWeekendPauseHour(cursor)) {
-      // Currently in the paused window — jump straight to 9am, none of
+      // Currently in the paused window â€” jump straight to 9am, none of
       // this stretch counts against `remaining`.
       cursor = nextSastHourBoundary(cursor, 9);
       continue;
     }
-    // Active window — consume time up to the next 9pm pause, or all of
+    // Active window â€” consume time up to the next 9pm pause, or all of
     // what's left, whichever comes first.
     const nextPause = nextSastHourBoundary(cursor, 21);
     const step = Math.min(nextPause.getTime() - cursor.getTime(), remaining);
@@ -2252,7 +2252,7 @@ function addPausableDuration(startDate, durationMs, isWeekend) {
 }
 
 // Ladder Cup's weekly cutoff defaults to the *upcoming* Sunday 10PM SAST
-// (Africa/Johannesburg, UTC+2 fixed, no DST — same rule as fmtDate/
+// (Africa/Johannesburg, UTC+2 fixed, no DST â€” same rule as fmtDate/
 // isWeekendPauseHour above: always SAST wall-clock, never the visitor's own
 // device timezone). Used by CreateLeague to prefill the cutoff picker for a
 // new ladder_cup league; admins can still override it. Mirrors
@@ -2260,7 +2260,7 @@ function addPausableDuration(startDate, durationMs, isWeekend) {
 // just the right hour.
 //
 // Superseded as the *auto-cycle's* cadence by nextMonthEndCutoffSAST below
-// (the cup now runs monthly, not weekly — see
+// (the cup now runs monthly, not weekly â€” see
 // 20260901_ladder_cup_monthly_cycle.sql) but left in place since it's still
 // a fine picker default for any other weekly-cadence use.
 export function nextSundayCutoffSAST(now = new Date()) {
@@ -2274,11 +2274,11 @@ export function nextSundayCutoffSAST(now = new Date()) {
 // Survival Ladder Cup's cadence is monthly: ends the last day of the month,
 // the next cup starts the first. This is the picker default for CreateLeague
 // (10PM SAST on the last calendar day of the current month, in SAST
-// wall-clock terms — mirrors nextSundayCutoffSAST's shape/offset handling
+// wall-clock terms â€” mirrors nextSundayCutoffSAST's shape/offset handling
 // exactly, just walking to month-end instead of to Sunday). The actual
 // auto-cycle (close old cup / open next) runs server-side on its own cron
-// tick at 23:59 UTC on the last day of the month — see
-// 20260901_ladder_cup_monthly_cycle.sql — this is only ever used to prefill
+// tick at 23:59 UTC on the last day of the month â€” see
+// 20260901_ladder_cup_monthly_cycle.sql â€” this is only ever used to prefill
 // the date picker when an admin manually creates a ladder_cup league.
 export function nextMonthEndCutoffSAST(now = new Date()) {
   const sastNow = new Date(now.getTime() + SAST_OFFSET_MS);
@@ -2289,7 +2289,7 @@ export function nextMonthEndCutoffSAST(now = new Date()) {
   const lastDayOfThisMonth = new Date(firstOfNextMonth.getTime() - ONE_DAY_MS);
   const candidate = new Date(Date.UTC(lastDayOfThisMonth.getUTCFullYear(), lastDayOfThisMonth.getUTCMonth(), lastDayOfThisMonth.getUTCDate(), 22, 0, 0, 0) - SAST_OFFSET_MS);
   if (candidate >= now) return candidate;
-  // Already past this month's cutoff — walk to the last day of *next*
+  // Already past this month's cutoff â€” walk to the last day of *next*
   // month the same way.
   const firstOfMonthAfterNext = new Date(Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth() + 2, 1));
   const lastDayOfNextMonth = new Date(firstOfMonthAfterNext.getTime() - ONE_DAY_MS);
@@ -2297,7 +2297,7 @@ export function nextMonthEndCutoffSAST(now = new Date()) {
 }
 
 // Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
-// <input type="datetime-local"> expects, in the browser's local time — the
+// <input type="datetime-local"> expects, in the browser's local time â€” the
 // exact inverse of how CreateLeague turns that same input's value back into
 // an ISO string (`new Date(value).toISOString()`), so editing round-trips
 // without drifting by a timezone offset.
@@ -2308,7 +2308,7 @@ export function toDatetimeLocalValue(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Short relative timestamp for comments/replies — falls back to the full
+// Short relative timestamp for comments/replies â€” falls back to the full
 // date once something's more than a week old, where "how many days ago"
 // stops being useful and the actual date is what you want.
 export function timeAgo(iso) {
@@ -2324,13 +2324,13 @@ export function timeAgo(iso) {
   return fmtDate(iso);
 }
 
-// Deterministic avatar background per username — same person always gets the
+// Deterministic avatar background per username â€” same person always gets the
 // same color, and different people are visually distinguishable in a thread,
 // the way any social feed tells commenters apart at a glance.
 const AVATAR_HUES = [142, 168, 25, 45, 200, 280, 340, 10];
 
 // Days remaining until a ladder challenge's accept-by deadline. Once this
-// hits 0 nothing resolves it automatically — it just becomes visible in the
+// hits 0 nothing resolves it automatically â€” it just becomes visible in the
 // admin queue (see escalatedLadderAccepts) for an admin to grant a walkover
 // or cancel the challenge.
 export function ladderDaysLeft(fromISO, windowDays) {
@@ -2348,11 +2348,11 @@ export function avatarColor(seed) {
   return `hsl(${hue}, 42%, 38%)`;
 }
 
-// WhatsApp's own brand green — kept constant across both themes so the button
+// WhatsApp's own brand green â€” kept constant across both themes so the button
 // reads as "WhatsApp" at a glance rather than blending into the app's palette.
 export const WHATSAPP_GREEN = "#25D366";
 
-// The one support line for the whole site — shown as a floating button on
+// The one support line for the whole site â€” shown as a floating button on
 // every screen (signed in or not) so anyone can reach a human fast. Exported
 // so a specific screen (e.g. RapidCupTournamentExtras' Help button) can build
 // its own richer prefilled message against the same number, rather than only
@@ -2361,11 +2361,11 @@ export const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
 
 // How long a member's row stays highlighted red after an admin taps their
 // WhatsApp icon (see markWaReminder / isWaReminderActive below). Simple
-// "I messaged them recently" flag — not tied to any fixture due date.
+// "I messaged them recently" flag â€” not tied to any fixture due date.
 const WA_REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // Builds a wa.me deep link with an optional prefilled message. wa.me opens
-// whichever WhatsApp variant — regular or Business — is installed as the
+// whichever WhatsApp variant â€” regular or Business â€” is installed as the
 // device's default handler for that number; there's no separate universal
 // link that can force Business specifically when both apps are present, so
 // this is the closest a web link can get to "open in Business WhatsApp".
@@ -2375,7 +2375,7 @@ export function waLink(phone, text) {
   return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 }
 
-// Appended only to matchday-1 "let's arrange the match" texts — a brand new
+// Appended only to matchday-1 "let's arrange the match" texts â€” a brand new
 // opponent may not know the site exists yet, so the very first fixture
 // message points them to it and tells them where to find their matchup
 // (the "Up next" strip right at the top of the homepage). Later matchdays
@@ -2383,13 +2383,13 @@ export function waLink(phone, text) {
 const SITE_URL = "https://www.weafrica.co.za/";
 export function firstMatchdayNote(round) {
   if (round !== 1) return "";
-  return `\n👆 Also, jump on ${SITE_URL} — you'll find your opponent right at the top of the homepage`;
+  return `\nðŸ‘† Also, jump on ${SITE_URL} â€” you'll find your opponent right at the top of the homepage`;
 }
 
 // Small pill button used anywhere we offer to message a club's registered
 // number. Renders nothing if there's no usable phone number, so callers can
 // place it directly after a phone number without an extra guard. With
-// iconOnly, renders as a plain round icon button and drops the text label —
+// iconOnly, renders as a plain round icon button and drops the text label â€”
 // used in fixtures where we show the WhatsApp entry point but not the raw
 // number itself.
 export function WhatsAppLink({ phone, text, label, iconOnly, onClick, title, c }) {
@@ -2416,7 +2416,7 @@ export function WhatsAppLink({ phone, text, label, iconOnly, onClick, title, c }
 // A "call" entry point that goes through WhatsApp instead of the device's
 // own dialer. WhatsApp has no public deep link that starts a voice call
 // directly against a phone number (its Call Link feature only shares links
-// to calls a user already created inside the app) — so this opens the
+// to calls a user already created inside the app) â€” so this opens the
 // WhatsApp chat with that number, prefilled with a message explaining why,
 // so the other person immediately knows to expect a call. From there the
 // person taps WhatsApp's own call icon. Renders nothing without a usable
@@ -2443,7 +2443,7 @@ export function WhatsAppCallLink({ phone, text, label, iconOnly, onClick, c }) {
   );
 }
 
-// Site-wide quick-contact entry point — a floating round WhatsApp button
+// Site-wide quick-contact entry point â€” a floating round WhatsApp button
 // pinned to the corner of every screen, signed in or not, so reaching
 // support never depends on which page someone happens to be on. Opens a
 // prefilled chat to SUPPORT_WHATSAPP_NUMBER rather than a raw phone number,
@@ -2461,7 +2461,7 @@ function SupportWhatsAppButton({ context }) {
 }
 
 // Small persistent "Terms" link, mirroring the WhatsApp support button on the
-// opposite corner — keeps the Terms & Conditions one tap away from every
+// opposite corner â€” keeps the Terms & Conditions one tap away from every
 // screen without crowding the header.
 function TermsFooterLink({ onOpen, c }) {
   return (
@@ -2473,24 +2473,24 @@ function TermsFooterLink({ onOpen, c }) {
   );
 }
 
-// The "referee" notification mascot — drop-in replacement for the old
+// The "referee" notification mascot â€” drop-in replacement for the old
 // plain-text bottom toast. Slides in from the right to dead center of the
 // screen with her message in a speech bubble, holds briefly, then slides
 // back out to the left (see the referee-in/referee-out keyframes in
 // index.css). Two photo variants alternate at random each time one fires
-// (see the queueing logic in App()) just for a bit of visual variety —
+// (see the queueing logic in App()) just for a bit of visual variety â€”
 // pointer-events stay off throughout so she never blocks a tap on
 // whatever's underneath her.
 function RefereeNotification({ data, c, onClose }) {
   const isFullBody = data.variant === "fullbody";
-  // Same singleton used by the rules player and comment rows — tapping this
+  // Same singleton used by the rules player and comment rows â€” tapping this
   // speaker reads the notification aloud with whatever voice/engine those
   // already use, and toggles off (id -> null) the same way a comment's
   // speaker does if tapped again mid-read.
   const speakingId = useCommentSpeakingId();
   const isSpeaking = speakingId === data.id;
   // Small reusable HUD-style corner bracket, mirrored/rotated per corner via
-  // the `pos` classes passed in — gives the bubble a "targeting frame" look
+  // the `pos` classes passed in â€” gives the bubble a "targeting frame" look
   // instead of a plain rectangle.
   const corner = (pos, borders) => (
     <span className={`absolute w-2.5 h-2.5 ${pos}`} style={{ ...borders, borderColor: c.accent }} />
@@ -2499,7 +2499,7 @@ function RefereeNotification({ data, c, onClose }) {
     <>
       {/* Vignette: dims whatever's underneath just enough that she pops
           against a busy page. Sits below her (z-99 vs z-100). Now catches
-          taps anywhere on screen to dismiss her — the bubble/mascot layer
+          taps anywhere on screen to dismiss her â€” the bubble/mascot layer
           above stays pointer-events-none except for its own buttons, so a
           tap that lands outside those buttons falls through to this layer. */}
       <div className="fixed inset-0 z-[99]" onClick={onClose}
@@ -2572,16 +2572,16 @@ export function Loader({ c }) {
   );
 }
 
-// The referee-hosted first-run tour — walks a new player through the app's
+// The referee-hosted first-run tour â€” walks a new player through the app's
 // main parts one stop at a time. Each step with a `target` selector actually
 // spotlights the real element it's describing (dims everything else, draws
 // a ring around it, and anchors the callout card right next to it) instead
-// of just describing it from a generic centered popup — steps without a
+// of just describing it from a generic centered popup â€” steps without a
 // target (currently only the welcome step) fall back to a centered card.
 // Steps whose target lives inside the floating quick-actions dock set
 // `needsDock: true`, which the tour opens/closes itself via
 // onSetQuickActionsOpen (App's setQuickActionsOpen, passed down through
-// App's own <TutorialTour> render — see below) as the user steps through.
+// App's own <TutorialTour> render â€” see below) as the user steps through.
 // Each stop's one-line "short" text is what's shown first; "Explain in
 // detail" reveals a longer paragraph in place for anyone who wants more
 // than the quick version. Auto-fires once for a brand-new user right after
@@ -2591,20 +2591,20 @@ const TUTORIAL_STEPS = [
   {
     title: "Welcome to Matchday",
     icon: Trophy,
-    short: "I'm the referee — I'll walk you through the app in a few short stops, pointing out what's what as we go.",
-    detail: "Matchday is where eFootball leagues actually get run: create or join a league, get paired against real opponents, log results with photo proof, and climb standings that update automatically. A few different formats live here side by side — regular leagues, the tiered League Ladder, and open 1-on-1 Challenges — so there's more than one way to compete.",
+    short: "I'm the referee â€” I'll walk you through the app in a few short stops, pointing out what's what as we go.",
+    detail: "Matchday is where eFootball leagues actually get run: create or join a league, get paired against real opponents, log results with photo proof, and climb standings that update automatically. A few different formats live here side by side â€” regular leagues, the tiered League Ladder, and open 1-on-1 Challenges â€” so there's more than one way to compete.",
   },
   {
     title: "Home & Leagues",
     icon: Trophy,
-    short: "This logo always brings you back Home — join or create a league here, and log results once you've played.",
-    detail: "Leagues come in two flavors: fun leagues (free) and cash leagues (a small entry fee, with a real prize pool split among the top finishers). Once you're in one, Home shows your upcoming fixtures and any results waiting to be logged — tap into a fixture, enter the score, and attach a photo of the final scoreboard to submit it.",
+    short: "This logo always brings you back Home â€” join or create a league here, and log results once you've played.",
+    detail: "Leagues come in two flavors: fun leagues (free) and cash leagues (a small entry fee, with a real prize pool split among the top finishers). Once you're in one, Home shows your upcoming fixtures and any results waiting to be logged â€” tap into a fixture, enter the score, and attach a photo of the final scoreboard to submit it.",
     target: '[data-tour="home-logo"]',
   },
   {
     title: "League Ladder",
     icon: TrendingUp,
-    short: "This tile is your way into the League Ladder — a tiered weekly competition where winning climbs you up.",
+    short: "This tile is your way into the League Ladder â€” a tiered weekly competition where winning climbs you up.",
     detail: "Everyone starts in the bottom tier and plays a fresh round-robin each week against others in their tier. Results need a scoreboard photo and your opponent's confirmation (or an admin's, if you can't agree) before they count. Finish well and you're promoted to a tougher tier next week; finish poorly and you can be relegated.",
     target: '[data-tour="qa-ladder"]',
     needsDock: true,
@@ -2620,7 +2620,7 @@ const TUTORIAL_STEPS = [
   {
     title: "The Kit Room",
     icon: Repeat,
-    short: "Play matches to earn Nets — spend them right here in the Kit Room, or trade with other players.",
+    short: "Play matches to earn Nets â€” spend them right here in the Kit Room, or trade with other players.",
     detail: "Nets are the platform's in-app currency, earned mainly by playing matches and doing well in leagues. The Kit Room shop lets you spend them on cosmetic items and other perks, and the Transfer Market lets players trade items with each other directly.",
     target: '[data-tour="qa-kitroom"]',
     needsDock: true,
@@ -2628,8 +2628,8 @@ const TUTORIAL_STEPS = [
   {
     title: "Notifications",
     icon: Bell,
-    short: "This bell shows anything that actually needs your attention — tap it any time.",
-    detail: "It's a short personal list, not a general feed: results waiting on your confirmation, open challenges up for grabs, and — if you're an admin — results escalated for review and payments waiting on approval.",
+    short: "This bell shows anything that actually needs your attention â€” tap it any time.",
+    detail: "It's a short personal list, not a general feed: results waiting on your confirmation, open challenges up for grabs, and â€” if you're an admin â€” results escalated for review and payments waiting on approval.",
     target: '[data-tour="notif-bell"]',
   },
   {
@@ -2642,8 +2642,8 @@ const TUTORIAL_STEPS = [
   {
     title: "Everything else",
     icon: Menu,
-    short: "This menu holds everything that isn't already up here — the Ladder, Leaderboard, feedback, and more.",
-    detail: "The hamburger menu covers the global Ladder, Leaderboard, light/dark mode, feedback, and sign out — plus admin tools like Accounts and the Activity log if you manage the platform.",
+    short: "This menu holds everything that isn't already up here â€” the Ladder, Leaderboard, feedback, and more.",
+    detail: "The hamburger menu covers the global Ladder, Leaderboard, light/dark mode, feedback, and sign out â€” plus admin tools like Accounts and the Activity log if you manage the platform.",
     target: '[data-tour="menu-btn"]',
   },
 ];
@@ -2716,7 +2716,7 @@ function TutorialTour({ onClose, onSetQuickActionsOpen, c }) {
 
   return (
     <div className="fixed inset-0 z-50" onClick={rect ? undefined : onClose}>
-      {/* Spotlight cutout — a box-shadow trick: the element itself has no
+      {/* Spotlight cutout â€” a box-shadow trick: the element itself has no
           fill, just a shadow with a huge spread, so everything OUTSIDE its
           bounds goes dark while the target rect stays fully visible and
           untouched underneath it. */}
@@ -2739,7 +2739,7 @@ function TutorialTour({ onClose, onSetQuickActionsOpen, c }) {
         className={rect ? "rounded-2xl overflow-hidden border" : "fixed inset-0 flex items-center justify-center px-4"}
         style={rect ? { ...cardStyle, background: c.bg, borderColor: c.borderStrong, boxShadow: "0 12px 32px rgba(0,0,0,0.35)" } : { zIndex: 60 }}>
         <div className={rect ? "" : "w-full max-w-sm rounded-2xl overflow-hidden border"} style={rect ? {} : { background: c.bg, borderColor: c.borderStrong }}>
-          {/* Little arrow connecting the card to its target — points up when
+          {/* Little arrow connecting the card to its target â€” points up when
               the card sits below the target, down when it sits above. */}
           {rect && (
             <div className="absolute w-3 h-3 rotate-45 border" style={{
@@ -2862,13 +2862,13 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
               <button type="button" onClick={submitCard} disabled={cardSaving}
                 className="inline-flex items-center gap-1.5 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-60"
                 style={{ background: c.accent, color: c.accentText }}>
-                <CreditCard size={13} /> {cardSaving ? "Starting checkout…" : "Pay by card"}
+                <CreditCard size={13} /> {cardSaving ? "Starting checkoutâ€¦" : "Pay by card"}
               </button>
               <div className="mt-2">
                 <CardBrandsBadge c={c} />
               </div>
               <div className="font-body text-[10px] mt-1.5 mb-3" style={{ color: c.textFaint }}>
-                Opens a secure card checkout page. You'll be joined automatically the moment payment is confirmed — no proof needed.
+                Opens a secure card checkout page. You'll be joined automatically the moment payment is confirmed â€” no proof needed.
               </div>
             </>
           )}
@@ -2892,7 +2892,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
           </div>
         </div>
         <div className="font-body text-[11px] mb-4" style={{ color: c.textFaint }}>
-          The more you put in, the bigger your prize — {formatRand(ENTRY_FEE_MAX)} is the max contribution (100% share). Your prize for a place is scaled by your entry as a fraction of {formatRand(ENTRY_FEE_MAX)}.
+          The more you put in, the bigger your prize â€” {formatRand(ENTRY_FEE_MAX)} is the max contribution (100% share). Your prize for a place is scaled by your entry as a fraction of {formatRand(ENTRY_FEE_MAX)}.
         </div>
 
         {league.description && (
@@ -2903,7 +2903,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
         )}
 
         <label className="block font-mono text-xs uppercase tracking-wider mb-2" style={{ color: c.textDim }}>
-          Entry fee <span style={{ color: c.textFaint }}>({formatRand(ENTRY_FEE_MIN)}–{formatRand(ENTRY_FEE_MAX)})</span>
+          Entry fee <span style={{ color: c.textFaint }}>({formatRand(ENTRY_FEE_MIN)}â€“{formatRand(ENTRY_FEE_MAX)})</span>
         </label>
         <div className="flex flex-wrap gap-2 mb-2">
           {ENTRY_FEE_PRESETS.map((amt) => (
@@ -2934,7 +2934,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
 
         <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-          {saving ? "Submitting…" : `Submit ${formatRand(clampFee(fee))} for approval`}
+          {saving ? "Submittingâ€¦" : `Submit ${formatRand(clampFee(fee))} for approval`}
         </button>
       </div>
     </div>
@@ -2954,9 +2954,9 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // The final — and now a decider leg, added automatically when a
+  // The final â€” and now a decider leg, added automatically when a
   // non-final tie is still level after the configured home & away legs
-  // (see advanceKnockout) — are always single decisive matches: if either
+  // (see advanceKnockout) â€” are always single decisive matches: if either
   // is tied, penalties are the only way through, so this modal asks for
   // them right here instead of sending the admin off to a separate screen.
   const isFinal = isFinalFixture(fixture, league);
@@ -2984,7 +2984,7 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
 
         {existing?.review_note && (
           <div className="rounded-lg p-3 mb-4 font-body text-xs" style={{ background: c.redSoft, color: c.red }}>
-            <div className="font-mono text-[10px] uppercase tracking-wider mb-1">Rejected — admin's note</div>
+            <div className="font-mono text-[10px] uppercase tracking-wider mb-1">Rejected â€” admin's note</div>
             {existing.review_note}
           </div>
         )}
@@ -2995,7 +2995,7 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
             <input type="number" min={0} value={h} onChange={(e) => setH(Number(e.target.value))}
               className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
           </div>
-          <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+          <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
           <div className="flex-1 min-w-0">
             <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"}</div>
             <input type="number" min={0} value={a} onChange={(e) => setA(Number(e.target.value))}
@@ -3005,14 +3005,14 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
 
         {needsPens && (
           <div className="mb-5">
-            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>This is the final — level after regulation goes to penalties.</div>
+            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>This is the final â€” level after regulation goes to penalties.</div>
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (pens)</div>
                 <input type="number" min={0} value={ph} onChange={(e) => setPh(e.target.value === "" ? "" : Number(e.target.value))}
                   className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
               </div>
-              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (pens)</div>
                 <input type="number" min={0} value={pa} onChange={(e) => setPa(e.target.value === "" ? "" : Number(e.target.value))}
@@ -3020,7 +3020,7 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
               </div>
             </div>
             {ph !== "" && pa !== "" && Number(ph) === Number(pa) && (
-              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too — someone has to win.</div>
+              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too â€” someone has to win.</div>
             )}
           </div>
         )}
@@ -3032,14 +3032,14 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
         <div className="font-mono text-[11px] mb-3" style={{ color: c.textFaint }}>
-          The admin reviews this before it counts — once approved it's posted to the comments under your name automatically.
+          The admin reviews this before it counts â€” once approved it's posted to the comments under your name automatically.
         </div>
 
         <FacebookHighlightsPrompt c={c} />
 
         <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-          {saving ? "Submitting…" : "Submit for admin approval"}
+          {saving ? "Submittingâ€¦" : "Submit for admin approval"}
         </button>
       </div>
     </div>
@@ -3047,7 +3047,7 @@ function SubmitResultModal({ league, fixture, homeTeam, awayTeam, existing, onCa
 }
 
 // Lets either side of an accepted challenge log the final score. No photo
-// proof here (unlike league results) — it's a friendly 1v1, and the other
+// proof here (unlike league results) â€” it's a friendly 1v1, and the other
 // player has to confirm the number before it counts anyway, so a bad-faith
 // score just gets disputed instead of quietly landing.
 function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCancel, onSubmit, c }) {
@@ -3081,7 +3081,7 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
             <input type="number" min={0} value={mine} onChange={(e) => setMine(Number(e.target.value))}
               className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
           </div>
-          <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+          <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
           <div className="flex-1 min-w-0">
             <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{opponentUsername}</div>
             <input type="number" min={0} value={theirs} onChange={(e) => setTheirs(Number(e.target.value))}
@@ -3103,7 +3103,7 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
 
         <button disabled={!file || saving} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-          {saving ? "Logging…" : "Log result"}
+          {saving ? "Loggingâ€¦" : "Log result"}
         </button>
       </div>
     </div>
@@ -3112,12 +3112,12 @@ function LogChallengeResultModal({ challenge, myUsername, opponentUsername, onCa
 
 // Step 10: logs a played (non-walkover) Ladder Cup match result. This modal
 // itself is unchanged by the submit -> confirm/dispute -> admin-escalation
-// pipeline (submitLadderCupMatchResult below) — it just collects the
+// pipeline (submitLadderCupMatchResult below) â€” it just collects the
 // scoreline and photo and calls onSubmit; whether that lands as a pending
 // report awaiting the opponent, same as everywhere else in this app, is
 // entirely the caller's business. Extra time and penalty scores only
 // show once the stage before them is level, and decidedBy itself isn't a
-// manual choice — resolveMatchWinner derives it from whichever scoreline
+// manual choice â€” resolveMatchWinner derives it from whichever scoreline
 // actually broke the tie, so there's nothing for the scoreline and the
 // stage label to disagree about.
 function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c }) {
@@ -3132,7 +3132,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
   const [saving, setSaving] = useState(false);
 
   const regulationLevel = Number(h) === Number(a);
-  // A level scoreline no longer forces extra time/penalties — the reporter
+  // A level scoreline no longer forces extra time/penalties â€” the reporter
   // picks "Draw" or "Play extra time" first; isDraw is reset the moment
   // the scoreline stops being level so it can never survive into a
   // decisive-result submission.
@@ -3172,7 +3172,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
             <input type="number" min={0} value={h} onChange={(e) => setH(Number(e.target.value))}
               className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
           </div>
-          <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+          <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
           <div className="flex-1 min-w-0">
             <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"}</div>
             <input type="number" min={0} value={a} onChange={(e) => setA(Number(e.target.value))}
@@ -3182,9 +3182,9 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
 
         {regulationLevel && (
           <div className="mb-4">
-            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — draw, or play extra time?</div>
+            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation â€” draw, or play extra time?</div>
             {/* Step 16: a level scoreline is no longer forced into extra
-                time/penalties — pick a draw (2 pts + 3 Nets each, no life
+                time/penalties â€” pick a draw (2 pts + 3 Nets each, no life
                 lost) or go to extra time toward a decisive result. */}
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setIsDraw(true)}
@@ -3200,7 +3200,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
             </div>
             {isDraw && (
               <div className="font-mono text-[11px] mt-2" style={{ color: c.textFaint }}>
-                A draw pays both clubs {LADDER_CUP_RULES.DRAW_POINTS} pts and <NetsAmount amount={LADDER_CUP_RULES.DRAW_NETS_REWARD} /> each — no life lost, no elimination.
+                A draw pays both clubs {LADDER_CUP_RULES.DRAW_POINTS} pts and <NetsAmount amount={LADDER_CUP_RULES.DRAW_NETS_REWARD} /> each â€” no life lost, no elimination.
               </div>
             )}
           </div>
@@ -3215,7 +3215,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
                 <input type="number" min={0} value={eth} onChange={(e) => setEth(Number(e.target.value))}
                   className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
               </div>
-              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (ET)</div>
                 <input type="number" min={0} value={eta} onChange={(e) => setEta(Number(e.target.value))}
@@ -3227,14 +3227,14 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
 
         {needsPens && (
           <div className="mb-4">
-            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>Still level after extra time — penalties</div>
+            <div className="font-mono text-xs mb-2" style={{ color: c.red }}>Still level after extra time â€” penalties</div>
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (pens)</div>
                 <input type="number" min={0} value={ph} onChange={(e) => setPh(e.target.value === "" ? "" : Number(e.target.value))}
                   className="w-full text-center rounded font-mono px-1 py-2 outline-none" style={{ background: c.surfaceHover, color: c.text }} />
               </div>
-              <span className="self-end pb-2" style={{ color: c.textFaint }}>–</span>
+              <span className="self-end pb-2" style={{ color: c.textFaint }}>â€“</span>
               <div className="flex-1 min-w-0">
                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{awayTeam?.name || "Away"} (pens)</div>
                 <input type="number" min={0} value={pa} onChange={(e) => setPa(e.target.value === "" ? "" : Number(e.target.value))}
@@ -3242,7 +3242,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
               </div>
             </div>
             {ph !== "" && pa !== "" && Number(ph) === Number(pa) && (
-              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too — someone has to win.</div>
+              <div className="font-mono text-[10px] mt-1" style={{ color: c.red }}>Penalties can't be level too â€” someone has to win.</div>
             )}
           </div>
         )}
@@ -3254,14 +3254,14 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
           <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
         <div className="font-mono text-[11px] mb-3" style={{ color: c.textFaint }}>
-          This posts straight to the ladder — points, streaks, and elimination update immediately, no admin review.
+          This posts straight to the ladder â€” points, streaks, and elimination update immediately, no admin review.
         </div>
 
         <FacebookHighlightsPrompt c={c} />
 
         <button disabled={!file || saving || !pensReady} onClick={submit} className="w-full flex items-center justify-center gap-2 font-body font-semibold px-5 py-3 rounded-full"
           style={file && !saving && pensReady ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textFaint }}>
-          {saving ? "Saving…" : "Log result"}
+          {saving ? "Savingâ€¦" : "Log result"}
         </button>
       </div>
     </div>
@@ -3270,7 +3270,7 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
 
 // Comments render in many independent components scattered across the
 // challenge board and league pages, but the browser can only speak one
-// utterance at a time — so "which comment is currently being read aloud"
+// utterance at a time â€” so "which comment is currently being read aloud"
 // lives here, outside React, as a tiny subscribe/notify singleton. Every
 // comment row's speaker button reads from this same source via
 // useCommentSpeakingId(), so starting a new one automatically resets the
@@ -3284,7 +3284,7 @@ function refreshCommentVoices() {
 if (typeof window !== "undefined" && window.speechSynthesis) {
   refreshCommentVoices();
   // addEventListener (rather than the onvoiceschanged property) so this
-  // doesn't clobber — or get clobbered by — RulesModal's own voice loading.
+  // doesn't clobber â€” or get clobbered by â€” RulesModal's own voice loading.
   window.speechSynthesis.addEventListener("voiceschanged", refreshCommentVoices);
   let commentVoicePollAttempts = 0;
   const commentVoicePoll = setInterval(() => {
@@ -3295,7 +3295,7 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 }
 const isMobileDeviceGlobal = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
-// Only one audio source — a "read aloud" utterance or a voice-note clip —
+// Only one audio source â€” a "read aloud" utterance or a voice-note clip â€”
 // should ever be playing at once across the whole app. Whoever wants to
 // start playing calls take() with its own stop function; if something else
 // was already playing, this stops it first. release() only clears the slot
@@ -3349,7 +3349,7 @@ export const commentSpeech = {
     this.notify();
     window.speechSynthesis.speak(utter);
     // Same desktop Chrome/Edge "goes silent after ~15s" bug worked around
-    // in RulesModal — harmless no-op on browsers that don't have it.
+    // in RulesModal â€” harmless no-op on browsers that don't have it.
     if (!isMobileDeviceGlobal) {
       this.watchdog = setInterval(() => {
         if (!window.speechSynthesis.speaking) { this.clearWatchdog(); return; }
@@ -3376,7 +3376,7 @@ const fmtDuration = (s) => {
 
 // Records a short voice note from the mic. Every composer (top-level and
 // replies, on both the league comments and the challenge board) gets its
-// own instance of this, same as they each get their own text/photo state —
+// own instance of this, same as they each get their own text/photo state â€”
 // nothing here is shared across composers, unlike commentSpeech/audioArbiter
 // above which coordinate *playback* across the whole app.
 export function useVoiceRecorder() {
@@ -3437,7 +3437,7 @@ export function useVoiceRecorder() {
     setState("idle");
   };
 
-  // Puts a previously-recorded clip back into the "recorded" preview state —
+  // Puts a previously-recorded clip back into the "recorded" preview state â€”
   // used to undo an optimistic discard() when the post it was attached to
   // fails to send, mirroring how failed text/photo get restored to the box.
   const restore = (savedClip) => {
@@ -3452,7 +3452,7 @@ export function useVoiceRecorder() {
   return { state, seconds, clip, start, stop, discard, restore };
 }
 
-// Mic button for a comment composer: idle → tap to start recording → tap
+// Mic button for a comment composer: idle â†’ tap to start recording â†’ tap
 // again to stop. While recording it swaps to a small pulsing timer, mirroring
 // how the Camera attach button sits next to the textarea everywhere else.
 export function VoiceRecorderButton({ recorder, c, size = 40, iconSize = 15 }) {
@@ -3498,7 +3498,7 @@ export function VoiceNotePlayer({ url, duration, c, compact = false }) {
 
   const toggle = () => {
     if (!audioRef.current) {
-      // Same fix as photos/avatars — old voice notes recorded before the
+      // Same fix as photos/avatars â€” old voice notes recorded before the
       // proxy existed still hold a raw Supabase URL in the database, so
       // this rewrites it to the cached proxy path right at playback time.
       const audio = new Audio(toProxiedUrl(url));
@@ -3530,7 +3530,7 @@ export function VoiceNotePlayer({ url, duration, c, compact = false }) {
 }
 
 
-// Small pill button that opens a RulesModal — dropped in wherever a player
+// Small pill button that opens a RulesModal â€” dropped in wherever a player
 // might want a quick reminder of how something works without leaving the
 // screen: on a league page, next to the ladder, and in the challenges hub.
 export function RulesButton({ label, onClick, c }) {
@@ -3543,8 +3543,8 @@ export function RulesButton({ label, onClick, c }) {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
-  // Supabase's onAuthStateChange fires — and hands back a brand-new session
-  // object, even when nothing about the signed-in user actually changed —
+  // Supabase's onAuthStateChange fires â€” and hands back a brand-new session
+  // object, even when nothing about the signed-in user actually changed â€”
   // on every TOKEN_REFRESHED event (roughly hourly per tab, more with
   // several tabs open), not just real sign-in/sign-out. Any effect that
   // lists `session` itself in its dependency array reruns on every one of
@@ -3560,7 +3560,7 @@ export default function App() {
   const [profile, setProfile] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leagues, setLeagues] = useState(null);
-  // Tutorial tour — auto-opens once for a brand-new user right after they
+  // Tutorial tour â€” auto-opens once for a brand-new user right after they
   // finish ProfileGate (see justOnboarded, set inside completeProfile
   // below), and can also be reopened any time from the header's tutorial
   // icon. localStorage-per-user gate (mirrors the achievements/level-up
@@ -3570,15 +3570,15 @@ export default function App() {
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
   // Ticks once a minute purely so time-derived values that don't have a DB
-  // row to change underneath them — like a challenge result's 30-minute
-  // confirm window lapsing — get re-evaluated even if nothing else caused
+  // row to change underneath them â€” like a challenge result's 30-minute
+  // confirm window lapsing â€” get re-evaluated even if nothing else caused
   // a re-render. See adminEscalatedResultCount below for what this feeds.
   const [appNow, setAppNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setAppNow(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
-  // Same listener RapidCupBanner registers on its own mount — kept here too
+  // Same listener RapidCupBanner registers on its own mount â€” kept here too
   // so a device's push subscription still gets repaired after a browser-
   // initiated endpoint rotation even on a visit that never renders Home
   // (and therefore never mounts RapidCupBanner). Registering it twice is
@@ -3586,53 +3586,53 @@ export default function App() {
   useEffect(() => listenForPushResubscribe(), []);
   // Admin override for the Weekend League spotlight's nightly auto-pause
   // (see isWeekendPauseHour / WeekendLeagueSpotlight). null = follow the
-  // 9pm–9am SAST schedule as usual; "paused" / "live" forces that state
+  // 9pmâ€“9am SAST schedule as usual; "paused" / "live" forces that state
   // regardless of the clock, until an admin clears it back to null. Lives
   // in a single-row `app_settings` table (id=1) rather than per-league,
   // since the spotlight's live/paused badge is one global state shared by
-  // every weekend league at once — see APP-SETTINGS-MIGRATION.md.
+  // every weekend league at once â€” see APP-SETTINGS-MIGRATION.md.
   const [weekendOverride, setWeekendOverrideState] = useState(null);
   // Site-wide custom WhatsApp message admins send from the "All accounts"
-  // page — same idea as a league's wa_message_template (MemberMessageEditor)
+  // page â€” same idea as a league's wa_message_template (MemberMessageEditor)
   // but scoped to the whole platform instead of one league, since accounts
   // don't belong to a single league. Lives on the same single-row
-  // `app_settings` table (id=1) as weekendOverride above — see
+  // `app_settings` table (id=1) as weekendOverride above â€” see
   // ACCOUNTS-MESSAGE-MIGRATION.md. {name} is swapped in per account, same
   // placeholder convention as the league version.
   const [accountsMessageTemplate, setAccountsMessageTemplate] = useState("");
   // A hard refresh re-mounts the whole app from scratch, so React state
-  // always starts from these defaults — but the browser itself preserves
+  // always starts from these defaults â€” but the browser itself preserves
   // window.history.state across a reload of the same entry (it's tied to
   // the URL/history entry, not the page's in-memory state). Reading it here
   // means a refresh lands back on whichever screen the appNav effect below
   // last recorded, instead of always bouncing to Home.
   const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
-  // Quick actions dock — floating on every screen (see the root return
+  // Quick actions dock â€” floating on every screen (see the root return
   // below), open/closed state lives here rather than inside Home now that
   // it's no longer scoped to a single screen.
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [activeLeagueId, setActiveLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLeagueId : null) ?? null);
-  // League Ladder — admin-only entry point, still not wired into the
+  // League Ladder â€” admin-only entry point, still not wired into the
   // browser-history restore logic activeLeagueId gets above. The engine
   // (Phases 1-6: weekly cycle, promotion/relegation, fees, bidding,
   // countdown/forfeit) is fully built as of Phase 6, but there's still no
-  // player-facing join flow — leagues are only populated by manual/admin
+  // player-facing join flow â€” leagues are only populated by manual/admin
   // seeding. Revisit this once a real join flow exists.
   // Restored from window.history.state the same way activeLeagueId is
-  // above — without this, activeLadderLeagueId reset to null on every
+  // above â€” without this, activeLadderLeagueId reset to null on every
   // full page reload while view correctly restored to "leagueLadder",
   // so the {view === "leagueLadder" && activeLadderLeagueId && (...)}
   // guard below silently rendered nothing: no crash, no console error,
   // just a blank screen under the header. Regular League pages never
   // had this problem since activeLeagueId was already restored this way.
   const [activeLadderLeagueId, setActiveLadderLeagueId] = useState(() => (window.history.state?.appView ? window.history.state.activeLadderLeagueId : null) ?? null);
-  const [refereeQueue, setRefereeQueue] = useState([]); // [{ id, msg }] — messages waiting to be shown
-  const [activeReferee, setActiveReferee] = useState(null); // { id, msg, variant, phase: "in" | "hold" | "out" } — currently on screen
+  const [refereeQueue, setRefereeQueue] = useState([]); // [{ id, msg }] â€” messages waiting to be shown
+  const [activeReferee, setActiveReferee] = useState(null); // { id, msg, variant, phase: "in" | "hold" | "out" } â€” currently on screen
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; }
   });
   // Accent color: originally a guest-only preference (picked on PublicHome,
-  // before signing in) that never made it past that screen — a guest who
+  // before signing in) that never made it past that screen â€” a guest who
   // picked "Ocean" would land back on gold the moment they signed in, since
   // the signed-in app read straight from THEMES[theme] with no accent
   // layered on. Lifting the state up here means the same choice (same
@@ -3643,23 +3643,23 @@ export default function App() {
   });
   const setAccent = (key) => {
     setAccentKey(key);
-    try { localStorage.setItem(ACCENT_KEY, key); } catch (e) { /* ignore — storage unavailable */ }
+    try { localStorage.setItem(ACCENT_KEY, key); } catch (e) { /* ignore â€” storage unavailable */ }
   };
   const [handledDeepLink, setHandledDeepLink] = useState(false);
-  const [paymentModal, setPaymentModal] = useState(null); // { league, member } — member set only when resubmitting
-  const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } — existing set only when resubmitting a rejected result
+  const [paymentModal, setPaymentModal] = useState(null); // { league, member } â€” member set only when resubmitting
+  const [resultModal, setResultModal] = useState(null); // { league, fixture, homeTeam, awayTeam, existing } â€” existing set only when resubmitting a rejected result
   // Set when a player taps an "Up next" card on Home wanting to log that
-  // specific fixture's result — activeLeagueId flips first and the league's
+  // specific fixture's result â€” activeLeagueId flips first and the league's
   // full data may not be loaded into `leagues` yet on the same tick, so this
   // just remembers the intent; the effect below picks it up once the league
   // (and that fixture) actually appear in `activeLeague`, then opens
   // resultModal for it and clears itself.
   const [pendingLogFixtureId, setPendingLogFixtureId] = useState(null);
-  const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } — logging a score for an accepted challenge
-  const [ladderCupResultModal, setLadderCupResultModal] = useState(null); // { league, match } — step 10, logging a Ladder Cup match result
+  const [challengeResultModal, setChallengeResultModal] = useState(null); // { kind: "challenge" | "open", challenge } â€” logging a score for an accepted challenge
+  const [ladderCupResultModal, setLadderCupResultModal] = useState(null); // { league, match } â€” step 10, logging a Ladder Cup match result
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
-  // "Install app" menu item state — see usePwaInstall.js. installHelpOpen
+  // "Install app" menu item state â€” see usePwaInstall.js. installHelpOpen
   // covers both iOS (which has no programmatic install prompt at all) and
   // the fallback case where a browser hasn't fired beforeinstallprompt yet.
   const { isStandalone, isIOS, canPromptDirectly, promptInstall } = usePwaInstall();
@@ -3672,10 +3672,10 @@ export default function App() {
       setInstallHelpOpen(true);
     }
   }, [canPromptDirectly, promptInstall]);
-  // App-download nag — shown to anyone signed in and NOT running the
+  // App-download nag â€” shown to anyone signed in and NOT running the
   // installed PWA (i.e. still in a regular browser tab, "the website").
   // Deliberately gated on `session` so it never fires on the guest/landing
-  // page before sign-in — a visitor who hasn't even created an account yet
+  // page before sign-in â€” a visitor who hasn't even created an account yet
   // shouldn't be asked to install the app before they've seen what it is.
   // Once per browser session (sessionStorage, not localStorage) so it
   // doesn't hammer someone who dismissed it five minutes ago but still
@@ -3693,11 +3693,11 @@ export default function App() {
     }, 2500);
     return () => clearTimeout(t);
   }, [isStandalone, session]);
-  // League Ladder maintenance notice — shown once per browser session to
+  // League Ladder maintenance notice â€” shown once per browser session to
   // anyone signed in, on their first Home load, so they don't tap into
   // the Ladder mid-fix and think something's broken. Everything else on
   // the platform (leagues, challenges, Shop, etc.) is unaffected, so this
-  // is purely informational — it doesn't block or gate the Ladder tab
+  // is purely informational â€” it doesn't block or gate the Ladder tab
   // itself. Flip LADDER_MAINTENANCE_ACTIVE to false to retire it; the
   // sessionStorage key means nobody sees a stale notice reappear once
   // it's off, since a fresh session simply won't set it again.
@@ -3712,12 +3712,12 @@ export default function App() {
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
   const [activityLog, setActivityLog] = useState(null); // admin-only: recent user_activity_log rows
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
-  const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member — feeds the Wall of Fame
-  const [ladderChampions, setLadderChampions] = useState(null); // every League 1 Sunday-cutoff winner (ladder_wall_of_fame, tier 1 only) — feeds the Wall of Fame's ladder_champion badge + titles, same public/no-RLS-hassle shape as allAchievements
+  const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member â€” feeds the Wall of Fame
+  const [ladderChampions, setLadderChampions] = useState(null); // every League 1 Sunday-cutoff winner (ladder_wall_of_fame, tier 1 only) â€” feeds the Wall of Fame's ladder_champion badge + titles, same public/no-RLS-hassle shape as allAchievements
   const [teamAvatars, setTeamAvatars] = useState({}); // team_id -> avatar_url, for club photos on the Table (mirrors the guest view's version)
   const [playerLocations, setPlayerLocations] = useState({}); // user_id -> {timezone, country_code}, for opponent flags/local-time/suggested-time (roadmap 2a/2b/2c)
   const [challenges, setChallenges] = useState(null); // every challenge involving the signed-in member, either side
-  const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool — open to whoever accepts first
+  const [openChallenges, setOpenChallenges] = useState(null); // broadcast "random challenge" pool â€” open to whoever accepts first
   // Bumped on every loadChallenges/loadOpenChallenges call and checked when
   // each response lands, so an in-flight request that's since been
   // superseded by a newer call gets its result silently dropped instead of
@@ -3728,36 +3728,36 @@ export default function App() {
   const [boardComments, setBoardComments] = useState(null); // platform-wide comment wall shown under Challenges
   const [ladderComments, setLadderComments] = useState(null); // comment wall shown on the full Ladder page
   const [ladderResults, setLadderResults] = useState(null); // last 100 confirmed ladder-challenge results, for the full Ladder page
-  const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position — never resets. Only ever loaded for the Ladder page itself now — see ladderTop5/myLadderRank below for the lightweight Home equivalents.
+  const [ladder, setLadder] = useState(null); // the whole permanent ladder, ordered by rank_position â€” never resets. Only ever loaded for the Ladder page itself now â€” see ladderTop5/myLadderRank below for the lightweight Home equivalents.
   // Home's LadderStrip only ever renders the top 5 rows plus the viewer's
-  // own — these two replace loadLadder() there (see below), which used to
+  // own â€” these two replace loadLadder() there (see below), which used to
   // poll the *entire* ladder_ranks table every 60s from Home, the busiest
   // screen in the app, for that same handful of rows.
   const [ladderTop5, setLadderTop5] = useState(null);
   const [myLadderRankRow, setMyLadderRankRow] = useState(null);
-  // { leagueId, tier } | null — the signed-in member's own current League
+  // { leagueId, tier } | null â€” the signed-in member's own current League
   // Ladder league (the tiered format, LeagueLadderDetail.jsx), lifted to
   // App level (rather than only fetched inside Home's own
-  // LadderLeagueSection) so the floating Quick actions dock — rendered on
-  // every screen, not just Home — can label its League Ladder tile with
+  // LadderLeagueSection) so the floating Quick actions dock â€” rendered on
+  // every screen, not just Home â€” can label its League Ladder tile with
   // the player's actual current tier and link straight into it.
   const [myLeagueLadderMembership, setMyLeagueLadderMembership] = useState(null);
-  // Bottom (highest-tier, entry-level) League Ladder league's id — loaded
+  // Bottom (highest-tier, entry-level) League Ladder league's id â€” loaded
   // alongside myLeagueLadderMembership below so the Quick actions tile can
   // send a not-yet-joined player straight into that league's Join flow
   // (join_ladder_league() always seats a fresh joiner there anyway; entry
-  // is 0N since d = maxActiveTier - tier = 0 for that league — see
+  // is 0N since d = maxActiveTier - tier = 0 for that league â€” see
   // ladderTierRow in economy.js) rather than just dumping them on Home.
   const [ladderBottomLeagueId, setLadderBottomLeagueId] = useState(null);
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
-  const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
+  const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link â€” works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
   const c = useMemo(() => withAccent(THEMES[theme], theme, accentKey), [theme, accentKey]);
 
   // The app's own content div paints its themed background, but the real
-  // <html>/<body> behind it never did — on mobile, an edge swipe triggers
+  // <html>/<body> behind it never did â€” on mobile, an edge swipe triggers
   // the browser's natural elastic overscroll bounce, which briefly reveals
   // whatever's behind the content (blank white by default) before snapping
   // back. Keeping the page's actual background in sync with the theme means
@@ -3767,21 +3767,21 @@ export default function App() {
     document.body.style.background = c.bg;
   }, [c.bg]);
 
-  // Same call signature as the old showToast(msg) — every existing call
+  // Same call signature as the old showToast(msg) â€” every existing call
   // site across the app is untouched, this just queues the message for the
   // referee mascot instead of setting a plain toast string.
   const showToast = useCallback((msg) => {
     setRefereeQueue((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, msg }]);
   }, []);
 
-  // Player tapped the referee notification's close button — send her
+  // Player tapped the referee notification's close button â€” send her
   // straight to the "out" animation rather than waiting on any timer.
   const dismissReferee = useCallback(() => {
     setActiveReferee((cur) => (cur ? { ...cur, phase: "out" } : cur));
   }, []);
 
   // Pulls the next queued message onto screen once nothing's currently
-  // showing — so firing several actions in quick succession (e.g.
+  // showing â€” so firing several actions in quick succession (e.g.
   // confirming a few results back to back) queues them one after another
   // instead of interrupting or overlapping.
   useEffect(() => {
@@ -3792,7 +3792,7 @@ export default function App() {
     setActiveReferee({ ...next, variant, phase: "in" });
   }, [activeReferee, refereeQueue]);
 
-  // Whichever comment/notification is currently being read aloud — shared
+  // Whichever comment/notification is currently being read aloud â€” shared
   // with the rules player and comment rows via the same commentSpeech
   // singleton. Used below to keep the referee on screen for as long as her
   // own notification is being read, instead of dismissing her on the usual
@@ -3808,7 +3808,7 @@ export default function App() {
       return () => clearTimeout(t);
     }
     if (activeReferee.phase === "hold") {
-      // No auto-dismiss timer here anymore — she stays on screen until the
+      // No auto-dismiss timer here anymore â€” she stays on screen until the
       // player taps the close button (see dismissReferee below), or until a
       // speaker-triggered read of her finishes (handled by the effect below).
       return;
@@ -3821,7 +3821,7 @@ export default function App() {
 
   // Once a speaker-triggered read of the active notification ends (its id
   // drops out of commentSpeech's speakingId), send her straight into the
-  // "out" animation rather than waiting on — or restarting — the hold
+  // "out" animation rather than waiting on â€” or restarting â€” the hold
   // timer above.
   const prevRefereeSpeakingIdRef = useRef(null);
   useEffect(() => {
@@ -3834,7 +3834,7 @@ export default function App() {
 
   // Guards the three destructive admin actions (delete league, remove a club, reject a
   // club's payment) behind 5 sequential, increasingly explicit confirmations instead of a
-  // single window.confirm() — makes an accidental tap or misclick far less likely to
+  // single window.confirm() â€” makes an accidental tap or misclick far less likely to
   // destroy data. Pass an array of up to 5 messages (last one is shown right before the
   // action fires) and the action to run once the admin has confirmed every step.
   const requestConfirm = useCallback((steps, action) => setConfirmFlow({ steps, step: 0, action }), []);
@@ -3857,7 +3857,7 @@ export default function App() {
       // Belt-and-suspenders: once supabase-js has parsed the
       // #access_token=... fragment from the OAuth redirect (or found
       // nothing to parse), strip it from the address bar. Otherwise it
-      // lingers in window.location — and if it's ever fed back into a
+      // lingers in window.location â€” and if it's ever fed back into a
       // future signInWithOAuth's redirectTo, Supabase appends a second
       // #access_token=... on top of it, producing an unparseable
       // "##access_token=" URL and a sign-in loop. This can't fully replace
@@ -3866,7 +3866,7 @@ export default function App() {
       if (window.location.hash.includes("access_token")) {
         window.history.replaceState({}, "", window.location.pathname + window.location.search);
       }
-      // Step 1 of activity tracking — just sign-in/sign-out for now, more
+      // Step 1 of activity tracking â€” just sign-in/sign-out for now, more
       // event types get added incrementally from here (see activityLog.js).
       if (event === "SIGNED_IN") logActivity("sign_in");
       if (event === "SIGNED_OUT") logActivity("sign_out");
@@ -3875,22 +3875,22 @@ export default function App() {
   }, []);
 
   // Daily login reward: 1N, once per UTC calendar day, just for being
-  // signed in — claim_daily_login_reward (20260842) is the source of
+  // signed in â€” claim_daily_login_reward (20260842) is the source of
   // truth on eligibility (locks the wallet row, checks last_login_reward_at
   // against today's UTC date), so this just calls it whenever a session
-  // shows up — fresh sign-in, a restored session on page load, or an
+  // shows up â€” fresh sign-in, a restored session on page load, or an
   // auth-state change later in the same tab. Idempotent server-side (any
   // call after the first one that day just returns claimed: false), so no
   // client-side "already tried this session" guard is needed beyond not
   // re-firing on every unrelated render, which the session.user.id
   // dependency below already handles. Balance updates live via
   // useNetsBalance's Realtime subscription (nets.js), so no manual
-  // refresh here — just the toast telling them it landed.
+  // refresh here â€” just the toast telling them it landed.
   useEffect(() => {
     if (!session?.user?.id) return;
     (async () => {
       const { data, error } = await supabase.rpc("claim_daily_login_reward");
-      if (error) return; // silent — not worth surfacing a toast for a bonus that failed to check
+      if (error) return; // silent â€” not worth surfacing a toast for a bonus that failed to check
       const result = Array.isArray(data) ? data[0] : data;
       if (result?.claimed) {
         showToast(`+${formatNets(1)} for logging in today!`);
@@ -3901,11 +3901,11 @@ export default function App() {
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore — storage unavailable */ }
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* ignore â€” storage unavailable */ }
   };
 
   // `stay` is set right before the redirect fires, not baked into the
-  // client at load time — the Google sign-in flow leaves the page and
+  // client at load time â€” the Google sign-in flow leaves the page and
   // comes back, so the preference has to already be sitting in
   // localStorage by the time the returning page reads the session back out.
   const signInWithGoogle = async (stay = true) => {
@@ -3913,7 +3913,7 @@ export default function App() {
     // redirectTo must be a clean URL with no leftover hash fragment. If a
     // previous OAuth attempt failed to parse (or the user simply has an
     // old #access_token=... sitting in the address bar), window.location.href
-    // carries that fragment along — Supabase then appends its OWN
+    // carries that fragment along â€” Supabase then appends its OWN
     // #access_token=... on top of it, producing a broken "##access_token="
     // URL that the client can never parse into a session. That's what
     // caused the sign-in loop: every retry got a messier URL than the last.
@@ -3928,13 +3928,13 @@ export default function App() {
   // signed-in app (Home, league lists, LeagueDetail, achievements, admin
   // screens).
   // LEAGUE_SUMMARY_SELECT is everything the bulk, whole-platform load
-  // (loadLeagues) needs — every field genuinely read from a Home league
+  // (loadLeagues) needs â€” every field genuinely read from a Home league
   // card or from anywhere that iterates *all* leagues (attentionScore's
   // result_submissions check, LeagueReactionBar's compact reaction bar,
   // computeMyUpcomingFixtures/computeMyProgress's fixtures scan, the
   // platform-wide Leaderboard/season/head-to-head passes), so teams,
   // fixtures, members, ladder_cup_entries and ladder_cup_matches stay
-  // full-width — audited and genuinely touched Home-wide, narrowing them
+  // full-width â€” audited and genuinely touched Home-wide, narrowing them
   // would just break those screens.
   // Three collections are confirmed read *only* through a single
   // already-open league object (`activeLeague.X` / `league.X` inside a
@@ -3954,19 +3954,19 @@ export default function App() {
     "comment_likes(id, user_id, reaction)";
 
   // Full per-league shape (LEAGUE_SUMMARY_SELECT + the three detail-only
-  // ladder-cup collections + comments) — fetched for exactly one league at
+  // ladder-cup collections + comments) â€” fetched for exactly one league at
   // a time, only once a player has actually opened it (see the
   // activeLeagueId effect below), never as part of the whole-platform
   // bulk load. `LEAGUE_DETAIL_ONLY_KEYS` (module scope, near
   // mergeSummaryPreservingDetail) is the list of object keys this adds on
-  // top of the summary shape — keep the two in sync if this select string
+  // top of the summary shape â€” keep the two in sync if this select string
   // changes.
   const LEAGUE_SELECT =
     LEAGUE_SUMMARY_SELECT +
     ", ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), ladder_cup_pool_sightings(*)" +
     ", comments(" + LEAGUE_COMMENTS_SELECT + ")";
 
-  // loadLeagues now fetches the narrow summary shape — every league on the
+  // loadLeagues now fetches the narrow summary shape â€” every league on the
   // platform, but without the three detail-only ladder-cup collections or
   // comments (see LEAGUE_SUMMARY_SELECT above). A league the player
   // currently has open already has its full detail loaded in state
@@ -3986,24 +3986,24 @@ export default function App() {
     });
   }, [showToast]);
 
-  // Every mutation used to follow itself with a full loadLeagues() — a
+  // Every mutation used to follow itself with a full loadLeagues() â€” a
   // re-fetch of every league on the whole platform (every team, fixture,
   // member, comment, like, result, reaction) just to reflect one comment
   // getting liked or one result getting recorded. That cost scaled with
   // total platform content AND with how often anyone did anything.
   // refreshLeague/refreshLeagues below re-fetch only the specific league(s)
   // a given action actually touched, using the exact same LEAGUE_SELECT
-  // shape, and merge the result(s) into local state by id — so the "server
+  // shape, and merge the result(s) into local state by id â€” so the "server
   // is the source of truth, just re-fetch" safety property every call site
   // already relied on is unchanged, only the scope of what gets re-fetched.
   // Doubles as the merge path for a brand-new league (createLeague): a
   // league whose id isn't in local state yet gets appended, not just
   // replaced, so callers don't need a separate "add" case.
-  // Merges by id, not replaces — the lazy detail fetch below calls this
+  // Merges by id, not replaces â€” the lazy detail fetch below calls this
   // with a stub-like row too, and a full replace would wipe every other
   // field off the already-loaded league the instant someone opened it,
   // crashing anything downstream that reads league.teams/fixtures for that
-  // league. A row without `_detailLoadedAt` is a narrow SUMMARY row —
+  // league. A row without `_detailLoadedAt` is a narrow SUMMARY row â€”
   // routed through mergeSummaryPreservingDetail so it can't silently
   // downgrade a league whose full detail is already loaded (see that
   // function below). A row *with* `_detailLoadedAt` is a full DETAIL row
@@ -4025,26 +4025,26 @@ export default function App() {
   }, []);
 
   // Lazily fills in the full detail shape (comments, ladder_cup_walkover_
-  // claims, ladder_cup_second_life_offers, ladder_cup_pool_sightings — see
+  // claims, ladder_cup_second_life_offers, ladder_cup_pool_sightings â€” see
   // LEAGUE_DETAIL_ONLY_KEYS) for whichever league is actually open, rather
   // than every league on the platform carrying that in memory and over the
   // wire on every load (see LEAGUE_SUMMARY_SELECT above). Skips the fetch
   // once this league already has detail loaded, tagged by `_detailLoadedAt`
-  // — e.g. right after this same effect (or refreshLeague/refreshLeagues)
+  // â€” e.g. right after this same effect (or refreshLeague/refreshLeagues)
   // already merged it in.
   useEffect(() => {
     // Wait for the full bulk load (loadLeagues) to land before doing
-    // anything — on a hard reload straight into a league/cup page, `view`
+    // anything â€” on a hard reload straight into a league/cup page, `view`
     // and `activeLeagueId` are restored from history synchronously, before
     // `leagues` has loaded (`leagues === null`). Without this guard,
     // `current` below comes back undefined and the effect would still fire,
-    // merging a bare stub into state — missing teams/fixtures/everything
-    // else — which is what activeLeague resolves to next render, crashing
+    // merging a bare stub into state â€” missing teams/fixtures/everything
+    // else â€” which is what activeLeague resolves to next render, crashing
     // Header's `activeLeague.teams.length`.
     if (!activeLeagueId || leagues === null) return;
     const current = leagues.find((l) => l.id === activeLeagueId);
     // Only proceed for a league that's actually already loaded (with its
-    // summary shape, at minimum) and just missing detail — never for one
+    // summary shape, at minimum) and just missing detail â€” never for one
     // not yet present in state at all, which is exactly the case that used
     // to produce the broken stub above.
     if (!current || current._detailLoadedAt) return;
@@ -4077,7 +4077,7 @@ export default function App() {
     if (!leagueId) return;
     const hasDetail = !!leaguesRef.current?.find((l) => l.id === leagueId)?._detailLoadedAt;
     const { data, error } = await supabase.from("leagues").select(hasDetail ? LEAGUE_SELECT : LEAGUE_SUMMARY_SELECT).eq("id", leagueId).maybeSingle();
-    if (error) { showToast("Couldn't refresh the league — try reloading."); return; }
+    if (error) { showToast("Couldn't refresh the league â€” try reloading."); return; }
     if (!data) { setLeagues((prev) => (prev || []).filter((l) => l.id !== leagueId)); return; } // deleted/no longer visible
     mergeLeaguesById([hasDetail ? { ...data, _detailLoadedAt: Date.now() } : data]);
   }, [showToast, mergeLeaguesById]);
@@ -4095,7 +4095,7 @@ export default function App() {
       detailIds.length ? supabase.from("leagues").select(LEAGUE_SELECT).in("id", detailIds) : Promise.resolve({ data: [] }),
       summaryIds.length ? supabase.from("leagues").select(LEAGUE_SUMMARY_SELECT).in("id", summaryIds) : Promise.resolve({ data: [] }),
     ]);
-    if (detailRes.error || summaryRes.error) { showToast("Couldn't refresh leagues — try reloading."); return; }
+    if (detailRes.error || summaryRes.error) { showToast("Couldn't refresh leagues â€” try reloading."); return; }
     const now = Date.now();
     mergeLeaguesById([
       ...(detailRes.data || []).map((row) => ({ ...row, _detailLoadedAt: now })),
@@ -4105,17 +4105,17 @@ export default function App() {
 
 
 
-  // Public setting (no auth required to read — guests need it too, see
+  // Public setting (no auth required to read â€” guests need it too, see
   // PublicHome's own copy of this query), so this loads regardless of
   // sign-in state rather than waiting on the session/isAdmin effect below.
   const loadWeekendOverride = useCallback(async () => {
     const { data, error } = await supabase.from("app_settings").select("weekend_league_override").eq("id", 1).maybeSingle();
-    if (error) return; // table may not exist yet if the migration hasn't been run — fail quiet, spotlight just falls back to the auto schedule
+    if (error) return; // table may not exist yet if the migration hasn't been run â€” fail quiet, spotlight just falls back to the auto schedule
     setWeekendOverrideState(data?.weekend_league_override ?? null);
   }, []);
 
   // Admin-only. Writing null clears the override and hands control back to
-  // the 9pm–9am SAST auto schedule.
+  // the 9pmâ€“9am SAST auto schedule.
   const setWeekendOverride = useCallback(async (value) => {
     const { error } = await supabase.from("app_settings")
       .update({ weekend_league_override: value, weekend_league_override_at: new Date().toISOString(), weekend_league_override_by: session?.user?.id || null })
@@ -4126,15 +4126,15 @@ export default function App() {
   }, [session, showToast]);
 
   useEffect(() => { loadWeekendOverride(); }, [loadWeekendOverride]);
-  // Realtime rather than a poll — an admin toggling this on one device
+  // Realtime rather than a poll â€” an admin toggling this on one device
   // (or another admin, elsewhere) should flip everyone's spotlight badge
   // immediately, not on the next visibility-poll tick.
   useRealtimeRefresh("app_settings", loadWeekendOverride, true);
 
-  // Admin-only — every account on the platform, for the Accounts screen.
+  // Admin-only â€” every account on the platform, for the Accounts screen.
   // Calls a SECURITY DEFINER function (get_all_accounts) rather than
   // selecting from `profiles` directly, since that's what lets us also pull
-  // each account's Google sign-in email from auth.users — a table normal
+  // each account's Google sign-in email from auth.users â€” a table normal
   // client queries can't reach. The function itself checks the caller is an
   // admin and returns nothing otherwise, so this is safe even if someone
   // calls it directly.
@@ -4148,7 +4148,7 @@ export default function App() {
     setAccountsMessageTemplate(settingsRow?.accounts_wa_message_template || "");
   }, [showToast]);
 
-  // Admin-only — same shape as loadAccounts above: routed through a
+  // Admin-only â€” same shape as loadAccounts above: routed through a
   // security-definer RPC (get_activity_log) rather than a direct select,
   // so the admin check happens server-side and this table never needs a
   // client-readable RLS policy at all.
@@ -4158,9 +4158,9 @@ export default function App() {
     setActivityLog(data || []);
   }, [showToast]);
 
-  // Admin-only — permanently deletes an account (login, profile, phone,
+  // Admin-only â€” permanently deletes an account (login, profile, phone,
   // membership rows) via the admin_delete_account() SQL function. Anything a
-  // running league already shows — club names, fixtures, results — is
+  // running league already shows â€” club names, fixtures, results â€” is
   // untouched, since those are stored as their own snapshotted text, not
   // looked up live from the account. Leagues the account created keep
   // running too; the function just hands them off to platform admins to
@@ -4168,17 +4168,17 @@ export default function App() {
   const deleteAccount = (account, leagueCounts) => {
     const label = account.efootball_username || account.email || "this account";
     const createdWarning = leagueCounts.created > 0
-      ? ` They created ${leagueCounts.created} league${leagueCounts.created === 1 ? "" : "s"} — ${leagueCounts.created === 1 ? "it" : "those"} will keep running exactly as-is, just manageable only by platform admins from now on.`
+      ? ` They created ${leagueCounts.created} league${leagueCounts.created === 1 ? "" : "s"} â€” ${leagueCounts.created === 1 ? "it" : "those"} will keep running exactly as-is, just manageable only by platform admins from now on.`
       : "";
     const joinedWarning = leagueCounts.joined > 0
-      ? ` They're a member of ${leagueCounts.joined} league${leagueCounts.joined === 1 ? "" : "s"} — their club name and results stay in those leagues, just no longer linked to a live account.`
+      ? ` They're a member of ${leagueCounts.joined} league${leagueCounts.joined === 1 ? "" : "s"} â€” their club name and results stay in those leagues, just no longer linked to a live account.`
       : "";
     requestConfirm([
       `Permanently delete ${label}'s account? This removes their login, phone number and profile for good and can't be undone.${createdWarning}${joinedWarning}`,
       `Are you sure? ${label}'s login will stop working immediately.`,
       `Really sure you want ${label} gone for good?`,
-      `Last check before deleting ${label} — still want to continue?`,
-      `Final confirmation — click to permanently delete ${label}'s account.`,
+      `Last check before deleting ${label} â€” still want to continue?`,
+      `Final confirmation â€” click to permanently delete ${label}'s account.`,
     ], async () => {
       const { error } = await supabase.rpc("admin_delete_account", { target_user_id: account.user_id });
       if (error) { showToast(`Couldn't delete account: ${error.message}`); return; }
@@ -4188,7 +4188,7 @@ export default function App() {
     });
   };
 
-  // Admin-only — marks an account approved via a security-definer function
+  // Admin-only â€” marks an account approved via a security-definer function
   // (a normal client update to another user's profiles row would be blocked
   // by RLS, same reasoning as admin_delete_account above).
   const approveAccount = async (account) => {
@@ -4198,7 +4198,7 @@ export default function App() {
   };
 
   // Overrides the generic "Hi {username}, this is weAfrica admin Saul."
-  // WhatsApp opener on the All accounts page — same idea as
+  // WhatsApp opener on the All accounts page â€” same idea as
   // updateLeagueMemberMessage, just site-wide (app_settings) instead of
   // per-league, since accounts aren't scoped to one league. Persists until
   // an admin edits or clears it again. Pass "" to go back to the default.
@@ -4206,11 +4206,11 @@ export default function App() {
     const { error } = await supabase.from("app_settings").update({ accounts_wa_message_template: text || null }).eq("id", 1);
     if (error) { showToast(`Couldn't save the message: ${error.message}`); return; }
     setAccountsMessageTemplate(text || "");
-    showToast(text ? "Message updated — used for every account's WhatsApp icon from now on." : "Message cleared — back to the default greeting.");
+    showToast(text ? "Message updated â€” used for every account's WhatsApp icon from now on." : "Message cleared â€” back to the default greeting.");
   };
 
   // Flags an account's row red for every admin (mirrors markWaReminder for
-  // league members) — a normal client update to another user's profiles row
+  // league members) â€” a normal client update to another user's profiles row
   // is blocked by RLS (same reasoning as admin_delete_account /
   // admin_set_account_approved above), so this goes through a
   // security-definer RPC instead of a direct table write. See
@@ -4223,14 +4223,14 @@ export default function App() {
   };
 
   // Manually clears one account's highlight before its normal
-  // WA_REMINDER_WINDOW_MS auto-clear — same pattern as clearWaReminder.
+  // WA_REMINDER_WINDOW_MS auto-clear â€” same pattern as clearWaReminder.
   const clearAccountReminder = async (account) => {
     setAccounts((prev) => (prev || []).map((a) => (a.user_id === account.user_id ? { ...a, wa_reminder_due_at: null } : a)));
     const { error } = await supabase.rpc("admin_clear_account_reminder", { target_user_id: account.user_id });
     if (error) { console.error("[accounts-reminder] clear failed", error); showToast(`Couldn't clear the highlight: ${error.message}`); }
   };
 
-  // Bulk version — clears every currently-highlighted account at once.
+  // Bulk version â€” clears every currently-highlighted account at once.
   const clearAllAccountReminders = async () => {
     setAccounts((prev) => (prev || []).map((a) => ({ ...a, wa_reminder_due_at: null })));
     const { error } = await supabase.rpc("admin_clear_all_account_reminders");
@@ -4240,7 +4240,7 @@ export default function App() {
   // "Notify everyone now" for the All accounts page. Unlike
   // notifyAllMembers (which can post to a league's shared comment feed),
   // there's no platform-wide feed every account already reads, so this
-  // can't be a genuine one-tap broadcast — it flags every account's row
+  // can't be a genuine one-tap broadcast â€” it flags every account's row
   // red as a "needs messaging" worklist and leaves the actual send to each
   // row's WhatsApp icon (which now opens with accountsMessageTemplate
   // filled in), same honest no-push-API tradeoff notifyAllMembers's own
@@ -4249,15 +4249,15 @@ export default function App() {
     if (!accountsMessageTemplate) { showToast("Set a custom message first, then you can flag everyone to message with it."); return; }
     const count = (accountList || []).length;
     requestConfirm([
-      `Flag all ${count} account${count === 1 ? "" : "s"} to message right now? Highlights every row red — tap each account's WhatsApp icon to actually send.`,
+      `Flag all ${count} account${count === 1 ? "" : "s"} to message right now? Highlights every row red â€” tap each account's WhatsApp icon to actually send.`,
     ], async () => {
       (accountList || []).forEach((a) => markAccountReminder(a));
-      showToast(`Flagged ${count} account${count === 1 ? "" : "s"} — use each row's WhatsApp icon to send.`);
+      showToast(`Flagged ${count} account${count === 1 ? "" : "s"} â€” use each row's WhatsApp icon to send.`);
     });
   };
 
   // Every other member on the platform, for the "who do you want to challenge"
-  // picker — just enough to browse and pick someone (username + photo), never
+  // picker â€” just enough to browse and pick someone (username + photo), never
   // phone numbers. Calls a SECURITY DEFINER function since normal client
   // queries can only read the signed-in member's own profiles row.
   const loadChallengeMembers = useCallback(async () => {
@@ -4278,12 +4278,12 @@ export default function App() {
     setTeamAvatars(map);
   }, []);
 
-  // Timezone-aware scheduling (roadmap 2a/2b) — every member's resolved
+  // Timezone-aware scheduling (roadmap 2a/2b) â€” every member's resolved
   // timezone/country, keyed by user_id, loaded once alongside team
   // avatars so any fixture/opponent card can show a flag + local time
   // without a fetch of its own. `profiles` is already publicly readable
   // to any signed-in member (see the profiles_select_public_fields
-  // policy — same one that already exposes username/avatar/phone), so
+  // policy â€” same one that already exposes username/avatar/phone), so
   // this is just a direct select rather than a bespoke view.
   const loadPlayerLocations = useCallback(async () => {
     const { data, error } = await supabase.from("profiles").select("user_id, timezone, country_code");
@@ -4295,7 +4295,7 @@ export default function App() {
     setPlayerLocations(map);
   }, []);
 
-  // Every earned badge from every member — the Wall of Fame's raw material.
+  // Every earned badge from every member â€” the Wall of Fame's raw material.
   // The achievements table is readable by anyone (see
   // supabase/achievements-migration.sql), and only ever contains a user_id
   // + achievement_id + when, nothing sensitive, so a plain select is safe
@@ -4306,10 +4306,10 @@ export default function App() {
     setAllAchievements(data || []);
   }, []);
 
-  // Every League 1 Sunday-cutoff winner, platform-wide — used to be shown
+  // Every League 1 Sunday-cutoff winner, platform-wide â€” used to be shown
   // only inside League 1's own LeagueLadderDetail page; now feeds the
   // homepage Wall of Fame instead (merged into the trophy/badge ranking via
-  // the ladder_champion achievement — see ACHIEVEMENTS_DEF) as well as the
+  // the ladder_champion achievement â€” see ACHIEVEMENTS_DEF) as well as the
   // per-user titles list (see computeLadderTitlesByUserId). tier=1 filter
   // via the ladder_leagues join, same "readable by anyone, nothing
   // sensitive" reasoning as loadAllAchievements above.
@@ -4325,7 +4325,7 @@ export default function App() {
   // sent it or the one who received it.
   const loadChallenges = useCallback(async () => {
     if (!session) return;
-    // Admins need every row, not just ones they're a participant in — the
+    // Admins need every row, not just ones they're a participant in â€” the
     // 30-minute-expired admin-review queue (see adminApproveChallengeResult)
     // depends on this. The admin-only UPDATE calls already assume this same
     // full access with no participant filter, so this just matches that on
@@ -4334,11 +4334,11 @@ export default function App() {
     // This fires from several places in quick succession on load (mount
     // effect, again once the async isAdmin check resolves, again from
     // openChallengesScreen) with no cancellation between them. Without a
-    // sequence guard, a slow *earlier* request — fired while isAdmin was
-    // still false, so participant-filtered — can land after a faster later
+    // sequence guard, a slow *earlier* request â€” fired while isAdmin was
+    // still false, so participant-filtered â€” can land after a faster later
     // admin-scoped request and silently stomp the correct data back down to
     // just the signed-in admin's own rows. No error, nothing in the
-    // console — rows just quietly disappear from the escalated queue. See
+    // console â€” rows just quietly disappear from the escalated queue. See
     // loadChallengesRequestId.
     const requestId = ++loadChallengesRequestId.current;
     let query = supabase.from("challenges").select(
@@ -4346,12 +4346,12 @@ export default function App() {
     ).order("created_at", { ascending: false });
     if (!isAdmin) query = query.or(`challenger_id.eq.${session.user.id},opponent_id.eq.${session.user.id}`);
     const { data, error } = await query;
-    if (requestId !== loadChallengesRequestId.current) return; // a newer call has since superseded this one — drop this stale result
+    if (requestId !== loadChallengesRequestId.current) return; // a newer call has since superseded this one â€” drop this stale result
     if (error) { showToast("Couldn't load challenges."); setChallenges([]); return; }
     setChallenges(data || []);
   }, [session, isAdmin, showToast]);
 
-  // The permanent ladder — every member, ordered by rank_position. Never
+  // The permanent ladder â€” every member, ordered by rank_position. Never
   // resets (that's the whole point), unlike seasons/leagues elsewhere in the
   // app. RLS only allows reading this while signed in; the homepage shows
   // its own public_ladder_full view instead (see PublicLadderSection).
@@ -4364,7 +4364,7 @@ export default function App() {
   }, []);
 
   // Lightweight stand-ins for the two things Home's LadderStrip actually
-  // needs — the top 5 rows and the viewer's own row — instead of the full
+  // needs â€” the top 5 rows and the viewer's own row â€” instead of the full
   // unbounded table loadLadder above fetches. See ladderTop5/myLadderRankRow
   // state comments for why this split exists.
   const loadLadderTop5 = useCallback(async () => {
@@ -4385,11 +4385,11 @@ export default function App() {
   }, [session]);
 
   // Same "mine" definition LadderLeagueSection uses on Home (active
-  // membership, week_number caught up to the current cycle week) — kept
+  // membership, week_number caught up to the current cycle week) â€” kept
   // in sync by hand since this is a separate, App-level fetch for the
   // Quick actions dock rather than a shared hook.
   const loadMyLeagueLadderMembership = useCallback(async () => {
-    // Bottom league lookup runs regardless of sign-in/membership status —
+    // Bottom league lookup runs regardless of sign-in/membership status â€”
     // it's what lets the Quick actions tile route a not-yet-joined (or
     // signed-out-turned-signed-in) player straight to a Join screen.
     const { data: bottomLeagueRow } = await supabase.from("ladder_leagues")
@@ -4417,7 +4417,7 @@ export default function App() {
   // the DB). This reads back the row that attempt logged so toasts can say
   // what really happened instead of always claiming "the ladder updated."
   // Returns null if there's nothing to say (log row not written yet, or a
-  // logging error) — callers fall back to a plain confirmation toast.
+  // logging error) â€” callers fall back to a plain confirmation toast.
   const describeLadderOutcome = async (source, sourceId) => {
     const { data, error } = await supabase.from("ladder_result_log")
       .select("applied, reason")
@@ -4427,7 +4427,7 @@ export default function App() {
     if (!data.applied) {
       if (data.reason === "gap_too_large") return "too far apart in points to affect the ladder.";
       if (data.reason === "not_on_ladder") return "one of you isn't on the ladder, so it wasn't affected.";
-      if (data.reason === "pair_cooldown") return "you two already have 2 ladder results today — this one's just for the record.";
+      if (data.reason === "pair_cooldown") return "you two already have 2 ladder results today â€” this one's just for the record.";
       return null;
     }
     return "the ladder just updated.";
@@ -4437,7 +4437,7 @@ export default function App() {
   // challenge to: anyone ranked above them whose points total is within 10
   // points of their own (i.e. up to 10 points ahead). Before your first
   // ladder match, everyone starts at 0 points, so "ahead of you" alone would
-  // leave you with nobody to challenge — for that first match only, clubs
+  // leave you with nobody to challenge â€” for that first match only, clubs
   // level with you on points are eligible too. Ordered closest points first,
   // since that's the one worth trying first.
   const ladderTargets = useMemo(() => {
@@ -4451,7 +4451,7 @@ export default function App() {
       .filter((r) => (playedNoMatches && r.points === mine.points) || (r.points > mine.points && r.points - mine.points <= 10))
       .sort((a, b) => a.points - b.points);
   }, [ladder, session]);
-  // Used to come from the full ladder list (ladder.find(...)) — but that
+  // Used to come from the full ladder list (ladder.find(...)) â€” but that
   // list is now only loaded on the Ladder page itself (see ladder state
   // comment above), while myLadderRank is also needed on Home (the rank
   // badge, achievement checks). myLadderRankRow is its own targeted
@@ -4459,7 +4459,7 @@ export default function App() {
   // actually loading the full table.
   const myLadderRank = myLadderRankRow;
 
-  // Lets a member stop receiving new ladder challenges — e.g. if they're
+  // Lets a member stop receiving new ladder challenges â€” e.g. if they're
   // swamped with a backlog and want a breather. Doesn't affect challenges
   // already sent/accepted, only blocks brand-new ones from landing on them
   // (enforced both here, by excluding paused players from ladderTargets, and
@@ -4471,14 +4471,14 @@ export default function App() {
     if (error) { showToast(`Couldn't update pause status: ${error.message}`); return; }
     await loadMyLadderRank();
     if (view === "ladder") await loadLadder(); // keeps ladderTargets' pause filter current if the full list is on screen
-    showToast(next ? "Ladder challenges paused — you won't receive new ones until you unpause." : "Ladder challenges resumed.");
+    showToast(next ? "Ladder challenges paused â€” you won't receive new ones until you unpause." : "Ladder challenges resumed.");
   };
 
-  // Joins the permanent ladder — a one-time 5N fee. Charging and creating
+  // Joins the permanent ladder â€” a one-time 5N fee. Charging and creating
   // the ladder_ranks row both happen inside join_ladder() (SECURITY
   // DEFINER; ladder_ranks has no client insert policy at all, so unlike
   // joinLeague's members-table insert-then-debit-then-rollback-on-failure
-  // dance, there's no client-side insert to unwind here — if the debit
+  // dance, there's no client-side insert to unwind here â€” if the debit
   // fails, the RPC's own transaction rolls back the whole thing.
   const joinLadder = async () => {
     const { error } = await supabase.rpc("join_ladder");
@@ -4495,12 +4495,12 @@ export default function App() {
 
   // Admin-only manual trigger for the same cleanup that also now runs on
   // its own every day at 03:00 UTC via pg_cron (see
-  // supabase/migrations/20260850_ladder_purge_auto_schedule.sql) — drops
+  // supabase/migrations/20260850_ladder_purge_auto_schedule.sql) â€” drops
   // every ladder_ranks row with 0 wins/losses/draws that's been sitting
   // untouched for 7+ days (a grace period so someone who joined this
   // morning and hasn't played their first match yet is never swept up).
-  // This button exists for running it on demand — right after a known
-  // wave of signups, say — rather than waiting for the nightly job.
+  // This button exists for running it on demand â€” right after a known
+  // wave of signups, say â€” rather than waiting for the nightly job.
   // Purged players aren't banned; join_ladder() has no history check, so
   // anyone removed can pay the 5N fee and join again like a new player.
   // Destructive (a real DELETE, no undo), so it goes through the same
@@ -4508,9 +4508,9 @@ export default function App() {
   // instead of a single window.confirm().
   const purgeInactiveLadderMembers = () => {
     requestConfirm([
-      "Remove everyone on the ladder who's never played a match (and joined 7+ days ago)? They keep their profile — just lose their ladder spot and would need to pay the join fee again.",
-      "Are you sure? This deletes their ladder_ranks row outright — there's no undo.",
-      "Final check — click to permanently remove every never-played member from the ladder.",
+      "Remove everyone on the ladder who's never played a match (and joined 7+ days ago)? They keep their profile â€” just lose their ladder spot and would need to pay the join fee again.",
+      "Are you sure? This deletes their ladder_ranks row outright â€” there's no undo.",
+      "Final check â€” click to permanently remove every never-played member from the ladder.",
     ], async () => {
       const { data: removed, error } = await supabase.rpc("purge_inactive_ladder_members");
       if (error) { showToast(`Couldn't purge inactive members: ${error.message}`); return; }
@@ -4523,13 +4523,13 @@ export default function App() {
 
   // Sends a challenge to another member. Snapshots the challenger's own
   // username/phone onto the row right away (same pattern used everywhere
-  // else in the app — a team's display_name/phone are snapshotted at join
-  // time too) — the opponent's phone stays off the row entirely until they
+  // else in the app â€” a team's display_name/phone are snapshotted at join
+  // time too) â€” the opponent's phone stays off the row entirely until they
   // accept, so nobody's number is exposed before they've agreed to it.
   // `isLadder` tags it so that, if it's ever confirmed, the points-awarding
   // trigger in Supabase actually credits the two of them.
   //
-  // Ladder Challenges are free to send/accept — no entry fee.
+  // Ladder Challenges are free to send/accept â€” no entry fee.
   const sendChallenge = async (opponent, isLadder = false) => {
     const { data: inserted, error } = await supabase.from("challenges").insert({
       challenger_id: session.user.id,
@@ -4543,14 +4543,14 @@ export default function App() {
 
     logActivity("challenge_sent", { opponent_username: opponent.username, is_ladder: isLadder });
     await loadChallenges();
-    showToast(isLadder ? `Ladder challenge sent to ${opponent.username} — win it and their spot is yours.` : `Challenge sent to ${opponent.username}.`);
+    showToast(isLadder ? `Ladder challenge sent to ${opponent.username} â€” win it and their spot is yours.` : `Challenge sent to ${opponent.username}.`);
   };
 
   // Accepting fills in the opponent's own phone right at the moment they agree
-  // to it — the only way their number ever lands on the row. Declining just
+  // to it â€” the only way their number ever lands on the row. Declining just
   // flips the status so the challenger can see it was seen and passed on.
   //
-  // Ladder Challenges are free to send/accept — no entry fee.
+  // Ladder Challenges are free to send/accept â€” no entry fee.
   const respondChallenge = async (challenge, accept) => {
     const update = accept
       ? { status: "accepted", opponent_phone: profile.phone, responded_at: new Date().toISOString() }
@@ -4559,11 +4559,11 @@ export default function App() {
     if (error) { showToast(`Couldn't respond: ${error.message}`); return; }
     logActivity(accept ? "challenge_accepted" : "challenge_declined", { challenger_username: challenge.challenger_username, is_ladder: challenge.is_ladder });
     await loadChallenges();
-    showToast(accept ? `Challenge accepted — say hi on WhatsApp.` : "Challenge declined.");
+    showToast(accept ? `Challenge accepted â€” say hi on WhatsApp.` : "Challenge declined.");
   };
 
   // Withdraws a still-pending challenge (challenger's side), or clears a
-  // declined/accepted one off the list once it's been seen — either way just
+  // declined/accepted one off the list once it's been seen â€” either way just
   // removes the row for both sides.
   const removeChallenge = async (challenge) => {
     const { error } = await supabase.from("challenges").delete().eq("id", challenge.id);
@@ -4571,7 +4571,7 @@ export default function App() {
     setChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
   };
 
-  // Either side of an accepted challenge can log the score first — it lands as
+  // Either side of an accepted challenge can log the score first â€” it lands as
   // "pending" until the other player confirms it (see confirmChallengeResult).
   // Scores are stored from the challenger's perspective (challenger_score /
   // opponent_score) regardless of who reports them, so the row has one
@@ -4603,10 +4603,10 @@ export default function App() {
     logActivity("match_result_submitted", { context: "challenge", challenge_id: challenge.id });
 
     await loadChallenges();
-    showToast("Result logged — waiting for them to confirm.");
+    showToast("Result logged â€” waiting for them to confirm.");
   };
 
-  // The player who *didn't* report the score confirms it — this is enforced
+  // The player who *didn't* report the score confirms it â€” this is enforced
   // both here (only offered to the other side in the UI) and should be
   // enforced again in RLS (result_reported_by <> auth.uid()) so a reporter
   // can't just confirm their own number.
@@ -4618,14 +4618,14 @@ export default function App() {
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
-    showToast(outcome ? `Result confirmed — ${outcome}` : "Result confirmed.");
+    showToast(outcome ? `Result confirmed â€” ${outcome}` : "Result confirmed.");
   };
 
   // Same signed-URL pattern as downloadResultProof, but for a challenge/open
   // challenge row's result_photo_path rather than a league submission.
   const viewChallengeResultProof = async (challenge) => {
     if (!challenge.result_photo_path) return;
-    // New rows store a permanent Blob URL directly — open it as-is. Rows
+    // New rows store a permanent Blob URL directly â€” open it as-is. Rows
     // from before the result-proofs migration still hold a Supabase storage
     // path, so fall back to signing those.
     if (challenge.result_photo_path.startsWith("http")) {
@@ -4645,10 +4645,10 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadChallenges();
-    showToast("Result disputed — ask them to re-log it.");
+    showToast("Result disputed â€” ask them to re-log it.");
   };
 
-  // Admin-only fallback once challengeResultConfirmExpired(challenge) is true —
+  // Admin-only fallback once challengeResultConfirmExpired(challenge) is true â€”
   // the opponent had 30 minutes to confirm/dispute and didn't, so an admin can
   // settle it directly from the screenshot instead. Same two outcomes as
   // the opponent's own confirm/dispute above.
@@ -4660,7 +4660,7 @@ export default function App() {
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
-    showToast(outcome ? `Result approved — ${outcome}` : "Result approved.");
+    showToast(outcome ? `Result approved â€” ${outcome}` : "Result approved.");
   };
   const adminRejectChallengeResult = async (challenge) => {
     const { error } = await supabase.from("challenges")
@@ -4668,11 +4668,11 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
     await loadChallenges();
-    showToast("Result rejected — they'll need to log it again.");
+    showToast("Result rejected â€” they'll need to log it again.");
   };
 
   // Admin-only fallback once a ladder challenge's 5-day accept window has
-  // passed with no response — an admin can grant the challenger a walkover
+  // passed with no response â€” an admin can grant the challenger a walkover
   // instead of it auto-resolving. This is logged as a nominal 3-0 win and
   // routed through the same confirmed-result update as a normal match, so
   // trg_resolve_ladder_challenge awards the points/win/loss exactly like
@@ -4691,9 +4691,9 @@ export default function App() {
     await loadChallenges();
     await loadLadder();
     const outcome = await describeLadderOutcome("challenge", challenge.id);
-    showToast(outcome ? `Walkover granted — ${outcome}` : "Walkover granted.");
+    showToast(outcome ? `Walkover granted â€” ${outcome}` : "Walkover granted.");
   };
-  // The other admin option for the same queue — closes the challenge out
+  // The other admin option for the same queue â€” closes the challenge out
   // with no ladder effect on either side, same as a normal decline.
   const adminCancelLadderChallenge = async (challenge) => {
     const { error } = await supabase.from("challenges")
@@ -4709,16 +4709,16 @@ export default function App() {
   // own history sticks around even after it resolves).
   const loadOpenChallenges = useCallback(async () => {
     if (!session) return;
-    // Same reasoning as loadChallenges above — an admin reviewing a random
+    // Same reasoning as loadChallenges above â€” an admin reviewing a random
     // challenge they weren't personally part of otherwise never receives
     // that row at all, no matter how expired its confirm window is. The
     // limit below is scoped to non-admins only: an admin needs every
     // unresolved/escalated open challenge reachable regardless of how old
     // it is, or an old one that's aged out of "most recent 50" becomes
-    // permanently unreviewable — silently missing from both the top
+    // permanently unreviewable â€” silently missing from both the top
     // escalated-review box and the Community Results escalated section,
     // with no error to point at why.
-    // See loadChallengesRequestId — same stale-response race applies here,
+    // See loadChallengesRequestId â€” same stale-response race applies here,
     // so this needs the same sequence guard.
     const requestId = ++loadOpenChallengesRequestId.current;
     let query = supabase.from("open_challenges").select(
@@ -4726,18 +4726,18 @@ export default function App() {
     ).order("created_at", { ascending: false });
     if (!isAdmin) query = query.or(`status.eq.open,creator_id.eq.${session.user.id},accepted_by.eq.${session.user.id}`).limit(50);
     const { data, error } = await query;
-    if (requestId !== loadOpenChallengesRequestId.current) return; // a newer call has since superseded this one — drop this stale result
+    if (requestId !== loadOpenChallengesRequestId.current) return; // a newer call has since superseded this one â€” drop this stale result
     if (error) { showToast("Couldn't load random challenges."); setOpenChallenges([]); return; }
     setOpenChallenges(data || []);
   }, [session, isAdmin, showToast]);
 
   // Community feed at the bottom of the Challenges screen: the last 100
-  // logged results from every member on the platform — both confirmed and
+  // logged results from every member on the platform â€” both confirmed and
   // still-awaiting-confirmation, direct challenges and random challenges
   // combined. Reads from the public_challenge_results view (see README) so
   // it isn't limited to the signed-in member's own rows the way
   // loadChallenges/loadOpenChallenges are. Logged to the console (not a
-  // toast — this feed is a nice-to-have, not worth interrupting anyone) so
+  // toast â€” this feed is a nice-to-have, not worth interrupting anyone) so
   // a missing/misconfigured view is easy to spot while debugging instead of
   // just silently showing an empty feed.
   const loadRecentResults = useCallback(async () => {
@@ -4750,7 +4750,7 @@ export default function App() {
     setRecentResults(data || []);
   }, [session]);
 
-  // Comment wall shown under Challenges — a single platform-wide board (not
+  // Comment wall shown under Challenges â€” a single platform-wide board (not
   // tied to any one league or challenge) for banter, callouts, and general
   // chat. Backed by its own tables so it's independent of the per-league
   // comments system: open to any signed-in member, no join/membership
@@ -4789,7 +4789,7 @@ export default function App() {
   };
 
   // A comment with replies underneath it warns about taking those replies
-  // down with it — replies nest to unlimited depth, so this counts every
+  // down with it â€” replies nest to unlimited depth, so this counts every
   // descendant, not just direct children.
   const deleteBoardComment = (comment) => {
     const all = boardComments || [];
@@ -4802,7 +4802,7 @@ export default function App() {
     requestConfirm([
       `Delete this ${noun}? This can't be undone.`,
       `Are you sure? Once it's gone, it's gone for good.`,
-      `Final check — click to permanently delete this ${noun}.`,
+      `Final check â€” click to permanently delete this ${noun}.`,
     ], async () => {
       const { error } = await supabase.from("challenge_board_comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
@@ -4828,7 +4828,7 @@ export default function App() {
     return true;
   };
 
-  // The Ladder's own comment wall — same shape and behavior as the challenge
+  // The Ladder's own comment wall â€” same shape and behavior as the challenge
   // board comments above, just backed by a separate `ladder_comments` table
   // so the two threads don't mix.
   const loadLadderComments = useCallback(async () => {
@@ -4841,7 +4841,7 @@ export default function App() {
     setLadderComments(data || []);
   }, [session]);
 
-  // Last 100 confirmed ladder-challenge results, platform-wide — reads from
+  // Last 100 confirmed ladder-challenge results, platform-wide â€” reads from
   // the ladder_match_results view (see README) so it isn't limited by the
   // per-user RLS on the raw challenges table.
   const loadLadderResults = useCallback(async () => {
@@ -4856,7 +4856,7 @@ export default function App() {
     // result is confirmed, the screenshot should only ever be visible to
     // the opponent during their confirm step and to an admin during the
     // approval-queue step (both handled separately via onViewResultProof,
-    // a 120s single-click signed link) — never in this public recent-
+    // a 120s single-click signed link) â€” never in this public recent-
     // matches feed that every ladder viewer sees.
   }, [session]);
 
@@ -4895,7 +4895,7 @@ export default function App() {
     requestConfirm([
       `Delete this ${noun}? This can't be undone.`,
       `Are you sure? Once it's gone, it's gone for good.`,
-      `Final check — click to permanently delete this ${noun}.`,
+      `Final check â€” click to permanently delete this ${noun}.`,
     ], async () => {
       const { error } = await supabase.from("ladder_comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
@@ -4921,7 +4921,7 @@ export default function App() {
     return true;
   };
 
-  // Fires one challenge open to every other member. Anyone can grab it —
+  // Fires one challenge open to every other member. Anyone can grab it â€”
   // whoever does first wins it and it's gone for the rest.
   const sendRandomChallenge = async () => {
     const { error } = await supabase.from("open_challenges").insert({
@@ -4936,7 +4936,7 @@ export default function App() {
 
   // Accepts an open broadcast. The update only matches a row that's still
   // 'open', so if two people tap Accept at the same instant, Postgres's
-  // row lock lets exactly one of these UPDATEs through — the loser gets 0
+  // row lock lets exactly one of these UPDATEs through â€” the loser gets 0
   // rows back and finds out someone else already grabbed it.
   const acceptOpenChallenge = async (challenge) => {
     const { data, error } = await supabase.from("open_challenges")
@@ -4944,9 +4944,9 @@ export default function App() {
       .eq("id", challenge.id).eq("status", "open")
       .select();
     if (error) { showToast(`Couldn't accept challenge: ${error.message}`); return; }
-    if (!data || data.length === 0) { showToast("Too slow — someone else already accepted that one."); await loadOpenChallenges(); return; }
+    if (!data || data.length === 0) { showToast("Too slow â€” someone else already accepted that one."); await loadOpenChallenges(); return; }
     await loadOpenChallenges();
-    showToast(`Challenge accepted — say hi on WhatsApp.`);
+    showToast(`Challenge accepted â€” say hi on WhatsApp.`);
   };
 
   // Withdraws your own still-open broadcast before anyone's grabbed it.
@@ -4963,8 +4963,8 @@ export default function App() {
     setOpenChallenges((prev) => (prev || []).filter((ch) => ch.id !== challenge.id));
   };
 
-  // Same report → confirm/dispute flow as reportChallengeResult, on the
-  // open_challenges table instead — scores are stored from the creator's
+  // Same report â†’ confirm/dispute flow as reportChallengeResult, on the
+  // open_challenges table instead â€” scores are stored from the creator's
   // perspective (creator_score / accepted_by_score) regardless of who logs it.
   const reportOpenChallengeResult = async (challenge, myScore, theirScore, rawFile) => {
     if (!rawFile) { showToast("Attach a photo of the final scoreboard before logging a result."); return; }
@@ -4993,7 +4993,7 @@ export default function App() {
     logActivity("match_result_submitted", { context: "open_challenge", challenge_id: challenge.id });
 
     await loadOpenChallenges();
-    showToast("Result logged — waiting for them to confirm.");
+    showToast("Result logged â€” waiting for them to confirm.");
   };
 
   const confirmOpenChallengeResult = async (challenge) => {
@@ -5004,7 +5004,7 @@ export default function App() {
     await loadOpenChallenges();
     await loadLadder(); // random challenges count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("open_challenge", challenge.id);
-    showToast(outcome ? `Result confirmed — ${outcome}` : "Result confirmed.");
+    showToast(outcome ? `Result confirmed â€” ${outcome}` : "Result confirmed.");
   };
 
   const disputeOpenChallengeResult = async (challenge) => {
@@ -5013,7 +5013,7 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't dispute result: ${error.message}`); return; }
     await loadOpenChallenges();
-    showToast("Result disputed — ask them to re-log it.");
+    showToast("Result disputed â€” ask them to re-log it.");
   };
 
   // Admin-only fallback, same rule as adminApproveChallengeResult above.
@@ -5025,7 +5025,7 @@ export default function App() {
     await loadOpenChallenges();
     await loadLadder(); // random challenges count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("open_challenge", challenge.id);
-    showToast(outcome ? `Result approved — ${outcome}` : "Result approved.");
+    showToast(outcome ? `Result approved â€” ${outcome}` : "Result approved.");
   };
   const adminRejectOpenChallengeResult = async (challenge) => {
     const { error } = await supabase.from("open_challenges")
@@ -5033,11 +5033,11 @@ export default function App() {
       .eq("id", challenge.id);
     if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
     await loadOpenChallenges();
-    showToast("Result rejected — they'll need to log it again.");
+    showToast("Result rejected â€” they'll need to log it again.");
   };
 
   // Lets an admin correct a mis-typed score on an escalated (30-minute-
-  // expired) result before approving/rejecting it — same idea as
+  // expired) result before approving/rejecting it â€” same idea as
   // editResultForFixture's score correction for league results, but
   // simpler: there's no fixture/standings recompute here, this just
   // overwrites the two stored score columns so Approve then confirms the
@@ -5051,7 +5051,7 @@ export default function App() {
       .update({ challenger_score: homeScore, opponent_score: awayScore })
       .eq("id", challenge.id).select().maybeSingle();
     if (error) { showToast(`Couldn't update the score: ${error.message}`); return false; }
-    if (!data) { showToast("Couldn't update — you don't have permission to edit this result."); return false; }
+    if (!data) { showToast("Couldn't update â€” you don't have permission to edit this result."); return false; }
     await loadChallenges();
     showToast("Score corrected.");
     return true;
@@ -5065,7 +5065,7 @@ export default function App() {
       .update({ creator_score: homeScore, accepted_by_score: awayScore })
       .eq("id", challenge.id).select().maybeSingle();
     if (error) { showToast(`Couldn't update the score: ${error.message}`); return false; }
-    if (!data) { showToast("Couldn't update — you don't have permission to edit this result."); return false; }
+    if (!data) { showToast("Couldn't update â€” you don't have permission to edit this result."); return false; }
     await loadOpenChallenges();
     showToast("Score corrected.");
     return true;
@@ -5076,7 +5076,7 @@ export default function App() {
     if (!session) { setProfile(undefined); setLeagues(null); setIsAdmin(false); return; }
     supabase.from("profiles").select("*").eq("user_id", session.user.id).maybeSingle()
       .then(({ data }) => setProfile(data || null));
-    // Fire-and-forget, same as every other call to this helper — a
+    // Fire-and-forget, same as every other call to this helper â€” a
     // declined permission prompt or unsupported browser must never block
     // sign-in. See the import comment above for why this now runs for
     // every session, not only from RapidCupBanner.
@@ -5084,13 +5084,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
   }, [sessionKey]);
 
-  // Timezone-aware scheduling (roadmap 2a) — silently (re)resolves this
+  // Timezone-aware scheduling (roadmap 2a) â€” silently (re)resolves this
   // player's timezone/country every sign-in and saves it if it's missing
   // or has changed (e.g. they've traveled, or switched device/browser).
   // Deliberately no toast: this is background housekeeping, not a user
   // action, and it should never interrupt anything. Runs off the
   // browser's Intl timezone first, falling back to the phone's calling
-  // code only if that's unavailable — see resolvePlayerLocation.
+  // code only if that's unavailable â€” see resolvePlayerLocation.
   useEffect(() => {
     if (!profile) return;
     const { timezone, country_code } = resolvePlayerLocation(profile.phone);
@@ -5110,7 +5110,7 @@ export default function App() {
 
   // Fires the tutorial tour the moment a freshly-onboarded player's profile
   // actually lands (justOnboarded flips true inside completeProfile, right
-  // after ProfileGate's insert succeeds) — waiting on `profile` here rather
+  // after ProfileGate's insert succeeds) â€” waiting on `profile` here rather
   // than firing straight from completeProfile means it opens after the app
   // has already swapped from ProfileGate to the real Home screen behind it,
   // instead of popping up over a screen that's about to unmount.
@@ -5118,7 +5118,7 @@ export default function App() {
     if (!justOnboarded || !profile) return;
     setJustOnboarded(false);
     setTutorialOpen(true);
-    try { localStorage.setItem(`efootball-tutorial-seen-${profile.user_id}`, "1"); } catch (e) { /* ignore — storage unavailable */ }
+    try { localStorage.setItem(`efootball-tutorial-seen-${profile.user_id}`, "1"); } catch (e) { /* ignore â€” storage unavailable */ }
   }, [justOnboarded, profile]);
 
   useEffect(() => {
@@ -5128,7 +5128,7 @@ export default function App() {
     loadLeagues();
     loadChallenges();
     loadOpenChallenges();
-    loadLadderTop5(); // Home's LadderStrip only — see ladderTop5 comment; the full loadLadder() is loaded on-demand by openLadderScreen instead
+    loadLadderTop5(); // Home's LadderStrip only â€” see ladderTop5 comment; the full loadLadder() is loaded on-demand by openLadderScreen instead
     loadMyLadderRank();
     loadMyLeagueLadderMembership(); // feeds the Quick actions dock's League Ladder tile label/link
     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
@@ -5140,17 +5140,17 @@ export default function App() {
   }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
 
   // The ladder never resets, but ranks can move any time someone else's
-  // challenge gets confirmed — so refresh it quietly while Home is open,
+  // challenge gets confirmed â€” so refresh it quietly while Home is open,
   // the same way the random-challenge pool refreshes itself.
   // Previously this list only ever refreshed after the signed-in member's
-  // own actions (accept, decline, log a result, etc.) — if the *other*
+  // own actions (accept, decline, log a result, etc.) â€” if the *other*
   // side of a challenge acted, there was no live update at all, only
   // whatever was loaded on the last visit to this screen. This subscribes
   // it properly instead of adding a new poll for something that never
   // polled before.
   useRealtimeRefresh("challenges", loadChallenges, !!session);
 
-  // Full unbounded ladder_ranks table — this used to also run continuously
+  // Full unbounded ladder_ranks table â€” this used to also run continuously
   // on Home (every 60s, plus on every realtime change from anyone's rank
   // moving anywhere on the platform) even though Home's LadderStrip only
   // ever renders 5-6 rows out of it. That was the single largest recurring
@@ -5161,7 +5161,7 @@ export default function App() {
   useRealtimeRefresh("ladder_ranks", loadLadder, view === "ladder" && !!profile);
   useVisibilityPoll(loadLadder, 60000, view === "ladder" && !!profile);
 
-  // Home's lightweight equivalents — top 5 rows plus the viewer's own row,
+  // Home's lightweight equivalents â€” top 5 rows plus the viewer's own row,
   // instead of the whole table above. myLadderRankRow (1 row) also needs to
   // stay live everywhere it's read (Home's badge/achievements, and the
   // Ladder page's pause toggle), not just on Home, so it isn't view-gated.
@@ -5170,7 +5170,7 @@ export default function App() {
   useRealtimeRefresh("ladder_ranks", loadMyLadderRank, !!session);
   useVisibilityPoll(loadMyLadderRank, 60000, !!session);
 
-  // League Ladder membership for the Quick actions tile — not view-gated,
+  // League Ladder membership for the Quick actions tile â€” not view-gated,
   // same reasoning as myLadderRankRow above: the dock renders on every
   // screen, so this needs to stay live everywhere, not just on Home.
   // Refreshed on any membership change (joining, promotion/relegation,
@@ -5178,26 +5178,26 @@ export default function App() {
   // discrete events rather than something that drifts second to second.
   useRealtimeRefresh("ladder_memberships", loadMyLeagueLadderMembership, !!session);
 
-  // The Challenges screen is a genuine "race to accept" — members watching
+  // The Challenges screen is a genuine "race to accept" â€” members watching
   // that screen want the pool to move without a manual refresh, so it stays
   // on the fast realtime + 30s poll. Kept live for admins on every screen
   // too (not just Home/Challenges), otherwise a random-challenge result
   // reported while an admin is off reviewing a league elsewhere would sit
-  // stale in state — undercounting adminEscalatedResultCount's header badge
+  // stale in state â€” undercounting adminEscalatedResultCount's header badge
   // until they happened to visit Home or Challenges and trigger a reload.
   useRealtimeRefresh("open_challenges", loadOpenChallenges, view === "challenges" || isAdmin);
   useVisibilityPoll(loadOpenChallenges, 30000, view === "challenges" || isAdmin);
 
   // Home only needs this for the header's grabbable-count badge and the
-  // "still up for grabs" banner — neither is a race the way the Challenges
+  // "still up for grabs" banner â€” neither is a race the way the Challenges
   // screen above is, so it doesn't need realtime. A realtime subscription
   // here would mean every open Home tab on the platform re-fetching the
-  // moment *anyone, anywhere* creates/accepts/cancels a random challenge —
+  // moment *anyone, anywhere* creates/accepts/cancels a random challenge â€”
   // for a badge that's fine to be up to two minutes stale. Non-admins only:
   // admins already get the fast realtime+30s combo above on every screen.
   useVisibilityPoll(loadOpenChallenges, 120000, view === "home" && !isAdmin);
 
-  // Same idea for the community results feed, on a slower clock — new
+  // Same idea for the community results feed, on a slower clock â€” new
   // confirmed results trickle in rather than needing a race-to-accept refresh.
   useEffect(() => {
     if (view !== "challenges") return;
@@ -5223,13 +5223,13 @@ export default function App() {
     if (linkedId) {
       const found = leagues.find((l) => l.id === linkedId);
       if (found) { setActiveLeagueId(found.id); setView("league"); }
-      else showToast("That league link isn't accessible — you may need to be added as a member first.");
+      else showToast("That league link isn't accessible â€” you may need to be added as a member first.");
       window.history.replaceState({}, "", window.location.pathname);
     }
     setHandledDeepLink(true);
   }, [leagues, handledDeepLink, showToast]);
 
-  // Handle a shared shop product link like /shop/<id> — anyone can open
+  // Handle a shared shop product link like /shop/<id> â€” anyone can open
   // one, signed in or not, so this runs independently of session state.
   useEffect(() => {
     if (handledShopDeepLink) return;
@@ -5248,12 +5248,12 @@ export default function App() {
 
   // Browser tab title reflects where the shopper actually is.
   useEffect(() => {
-    document.title = view === "shop" ? "Department Store" : "Matchday — eFootball Leagues";
+    document.title = view === "shop" ? "Department Store" : "Matchday â€” eFootball Leagues";
   }, [view]);
 
   // Push a real browser history entry for every screen change, so the
-  // hardware/gesture back action moves between in-app screens (League →
-  // Home, Shop → Home, etc.) instead of leaving the site entirely — which
+  // hardware/gesture back action moves between in-app screens (League â†’
+  // Home, Shop â†’ Home, etc.) instead of leaving the site entirely â€” which
   // previously looked like getting logged out, since coming back in reloaded
   // the app from scratch.
   const appNavFirstRef = useRef(true);
@@ -5268,7 +5268,7 @@ export default function App() {
   useEffect(() => {
     const onPopState = (e) => {
       const state = e.state;
-      if (!state || !state.appView) return; // not one of ours — leave it to whichever nav owns it
+      if (!state || !state.appView) return; // not one of ours â€” leave it to whichever nav owns it
       setView(state.view || "home");
       setActiveLeagueId(state.activeLeagueId ?? null);
       setActiveLadderLeagueId(state.activeLadderLeagueId ?? null);
@@ -5277,7 +5277,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  // Every in-app "← Back" button used to call setView("home") directly —
+  // Every in-app "â† Back" button used to call setView("home") directly â€”
   // which *pushes* a new history entry rather than stepping back through
   // the ones already there. Repeat that a few times while browsing around
   // and the real history stack fills up with duplicate "home" entries, so
@@ -5293,12 +5293,12 @@ export default function App() {
     else setView("home");
   }, []);
 
-  // League Ladder — admin-only entry, opens whichever ladder_leagues row
+  // League Ladder â€” admin-only entry, opens whichever ladder_leagues row
   // has the highest tier number, since tier 8 (the bottom, and currently
   // the only seeded league) is where the manual seed puts the first 8
   // players. Picking "highest tier" rather than a hardcoded id keeps this
   // working if a higher-numbered bottom league gets seeded later without
-  // needing a code change here — this whole entry point goes away once a
+  // needing a code change here â€” this whole entry point goes away once a
   // real join flow exists.
   const openLeagueLadderTestScreen = useCallback(async () => {
     const { data, error } = await supabase.from("ladder_leagues").select("id").order("tier", { ascending: false }).limit(1).maybeSingle();
@@ -5307,10 +5307,10 @@ export default function App() {
     setView("leagueLadder");
   }, [showToast]);
 
-  // openLeagueLadder(leagueId) — the real, public entry point (the "own
+  // openLeagueLadder(leagueId) â€” the real, public entry point (the "own
   // section" on Home uses this), now that join_ladder_league() exists.
   // Unlike openLeagueLadderTestScreen above, this doesn't re-look-up the
-  // bottom league itself — Home's LadderLeagueSection already knows which
+  // bottom league itself â€” Home's LadderLeagueSection already knows which
   // leagueId was clicked (it fetched the list to render the cards), so
   // this is just the two-state-set navigation shared by both entry points.
   const openLeagueLadder = useCallback((leagueId) => {
@@ -5318,7 +5318,7 @@ export default function App() {
     setView("leagueLadder");
   }, []);
 
-  // openLadderPoolAdmin — ladder_pool is a global singleton (20260855), so
+  // openLadderPoolAdmin â€” ladder_pool is a global singleton (20260855), so
   // unlike openLeagueLadder there's no id to carry: every admin lands on
   // the exact same screen no matter which league's page they linked in
   // from.
@@ -5332,9 +5332,9 @@ export default function App() {
       .select().single();
     if (error) {
       if (error.code === "23505" && error.message.toLowerCase().includes("phone")) {
-        showToast("That phone number is already linked to another account — double-check it, or use a different number.");
+        showToast("That phone number is already linked to another account â€” double-check it, or use a different number.");
       } else {
-        showToast("Couldn't save your details — try again.");
+        showToast("Couldn't save your details â€” try again.");
       }
       return;
     }
@@ -5362,7 +5362,7 @@ export default function App() {
     showToast("Profile photo updated.");
   };
 
-  // Lets a signed-in member fix their own phone/username later — the only way to
+  // Lets a signed-in member fix their own phone/username later â€” the only way to
   // resolve a "phone already registered to another account" situation, since phone
   // numbers are unique platform-wide (one number = one account, across all leagues).
   const updateProfile = async (phone, username) => {
@@ -5372,7 +5372,7 @@ export default function App() {
       .select().single();
     if (error) {
       if (error.code === "23505" && error.message.toLowerCase().includes("phone")) {
-        showToast("That phone number is already linked to another account — double-check it, or use a different number.");
+        showToast("That phone number is already linked to another account â€” double-check it, or use a different number.");
       } else {
         showToast(`Couldn't save your details: ${error.message}`);
       }
@@ -5386,17 +5386,17 @@ export default function App() {
   const activeLeague = useMemo(() => (leagues || []).find((l) => l.id === activeLeagueId) || null, [leagues, activeLeagueId]);
   const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
 
-  // `leagues` (and everything nested under it — ladder_cup_walkover_claims,
+  // `leagues` (and everything nested under it â€” ladder_cup_walkover_claims,
   // ladder_cup_matches, etc.) was only ever loaded once at sign-in
   // (loadLeagues, above) and otherwise only refreshed by the SAME client
   // that just performed a mutation (refreshLeague after a challenge/claim
   // call). Unlike challenges/ladder_ranks/open_challenges, which all have
   // useRealtimeRefresh below, nothing ever pushed an update to OTHER
-  // clients — so an admin sitting on a Ladder Cup's review screen never
+  // clients â€” so an admin sitting on a Ladder Cup's review screen never
   // found out a walkover claim (or a new match) had been submitted by
   // someone else's phone; their local `leagues` state just stayed stale
   // until a manual page reload. This is what "admin doesn't receive them"
-  // actually was — the claims were in the database (and, per the RLS
+  // actually was â€” the claims were in the database (and, per the RLS
   // check, always readable) the whole time. Scoped to the currently open
   // league only (refreshLeague, not the full loadLeagues) to keep this
   // cheap; the visibility poll is the same slow safety net pattern used
@@ -5409,7 +5409,7 @@ export default function App() {
   // Step 13 will add a proper scheduled job for the hard cutoff; second-life
   // offers get their lazy check here in the meantime (per the integration
   // notes: "call on read, or on a cron"). Runs whenever a ladder_cup league
-  // becomes the active one — if any entry's 24h window has lapsed with no
+  // becomes the active one â€” if any entry's 24h window has lapsed with no
   // response, it converts straight to eliminated, same outcome as an
   // explicit decline. Guarded with a ref so a re-render (or refreshLeague
   // picking up its own write) doesn't re-fire the same expiry twice.
@@ -5429,7 +5429,7 @@ export default function App() {
       if (!error) {
         // Best-effort: record the lapse so a future recompute (see
         // recomputeLadderCupLeague) can tell this was a silent expiry
-        // rather than an explicit decline — doesn't change what happened,
+        // rather than an explicit decline â€” doesn't change what happened,
         // just what a replay can reconstruct about it later.
         await Promise.all(stale.map((r) => supabase.rpc("record_ladder_cup_second_life_response", {
           p_entry_id: r.id, p_league_id: activeLeague.id, p_team_id: r.team_id, p_response_type: "expired",
@@ -5440,7 +5440,7 @@ export default function App() {
   }, [activeLeague, refreshLeague]);
 
   // Self-heal for clubs that ended up on the team list without a matching
-  // ladder_cup_entries row — e.g. this league's pre-listed clubs were added
+  // ladder_cup_entries row â€” e.g. this league's pre-listed clubs were added
   // before the bulk-insert-at-creation code (see createLeague) existed, so
   // they never got placed on the ladder. Same lazy-check-on-read shape as
   // the two effects above: runs once per league the first time it's
@@ -5461,21 +5461,21 @@ export default function App() {
       await refreshLeague(activeLeague.id);
     })();
   }, [activeLeague, refreshLeague]);
-  // the second-life expiry above — fires once per league, the first time
+  // the second-life expiry above â€” fires once per league, the first time
   // it's the active one after hasLadderCupCutoffPassed is true and
   // ladder_cup_finalized_at is still null. No separate scheduled job:
   // every write path already refuses to touch a ladder_cup league once
   // its cutoff has passed (see hasLadderCupCutoffPassed call sites above),
   // so nothing on the board can change between the deadline and whenever
-  // someone next opens the league — running this on read rather than on a
+  // someone next opens the league â€” running this on read rather than on a
   // timer costs nothing.
   //
   // crownChampion only reads club_id/pts/gd/toughest_opponent_beaten_pts/
   // status off each entry, so this maps straight off the raw rows rather
   // than the fuller ladderCupEntryFromRow round-trip (that one's for
   // callers that write a match/claim result back). finalizeAtCutoff's
-  // finalizedMatches/finalizedClaims aren't used to change anything — per
-  // its own doc comment they never undo points already applied — they're
+  // finalizedMatches/finalizedClaims aren't used to change anything â€” per
+  // its own doc comment they never undo points already applied â€” they're
   // purely to tell players how many in-flight matches/claims got cut off,
   // via the same postComment announcement a normal result gets.
   const finalizedLadderCupCutoffChecked = useRef(new Set());
@@ -5484,14 +5484,14 @@ export default function App() {
     if (activeLeague.ladder_cup_finalized_at) return;
     if (!hasLadderCupCutoffPassed(activeLeague.ladder_cup_cutoff_at)) return;
     // Bug fix: don't crown a champion off a snapshot that still has a
-    // lapsed-but-not-yet-converted second-life offer sitting in it — the
+    // lapsed-but-not-yet-converted second-life offer sitting in it â€” the
     // expiry effect above hasn't necessarily finished writing
     // `eliminated` for it yet (both effects fire off the same render's
     // `activeLeague`), and crownChampion only excludes `eliminated`
     // entries, so a stale `pending_second_life` row would still count as
     // live. Skip this pass without marking it checked; once the expiry
     // effect's write lands and refreshLeague pulls the corrected
-    // statuses, activeLeague changes and this effect runs again — that
+    // statuses, activeLeague changes and this effect runs again â€” that
     // next pass is the one that actually finalizes.
     const hasUnresolvedSecondLifeOffers = (activeLeague.ladder_cup_entries || []).some((r) =>
       r.status === "pending_second_life" && r.second_life_expires_at && new Date(r.second_life_expires_at) <= new Date());
@@ -5514,14 +5514,14 @@ export default function App() {
       const droppedClaims = claims.length - finalizedClaims.length;
 
       // Bug fix: this write used to go straight to `leagues` from
-      // whichever member's browser got here first — but the RLS UPDATE
+      // whichever member's browser got here first â€” but the RLS UPDATE
       // policy on `leagues` only allows the league's creator or an admin
       // to write to it, so a regular member's browser would silently
       // fail here (no error, `wonRace` just empty) and the league would
       // stay stuck unfinalized until an admin happened to open it. Routed
       // through a SECURITY DEFINER RPC (see finalize-ladder-cup-rpc.sql)
       // that any signed-in user can call, but which can only ever perform
-      // this exact narrow update — nothing else on `leagues` is opened up.
+      // this exact narrow update â€” nothing else on `leagues` is opened up.
       // The RPC's own WHERE clause (format = 'ladder_cup', cutoff passed,
       // not already finalized) does the same "first one here wins" race
       // guard the old `.is("ladder_cup_finalized_at", null)` did.
@@ -5536,12 +5536,12 @@ export default function App() {
       }
       if (!wonRace || wonRace.length === 0) {
         // Someone else's read already finalized this league between our
-        // check above and this write — nothing left for us to do.
+        // check above and this write â€” nothing left for us to do.
         await refreshLeague(activeLeague.id);
         return;
       }
       // The RPC sets this server-side (now()) rather than us passing a
-      // client-side timestamp — read it back off the returned row so the
+      // client-side timestamp â€” read it back off the returned row so the
       // champion-row write below stays consistent with what's actually
       // stored on `leagues`.
       const finalizedAt = wonRace[0].ladder_cup_finalized_at;
@@ -5549,7 +5549,7 @@ export default function App() {
       if (champion) {
         const champRow = rows.find((r) => r.team_id === champion.club_id);
         if (champRow) {
-          // Bug fix: this write was previously unchecked — a failure here
+          // Bug fix: this write was previously unchecked â€” a failure here
           // left leagues.ladder_cup_champion_team_id (and the finalized
           // banner that reads it) correct while the standings table's
           // crown icon (which reads this row's own `status`) silently
@@ -5566,15 +5566,15 @@ export default function App() {
 
       // Ladder Cup's own Top 20 prize pool payout (economy.js's
       // LADDER_CUP_PRIZE_SPLIT / finalize_ladder_cup_prize_pool, 20260841)
-      // — separate from finalize_league_prize_pool, which excludes
+      // â€” separate from finalize_league_prize_pool, which excludes
       // ladder_cup entirely. Ranked by the full standings board order
-      // (every entry, including eliminated clubs — not crownChampion's
+      // (every entry, including eliminated clubs â€” not crownChampion's
       // non-eliminated-only subset), since 2nd-20th place money doesn't
       // require having survived to cutoff, only the champion does. The
       // RPC itself re-derives the real pool from entry-fee transactions
       // and is idempotent (ladder_cup_prizes_paid_at guard), so a failure
       // here just means the payout retries next time someone opens the
-      // league — no need to unwind the finalize above.
+      // league â€” no need to unwind the finalize above.
       const { error: prizeErr } = await supabase.rpc("finalize_ladder_cup_prize_pool", {
         p_league_id: activeLeague.id,
         p_ranked_team_ids: rankLadderCupStandings(mapped).map((e) => e.club_id),
@@ -5586,8 +5586,8 @@ export default function App() {
       const teamsById = Object.fromEntries((activeLeague.teams || []).map((t) => [t.id, t]));
       const championName = champion ? (teamsById[champion.club_id]?.name || "Unknown club") : null;
       let announcement = championName
-        ? `Ladder Cup cutoff reached — ${championName} crowned champion with ${champion.pts} pts.`
-        : "Ladder Cup cutoff reached — no eligible champion (every club was eliminated).";
+        ? `Ladder Cup cutoff reached â€” ${championName} crowned champion with ${champion.pts} pts.`
+        : "Ladder Cup cutoff reached â€” no eligible champion (every club was eliminated).";
       const droppedBits = [
         droppedMatches > 0 && `${droppedMatches} match${droppedMatches === 1 ? "" : "es"} still in progress`,
         droppedClaims > 0 && `${droppedClaims} walkover claim${droppedClaims === 1 ? "" : "s"} not yet approved`,
@@ -5599,17 +5599,17 @@ export default function App() {
     })();
   }, [activeLeague, refreshLeague, showToast]);
 
-  // Auto-finalizes the Nets prize pool for a finished paid ("fun") league —
+  // Auto-finalizes the Nets prize pool for a finished paid ("fun") league â€”
   // same pattern as the ladder-cup auto-finalize effect just above: any
   // browser that has this league open notices it's complete and calls the
   // same idempotent, SECURITY DEFINER RPC (finalize_league_prize_pool,
   // 20260839/20260840) any signed-in member can call. The RPC's own
   // prizes_paid_at row-locked guard means whichever browser gets there
-  // first is the only one that actually pays out — no client-side race
+  // first is the only one that actually pays out â€” no client-side race
   // guard needed beyond the dedupe ref below (that's just to stop this
   // browser from firing the RPC repeatedly while waiting on its response).
   //
-  // ladder_cup is excluded from THIS effect/RPC — it has its own separate
+  // ladder_cup is excluded from THIS effect/RPC â€” it has its own separate
   // pooled payout (finalize_ladder_cup_prize_pool, 20260841: champion 50%,
   // 2nd-20th spread across the rest), fired from the ladder-cup finalize
   // effect above once finalize_ladder_cup crowns a champion, not from here.
@@ -5617,12 +5617,12 @@ export default function App() {
   // there was never a pool to begin with, so nothing to finalize either.
   //
   // Ranking: computeKnockoutRanking(league) already produces exactly the
-  // ranked team-id order this needs for every format — champion-first
+  // ranked team-id order this needs for every format â€” champion-first
   // exit-round ranking for knockout/groups_knockout brackets (falling back
   // to group-stage standings for anyone who never reached the bracket),
   // and plain computeStandings order for round robin/survivor. Same
   // function the Wall of Fame and cash-prize payout already trust for
-  // "who finished where" — see computeMyLeagueWins/computeCashPrizes.
+  // "who finished where" â€” see computeMyLeagueWins/computeCashPrizes.
   const finalizedPrizePoolChecked = useRef(new Set());
   useEffect(() => {
     if (!activeLeague) return;
@@ -5651,17 +5651,17 @@ export default function App() {
   // Picks up the intent set by tapping an "Up next" card on Home (see
   // pendingLogFixtureId above) once activeLeague's fixtures/teams are
   // actually available, and opens the same SubmitResultModal the manual
-  // "Find your opponent" flow uses — pre-filled with that exact fixture, so
+  // "Find your opponent" flow uses â€” pre-filled with that exact fixture, so
   // the player lands ready to enter a score and attach their photo rather
   // than having to search for themselves.
   useEffect(() => {
     if (!pendingLogFixtureId || !activeLeague) return;
     const fixture = activeLeague.fixtures.find((f) => f.id === pendingLogFixtureId);
-    if (!fixture) return; // not loaded into this league's data yet — wait for the next update
+    if (!fixture) return; // not loaded into this league's data yet â€” wait for the next update
     setPendingLogFixtureId(null);
-    if (fixture.played) return; // already logged elsewhere in the meantime — just land on the league
+    if (fixture.played) return; // already logged elsewhere in the meantime â€” just land on the league
     if (isFixtureLocked(fixture, activeLeague)) {
-      showToast("That match passed its 2-day deadline without a result — both clubs received a loss. It's no longer loggable.");
+      showToast("That match passed its 2-day deadline without a result â€” both clubs received a loss. It's no longer loggable.");
       return;
     }
     const homeTeam = activeLeague.teams.find((t) => t.id === fixture.home_team_id);
@@ -5680,7 +5680,7 @@ export default function App() {
 
   // Results (regular challenges and random/open challenges alike) whose
   // 30-minute opponent-confirm window has lapsed move into the admin queue
-  // shown at the top of ChallengesScreen — but until now nothing surfaced
+  // shown at the top of ChallengesScreen â€” but until now nothing surfaced
   // that anywhere else, so an admin not already sitting on that screen the
   // moment the window lapsed had no way to know it needed them. Folding
   // this into the header badge (below) means it's visible from any screen.
@@ -5695,13 +5695,13 @@ export default function App() {
   // null for fun leagues / non-members; "pending" | "approved" | "rejected" for cash league members.
   const myPaymentStatus = (league) => myMembership(league)?.payment_status || null;
   // Creating a league or being a platform admin gives management rights,
-  // but doesn't by itself count as having joined — the creator/admin can
+  // but doesn't by itself count as having joined â€” the creator/admin can
   // still choose to register a club and join like any other player.
   const canManageLeague = (league) => !!session && (isAdmin || league.created_by === session.user.id);
 
   // Sweeps every league the signed-in member can manage, the moment league
   // data loads (or reloads), and auto-eliminates any club caught in a
-  // no-show tie — see findNoShowTeamIds. This is what makes the cut
+  // no-show tie â€” see findNoShowTeamIds. This is what makes the cut
   // automatic: it doesn't wait for a round/stage to fully finish or for an
   // admin to hit an "advance" button, and it runs across every league and
   // every format, not just knockout/survivor/groups where a manual
@@ -5719,7 +5719,7 @@ export default function App() {
     (async () => {
       const allIds = targets.flatMap(({ ids }) => ids);
       // Same permission-check pattern as advanceKnockout/advanceSurvivor/
-      // finalizeGroups: don't just trust the update call succeeded — count
+      // finalizeGroups: don't just trust the update call succeeded â€” count
       // what actually came back and say so if RLS quietly blocked some rows,
       // instead of the admin only finding out because a club is still
       // showing as active days later.
@@ -5727,11 +5727,11 @@ export default function App() {
       if (cancelled) return;
       if (error) { showToast(`Couldn't auto-eliminate no-show clubs: ${error.message}`); return; }
       const updatedIds = new Set((updatedRows || []).map((r) => r.id));
-      if (updatedIds.size === 0) return; // every row blocked — nothing changed, nothing to reload or announce
+      if (updatedIds.size === 0) return; // every row blocked â€” nothing changed, nothing to reload or announce
 
-      // Drop an auto-posted comment in each affected league's feed — the
+      // Drop an auto-posted comment in each affected league's feed â€” the
       // same "isResult" system-comment mechanism already used for
-      // auto-posted matchday results — so the eliminated club sees it
+      // auto-posted matchday results â€” so the eliminated club sees it
       // directly next time they open that league, instead of only finding
       // out passively via their own "you've been eliminated" status line.
       const announcedLeagueNames = [];
@@ -5745,8 +5745,8 @@ export default function App() {
           return owner?.display_name ? `${team?.name || "A club"} (${owner.display_name})` : (team?.name || "A club");
         });
         const body = names.length === 1
-          ? `${names[0]} was automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`
-          : `${names.join(", ")} were automatically eliminated — missed a match past its deadline, and the no-show penalty already put them at -4 on it.`;
+          ? `${names[0]} was automatically eliminated â€” missed a match past its deadline, and the no-show penalty already put them at -4 on it.`
+          : `${names.join(", ")} were automatically eliminated â€” missed a match past its deadline, and the no-show penalty already put them at -4 on it.`;
         await postComment(league, body, null, null, null, true);
       }
 
@@ -5754,10 +5754,10 @@ export default function App() {
       const updatedCount = updatedIds.size;
       const where = announcedLeagueNames.length === 1 ? ` in "${announcedLeagueNames[0]}"` : ` across ${announcedLeagueNames.length} leagues`;
       if (updatedCount < allIds.length) {
-        showToast(`${updatedCount} of ${allIds.length} no-show clubs${where} were auto-eliminated — the rest hit a permissions issue and will retry next reload.`);
+        showToast(`${updatedCount} of ${allIds.length} no-show clubs${where} were auto-eliminated â€” the rest hit a permissions issue and will retry next reload.`);
         return;
       }
-      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} — no-show on a match past its deadline.`);
+      showToast(`${updatedCount} club${updatedCount === 1 ? "" : "s"} eliminated automatically${where} â€” no-show on a match past its deadline.`);
     })();
     return () => { cancelled = true; };
   }, [leagues, session, isAdmin, refreshLeagues, showToast]);
@@ -5776,29 +5776,29 @@ export default function App() {
   // "Entry closed" covers two independent reasons: the admin set a manual
   // entry_closes_at cutoff (any format other than ladder_cup), or this is a
   // ladder_cup league whose own hard cutoff has already passed. Survival
-  // Ladder Cup has no separate entry-close date of its own — clubs can join
-  // right up until the ladder's monthly cutoff — so entry_closes_at is
+  // Ladder Cup has no separate entry-close date of its own â€” clubs can join
+  // right up until the ladder's monthly cutoff â€” so entry_closes_at is
   // deliberately ignored for that format even if an old row still has one
   // set. Extending this single function (rather than adding a parallel
   // check) means the fix reaches every place that already gates on it: the
   // Join button's visibility on LeagueCard, Home's isJoinable sort, and
   // both join handlers below.
   // ladder_cup_started_at (see startLadderCupLeague below) is a status
-  // marker only — clubs keep registering right up to the cutoff/finalize,
+  // marker only â€” clubs keep registering right up to the cutoff/finalize,
   // same as before the Start button existed. It intentionally does NOT
   // factor into entryClosed.
   const entryClosed = (league) =>
     (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
     || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
-  // Admin-created leagues (except Knockout and Survival Ladder Cup itself —
+  // Admin-created leagues (except Knockout and Survival Ladder Cup itself â€”
   // gating entry to a Ladder Cup on having already placed top 20% in one
   // would lock out anyone who hasn't qualified yet from ever getting the
   // chance to) require the joining club to have finished in the top 20% of
   // some completed Survival Ladder Cup at least once. "The club" is
-  // resolved the same way joinLeague itself resolves team identity — by
+  // resolved the same way joinLeague itself resolves team identity â€” by
   // matching the profile's efootball_username against a league's team
-  // names — since that's the only identity a club carries across leagues.
+  // names â€” since that's the only identity a club carries across leagues.
   // Only finalized Ladder Cups count (an in-progress one hasn't produced a
   // real final standing yet); ties share a rank_position
   // (rankLadderCupStandings' "1224" ranking), so the qualifying cutoff is
@@ -5840,24 +5840,24 @@ export default function App() {
     const { name, teamNames, format, survivor, groups, knockoutLegs, ladderCupCutoffAt, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
     const insertPayload = {
       name, created_by: session.user.id, format,
-      // Survival Ladder Cup has no entry-close date of its own — clubs join
-      // until the ladder's own cutoff, not a separate registration window —
+      // Survival Ladder Cup has no entry-close date of its own â€” clubs join
+      // until the ladder's own cutoff, not a separate registration window â€”
       // so entry_closes_at is always stored as null for this format,
       // regardless of what CreateLeague happened to pass in.
       entry_closes_at: format === "ladder_cup" ? null : entryClosesAt, starts_at: startsAt,
       description: description || null,
       round_period_hours: roundPeriodHours || DEFAULT_ROUND_PERIOD_HOURS,
-      // Drives the guest homepage's Weekend League spotlight — only leagues
+      // Drives the guest homepage's Weekend League spotlight â€” only leagues
       // an admin actually created should ever show up there, so this is
       // captured once at creation time rather than re-derived later (a
       // league's creator obviously doesn't change, but who counts as an
       // admin could, and we don't want that retroactively flipping which
       // past leagues appear).
       created_by_admin: isAdmin,
-      // Only an admin can actually create a cash league — enforced again here
+      // Only an admin can actually create a cash league â€” enforced again here
       // (not just in the CreateLeague UI) since input is client-supplied.
       // The database's own check constraint / RLS policy is the real backstop.
-      // Survival Ladder Cup is free to play — never a cash league,
+      // Survival Ladder Cup is free to play â€” never a cash league,
       // regardless of what CreateLeague happened to pass in (same
       // belt-and-braces re-check as entry_closes_at above).
       league_type: format !== "ladder_cup" && isAdmin && leagueType === "cash" ? "cash" : "fun",
@@ -5887,18 +5887,18 @@ export default function App() {
     logActivity("league_created", { league_id: league.id, league_name: league.name, format });
 
     // Pre-listed clubs are added as registered teams. For every other
-    // format, fixtures are NOT generated yet — the league stays open for
+    // format, fixtures are NOT generated yet â€” the league stays open for
     // registration so the admin gets a chance to remove any club before
     // starting, and "Start league & generate fixtures" does that later.
     // Ladder Cup has no such start step: a club is live on the ladder (i.e.
     // has a ladder_cup_entries row) the instant it's registered, whether
-    // pre-listed here or self-joined later — see ensureLadderCupEntry.
+    // pre-listed here or self-joined later â€” see ensureLadderCupEntry.
     if (teamNames.length >= 2) {
       const { data: newTeams, error: teamErr } = await supabase.from("teams")
         .insert(teamNames.map((n) => ({ league_id: league.id, name: n }))).select();
       if (teamErr) { showToast(`Couldn't add clubs: ${teamErr.message}`); return; }
       if (format === "ladder_cup") {
-        // Same RLS-safe RPC as ensureLadderCupEntry — a raw bulk insert here
+        // Same RLS-safe RPC as ensureLadderCupEntry â€” a raw bulk insert here
         // hits the identical "new row violates row-level security policy"
         // rejection a self-join's insert did, since it's the same table and
         // the same missing client-side INSERT grant.
@@ -5908,12 +5908,12 @@ export default function App() {
         if (entryErr) showToast(`Clubs added, but their ladder entries failed to set up: ${entryErr.message}. Contact support.`);
       }
       showToast(format === "ladder_cup"
-        ? `League created — ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed and live on the ladder now. More clubs can join until entry closes.`
-        : `League created — ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed. Review the list, then start the league when ready.`);
+        ? `League created â€” ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed and live on the ladder now. More clubs can join until entry closes.`
+        : `League created â€” ${teamNames.length} club${teamNames.length === 1 ? "" : "s"} pre-listed. Review the list, then start the league when ready.`);
     } else {
       showToast(format === "ladder_cup"
-        ? "League created — open for registration. Clubs are live on the ladder the moment they join."
-        : "League created — open for registration. Players can join, then you can start it.");
+        ? "League created â€” open for registration. Clubs are live on the ladder the moment they join."
+        : "League created â€” open for registration. Players can join, then you can start it.");
     }
 
     await refreshLeague(league.id);
@@ -5922,20 +5922,20 @@ export default function App() {
   };
 
   // Starting a league (bracket/fixtures generated, entries effectively
-  // locked) can't be undone from inside the app — reversing it means going
+  // locked) can't be undone from inside the app â€” reversing it means going
   // into the database directly to delete fixtures and reset flags. Guarded
   // behind 5 sequential confirmations (not the usual 2-3 for other
   // destructive admin actions) specifically because this one is easy to
   // fire by mistake on the wrong league in a list of several, and because
-  // undoing it isn't a button anywhere — it's a support conversation.
+  // undoing it isn't a button anywhere â€” it's a support conversation.
   const generateFixtures = (league) => {
     const teamCount = (league.teams || []).length;
     requestConfirm([
-      `Start "${league.name}" now? This generates the ${league.format === "knockout" || league.format === "groups_knockout" ? "bracket" : "fixtures"} for the ${teamCount} club${teamCount === 1 ? "" : "s"} currently joined — make sure that's really the right league.`,
-      `Take a second look — is "${league.name}" definitely the league you meant to start, and not a different one?`,
-      `Once started, undoing this isn't a button in the app — it means deleting fixtures directly in the database. Still want to start "${league.name}"?`,
+      `Start "${league.name}" now? This generates the ${league.format === "knockout" || league.format === "groups_knockout" ? "bracket" : "fixtures"} for the ${teamCount} club${teamCount === 1 ? "" : "s"} currently joined â€” make sure that's really the right league.`,
+      `Take a second look â€” is "${league.name}" definitely the league you meant to start, and not a different one?`,
+      `Once started, undoing this isn't a button in the app â€” it means deleting fixtures directly in the database. Still want to start "${league.name}"?`,
       `Any club that joins after this point won't be part of the schedule. Confirmed everyone who should be in is already in?`,
-      `Last check — start "${league.name}" and generate its fixtures now?`,
+      `Last check â€” start "${league.name}" and generate its fixtures now?`,
     ], () => doGenerateFixtures(league));
   };
 
@@ -5949,7 +5949,7 @@ export default function App() {
     // club that joined moments ago but hasn't shown up in this browser's
     // state yet would otherwise be silently left out of the whole schedule.
     const { data: freshTeams, error: teamsErr } = await supabase.from("teams").select("*").eq("league_id", league.id);
-    if (teamsErr) { showToast("Couldn't confirm the current club list — try again."); return; }
+    if (teamsErr) { showToast("Couldn't confirm the current club list â€” try again."); return; }
 
     if (freshTeams.length < 2) { showToast("Need at least 2 registered clubs to start the league."); return; }
     if (league.format === "groups_knockout" && freshTeams.length < 4) {
@@ -5960,7 +5960,7 @@ export default function App() {
       const ok = await persistGroupAssignments(groupAssignments);
       if (!ok) return;
       // Weekend League groups_knockout gets its group_stage_due_at set
-      // automatically to Saturday 17:00 SAST — the group stage auto-ends
+      // automatically to Saturday 17:00 SAST â€” the group stage auto-ends
       // and the knockout bracket auto-generates right at that moment (see
       // 20260925_weekend_league_group_stage_auto_advance.sql), instead of
       // an admin having to set this manually the way every other
@@ -5973,7 +5973,7 @@ export default function App() {
     if (!ok) return;
     if (startsInFinal) await supabase.from("leagues").update({ final_stage_started: true }).eq("id", league.id);
     await refreshLeague(league.id);
-    showToast(`League started — ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
+    showToast(`League started â€” ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
     } finally {
       stageActionInFlight.current.delete(key);
     }
@@ -5982,11 +5982,11 @@ export default function App() {
   const advanceGroupsToKnockout = async (league) => {
     // Same fix as advanceSurvivor: read this league's teams/fixtures fresh
     // right before deciding qualifiers, rather than trusting whatever the
-    // admin's browser already had — a stale copy here can both cut the
+    // admin's browser already had â€” a stale copy here can both cut the
     // wrong clubs from the group stage and seed the knockout bracket wrong.
     const { data: fresh, error: freshErr } = await supabase
       .from("leagues").select("format, groups_count, group_stage_due_at, group_qualifiers, knockout_legs, round_period_hours, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
-    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results â€” try again."); return; }
 
     const groupFixtures = fresh.fixtures.filter((f) => f.stage === 1);
     const unplayed = groupFixtures.filter((f) => !f.played && !isFixtureLocked(f, fresh));
@@ -6000,13 +6000,13 @@ export default function App() {
       if (groupTeams.length === 0) continue;
       const groupFx = groupFixtures.filter((f) => groupTeams.some((t) => t.id === f.home_team_id));
       const standings = computeStandings(groupTeams, groupFx, fresh);
-      // A club auto-eliminated mid-group-stage (findNoShowTeamIds — no-show
+      // A club auto-eliminated mid-group-stage (findNoShowTeamIds â€” no-show
       // penalties) can still out-rank an opponent on points/gd earned
       // before it was cut. Its already-played fixtures still have to count
       // for real toward every OTHER team's standings (hence filtering
       // AFTER computeStandings, not before, which would silently drop
       // those fixtures for everyone), but the eliminated club itself can never
-      // be a qualifier — bug: without this filter, an already-eliminated
+      // be a qualifier â€” bug: without this filter, an already-eliminated
       // club could rank in the top N and get pushed straight into the
       // knockout bracket as a "qualifier" despite eliminated: true.
       const eligible = standings.filter((r) => !r.eliminated);
@@ -6020,12 +6020,12 @@ export default function App() {
       const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds).select("id");
       if (error) { showToast(`Couldn't finalize groups: ${error.message}`); return; }
       if ((updatedRows?.length || 0) < eliminatedIds.length) {
-        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) — groups NOT finalized. Try again or check with support.`);
+        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) â€” groups NOT finalized. Try again or check with support.`);
         return;
       }
     }
 
-    // Pass the outer `league` (not `fresh`) here — knockoutBracketFixtures
+    // Pass the outer `league` (not `fresh`) here â€” knockoutBracketFixtures
     // needs created_by_admin/starts_at to know if this is a weekend league
     // (see isWeekendLeague), and those never go stale the way scores/teams
     // do, so the outer object is fine and `fresh` doesn't select them.
@@ -6038,28 +6038,28 @@ export default function App() {
     if (updErr) { showToast(`Couldn't update league: ${updErr.message}`); return; }
 
     await refreshLeague(league.id);
-    showToast(`Knockout stage started — ${qualifiers.length} clubs through.`);
+    showToast(`Knockout stage started â€” ${qualifiers.length} clubs through.`);
   };
 
   const joinInFlight = useRef(new Set());
   // Same idea as joinInFlight, for the admin-side actions that generate or
-  // advance fixtures — a double-tap here (easy to do on mobile) would fire
+  // advance fixtures â€” a double-tap here (easy to do on mobile) would fire
   // the insert twice before the button's derived `disabled` state catches
   // up, which can duplicate a whole round of fixtures.
   const stageActionInFlight = useRef(new Set());
   // Ladder Cup has no separate "start the league" step (unlike the
-  // fixtures-based formats) — a club is live in the ladder the moment its
+  // fixtures-based formats) â€” a club is live in the ladder the moment its
   // `teams` row exists, whether that happened via a pre-listed club at
   // creation (see createLeague) or a fresh self-join here. Called right
   // after a brand-new team row is inserted; a no-op for every other format.
   // Routed through the ensure_ladder_cup_entry RPC rather than a direct
-  // table insert — regular authenticated clients don't have INSERT
+  // table insert â€” regular authenticated clients don't have INSERT
   // privileges on ladder_cup_entries (RLS rejects it: "new row violates
   // row-level security policy"), so this needs the same SECURITY DEFINER
   // treatment already used for the finalize write. The RPC's own
   // ON CONFLICT DO NOTHING makes a retry (e.g. after a network hiccup, or
   // the backfill effect re-checking a team that got an entry moments ago)
-  // a safe no-op — no error code to swallow client-side anymore.
+  // a safe no-op â€” no error code to swallow client-side anymore.
   const ensureLadderCupEntry = async (league, teamId) => {
     if (league.format !== "ladder_cup" || !teamId) return;
     const { error } = await supabase.rpc("ensure_ladder_cup_entry", { p_league_id: league.id, p_team_id: teamId });
@@ -6068,7 +6068,7 @@ export default function App() {
     }
   };
 
-  // Records "club X has now been shown club Y as a possible opponent" —
+  // Records "club X has now been shown club Y as a possible opponent" â€”
   // starts that pairing's 12h POOL_CONTACT_WINDOW_HOURS clock, if/when it
   // becomes the "live" one (see ladderCupOpponentTimerState /
   // ladder_cup_pool_sightings). Idempotent
@@ -6076,7 +6076,7 @@ export default function App() {
   // client-side against sightings already in league.ladder_cup_pool_sightings
   // before calling this, so it's only actually fired once per newly-seen
   // pairing rather than on every render. Optimistic local insert first, same
-  // reasoning as every other ladder cup write here — the UI (and the
+  // reasoning as every other ladder cup write here â€” the UI (and the
   // dedupe check on the next render) shouldn't have to wait on the network
   // round-trip to know this pairing is now being tracked.
   const ensureLadderCupPoolSighting = async (league, teamId, opponentTeamId) => {
@@ -6095,7 +6095,7 @@ export default function App() {
   };
 
   // Fires the moment a club taps the WhatsApp icon for a specific opponent
-  // on its Ladder Cup board — the signal that exempts THIS opponent from
+  // on its Ladder Cup board â€” the signal that exempts THIS opponent from
   // expiring off the caller's own board (see ladderCupOpponentTimerState).
   const markLadderCupPoolContact = async (league, teamId, opponentTeamId) => {
     if (!teamId || !opponentTeamId || league.format !== "ladder_cup") return;
@@ -6113,9 +6113,9 @@ export default function App() {
 
   // Step 9: opponent slate + challenge flow. Tapping an opponent on the
   // board doesn't create a "pending" invite the way the platform-wide
-  // Ladder's `challenges` table does — Ladder Cup has no accept/decline
+  // Ladder's `challenges` table does â€” Ladder Cup has no accept/decline
   // step (see the ruleset: matching is by ladder-points band, not mutual
-  // consent) — so this goes straight to a `ladder_cup_matches` row with
+  // consent) â€” so this goes straight to a `ladder_cup_matches` row with
   // home/away already decided. That row IS the "challenge is live" state;
   // there's no separate table for it.
   const ladderCupPendingMatchWith = (league, myTeamId, opponentTeamId) =>
@@ -6126,9 +6126,9 @@ export default function App() {
 
   const initiateLadderCupMatch = async (league, myTeamId, opponentTeamId) => {
     if (!myTeamId || !opponentTeamId) return;
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new matches."); return; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” no new matches."); return; }
     // Belt-and-suspenders against a double-tap creating two rows for the
-    // same pairing before refreshLeague's response lands — the DB has no
+    // same pairing before refreshLeague's response lands â€” the DB has no
     // unique constraint on this table (a rematch after a finalized result
     // is legitimate), so the check has to happen here too (the RPC below
     // re-checks it server-side against the race a client-only check can't
@@ -6138,16 +6138,16 @@ export default function App() {
       return;
     }
     // Routed through the initiate_ladder_cup_match RPC rather than a direct
-    // insert — same RLS-safe pattern as ensure_ladder_cup_entry (see
+    // insert â€” same RLS-safe pattern as ensure_ladder_cup_entry (see
     // supabase/migrations/20260815_ladder_cup_match_rpc.sql). Home/away is
     // now decided inside the function, so the client's own assignHomeTeam
-    // call is gone — its result would have no bearing on what's actually
+    // call is gone â€” its result would have no bearing on what's actually
     // inserted.
     const { data, error } = await supabase.rpc("initiate_ladder_cup_match",
       { p_league_id: league.id, p_team_id: myTeamId, p_opponent_team_id: opponentTeamId });
     if (error) {
       // The client-side ladderCupPendingMatchWith check above is only as
-      // fresh as this league's last refreshLeague — if a match was created
+      // fresh as this league's last refreshLeague â€” if a match was created
       // in a session/tab that didn't feed back into this one, the RPC's own
       // "already set up" guard catches what the client-side check missed.
       // Treat it the same way as if the client-side check had caught it
@@ -6162,11 +6162,11 @@ export default function App() {
       return;
     }
     await refreshLeague(league.id);
-    showToast("Challenge set up — go play it.");
+    showToast("Challenge set up â€” go play it.");
   };
 
   // Either side can back out of a match that hasn't had its length set yet
-  // (no result exists to protect at that point — recordLadderCupWin only
+  // (no result exists to protect at that point â€” recordLadderCupWin only
   // ever runs on a completed result, so nothing on the standings depends
   // on this row). Once a length's set the row stays as-is; result logging
   // (step 10) is what moves it forward from there.
@@ -6180,16 +6180,16 @@ export default function App() {
   // Full round-trip conversion between a raw ladder_cup_entries row and the
   // pure engine's entry shape. The standings table's own mapper
   // (toLadderCupEngineEntries in LeagueDetail.jsx) only carries the handful
-  // of fields rendering needs — recordLadderCupWin needs the complete
+  // of fields rendering needs â€” recordLadderCupWin needs the complete
   // shape (w/l/streak/status/second-life state/badge counts), so this is a
   // separate, fuller mapper living next to the handler that actually
-  // writes results back. badge_walkover isn't part of the round trip —
+  // writes results back. badge_walkover isn't part of the round trip â€”
   // recordLadderCupWin never touches it, that's step 12's column.
   const ladderCupEntryFromRow = (row, clubName) => ({
     club_id: row.team_id,
     club_name: clubName,
     pts: row.pts, w: row.w, l: row.l, d: row.d || 0, gd: row.gd, streak: row.streak,
-    // Separate from pts — see formats/ladderCup.js. Falls back to the
+    // Separate from pts â€” see formats/ladderCup.js. Falls back to the
     // starting rating for any row written before this column existed.
     ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
     status: row.status,
@@ -6204,7 +6204,7 @@ export default function App() {
       second_life: row.badge_second_life,
       bounty_hunter: row.badge_bounty_hunter,
     },
-    // Step 14 (rebirth) — display-only, see formats/ladderCup.js. Falls
+    // Step 14 (rebirth) â€” display-only, see formats/ladderCup.js. Falls
     // back for any row written before these columns existed.
     rebirth_count: row.rebirth_count || 0,
     past_lives: row.past_lives || [],
@@ -6224,20 +6224,20 @@ export default function App() {
     updated_at: new Date().toISOString(),
   });
 
-  // Routed through apply_ladder_cup_entry_result (RPC, security definer —
+  // Routed through apply_ladder_cup_entry_result (RPC, security definer â€”
   // see supabase/migrations/20260819_ladder_cup_entry_result_rpc.sql)
   // instead of a direct .update() on ladder_cup_entries. That table
   // already rejects a plain client INSERT under RLS (see
   // ensure_ladder_cup_entry's comment), and the same policy blocks these
-  // UPDATEs too — which is why confirmed results were silently failing to
+  // UPDATEs too â€” which is why confirmed results were silently failing to
   // land on the standings table / elimination status despite the match
   // itself finalizing fine. teamAId/teamBId are the two clubs the RPC
   // checks caller membership against (self-serve paths) alongside
   // leagues.created_by (admin paths).
   // badgeWalkoverCount is passed separately (not part of entry.badge_counts,
   // same asymmetry ladderCupRowPatchFromEntry's callers already work
-  // around — see the badge_walkover comment at the approve-claim call
-  // site below) — defaults to the row's existing count so ordinary result
+  // around â€” see the badge_walkover comment at the approve-claim call
+  // site below) â€” defaults to the row's existing count so ordinary result
   // confirms leave it untouched.
   const applyLadderCupEntryPatch = async (leagueId, entryId, teamAId, teamBId, entry, badgeWalkoverCount) => {
     const { error } = await supabase.rpc("apply_ladder_cup_entry_result", {
@@ -6258,18 +6258,18 @@ export default function App() {
     return !error ? true : (showToast(`Result saved, but the ladder standings couldn't be fully updated: ${error.message}`), false);
   };
 
-  // Step 10: result logging — now a proper submit -> opponent
+  // Step 10: result logging â€” now a proper submit -> opponent
   // confirm-or-dispute -> admin-escalation pipeline, same shape every other
   // result path in this app (result_submissions, challenges,
   // open_challenges) already uses, instead of the old first-submit-wins
   // flow (whoever tapped "Log result" first had it applied to standings
   // instantly, with no chance for the other side to catch a mistake).
   //
-  // submitLadderCupMatchResult (either side, once) reports a scoreline —
+  // submitLadderCupMatchResult (either side, once) reports a scoreline â€”
   // resolves the winner client-side (same validation as before), uploads
   // the mandatory proof photo, and writes it via the submit_ladder_cup_match_result
   // RPC, which is what actually enforces "only one side's report can land"
-  // (see 20260818_ladder_cup_result_pipeline.sql) — nothing here touches
+  // (see 20260818_ladder_cup_result_pipeline.sql) â€” nothing here touches
   // ladder_cup_entries or finalized_at yet.
   //
   // applyLadderCupMatchResult (shared by the opponent's confirm and an
@@ -6280,9 +6280,9 @@ export default function App() {
   // result back to scratch so either side can re-log it, same as
   // disputeChallengeResult/adminRejectChallengeResult do for challenges.
   const submitLadderCupMatchResult = async (league, match, teamId, { homeGoals, awayGoals, isDraw = false, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this result can't be logged."); return false; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” this result can't be logged."); return false; }
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return false; }
-    if (!teamId) { showToast("Couldn't tell which club you're logging this for — try refreshing."); return false; }
+    if (!teamId) { showToast("Couldn't tell which club you're logging this for â€” try refreshing."); return false; }
 
     let winnerSide, decidedBy;
     try {
@@ -6291,7 +6291,7 @@ export default function App() {
       showToast(err.message);
       return false;
     }
-    // Step 16: a draw has no winner side — resolveMatchWinner returns
+    // Step 16: a draw has no winner side â€” resolveMatchWinner returns
     // { isDraw: true, decidedBy: "draw" } instead of a winnerSide for this
     // case, so winnerTeamId stays null.
     const winnerTeamId = decidedBy === "draw" ? null : (winnerSide === "home" ? match.home_team_id : match.away_team_id);
@@ -6319,12 +6319,12 @@ export default function App() {
     });
     if (error) {
       // Mirrors initiateLadderCupMatch's handling of the same race one step
-      // earlier in this flow — someone else's report already landed while
+      // earlier in this flow â€” someone else's report already landed while
       // this one was uploading, so refresh so it renders in the right
       // state instead of showing the raw RPC error.
       if (/already been reported/i.test(error.message)) {
         await refreshLeague(league.id);
-        showToast("They already logged a result for this match — check it below.");
+        showToast("They already logged a result for this match â€” check it below.");
         return false;
       }
       showToast(`Couldn't log the result: ${error.message}`);
@@ -6333,27 +6333,27 @@ export default function App() {
     logActivity("match_result_submitted", { context: "ladder_cup", league_id: league.id, match_id: match.id, winner_team_id: winnerTeamId });
 
     await refreshLeague(league.id);
-    showToast("Result logged — waiting for them to confirm or dispute it.");
+    showToast("Result logged â€” waiting for them to confirm or dispute it.");
     return true;
   };
 
   // Applies a reported-but-unconfirmed result to both clubs' ladder
   // standings and marks the match finalized. Shared by the opponent's
   // confirm (respondLadderCupMatchResult) and an admin's approve
-  // (adminResolveLadderCupMatchResult) — those are the only two ways a
+  // (adminResolveLadderCupMatchResult) â€” those are the only two ways a
   // pending result can become official, so this is the single place that
   // logic lives. Reads the scoreline straight off `match` (already
   // persisted by submitLadderCupMatchResult) rather than taking it as
   // arguments, since by this point it's just replaying what was reported.
   //
   // NOTE: standings (pts/w/l/gd/streak/ladder_rating/badges/second-life
-  // transition) are no longer computed here and pushed to the server —
+  // transition) are no longer computed here and pushed to the server â€”
   // confirm_ladder_cup_match_result now does the full recompute itself,
   // server-side, inside _apply_ladder_cup_match_win (see
   // supabase/migrations/20260833_ladder_cup_server_side_result_and_reward.sql).
   // The old flow computed recordLadderCupWin's result in the browser and
   // pushed the numbers to apply_ladder_cup_entry_result, which trusted
-  // them outright — any signed-in member of either club could call that
+  // them outright â€” any signed-in member of either club could call that
   // RPC directly with fabricated numbers. This function's only job now is
   // to trigger the confirm and reflect what the server actually decided.
   const applyLadderCupMatchResult = async (league, match) => {
@@ -6365,14 +6365,14 @@ export default function App() {
 
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
-    if (!rowsById[match.home_team_id] || !rowsById[match.away_team_id]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
+    if (!rowsById[match.home_team_id] || !rowsById[match.away_team_id]) { showToast("Couldn't find both clubs' ladder entries â€” try refreshing."); return false; }
 
     // Routed through confirm_ladder_cup_match_result (RPC, security
-    // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql
+    // definer â€” see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql
     // and 20260833's server-side recompute) instead of a direct .update()
     // on ladder_cup_matches. The plain client update here was written
     // assuming it'd work the same way for an admin's approve as it does
-    // for the reporting side's own confirm — but an admin resolving an
+    // for the reporting side's own confirm â€” but an admin resolving an
     // *escalated* match (timeout or dispute cap, see
     // ladderCupResultEscalationReason) is often not a member of either
     // club, and nothing ever granted that caller write access to this
@@ -6386,21 +6386,21 @@ export default function App() {
 
     const homeName = teamsById[match.home_team_id]?.name || "Home";
     const awayName = teamsById[match.away_team_id]?.name || "Away";
-    let scoreLine = `${homeName} ${match.home_goals} – ${match.away_goals} ${awayName}`;
+    let scoreLine = `${homeName} ${match.home_goals} â€“ ${match.away_goals} ${awayName}`;
     if (decidedBy === "extra_time") scoreLine += ` (aet ${match.extra_time_home_goals}-${match.extra_time_away_goals})`;
     if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
     if (isDraw) scoreLine += " (draw)";
-    await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, match.proof_url, true, null, null, match.id);
+    await postComment(league, `Ladder Cup â€” ${scoreLine}`, null, null, match.proof_url, true, null, null, match.id);
 
     if (isDraw) {
-      // Neither side is eliminated or offered a second life on a draw —
+      // Neither side is eliminated or offered a second life on a draw â€”
       // nothing to read back, unlike the win/loss path below.
       await refreshLeague(league.id);
-      showToast(`Result confirmed — draw, both clubs get ${LADDER_CUP_RULES.DRAW_POINTS} pts.`);
+      showToast(`Result confirmed â€” draw, both clubs get ${LADDER_CUP_RULES.DRAW_POINTS} pts.`);
       return true;
     }
 
-    // Read back the loser's post-confirm status for the toast — the
+    // Read back the loser's post-confirm status for the toast â€” the
     // server (not this client) decided whether that was elimination or a
     // second-life offer, so ask it rather than recomputing locally.
     const { data: loserRowAfter } = await supabase
@@ -6408,24 +6408,24 @@ export default function App() {
 
     await refreshLeague(league.id);
     showToast(loserRowAfter?.status === "eliminated"
-      ? `Result confirmed — ${teamsById[loserTeamId]?.name || "they"} are eliminated.`
+      ? `Result confirmed â€” ${teamsById[loserTeamId]?.name || "they"} are eliminated.`
       : loserRowAfter?.status === "pending_second_life"
-      ? `Result confirmed — ${teamsById[loserTeamId]?.name || "they"} have 24h to accept a second life.`
+      ? `Result confirmed â€” ${teamsById[loserTeamId]?.name || "they"} have 24h to accept a second life.`
       : "Result confirmed.");
     return true;
   };
 
-  // Wipes a reported-but-unconfirmed result back to scratch — same shape
+  // Wipes a reported-but-unconfirmed result back to scratch â€” same shape
   // as disputeChallengeResult, but also bumps result_dispute_count so
   // ladderCupResultEscalationReason can send a match straight to the admin
   // queue once it's been disputed too many times (see
   // LADDER_CUP_DISPUTE_ESCALATION_THRESHOLD), same benefit-of-the-doubt
   // rule league fixtures already give a fixture that keeps getting
   // rejected. finalized_at was never set on a merely-pending result, so
-  // there's nothing to unwind there — only the reported fields need
+  // there's nothing to unwind there â€” only the reported fields need
   // clearing.
   const clearLadderCupMatchResult = async (league, match) => {
-    // Same fix as confirm_ladder_cup_match_result just above — a plain
+    // Same fix as confirm_ladder_cup_match_result just above â€” a plain
     // client update failed the same way for a non-participant admin
     // rejecting an escalated match, so this goes through an RPC too. See
     // supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql.
@@ -6436,12 +6436,12 @@ export default function App() {
     return !error;
   };
 
-  // The player who *didn't* report the score confirms or disputes it —
+  // The player who *didn't* report the score confirms or disputes it â€”
   // enforced here (teamId must be the match's other side, not the
   // reporter) and should be enforced again in RLS (result_reported_by_team_id
   // <> the acting club) so a reporter can't confirm their own number. Once
   // challengeResultConfirmExpired(match) is true this stops being offered
-  // client-side (see LadderCupOpponentRow) — from there it's admin-only
+  // client-side (see LadderCupOpponentRow) â€” from there it's admin-only
   // via adminResolveLadderCupMatchResult below.
   const respondLadderCupMatchResult = async (league, match, teamId, accept) => {
     if (!teamId || match.result_status !== "pending") return;
@@ -6451,14 +6451,14 @@ export default function App() {
       return;
     }
     const ok = await clearLadderCupMatchResult(league, match);
-    if (!ok) { showToast("Couldn't dispute the result — try refreshing."); return; }
+    if (!ok) { showToast("Couldn't dispute the result â€” try refreshing."); return; }
     await refreshLeague(league.id);
-    showToast("Result disputed — ask them to re-log it.");
+    showToast("Result disputed â€” ask them to re-log it.");
   };
 
   // Admin-only fallback once ladderCupResultEscalationReason(match) is
   // truthy (opponent had their window/dispute allowance and it wasn't
-  // resolved) — same two outcomes as the opponent's own confirm/dispute,
+  // resolved) â€” same two outcomes as the opponent's own confirm/dispute,
   // just triggered by an admin reviewing the screenshot directly instead.
   const adminResolveLadderCupMatchResult = async (league, match, approve) => {
     if (approve) {
@@ -6466,27 +6466,27 @@ export default function App() {
       return;
     }
     const ok = await clearLadderCupMatchResult(league, match);
-    if (!ok) { showToast("Couldn't reject the result — try refreshing."); return; }
+    if (!ok) { showToast("Couldn't reject the result â€” try refreshing."); return; }
     await refreshLeague(league.id);
-    showToast("Result rejected — they'll need to log it again.");
+    showToast("Result rejected â€” they'll need to log it again.");
   };
 
   // Step 11: second-life accept. Accepting ends the 24h window immediately
   // and re-enters the ladder at pts minus winScaledFee(SECOND_LIFE_
-  // DEDUCTION, entry.w) (floored at 0, per acceptSecondLife) — there's no
+  // DEDUCTION, entry.w) (floored at 0, per acceptSecondLife) â€” there's no
   // decline button anymore (see LadderCupSecondLifeOffer); not accepting
   // before the window lapses is how you decline. That lapse is handled by
   // a separate lazy check elsewhere (a direct ladder_cup_entries update
-  // once second_life_expires_at has passed, not a call through here) — the
+  // once second_life_expires_at has passed, not a call through here) â€” the
   // `accept = false` branch below is no longer reachable from any UI path,
   // kept only in case a future admin tool needs to force-decline on a
   // club's behalf.
   const respondLadderCupSecondLife = async (league, teamId, accept) => {
     if (!league || !teamId) return;
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — second life offers are closed."); return; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” second life offers are closed."); return; }
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
-    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+    if (!row) { showToast("Couldn't find your ladder entry â€” try refreshing."); return; }
     if (row.status !== "pending_second_life") return;
 
     const entry = ladderCupEntryFromRow(row, teamsById[teamId]?.name || "Unknown club");
@@ -6496,7 +6496,7 @@ export default function App() {
     if (!ok) return;
     // Records which way this club's one-and-only second-life offer actually
     // went (see supabase/migrations/20260821_ladder_cup_second_life_history.sql)
-    // — without this, a future correction to an earlier match couldn't tell
+    // â€” without this, a future correction to an earlier match couldn't tell
     // a replay whether this club accepted or declined when it replays this
     // loss again. Best-effort: a failure here shouldn't block the
     // accept/decline itself, which already landed via applyLadderCupEntryPatch.
@@ -6506,20 +6506,20 @@ export default function App() {
     });
     if (historyErr) console.error("Couldn't record second-life response history:", historyErr.message);
     await refreshLeague(league.id);
-    showToast(accept ? `Back in it — re-entered at ${updated.pts} pts.` : "Second life declined — you're eliminated from this cup.");
+    showToast(accept ? `Back in it â€” re-entered at ${updated.pts} pts.` : "Second life declined â€” you're eliminated from this cup.");
   };
 
   // Step 14: rebirth. A fully eliminated club (second life already spent,
   // or its first offer declined/expired) never stopped showing on the
-  // standings table — it just dropped out of matchmaking, same as any
+  // standings table â€” it just dropped out of matchmaking, same as any
   // other "eliminated" row. This is the missing other half: let that club
-  // choose to rejoin — now for a flat LADDER_CUP_REBIRTH_FEE_NETS (6N)
+  // choose to rejoin â€” now for a flat LADDER_CUP_REBIRTH_FEE_NETS (6N)
   // "buy your life back" fee, charged atomically with the reset inside
   // rebirth_ladder_cup_entry() itself (see
-  // supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) — nothing to
+  // supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) â€” nothing to
   // debit client-side here. reborn() (formats/ladderCup.js) archives the
   // finished life and resets live stats to a fresh day-one run; the RPC
-  // is what actually persists it — same RLS-safe pattern as every other
+  // is what actually persists it â€” same RLS-safe pattern as every other
   // ladder_cup_entries write, self-serve only (no admin path; reviving
   // your own club isn't something an admin does on your behalf). badge_walkover isn't part of
   // the engine's badge_counts (see applyLadderCupEntryPatch's comment on
@@ -6527,10 +6527,10 @@ export default function App() {
   // straight off the row, before it's sent to the RPC.
   const rejoinLadderCup = async (league, teamId) => {
     if (!league || !teamId) return;
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — rebirth is closed."); return; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” rebirth is closed."); return; }
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
-    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+    if (!row) { showToast("Couldn't find your ladder entry â€” try refreshing."); return; }
     if (row.status !== "eliminated") return;
 
     const clubName = teamsById[teamId]?.name || "Unknown club";
@@ -6559,13 +6559,13 @@ export default function App() {
   // Unlock one more opponent on the challenge board for
   // LADDER_CUP_OPPONENT_SLOT_FEE_NETS (1N), via buy_ladder_cup_opponent_slot
   // (see supabase/migrations/20260904_ladder_cup_opponent_slot_purchase.sql).
-  // Nothing to compute or debit client-side — the RPC charges and bumps
+  // Nothing to compute or debit client-side â€” the RPC charges and bumps
   // purchased_opponent_slots atomically; refreshing the league afterward
   // is what actually reveals the next row on LadderCupOpponentBoard.
   const buyLadderCupOpponentSlot = async (league, teamId) => {
     if (!league || !teamId) return;
     const row = (league.ladder_cup_entries || []).find((r) => r.team_id === teamId);
-    if (!row) { showToast("Couldn't find your ladder entry — try refreshing."); return; }
+    if (!row) { showToast("Couldn't find your ladder entry â€” try refreshing."); return; }
 
     const { error } = await supabase.rpc("buy_ladder_cup_opponent_slot", {
       p_entry_id: row.id, p_league_id: league.id, p_team_id: teamId,
@@ -6578,11 +6578,11 @@ export default function App() {
     await refreshLeague(league.id);
   };
 
-  // Step 12: walkover claims — claim with screenshot proof, straight to
+  // Step 12: walkover claims â€” claim with screenshot proof, straight to
   // admin review. No messaging step, no wait: the button uploads a
   // screenshot and creates the claim (already at pending_review) in one
   // go. Routed through the claim_ladder_cup_walkover RPC rather than a
-  // direct insert — same RLS-safe pattern as ensure_ladder_cup_entry and
+  // direct insert â€” same RLS-safe pattern as ensure_ladder_cup_entry and
   // initiate_ladder_cup_match (see
   // supabase/migrations/20260821_ladder_cup_walkover_claim_direct.sql).
   // The DB's partial unique index on (claimant_team_id, target_team_id)
@@ -6593,7 +6593,7 @@ export default function App() {
   // and getOpponentPool shows at most 10.
   const claimLadderCupWalkover = async (league, myTeamId, opponentTeamId, file) => {
     if (!myTeamId || !opponentTeamId) return;
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — no new walkover claims."); return; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” no new walkover claims."); return; }
     if (!file) { showToast("Attach a screenshot before submitting the claim."); return; }
 
     const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
@@ -6601,14 +6601,14 @@ export default function App() {
     const path = `${session.user.id}/walkover-${myTeamId}-${opponentTeamId}-${Date.now()}.${ext}`;
     let proofUrl;
     try {
-      // Mobile networks can stall a fetch indefinitely with no error — wrap
+      // Mobile networks can stall a fetch indefinitely with no error â€” wrap
       // in withTimeout so a bad connection surfaces a toast (and clears the
-      // button's "Submitting…" state) instead of hanging forever. See
+      // button's "Submittingâ€¦" state) instead of hanging forever. See
       // src/utils/withTimeout.js.
       proofUrl = await withTimeout(
         uploadToR2("result-proofs", path, compressed),
         25000,
-        "Upload timed out — check your connection and try again."
+        "Upload timed out â€” check your connection and try again."
       );
     } catch (uploadErr) {
       showToast(`Couldn't upload screenshot: ${uploadErr.message}`);
@@ -6631,13 +6631,13 @@ export default function App() {
           p_claimed_at: claim.claimed_at, p_proof_url: claim.proof_url,
         }),
         15000,
-        "The claim timed out — check your connection and try again."
+        "The claim timed out â€” check your connection and try again."
       ));
     } catch (timeoutErr) {
       // The screenshot's already uploaded and the RPC call may or may not
-      // have landed server-side by the time this fires — don't let the
+      // have landed server-side by the time this fires â€” don't let the
       // user assume it silently failed and re-submit blind.
-      showToast(`${timeoutErr.message} If you retry and see "already got an open claim", the first one went through — no need to resubmit.`);
+      showToast(`${timeoutErr.message} If you retry and see "already got an open claim", the first one went through â€” no need to resubmit.`);
       return;
     }
     if (error) {
@@ -6646,18 +6646,18 @@ export default function App() {
     }
     logActivity("walkover_claim_submitted", { league_id: league.id, target_team_id: opponentTeamId });
     await refreshLeague(league.id);
-    showToast("Walkover claim submitted — waiting on admin review.");
+    showToast("Walkover claim submitted â€” waiting on admin review.");
   };
 
   // Admin approval: flips the claim, then applies the walkover exactly the
-  // way LADDER_CUP_INTEGRATION.md's own sample does — recordLadderCupWin
+  // way LADDER_CUP_INTEGRATION.md's own sample does â€” recordLadderCupWin
   // with isWalkover: true, base 3pts only, and the target goes through the
   // same loss/second-life path a played defeat would. badge_walkover isn't
   // part of recordLadderCupWin's round trip (see ladderCupRowPatchFromEntry's
   // comment above) so it's bumped here, the one place a walkover win is
   // actually recorded.
   const approveLadderCupWalkoverClaim = async (league, claimRow) => {
-    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this claim can no longer be approved."); return; }
+    if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed â€” this claim can no longer be approved."); return; }
     try {
       approveWalkoverClaim(claimRow);
     } catch (err) {
@@ -6666,7 +6666,7 @@ export default function App() {
     }
 
     // Routed through approve_ladder_cup_walkover_claim (RPC, security
-    // definer) — it creates the ladder_cup_matches row itself and
+    // definer) â€” it creates the ladder_cup_matches row itself and
     // delegates to _apply_ladder_cup_match_win, the same authoritative
     // path a played/decider match win goes through, so standings, elo,
     // badges (badge_walkover included), and Nets crediting all happen
@@ -6679,10 +6679,10 @@ export default function App() {
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const winnerName = teamsById[claimRow.claimant_team_id]?.name || "A club";
     const loserName = teamsById[claimRow.target_team_id]?.name || "their opponent";
-    await postComment(league, `Ladder Cup — walkover win for ${winnerName} over ${loserName}`, null, null, claimRow.proof_url, true, null, null);
+    await postComment(league, `Ladder Cup â€” walkover win for ${winnerName} over ${loserName}`, null, null, claimRow.proof_url, true, null, null);
 
     await refreshLeague(league.id);
-    showToast("Walkover approved — result applied to the ladder.");
+    showToast("Walkover approved â€” result applied to the ladder.");
   };
 
   const applyLadderCupWalkoverRejection = async (league, claimRow) => {
@@ -6692,7 +6692,7 @@ export default function App() {
       showToast(err.message);
       return;
     }
-    // Routed through reject_ladder_cup_walkover_claim (RPC) — same
+    // Routed through reject_ladder_cup_walkover_claim (RPC) â€” same
     // server-side pending_review + admin/league-creator checks as the
     // approve path, instead of a bare client .update().
     const { error } = await supabase.rpc("reject_ladder_cup_walkover_claim", { p_claim_id: claimRow.id });
@@ -6714,7 +6714,7 @@ export default function App() {
     try {
     const league = (leagues || []).find((l) => l.id === leagueId);
     if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
-      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+      showToast("This Ladder Cup has already reached its cutoff â€” no new clubs can join.");
       return;
     }
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return; }
@@ -6727,7 +6727,7 @@ export default function App() {
     if (league.league_type === "fun") {
       const activeFunLeague = blockingLeagueFor(activeFunLeaguesByKind(leagues, session), league);
       if (activeFunLeague) {
-        showToast(`You're still active in "${activeFunLeague.name}" — join another ${formatKindLabel(league.format)} league once your club there is eliminated, or that league finishes.`);
+        showToast(`You're still active in "${activeFunLeague.name}" â€” join another ${formatKindLabel(league.format)} league once your club there is eliminated, or that league finishes.`);
         return;
       }
     }
@@ -6738,7 +6738,7 @@ export default function App() {
     if (match) {
       const alreadyClaimed = league.members.some((m) => m.team_id === match.id);
       if (alreadyClaimed) {
-        showToast(`"${match.name}" is already claimed by another member in this league — contact the league admin.`);
+        showToast(`"${match.name}" is already claimed by another member in this league â€” contact the league admin.`);
         return;
       }
     } else if (!started) {
@@ -6747,7 +6747,7 @@ export default function App() {
         .select().single();
       if (teamErr) {
         if (teamErr.code === "23505") {
-          showToast(`"${profile.efootball_username}" is already registered in this league — contact the league admin if that's a mistake.`);
+          showToast(`"${profile.efootball_username}" is already registered in this league â€” contact the league admin if that's a mistake.`);
         } else {
           showToast(`Couldn't register your club: ${teamErr.message}`);
         }
@@ -6758,7 +6758,7 @@ export default function App() {
     // Ladder Cup: every claimed-or-created team needs a ladder_cup_entries
     // row before it shows up anywhere ladder-related (standings, Find your
     // opponent, the opponent board). This used to only run for brand-new
-    // self-registered teams (the branch above) — a team claimed by name
+    // self-registered teams (the branch above) â€” a team claimed by name
     // from a pre-listed list (the `match` branch) never got one, so a club
     // whose creation-time bulk insert had failed (or was pre-listed before
     // that bulk insert existed) stayed permanently un-placed the moment
@@ -6773,9 +6773,9 @@ export default function App() {
       display_name: profile.efootball_username, phone: profile.phone,
       team_id: match ? match.id : null,
     });
-    if (error) { showToast("Couldn't join — you may already be a member."); return; }
+    if (error) { showToast("Couldn't join â€” you may already be a member."); return; }
 
-    // Nets entry fee — fun leagues only (cash leagues already charge real
+    // Nets entry fee â€” fun leagues only (cash leagues already charge real
     // money via the proof-of-payment flow in startJoin/claimOrRegisterTeam
     // below) and only when actually claiming/registering a team, never for
     // joining as a spectator (team_id: null). See economy.js's
@@ -6783,7 +6783,7 @@ export default function App() {
     //
     // Charged AFTER the member row exists rather than before: nets_debit
     // is self-service (fine to call first), but reversing a charge would
-    // need nets_credit, which is admin-only (20260826/20260831) — a plain
+    // need nets_credit, which is admin-only (20260826/20260831) â€” a plain
     // user can't refund themselves through it. Deleting the just-created
     // membership row on a failed debit is self-service (same RLS leaveLeague
     // already relies on), so failing this way needs no privileged refund
@@ -6801,7 +6801,7 @@ export default function App() {
 
     logActivity("league_joined", { league_id: leagueId, league_name: league.name, as_team: !!match });
     await refreshLeague(leagueId);
-    showToast(match ? `Joined — you're playing as ${match.name}.` : "Joined as a spectator — your username isn't on this league's team list.");
+    showToast(match ? `Joined â€” you're playing as ${match.name}.` : "Joined as a spectator â€” your username isn't on this league's team list.");
     } finally {
       joinInFlight.current.delete(leagueId);
     }
@@ -6825,10 +6825,10 @@ export default function App() {
     if (match) {
       const alreadyClaimed = league.members.some((m) => m.team_id === match.id);
       if (alreadyClaimed) {
-        showToast(`"${match.name}" is already claimed by another member in this league — contact the league admin.`);
+        showToast(`"${match.name}" is already claimed by another member in this league â€” contact the league admin.`);
         return { error: true };
       }
-      // See the matching comment in joinLeague — a claimed pre-listed team
+      // See the matching comment in joinLeague â€” a claimed pre-listed team
       // needs this exactly as much as a freshly created one does.
       await ensureLadderCupEntry(league, match.id);
       return { team: match };
@@ -6839,7 +6839,7 @@ export default function App() {
       .select().single();
     if (teamErr) {
       if (teamErr.code === "23505") {
-        showToast(`"${profile.efootball_username}" is already registered in this league — contact the league admin if that's a mistake.`);
+        showToast(`"${profile.efootball_username}" is already registered in this league â€” contact the league admin if that's a mistake.`);
       } else {
         showToast(`Couldn't register your club: ${teamErr.message}`);
       }
@@ -6850,11 +6850,11 @@ export default function App() {
   };
 
   // Joins a cash league: registers/claims the club, uploads the proof of payment to
-  // private storage, and creates the member row with payment_status "pending" —
+  // private storage, and creates the member row with payment_status "pending" â€”
   // it only becomes a confirmed registration once an admin approves it.
   const joinCashLeague = async (league, fee, rawFile) => {
     if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
-      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+      showToast("This Ladder Cup has already reached its cutoff â€” no new clubs can join.");
       return false;
     }
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return false; }
@@ -6871,7 +6871,7 @@ export default function App() {
     const { error: uploadErr } = await supabase.storage.from("payment-proofs").upload(path, file, { cacheControl: "31536000" });
     if (uploadErr) { showToast(`Couldn't upload proof of payment: ${uploadErr.message}`); return false; }
     // payment-proofs stays on Supabase Storage (private, never went through
-    // the Blob migration — see api/blob-upload.js's comment), so it needs
+    // the Blob migration â€” see api/blob-upload.js's comment), so it needs
     // its own log line here rather than getting it for free from uploadToBlob.
     logActivity("storage_upload", { bucket: "payment-proofs", league_id: league.id, bytes: file.size ?? null });
 
@@ -6881,10 +6881,10 @@ export default function App() {
       team_id: result.team ? result.team.id : null,
       entry_fee: feeNum, payment_status: "pending", payment_proof_path: path,
     });
-    if (error) { showToast("Couldn't submit registration — you may already be a member."); return false; }
+    if (error) { showToast("Couldn't submit registration â€” you may already be a member."); return false; }
 
     await refreshLeague(league.id);
-    showToast(`Registration submitted — ${formatRand(feeNum)} pending admin approval.`);
+    showToast(`Registration submitted â€” ${formatRand(feeNum)} pending admin approval.`);
     return true;
   };
 
@@ -6906,7 +6906,7 @@ export default function App() {
     if (error) { showToast(`Couldn't resubmit: ${error.message}`); return false; }
 
     await refreshLeague(league.id);
-    showToast(`Resubmitted — ${formatRand(feeNum)} pending admin approval.`);
+    showToast(`Resubmitted â€” ${formatRand(feeNum)} pending admin approval.`);
     return true;
   };
 
@@ -6926,7 +6926,7 @@ export default function App() {
     if (!paymentModal) return;
     const { league } = paymentModal;
     if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
-      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+      showToast("This Ladder Cup has already reached its cutoff â€” no new clubs can join.");
       return;
     }
     if (entryClosed(league)) { showToast("Entry to this league has closed."); return; }
@@ -6944,7 +6944,7 @@ export default function App() {
     }).select().single();
 
     if (error) {
-      showToast("Couldn't start registration — you may already be a member.");
+      showToast("Couldn't start registration â€” you may already be a member.");
       return;
     }
 
@@ -6967,11 +6967,11 @@ export default function App() {
       return;
     }
 
-    showToast("Redirecting to secure card checkout — you'll be joined automatically once payment confirms.");
+    showToast("Redirecting to secure card checkout â€” you'll be joined automatically once payment confirms.");
     window.location.href = data.paylinkUrl;
   };
 
-  // Admin/creator only — downloads via a short-lived signed URL since the bucket is private.
+  // Admin/creator only â€” downloads via a short-lived signed URL since the bucket is private.
   const downloadPaymentProof = async (member) => {
     if (!member.payment_proof_path) { showToast("No proof of payment on file for this member."); return; }
     const { data, error } = await supabase.storage.from("payment-proofs").createSignedUrl(member.payment_proof_path, 120);
@@ -6989,7 +6989,7 @@ export default function App() {
     }).eq("id", member.id);
     if (error) { showToast(`Couldn't update payment status: ${error.message}`); return; }
     await refreshLeague(member.league_id);
-    showToast(status === "approved" ? `Payment approved — ${member.display_name} is confirmed.` : `Payment marked as rejected for ${member.display_name}.`);
+    showToast(status === "approved" ? `Payment approved â€” ${member.display_name} is confirmed.` : `Payment marked as rejected for ${member.display_name}.`);
   };
 
   const reviewPayment = (member, status) => {
@@ -6998,43 +6998,43 @@ export default function App() {
       `Reject ${member.display_name}'s club? They'll need to resubmit proof of payment to join.`,
       `Are you sure? Their registration will be marked as rejected.`,
       `Really sure you want to reject ${member.display_name}?`,
-      `Last check before rejecting ${member.display_name} — still want to continue?`,
-      `Final confirmation — click to reject ${member.display_name}'s club.`,
+      `Last check before rejecting ${member.display_name} â€” still want to continue?`,
+      `Final confirmation â€” click to reject ${member.display_name}'s club.`,
     ], () => applyPaymentReview(member, status));
   };
 
-  // Fired when an admin taps the WhatsApp icon next to a member — flags that
+  // Fired when an admin taps the WhatsApp icon next to a member â€” flags that
   // member red (for every admin) for WA_REMINDER_WINDOW_MS. Just "someone
-  // messaged them recently" — not tied to a fixture due date, so it fires
+  // messaged them recently" â€” not tied to a fixture due date, so it fires
   // every time regardless of the member's or league's state.
   //
   // This write races the browser navigating away to open WhatsApp (the
   // link's href starts loading the instant it's tapped). On some phones the
   // tab/page context survives that handoff long enough for a normal
   // supabase-js call to finish; on others it gets torn down first and the
-  // write is silently cut off mid-flight — same code, purely device/browser
+  // write is silently cut off mid-flight â€” same code, purely device/browser
   // timing. A raw fetch with keepalive:true is what a normal client update
   // can't do: it tells the browser to keep the request alive independent of
   // the page's lifecycle, so it still lands even if this tab is unloaded a
   // moment later. Scoped to just this call (not the shared supabase client)
-  // since keepalive requests cap out at 64KB — fine for this tiny patch, but
+  // since keepalive requests cap out at 64KB â€” fine for this tiny patch, but
   // wrong to apply blanket to calls elsewhere that upload scoreboard photos.
   //
   // IMPORTANT: the token comes straight from the `session` state already
-  // held by this component — never `await supabase.auth.getSession()` here.
+  // held by this component â€” never `await supabase.auth.getSession()` here.
   // That call can itself trigger a real (non-keepalive) network request to
   // refresh a near-expired token, and if THAT gets cut off by the same
   // navigation race, the actual write never even starts. Reading `session`
-  // synchronously keeps this to exactly one network call — the keepalive
-  // one — instead of stacking a second, unprotected one in front of it.
+  // synchronously keeps this to exactly one network call â€” the keepalive
+  // one â€” instead of stacking a second, unprotected one in front of it.
   const markWaReminder = async (member) => {
     const token = session?.access_token;
-    if (!token) { console.warn("[wa-reminder] skipped — no session token"); return; }
+    if (!token) { console.warn("[wa-reminder] skipped â€” no session token"); return; }
     const sentAt = new Date().toISOString();
 
     // Update the highlight LOCALLY, immediately, before firing the network
     // call. On mobile, tapping this icon hands off to the WhatsApp app right
-    // away — the browser tab can get backgrounded mid-request, which can cut
+    // away â€” the browser tab can get backgrounded mid-request, which can cut
     // off the full loadLeagues() re-fetch this used to depend on to show the
     // highlight. That made the write land in Supabase (visible on next
     // manual reload) while the screen itself never visibly updated. Setting
@@ -7060,7 +7060,7 @@ export default function App() {
         },
         body: JSON.stringify({ wa_reminder_due_at: sentAt }),
       });
-      // TEMP DEBUG — remove once confirmed working. keepalive responses can't
+      // TEMP DEBUG â€” remove once confirmed working. keepalive responses can't
       // always be read, but when they can, this surfaces the real failure
       // (missing column, RLS rejection, etc.) instead of eating it silently.
       if (!res.ok) {
@@ -7072,14 +7072,14 @@ export default function App() {
     } catch (err) {
       console.error("[wa-reminder] PATCH threw", err);
       // Local highlight already applied above, so the admin still sees it
-      // even if this network call got cut off by the app handoff — no toast
+      // even if this network call got cut off by the app handoff â€” no toast
       // here on purpose, same as before, so it doesn't interrupt the send.
     }
   };
 
   // Manually clears a member's WhatsApp "reminded" highlight before its
   // normal WA_REMINDER_WINDOW_MS auto-clear (see markWaReminder /
-  // isWaReminderActive above) — e.g. once the admin knows the member has
+  // isWaReminderActive above) â€” e.g. once the admin knows the member has
   // replied or sorted themselves out and the red flag is no longer useful.
   // No navigation race here (unlike markWaReminder, this button doesn't
   // hand off to WhatsApp), so a normal supabase-js call is fine.
@@ -7094,9 +7094,9 @@ export default function App() {
     if (error) { console.error("[wa-reminder] clear failed", error); showToast(`Couldn't clear the highlight: ${error.message}`); }
   };
 
-  // Bulk version of clearWaReminder — clears every currently-highlighted
+  // Bulk version of clearWaReminder â€” clears every currently-highlighted
   // member in one league at once, e.g. after a round of messaging is done
-  // and the admin wants a clean slate rather than clicking each × one at
+  // and the admin wants a clean slate rather than clicking each Ã— one at
   // a time.
   const clearAllWaReminders = async (league) => {
     setLeagues((prev) => (prev || []).map((lg) => (
@@ -7107,11 +7107,11 @@ export default function App() {
   };
 
   // Admin/creator entering a result directly (no approval step needed, it's
-  // their own call) — but a photo of the final scoreboard is required here
+  // their own call) â€” but a photo of the final scoreboard is required here
   // too, same as submitMatchResult's rule for regular players. Once saved,
   // it's posted to the comments as scoreline + photo, same as an approved
   // player submission, so the evidence is visible to the whole league either way.
-  // Shared by every path that can finish a knockout-bracket fixture —
+  // Shared by every path that can finish a knockout-bracket fixture â€”
   // admin direct entry (recordResult), player-submit-then-admin-approve
   // (approveResult), and opponent-confirms (respondToResultSubmission's
   // accept branch). All three end with the fixture row holding a final
@@ -7121,7 +7121,7 @@ export default function App() {
   const applyKnockoutElimination = async (league, fixture, homeScore, awayScore, pensHome = null, pensAway = null) => {
     const inKnockoutBracket = league.format === "knockout" || (league.format === "groups_knockout" && league.final_stage_started);
     if (!inKnockoutBracket || !fixture.away_team_id) return;
-    // Fetch this tie's leg(s) fresh — not from local `league.fixtures` —
+    // Fetch this tie's leg(s) fresh â€” not from local `league.fixtures` â€”
     // so a leg completed earlier (but not yet reflected in this browser's
     // state) doesn't make an already-finished tie look incomplete and
     // silently skip elimination.
@@ -7141,7 +7141,7 @@ export default function App() {
     const [teamA, teamB] = Object.keys(totals);
     // Level on aggregate outside the final just leaves both sides as they
     // are (advanceKnockout lets both through when the round advances). In
-    // the final, a penalty score — if one's been entered — decides it now.
+    // the final, a penalty score â€” if one's been entered â€” decides it now.
     const isFinal = isFinalRoundFixtures(tieFixtures);
     let winnerId = null, loserId = null;
     if (totals[teamA] !== totals[teamB]) {
@@ -7157,7 +7157,7 @@ export default function App() {
     }
     if (winnerId) {
       // Explicitly set BOTH sides' elimination status from this tie's
-      // outcome — not just marking the loser eliminated. This matters
+      // outcome â€” not just marking the loser eliminated. This matters
       // when a result gets corrected after the fact (admin re-logs a
       // new score on an already-decided tie, like here): without also
       // resetting the winner back to not-eliminated, a team that was
@@ -7165,19 +7165,19 @@ export default function App() {
       // eliminated forever, even once the correction says they won.
       const { error: elimLoserErr } = await supabase.from("teams").update({ eliminated: true }).eq("id", loserId);
       const { error: elimWinnerErr } = await supabase.from("teams").update({ eliminated: false }).eq("id", winnerId);
-      if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated — check permissions.");
+      if (elimLoserErr || elimWinnerErr) showToast("Result saved, but a club's elimination status couldn't be fully updated â€” check permissions.");
     }
   };
 
   const recordResult = async (league, fixture, homeScore, awayScore, file = null, pensHome = null, pensAway = null) => {
     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return; }
     // Goes through record_fixture_result (see supabase/migrations/20260829_record_fixture_result_rpc.sql)
-    // instead of a plain client .update() — same score-sanity checks
+    // instead of a plain client .update() â€” same score-sanity checks
     // (no negative scores, penalty scores can't be level) the
     // player-submission paths already have, which the old raw update let
     // slip past silently. RLS already restricted this write to the
     // league's creator or an admin either way, so this isn't an
-    // authorization change — the RPC still allows re-recording an
+    // authorization change â€” the RPC still allows re-recording an
     // already-played fixture, same as before, so admin corrections keep working.
     const { error } = await supabase.rpc("record_fixture_result", {
       p_fixture_id: fixture.id, p_home_score: homeScore, p_away_score: awayScore, p_pens_home: pensHome, p_pens_away: pensAway,
@@ -7187,11 +7187,11 @@ export default function App() {
     await applyKnockoutElimination(league, fixture, homeScore, awayScore, pensHome, pensAway);
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
-    await postComment(league, `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`, null, file, null, true, null, fixture.id);
+    await postComment(league, `Matchday ${fixture.round} â€” ${homeName} ${homeScore} â€“ ${awayScore} ${awayName}`, null, file, null, true, null, fixture.id);
     await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", fixture.id);
-    showToast(outcome ? `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName} — ${outcome}` : `Saved: ${homeName} ${homeScore} – ${awayScore} ${awayName}`);
+    showToast(outcome ? `Saved: ${homeName} ${homeScore} â€“ ${awayScore} ${awayName} â€” ${outcome}` : `Saved: ${homeName} ${homeScore} â€“ ${awayScore} ${awayName}`);
   };
 
   // A joined, non-managing player's version of recordResult: same score
@@ -7217,13 +7217,13 @@ export default function App() {
       home_score: homeScore, away_score: awayScore, pens_home: pensHome, pens_away: pensAway, photo_path: photoUrl,
     });
     if (error) {
-      if (error.code === "23505") showToast("Someone already submitted a result for this match — it's waiting on their opponent (or an admin) to review.");
+      if (error.code === "23505") showToast("Someone already submitted a result for this match â€” it's waiting on their opponent (or an admin) to review.");
       else showToast(`Couldn't submit result: ${error.message}`);
       return false;
     }
     logActivity("match_result_submitted", { league_id: league.id, fixture_id: fixture.id, home_score: homeScore, away_score: awayScore });
     await refreshLeague(league.id);
-    showToast("Result submitted — pending admin approval.");
+    showToast("Result submitted â€” pending admin approval.");
     return true;
   };
 
@@ -7233,10 +7233,10 @@ export default function App() {
     if (ok) setResultModal(null);
   };
 
-  // Admin/creator only — downloads a submitted result's photo proof via a
+  // Admin/creator only â€” downloads a submitted result's photo proof via a
   // short-lived signed URL, same pattern as downloadPaymentProof.
   const downloadResultProof = async (submission) => {
-    // New rows store a permanent Blob URL directly — open it as-is. Rows
+    // New rows store a permanent Blob URL directly â€” open it as-is. Rows
     // from before the result-proofs migration still hold a Supabase storage
     // path, so fall back to signing those.
     if (submission.photo_path?.startsWith("http")) {
@@ -7248,11 +7248,11 @@ export default function App() {
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
-  // Approving/rejecting both go through security-definer SQL functions —
+  // Approving/rejecting both go through security-definer SQL functions â€”
   // approval needs to atomically update the fixture and post the comment
   // under the player's own identity, which a plain client-side update can't
   // do (see supabase-results-feature.sql). That function predates photo
-  // support though, so its own auto-posted comment is text-only — this adds
+  // support though, so its own auto-posted comment is text-only â€” this adds
   // a second comment carrying the photo (long-lived signed URL, same trick
   // rejectResult uses, since result-proofs is a private bucket).
   const approveResult = async (league, submission) => {
@@ -7260,7 +7260,7 @@ export default function App() {
     if (error) { showToast(`Couldn't approve: ${error.message}`); return; }
 
     // approve_result_submission is a DB-side RPC (not in this repo) that
-    // only copies the score into the fixtures row — it doesn't know about
+    // only copies the score into the fixtures row â€” it doesn't know about
     // knockout elimination, so that has to happen here too, same as
     // recordResult. Without this, a club eliminated via the player-submit
     // -then-admin-approve path never gets its `eliminated` flag flipped and
@@ -7271,7 +7271,7 @@ export default function App() {
     if (submission.photo_path) {
       const homeName = league.teams.find((t) => t.id === fixture?.home_team_id)?.name || "Home";
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
-      // New rows already hold a permanent Blob URL — use it directly. Rows
+      // New rows already hold a permanent Blob URL â€” use it directly. Rows
       // from before the result-proofs migration still hold a Supabase
       // storage path, so fall back to a long-lived signed URL for those.
       let photoUrl = submission.photo_path.startsWith("http") ? submission.photo_path : null;
@@ -7283,7 +7283,7 @@ export default function App() {
       if (photoUrl) {
         await postComment(
           league,
-          `Photo proof for ${submission.submitted_by_username}'s approved result — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+          `Photo proof for ${submission.submitted_by_username}'s approved result â€” Matchday ${fixture?.round} â€” ${homeName} ${submission.home_score} â€“ ${submission.away_score} ${awayName}`,
           null, null, photoUrl, true, null, fixture?.id || null,
         );
       }
@@ -7292,20 +7292,20 @@ export default function App() {
     await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", submission.fixture_id);
-    showToast(outcome ? `Result approved — posted to comments as ${submission.submitted_by_username} — ${outcome}` : `Result approved — posted to comments as ${submission.submitted_by_username}.`);
+    showToast(outcome ? `Result approved â€” posted to comments as ${submission.submitted_by_username} â€” ${outcome}` : `Result approved â€” posted to comments as ${submission.submitted_by_username}.`);
   };
 
   const rejectResult = (league, submission) => {
     requestConfirm([
       `Reject this result submitted by ${submission.submitted_by_username}? They'll be able to resubmit.`,
       `Are you sure? The match will stay unplayed until someone resubmits.`,
-      `Final check — click to reject this result.`,
+      `Final check â€” click to reject this result.`,
     ], async () => {
       const { error } = await supabase.rpc("reject_result_submission", { p_submission_id: submission.id, p_note: null });
       if (error) { showToast(`Couldn't reject: ${error.message}`); return; }
 
       // Post it to comments too, so the league can see the rejected claim and
-      // photo — not just the admin. result-proofs is a private bucket (unlike
+      // photo â€” not just the admin. result-proofs is a private bucket (unlike
       // comment-photos), so this signs the existing file with a long expiry
       // instead of re-uploading it, and reuses that URL as the comment's photo.
       const fixture = league.fixtures.find((f) => f.id === submission.fixture_id);
@@ -7313,7 +7313,7 @@ export default function App() {
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       let photoUrl = null;
       if (submission.photo_path) {
-        // New rows already hold a permanent Blob URL — use it directly.
+        // New rows already hold a permanent Blob URL â€” use it directly.
         // Rows from before the result-proofs migration still hold a
         // Supabase storage path, so fall back to a long-lived signed URL.
         if (submission.photo_path.startsWith("http")) {
@@ -7326,23 +7326,23 @@ export default function App() {
       }
       await postComment(
         league,
-        `${submission.submitted_by_username}'s result was rejected — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+        `${submission.submitted_by_username}'s result was rejected â€” Matchday ${fixture?.round} â€” ${homeName} ${submission.home_score} â€“ ${submission.away_score} ${awayName}`,
         null, null, photoUrl, true,
       );
 
       await refreshLeague(league.id);
-      showToast("Result rejected — posted to comments.");
+      showToast("Result rejected â€” posted to comments.");
     });
   };
 
-  // The opponent's side of a pending submission — same two outcomes as the
+  // The opponent's side of a pending submission â€” same two outcomes as the
   // admin approve/reject above, but scoped so only the player on the other
   // side of that specific fixture can act (enforced server-side in
   // respond_to_result_submission, not just by which button the UI shows).
   // Confirming behaves like approveResult (fixture gets updated, photo proof
   // gets posted to comments); disputing behaves like rejectResult. Either
   // way the confirmation/dispute comment posts under the opponent's own
-  // identity — since they're the one actually clicking the button, that
+  // identity â€” since they're the one actually clicking the button, that
   // doesn't need the security-definer identity trick approveResult uses.
   const respondToResultSubmission = (league, submission, accept) => {
     const post = async () => {
@@ -7361,7 +7361,7 @@ export default function App() {
       const awayName = league.teams.find((t) => t.id === fixture?.away_team_id)?.name || "Away";
       let photoUrl = null;
       if (submission.photo_path) {
-        // New rows already hold a permanent Blob URL — use it directly.
+        // New rows already hold a permanent Blob URL â€” use it directly.
         // Rows from before the result-proofs migration still hold a
         // Supabase storage path, so fall back to a long-lived signed URL.
         if (submission.photo_path.startsWith("http")) {
@@ -7375,31 +7375,31 @@ export default function App() {
       await postComment(
         league,
         accept
-          ? `Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName} (confirmed by opponent)`
-          : `${submission.submitted_by_username}'s result was disputed by their opponent — Matchday ${fixture?.round} — ${homeName} ${submission.home_score} – ${submission.away_score} ${awayName}`,
+          ? `Matchday ${fixture?.round} â€” ${homeName} ${submission.home_score} â€“ ${submission.away_score} ${awayName} (confirmed by opponent)`
+          : `${submission.submitted_by_username}'s result was disputed by their opponent â€” Matchday ${fixture?.round} â€” ${homeName} ${submission.home_score} â€“ ${submission.away_score} ${awayName}`,
         null, null, photoUrl, true, null, accept ? (fixture?.id || null) : null,
       );
 
       await refreshLeague(league.id);
-      showToast(accept ? "Result confirmed — posted to comments." : "Result disputed — they'll need to resubmit.");
+      showToast(accept ? "Result confirmed â€” posted to comments." : "Result disputed â€” they'll need to resubmit.");
     };
 
     if (accept) { post(); return; }
     requestConfirm([
       `Dispute this result submitted by ${submission.submitted_by_username}? They'll be able to resubmit.`,
       `Are you sure? The match will stay unplayed until someone resubmits.`,
-      `Final check — click to dispute this result.`,
+      `Final check â€” click to dispute this result.`,
     ], post);
   };
 
   const advanceKnockout = async (league) => {
     // Same fix as advanceSurvivor/advanceGroupsToKnockout: read this
     // league's fixtures fresh right before deciding round winners. Working
-    // off stale local data here is the worst version of this bug — it can
+    // off stale local data here is the worst version of this bug â€” it can
     // advance the wrong team to the next round entirely.
     const { data: fresh, error: freshErr } = await supabase
       .from("leagues").select("knockout_legs, round_period_hours, fixtures(*)").eq("id", league.id).single();
-    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results â€” try again."); return; }
 
     // Pure knockout leagues run their whole bracket in stage 1; groups_knockout
     // leagues only enter the bracket once the group stage (stage 1) is done,
@@ -7417,7 +7417,7 @@ export default function App() {
       (ties[key] = ties[key] || []).push(f);
     });
 
-    // Whether this round IS the final — see isFinalRoundFixtures. Only the
+    // Whether this round IS the final â€” see isFinalRoundFixtures. Only the
     // final ever needs a single decisive winner (via penalties); every
     // earlier round just advances both sides on a level tie, so points
     // earned by drawing at home and away aren't wasted on a coin-flip edit.
@@ -7425,11 +7425,11 @@ export default function App() {
 
     const winners = [];
     // A tie where every leg went unplayed past its deadline is level on
-    // aggregate for the same reason both sides no-showed — nobody actually
+    // aggregate for the same reason both sides no-showed â€” nobody actually
     // played to earn advancement, so both clubs are knocked out instead.
     const bothEliminatedIds = [];
     // deciderInserts: non-final ties still level after the configured home
-    // & away legs. A decider leg gets added for each — its score folds
+    // & away legs. A decider leg gets added for each â€” its score folds
     // straight into `totals` above once played (both sides' prior legs
     // were exactly equal, so adding the decider's score to each total is
     // mathematically identical to just comparing the decider alone), so no
@@ -7450,7 +7450,7 @@ export default function App() {
         if (allLegsNoShow) { bothEliminatedIds.push(teamA, teamB); return; }
         if (isFinal || configuredLegs === 1) {
           // The final always needs exactly one winner, and a single-leg
-          // config has no second leg to fall back on either — both fall
+          // config has no second leg to fall back on either â€” both fall
           // back to penalties instead of inserting a leg that was never
           // configured to exist.
           const pensA = pensAggregateFor(legs, teamA);
@@ -7464,7 +7464,7 @@ export default function App() {
         }
         // Non-final, multi-leg, and still level. If no decider leg has been added yet
         // for this tie (legs.length is still just the configured home &
-        // away count), add one now instead of letting both clubs through —
+        // away count), add one now instead of letting both clubs through â€”
         // the round can't advance until it's played (the unplayed check at
         // the top of this function already catches that on the next call,
         // since the decider becomes part of this round's fixtures).
@@ -7477,7 +7477,7 @@ export default function App() {
           return;
         }
         // A decider has already been played and is folded into `totals`
-        // above, but it's STILL level — same fallback as the final: a
+        // above, but it's STILL level â€” same fallback as the final: a
         // penalty score on the decider leg decides it.
         const pensA = pensAggregateFor(legs, teamA);
         const pensB = pensAggregateFor(legs, teamB);
@@ -7495,22 +7495,22 @@ export default function App() {
       const ok = await insertChunked("fixtures", deciderInserts, showToast);
       if (!ok) return;
       await refreshLeague(league.id);
-      showToast(`${deciderInserts.length} tie${deciderInserts.length === 1 ? "" : "s"} still level after home & away — a decider match has been added.`);
+      showToast(`${deciderInserts.length} tie${deciderInserts.length === 1 ? "" : "s"} still level after home & away â€” a decider match has been added.`);
       return;
     }
-    if (tieNeedsPens) { showToast("A tie is level after regulation — enter the penalty shootout score to decide a winner."); return; }
+    if (tieNeedsPens) { showToast("A tie is level after regulation â€” enter the penalty shootout score to decide a winner."); return; }
 
     if (bothEliminatedIds.length > 0) {
       const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", bothEliminatedIds).select("id");
       if (error) { showToast(`Couldn't eliminate the no-show teams: ${error.message}`); return; }
       if ((updatedRows?.length || 0) < bothEliminatedIds.length) {
-        showToast(`Only ${updatedRows?.length || 0} of ${bothEliminatedIds.length} no-show clubs were actually eliminated (permissions issue) — round NOT advanced. Try again or check with support.`);
+        showToast(`Only ${updatedRows?.length || 0} of ${bothEliminatedIds.length} no-show clubs were actually eliminated (permissions issue) â€” round NOT advanced. Try again or check with support.`);
         return;
       }
     }
     if (winners.length <= 1) { showToast("This league already has a champion."); return; }
 
-    // dueOffset: 1 — dueBase here is "right now" (the moment this round is
+    // dueOffset: 1 â€” dueBase here is "right now" (the moment this round is
     // generated), not the bracket's original start date, so the new round's
     // deadline should always be exactly one period out from now, regardless
     // of what the actual round number (maxRound + 1) is. See
@@ -7522,27 +7522,27 @@ export default function App() {
     await refreshLeague(league.id);
     const eliminatedTiesCount = bothEliminatedIds.length / 2;
     showToast(eliminatedTiesCount > 0
-      ? `Round ${maxRound + 1} created. ${bothEliminatedIds.length} club${bothEliminatedIds.length === 1 ? "" : "s"} eliminated — no-show on both sides in ${eliminatedTiesCount} tie${eliminatedTiesCount === 1 ? "" : "s"}.`
+      ? `Round ${maxRound + 1} created. ${bothEliminatedIds.length} club${bothEliminatedIds.length === 1 ? "" : "s"} eliminated â€” no-show on both sides in ${eliminatedTiesCount} tie${eliminatedTiesCount === 1 ? "" : "s"}.`
       : `Round ${maxRound + 1} created.`);
   };
 
   const advanceSurvivor = async (league) => {
     // Pull this league's teams/fixtures fresh right before deciding who's
-    // cut — not the `league` object already sitting in the browser's state.
+    // cut â€” not the `league` object already sitting in the browser's state.
     // If a result was recorded (by anyone, in any tab) since this admin's
     // page last loaded, the local copy is stale, and computing the cut
-    // against it can eliminate a club that had actually won its match —
+    // against it can eliminate a club that had actually won its match â€”
     // it just hadn't shown up on this screen yet.
     const { data: fresh, error: freshErr } = await supabase
       .from("leagues").select("current_stage, final_stage_started, teams!teams_league_id_fkey(*), fixtures(*)").eq("id", league.id).single();
-    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results — try again."); return; }
+    if (freshErr || !fresh) { showToast("Couldn't confirm the latest results â€” try again."); return; }
 
     const currentStage = fresh.current_stage;
     const stageFixtures = fresh.fixtures.filter((f) => f.stage === currentStage);
     const unplayed = stageFixtures.filter((f) => !f.played && !isExpired(f));
     if (unplayed.length > 0) { showToast(`${unplayed.length} match(es) in this stage still need a result.`); return; }
 
-    if (fresh.final_stage_started) { showToast("This is the final stage — check the table for the champion."); return; }
+    if (fresh.final_stage_started) { showToast("This is the final stage â€” check the table for the champion."); return; }
 
     const activeTeams = fresh.teams.filter((t) => !t.eliminated);
     const standings = computeStandings(activeTeams, stageFixtures);
@@ -7556,7 +7556,7 @@ export default function App() {
       const { data: updatedRows, error } = await supabase.from("teams").update({ eliminated: true }).in("id", eliminatedIds).select("id");
       if (error) { showToast(`Couldn't eliminate teams: ${error.message}`); return; }
       if ((updatedRows?.length || 0) < eliminatedIds.length) {
-        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) — stage NOT advanced. Try again or check with support.`);
+        showToast(`Only ${updatedRows?.length || 0} of ${eliminatedIds.length} clubs were actually eliminated (permissions issue) â€” stage NOT advanced. Try again or check with support.`);
         return;
       }
     }
@@ -7577,7 +7577,7 @@ export default function App() {
     if (updErr) { showToast(`Couldn't update league: ${updErr.message}`); return; }
 
     await refreshLeague(league.id);
-    showToast(goingFinal ? `Final stage started — ${remainingIds.length} clubs remain.` : `Stage ${nextStage} started — ${remainingIds.length} clubs remain.`);
+    showToast(goingFinal ? `Final stage started â€” ${remainingIds.length} clubs remain.` : `Stage ${nextStage} started â€” ${remainingIds.length} clubs remain.`);
   };
 
   const advanceStage = async (league) => {
@@ -7606,18 +7606,18 @@ export default function App() {
       `Remove ${team.name} from this league? This can't be undone.`,
       `Are you sure? ${team.name}'s results and standings will be deleted too.`,
       `Really sure you want ${team.name} gone for good?`,
-      `Last check before removing ${team.name} — still want to continue?`,
-      `Final confirmation — click to permanently remove ${team.name}.`,
+      `Last check before removing ${team.name} â€” still want to continue?`,
+      `Final confirmation â€” click to permanently remove ${team.name}.`,
     ], async () => {
       await supabase.from("members").delete().eq("team_id", team.id);
 
-      // A team that has already played can't be hard-deleted — its id is
+      // A team that has already played can't be hard-deleted â€” its id is
       // referenced (NOT NULL, no cascade) by ladder_cup_matches' home/away
       // team columns and by regular league fixtures, so deleting it here
       // would hit the same 23503 foreign-key error removeTeam used to
       // throw. Once match history exists, we just drop the membership
       // (already done above) and leave the now-unclaimed teams row in
-      // place — same as leaveLeague already does post-start.
+      // place â€” same as leaveLeague already does post-start.
       const [{ count: matchCount }, { count: fixtureCount }] = await Promise.all([
         supabase.from("ladder_cup_matches").select("id", { count: "exact", head: true })
           .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`),
@@ -7637,7 +7637,7 @@ export default function App() {
 
   // Self-service version of removeTeam, for a regular member leaving on their own.
   // Always deletes their own membership row. Only also deletes their club if the
-  // league hasn't started yet (fixtures.length === 0) — once fixtures exist, wiping
+  // league hasn't started yet (fixtures.length === 0) â€” once fixtures exist, wiping
   // the team would blow away results/standings for everyone else, so post-start we
   // just drop their membership and leave the (now unclaimed) club record in place.
   const leaveLeague = (league) => {
@@ -7646,7 +7646,7 @@ export default function App() {
     requestConfirm([
       `Leave "${league.name}"? This can't be undone.`,
       `Are you sure? You'll lose access to this league.`,
-      `Final check — click to leave "${league.name}" for good.`,
+      `Final check â€” click to leave "${league.name}" for good.`,
     ], async () => {
       const team = membership.team_id ? league.teams.find((t) => t.id === membership.team_id) : null;
       const { error } = await supabase.from("members").delete().eq("id", membership.id);
@@ -7682,11 +7682,11 @@ export default function App() {
   };
 
   // Lets whoever can manage the league (its creator, or an admin) push the
-  // entry-close and kickoff dates back — plans change, a WhatsApp group is
+  // entry-close and kickoff dates back â€” plans change, a WhatsApp group is
   // slow to fill, whatever. Both are required, same as at creation, so a
   // league can never end up with one set and the other blank.
   // Admin fill-in for leagues created before creator_phone existed (or before
-  // the creator had a phone on their profile) — without this, the "message
+  // the creator had a phone on their profile) â€” without this, the "message
   // the admin about this result" WhatsApp icon on the Results tab has no
   // number to link to and just stays hidden (see CommentRow in
   // LeagueDetail.jsx). Setting it here retroactively turns that icon on for
@@ -7701,7 +7701,7 @@ export default function App() {
 
   const updateLeagueSchedule = async (league, { entryClosesAt, startsAt }) => {
     // Survival Ladder Cup never has an entry-close date (see entryClosed
-    // above) — LeagueScheduleLine doesn't even offer the field for this
+    // above) â€” LeagueScheduleLine doesn't even offer the field for this
     // format, so entryClosesAt arrives empty here and is kept null rather
     // than parsed into an invalid date.
     const { error } = await supabase.from("leagues")
@@ -7716,7 +7716,7 @@ export default function App() {
   };
 
   // Lets whoever can manage the league change how many days each round gets
-  // once fixtures open, but only while the league hasn't started yet — once
+  // once fixtures open, but only while the league hasn't started yet â€” once
   // generateFixtures has run, every fixture's due_at is already baked in from
   // whatever the period was at that moment, so changing it after the fact
   // wouldn't touch existing fixtures and would just be confusing.
@@ -7729,7 +7729,7 @@ export default function App() {
 
   // Groups + Knockout only: the shared deadline for the whole group stage.
   // Individual matchday due_at values stay advisory (they still show as
-  // "Due X" and never block a submission or auto-score a loss) — this date
+  // "Due X" and never block a submission or auto-score a loss) â€” this date
   // is the real cutoff. Pass null to clear it.
   const updateLeagueGroupStageDueAt = async (league, dueAt) => {
     const { error } = await supabase.from("leagues")
@@ -7740,9 +7740,9 @@ export default function App() {
   };
 
   // Admin-triggered "Start League" for Survival Ladder Cup. Ladder Cup has
-  // no fixtures to generate (see generateFixtures — that's for the other
+  // no fixtures to generate (see generateFixtures â€” that's for the other
   // formats only) and clubs are already live on the ladder the moment they
-  // join, so starting it doesn't create anything — it just flips a status
+  // join, so starting it doesn't create anything â€” it just flips a status
   // marker (ladder_cup_started_at) so the league shows as "Started" instead
   // of "Open for joining". Registration is NOT affected: clubs keep
   // registering right up to the cutoff/finalize either way (see
@@ -7757,7 +7757,7 @@ export default function App() {
         .update({ ladder_cup_started_at: new Date().toISOString() }).eq("id", league.id);
       if (error) { showToast(`Couldn't start the league: ${error.message}`); return; }
       await refreshLeague(league.id);
-      showToast(`League started with ${league.teams.length} clubs on the ladder — new clubs can still join anytime before the cutoff.`);
+      showToast(`League started with ${league.teams.length} clubs on the ladder â€” new clubs can still join anytime before the cutoff.`);
     } finally {
       stageActionInFlight.current.delete(key);
     }
@@ -7765,7 +7765,7 @@ export default function App() {
 
 
   // Overrides the auto-generated WhatsApp nudge text (see adminStatusMessage)
-  // for every member's WA icon in this league. Persists on the league row —
+  // for every member's WA icon in this league. Persists on the league row â€”
   // once set, every member gets this exact wording (with {name} swapped in
   // per member) instead of the default status-based message, and it stays
   // that way until whoever manages the league edits or clears it again; it
@@ -7775,16 +7775,16 @@ export default function App() {
     const { error } = await supabase.from("leagues").update({ wa_message_template: text || null }).eq("id", league.id);
     if (error) { showToast(`Couldn't save the member message: ${error.message}`); return; }
     await refreshLeague(league.id);
-    showToast(text ? "Member message updated — used for every WhatsApp nudge in this league from now on." : "Member message cleared — back to the default auto message.");
+    showToast(text ? "Member message updated â€” used for every WhatsApp nudge in this league from now on." : "Member message cleared â€” back to the default auto message.");
   };
 
   // Broadcasts the league's saved custom message to every member right
-  // now, at no cost — no SMS/WhatsApp Business API involved. It posts as
+  // now, at no cost â€” no SMS/WhatsApp Business API involved. It posts as
   // an auto-generated comment (same "isResult" mechanic already used for
   // auto-posted matchday results and no-show eliminations) in the league's
   // own comment feed, which every member already reads. That's the honest
   // tradeoff: it's instant and genuinely free, but it's an in-app
-  // notification, not a push straight to someone's phone — a member sees
+  // notification, not a push straight to someone's phone â€” a member sees
   // it the next time they open this league, same as every other
   // auto-posted comment in the app. Requires a saved custom message first:
   // there's no single sensible "broadcast" version of the default status
@@ -7796,7 +7796,7 @@ export default function App() {
     requestConfirm([
       `Notify all ${memberCount} member${memberCount === 1 ? "" : "s"} of "${league.name}" right now? Posts your saved message to the league's comment feed for everyone to see.`,
     ], async () => {
-      // No single member to derive {round}/{due} from for a broadcast — use
+      // No single member to derive {round}/{due} from for a broadcast â€” use
       // the league's own next unplayed fixture (same source as the editor's
       // preview) so a template written with those placeholders still reads
       // sensibly when posted to the whole feed at once.
@@ -7813,24 +7813,24 @@ export default function App() {
       const posted = await postComment(league, body, null, null, null, true);
       if (posted) {
         // Same red "reminded" highlight the per-member WhatsApp icon sets
-        // (see markWaReminder) — a broadcast is still notifying every
+        // (see markWaReminder) â€” a broadcast is still notifying every
         // member, so every member's row gets flagged too.
         (league.members || []).forEach((mm) => markWaReminder(mm));
-        showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} — posted to the league feed.`);
+        showToast(`Notified ${memberCount} member${memberCount === 1 ? "" : "s"} â€” posted to the league feed.`);
       }
     });
   };
 
-  // Comments live on every league regardless of stage — still filling up (pending)
-  // or already generated fixtures (created/active) — so members can talk trash,
+  // Comments live on every league regardless of stage â€” still filling up (pending)
+  // or already generated fixtures (created/active) â€” so members can talk trash,
   // coordinate, or ask questions in one place. Anyone who can see the league can
   // read comments; only members/creator/admins can post (enforced by RLS too).
-  // A comment or reply can optionally carry one photo — normally a fresh upload
+  // A comment or reply can optionally carry one photo â€” normally a fresh upload
   // to the public "comment-photos" bucket (same pattern as league photos), but
   // photoUrl lets a caller pass an already-resolved URL instead (used when
   // rejecting a result: it reuses the submission's existing photo rather than
   // re-uploading it).
-  // voiceClip is { blob, duration } from useVoiceRecorder — optional, same
+  // voiceClip is { blob, duration } from useVoiceRecorder â€” optional, same
   // as the photo, and stands alone fine (a voice-only comment with no text).
   const postComment = async (league, body, parentComment = null, file = null, photoUrl = null, isResult = false, voiceClip = null, fixtureId = null, ladderCupMatchId = null) => {
     const trimmed = (body || "").trim();
@@ -7865,7 +7865,7 @@ export default function App() {
     return true;
   };
 
-  // Admin-only correction for a posted result line (Results tab) — edits the
+  // Admin-only correction for a posted result line (Results tab) â€” edits the
   // comment's text in place. This does NOT touch the fixture's home_score/
   // away_score or recompute standings/knockout progress; it only fixes what's
   // displayed in the results history. If the actual match score was wrong,
@@ -7874,19 +7874,19 @@ export default function App() {
     const trimmed = newBody.trim();
     if (!trimmed) return false;
     // .select().maybeSingle() is deliberate: Supabase RLS blocks a row
-    // silently — an update whose WHERE clause the policy filters out still
+    // silently â€” an update whose WHERE clause the policy filters out still
     // comes back with no error, just 0 rows affected. Without asking for
     // the row back we'd show "Result updated" even when nothing changed.
     const { data, error } = await supabase.from("comments").update({ body: trimmed }).eq("id", comment.id).select().maybeSingle();
     if (error) { showToast(`Couldn't update result: ${error.message}`); return false; }
-    if (!data) { showToast("Couldn't update — you don't have permission to edit this result (check the comments UPDATE policy in Supabase)."); return false; }
+    if (!data) { showToast("Couldn't update â€” you don't have permission to edit this result (check the comments UPDATE policy in Supabase)."); return false; }
     await refreshLeague(league.id);
     showToast("Result updated.");
     return true;
   };
 
   // Admin correction for a posted result that's linked to a real fixture
-  // (comment.fixture_id — only set on results posted after the fixture_id
+  // (comment.fixture_id â€” only set on results posted after the fixture_id
   // column was added; see supabase-edit-results-followup.sql). Unlike
   // editComment above, this actually rewrites the fixture's home_score/
   // away_score (so standings/knockout progress move too), re-runs the same
@@ -7902,13 +7902,13 @@ export default function App() {
       .update({ home_score: homeScore, away_score: awayScore })
       .eq("id", fixture.id).select().maybeSingle();
     if (fxError) { showToast(`Couldn't update the match score: ${fxError.message}`); return false; }
-    if (!fxData) { showToast("Couldn't update — you don't have permission to edit this fixture (check the fixtures UPDATE policy in Supabase)."); return false; }
+    if (!fxData) { showToast("Couldn't update â€” you don't have permission to edit this fixture (check the fixtures UPDATE policy in Supabase)."); return false; }
 
     await applyKnockoutElimination(league, fixture, homeScore, awayScore, fixture.pens_home, fixture.pens_away);
 
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
-    const newBody = `Matchday ${fixture.round} — ${homeName} ${homeScore} – ${awayScore} ${awayName}`;
+    const newBody = `Matchday ${fixture.round} â€” ${homeName} ${homeScore} â€“ ${awayScore} ${awayName}`;
     const { data: cmData, error: cmError } = await supabase.from("comments").update({ body: newBody }).eq("id", comment.id).select().maybeSingle();
     if (cmError) showToast(`Score saved, but couldn't update the posted text: ${cmError.message}`);
     else if (!cmData) showToast("Score saved, but you don't have permission to edit the posted text (check the comments UPDATE policy).");
@@ -7916,33 +7916,33 @@ export default function App() {
     await refreshLeague(league.id);
     await loadLadder(); // league results count toward ladder points, when eligible (see describeLadderOutcome)
     const outcome = await describeLadderOutcome("fixture", fixture.id);
-    if (!cmError && cmData) showToast(outcome ? `Result updated — ${outcome}` : "Result updated — table refreshed.");
+    if (!cmError && cmData) showToast(outcome ? `Result updated â€” ${outcome}` : "Result updated â€” table refreshed.");
     return true;
   };
 
-  // Admin-only — fully cancels an already-recorded fixture result (as
+  // Admin-only â€” fully cancels an already-recorded fixture result (as
   // opposed to editResultForFixture above, which corrects the score but
   // keeps the fixture played). Puts the fixture back to played=false with
   // no score, so it goes back to the Fixtures tab as either a normal
   // upcoming match or, if its deadline has already passed, an expired one
-  // — isExpired()/isFixtureLocked() derive that purely from played+due_at,
+  // â€” isExpired()/isFixtureLocked() derive that purely from played+due_at,
   // so there's nothing extra to set here for that part.
   //
   // Two more things need undoing alongside the fixture row itself:
-  //   1. Knockout elimination — if this result decided a tie (see
+  //   1. Knockout elimination â€” if this result decided a tie (see
   //      applyKnockoutElimination), both clubs' `eliminated` flags get
   //      reset to false. This is deliberately unconditional rather than
   //      trying to re-derive "was this tie actually decided" from the
   //      other leg: a two-leg tie's outcome depends on BOTH legs, and this
   //      leg's score is what's being erased, so the tie can no longer be
-  //      considered decided either way — same logic the "why explicitly
+  //      considered decided either way â€” same logic the "why explicitly
   //      set both sides" comment in applyKnockoutElimination already
   //      spells out for the mirror-image case.
-  //   2. The auto-posted result comment(s) — the "Matchday N — Home 2 – 1
+  //   2. The auto-posted result comment(s) â€” the "Matchday N â€” Home 2 â€“ 1
   //      Away" row this result generated, plus a photo-proof reply if the
   //      result came in through the approve-submission path. Left in
   //      place, that read like a valid confirmed result with nothing on
-  //      screen to say otherwise. Any replies/reactions on it go with it —
+  //      screen to say otherwise. Any replies/reactions on it go with it â€”
   //      same behavior deleteComment already has for a result row with a
   //      reply thread under it.
   const cancelFixtureResult = (league, fixture) => {
@@ -7950,9 +7950,9 @@ export default function App() {
     const homeName = league.teams.find((t) => t.id === fixture.home_team_id)?.name || "Home";
     const awayName = league.teams.find((t) => t.id === fixture.away_team_id)?.name || "Away";
     requestConfirm([
-      `Cancel this result — Matchday ${fixture.round}: ${homeName} ${fixture.home_score} – ${fixture.away_score} ${awayName}? The match goes back to unplayed.`,
+      `Cancel this result â€” Matchday ${fixture.round}: ${homeName} ${fixture.home_score} â€“ ${fixture.away_score} ${awayName}? The match goes back to unplayed.`,
       `Are you sure? The posted result and any elimination it caused will be undone. This can't be undone itself.`,
-      `Final check — click to permanently cancel this result.`,
+      `Final check â€” click to permanently cancel this result.`,
     ], async () => {
       const { error } = await supabase.rpc("cancel_fixture_result", { p_fixture_id: fixture.id });
       if (error) { showToast(`Couldn't cancel result: ${error.message}`); return; }
@@ -7961,20 +7961,20 @@ export default function App() {
       if (inKnockoutBracket && fixture.away_team_id) {
         const { error: elimErr } = await supabase.from("teams").update({ eliminated: false })
           .in("id", [fixture.home_team_id, fixture.away_team_id]);
-        if (elimErr) showToast("Result cancelled, but a club's elimination status couldn't be reset — check permissions.");
+        if (elimErr) showToast("Result cancelled, but a club's elimination status couldn't be reset â€” check permissions.");
       }
 
       const { error: commentsErr } = await supabase.from("comments").delete()
         .eq("fixture_id", fixture.id).eq("is_result", true);
-      if (commentsErr) showToast("Result cancelled, but the posted result comment couldn't be removed — check permissions.");
+      if (commentsErr) showToast("Result cancelled, but the posted result comment couldn't be removed â€” check permissions.");
 
       await refreshLeague(league.id);
       await loadLadder(); // league results count toward ladder points, when eligible
-      showToast(`Result cancelled — ${homeName} vs ${awayName} is unplayed again.`);
+      showToast(`Result cancelled â€” ${homeName} vs ${awayName} is unplayed again.`);
     });
   };
 
-  // Ladder Cup's version of editResultForFixture — but a Ladder Cup result
+  // Ladder Cup's version of editResultForFixture â€” but a Ladder Cup result
   // can't be corrected the same way a fixture is (overwrite the score,
   // patch two rows). pts/gd/streak/status/badges/ladder_rating are all
   // PATH-DEPENDENT: streak and badges depend on the order matches
@@ -7992,22 +7992,22 @@ export default function App() {
   // onEditLadderCupResult handler wired up from LeagueDetail.
   //
   // Second-life accept/decline/expiry is the one piece of state this
-  // replay can't derive purely from the match/walkover event log — that's
-  // a human decision, not a computed result — so it leans on
+  // replay can't derive purely from the match/walkover event log â€” that's
+  // a human decision, not a computed result â€” so it leans on
   // ladder_cup_second_life_offers (see
   // supabase/migrations/20260821_ladder_cup_second_life_history.sql) to
   // know how each club's one-and-only offer actually went. A club with no
   // history row there (an offer resolved before that migration existed)
   // falls back to its CURRENT second_life_used flag / status, which is a
   // safe stand-in specifically because every club only ever gets one such
-  // offer in its lifetime — that flag alone already records how it went.
+  // offer in its lifetime â€” that flag alone already records how it went.
   const computeLadderCupRecompute = (league) => {
     const teams = league.teams || [];
     const entryRows = league.ladder_cup_entries || [];
     const offersByTeam = Object.fromEntries((league.ladder_cup_second_life_offers || []).map((o) => [o.team_id, o]));
     const teamsById = Object.fromEntries(teams.map((t) => [t.id, t]));
 
-    // Every club with an entry row today gets a fresh, zeroed-out seed —
+    // Every club with an entry row today gets a fresh, zeroed-out seed â€”
     // clubs get an entry the moment they join (ensureLadderCupEntry),
     // independent of whether they've played, so this is the right seed
     // set: every possible winner/loser below already has a row here.
@@ -8015,8 +8015,8 @@ export default function App() {
 
     const events = [];
     for (const m of (league.ladder_cup_matches || [])) {
-      if (!m.finalized_at) continue; // never confirmed, or disputed away — never happened
-      // Step 16 (draws): decided_by === "draw" has no winner_team_id — push
+      if (!m.finalized_at) continue; // never confirmed, or disputed away â€” never happened
+      // Step 16 (draws): decided_by === "draw" has no winner_team_id â€” push
       // a draw event instead of forcing it through the winner/loser shape,
       // otherwise winner_team_id === null !== home_team_id would silently
       // misreplay it as an away win.
@@ -8056,7 +8056,7 @@ export default function App() {
     const walkoverBadgeCount = new Map(); // team_id -> count; recordLadderCupWin doesn't touch this counter itself
 
     for (const ev of events) {
-      // Step 16 (draws): symmetric, no winner/loser — handled entirely
+      // Step 16 (draws): symmetric, no winner/loser â€” handled entirely
       // separately from the win/loss branch below, since recordLadderCupWin
       // trusts winner/loser completely and a draw has neither.
       if (ev.isDraw) {
@@ -8072,14 +8072,14 @@ export default function App() {
 
       const winnerEntry = entries.get(ev.winnerTeamId);
       const loserEntry = entries.get(ev.loserTeamId);
-      // Missing club (removed from the league since?) — skip this one
+      // Missing club (removed from the league since?) â€” skip this one
       // event rather than aborting the whole recompute.
       if (!winnerEntry || !loserEntry) continue;
       // A club that's still sitting on an unresolved second-life offer
-      // can't have a next match in real life — but if the corrected
+      // can't have a next match in real life â€” but if the corrected
       // timeline reshuffled who won an earlier match, that's exactly the
       // state we might be replaying into. Skip rather than feed a
-      // pending_second_life club into another result — same "can't be
+      // pending_second_life club into another result â€” same "can't be
       // matched" rule the real app enforces via getOpponentPool.
       if (winnerEntry.status === "pending_second_life" || loserEntry.status === "pending_second_life") continue;
 
@@ -8101,7 +8101,7 @@ export default function App() {
         } else if (offer?.response_type === "declined" || offer?.response_type === "expired") {
           resolvedLoser = declineOrExpireSecondLife(loser);
         } else if (offer && !offer.responded_at && offer.expires_at && new Date(offer.expires_at) <= new Date()) {
-          // No recorded response, but the 24h window's already lapsed —
+          // No recorded response, but the 24h window's already lapsed â€”
           // same silent-expiry conversion the lazy-expiry effect does on
           // read.
           resolvedLoser = declineOrExpireSecondLife(loser);
@@ -8111,10 +8111,10 @@ export default function App() {
           // a club only ever gets one such offer in its lifetime.
           if (currentRow?.second_life_used) resolvedLoser = acceptSecondLife(loser);
           else if (currentRow?.status === "eliminated") resolvedLoser = declineOrExpireSecondLife(loser);
-          // else: no record either way and the row isn't eliminated —
+          // else: no record either way and the row isn't eliminated â€”
           // treat as a genuinely still-open offer, same as the real-time case below.
         }
-        // else: a real, still-open offer — leave the club pending_second_life.
+        // else: a real, still-open offer â€” leave the club pending_second_life.
       }
       entries.set(ev.loserTeamId, resolvedLoser);
 
@@ -8125,7 +8125,7 @@ export default function App() {
   };
 
   // Runs the replay above and writes the rebuilt table back in one round
-  // trip via bulk_apply_ladder_cup_entries (admin-only RPC — see
+  // trip via bulk_apply_ladder_cup_entries (admin-only RPC â€” see
   // supabase/migrations/20260822_ladder_cup_result_correction.sql).
   const recomputeLadderCupLeague = async (league) => {
     const { entries, walkoverBadgeCount } = computeLadderCupRecompute(league);
@@ -8146,7 +8146,7 @@ export default function App() {
   };
 
   // Admin correction for a posted Ladder Cup result comment
-  // (comment.ladder_cup_match_id) — see the recompute functions above for
+  // (comment.ladder_cup_match_id) â€” see the recompute functions above for
   // why this can't just overwrite the one match's score. Only offered for
   // a regulation-time correction (matches the score-box UI in
   // LeagueDetail's CommentRow); extra time/penalties carry over unchanged
@@ -8163,7 +8163,7 @@ export default function App() {
       decidedBy = "regulation";
       winnerTeamId = homeGoals > awayGoals ? match.home_team_id : match.away_team_id;
     } else if (match.decided_by === "regulation") {
-      showToast("That scoreline is level — this match has no extra time or penalties on record to decide it.");
+      showToast("That scoreline is level â€” this match has no extra time or penalties on record to decide it.");
       return false;
     }
 
@@ -8176,26 +8176,26 @@ export default function App() {
     });
     if (matchErr) { showToast(`Couldn't correct the result: ${matchErr.message}`); return false; }
 
-    // Re-fetch rather than patching the local `league` object by hand —
+    // Re-fetch rather than patching the local `league` object by hand â€”
     // the recompute needs every finalized match/approved walkover claim
     // in the league, not just this one.
     const { data: freshLeague, error: fetchErr } = await supabase.from("leagues").select(LEAGUE_SELECT).eq("id", league.id).maybeSingle();
-    if (fetchErr || !freshLeague) { showToast("Score corrected, but couldn't reload the league to recompute standings — try refreshing."); return false; }
+    if (fetchErr || !freshLeague) { showToast("Score corrected, but couldn't reload the league to recompute standings â€” try refreshing."); return false; }
     const recomputeOk = await recomputeLadderCupLeague(freshLeague);
 
     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
     const homeName = teamsById[match.home_team_id]?.name || "Home";
     const awayName = teamsById[match.away_team_id]?.name || "Away";
-    let scoreLine = `${homeName} ${homeGoals} – ${awayGoals} ${awayName}`;
+    let scoreLine = `${homeName} ${homeGoals} â€“ ${awayGoals} ${awayName}`;
     if (decidedBy === "extra_time") scoreLine += ` (aet ${match.extra_time_home_goals}-${match.extra_time_away_goals})`;
     if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
-    const { data: cmData, error: cmError } = await supabase.from("comments").update({ body: `Ladder Cup — ${scoreLine}` }).eq("id", comment.id).select().maybeSingle();
+    const { data: cmData, error: cmError } = await supabase.from("comments").update({ body: `Ladder Cup â€” ${scoreLine}` }).eq("id", comment.id).select().maybeSingle();
     if (cmError) showToast(`Score saved, but couldn't update the posted text: ${cmError.message}`);
     else if (!cmData) showToast("Score saved, but you don't have permission to edit the posted text (check the comments UPDATE policy).");
 
     await refreshLeague(league.id);
-    if (recomputeOk && !cmError && cmData) showToast("Result corrected — the whole ladder was recomputed from scratch.");
-    else if (recomputeOk) showToast("Standings recomputed — but the posted text couldn't be updated.");
+    if (recomputeOk && !cmError && cmData) showToast("Result corrected â€” the whole ladder was recomputed from scratch.");
+    else if (recomputeOk) showToast("Standings recomputed â€” but the posted text couldn't be updated.");
     return true;
   };
 
@@ -8205,7 +8205,7 @@ export default function App() {
     requestConfirm([
       `Delete this ${noun}? This can't be undone.`,
       `Are you sure? Once it's gone, it's gone for good.`,
-      `Final check — click to permanently delete this ${noun}.`,
+      `Final check â€” click to permanently delete this ${noun}.`,
     ], async () => {
       const { error } = await supabase.from("comments").delete().eq("id", comment.id);
       if (error) { showToast(`Couldn't delete comment: ${error.message}`); return; }
@@ -8214,7 +8214,7 @@ export default function App() {
     });
   };
 
-  // Likes are a simple toggle backed by a unique (comment_id, user_id) row —
+  // Likes are a simple toggle backed by a unique (comment_id, user_id) row â€”
   // insert to like, delete your own row to unlike. No optimistic local state:
   // this app already reloads the full league tree after every mutation, so
   // liking follows the same pattern as everything else here.
@@ -8241,7 +8241,7 @@ export default function App() {
 
   // Reacting to the league itself works exactly like reacting to a comment
   // (same toggle/switch/remove semantics, one row per (league, user)), but
-  // it's open to anyone signed in — not gated by canComment — since the
+  // it's open to anyone signed in â€” not gated by canComment â€” since the
   // general public should be able to react to a league without joining it.
   const toggleLeagueReaction = async (league, reaction) => {
     const mine = (league.league_reactions || []).find((l) => l.user_id === session.user.id);
@@ -8260,7 +8260,7 @@ export default function App() {
     return true;
   };
 
-  // Suggestion box — open to anyone signed in, regardless of whether they've
+  // Suggestion box â€” open to anyone signed in, regardless of whether they've
   // joined or created any league. Write-only from the app's side; suggestions
   // are just read from the Supabase table editor.
   const postSuggestion = async (text) => {
@@ -8270,7 +8270,7 @@ export default function App() {
       user_id: session.user.id, username: profile?.efootball_username || session.user.email, body: trimmed,
     });
     if (error) { showToast(`Couldn't send suggestion: ${error.message}`); return false; }
-    showToast("Thanks — suggestion sent!");
+    showToast("Thanks â€” suggestion sent!");
     return true;
   };
 
@@ -8280,13 +8280,13 @@ export default function App() {
       `Are you sure? Every result and standing in "${league.name}" will be gone for good.`,
       `Really sure? ${league.members.length} member${league.members.length === 1 ? "" : "s"} will lose access to this league.`,
       `This can't be undone once it's done. Still want to delete "${league.name}"?`,
-      `Last check — click to permanently delete "${league.name}".`,
+      `Last check â€” click to permanently delete "${league.name}".`,
     ], async () => {
       const { error } = await supabase.from("leagues").delete().eq("id", league.id);
       if (error) { showToast(`Couldn't delete: ${error.message}`); return; }
       setView("home");
       setActiveLeagueId(null);
-      setLeagues((prev) => (prev || []).filter((l) => l.id !== league.id)); // already gone server-side — no need to refetch
+      setLeagues((prev) => (prev || []).filter((l) => l.id !== league.id)); // already gone server-side â€” no need to refetch
       showToast("League deleted.");
     });
   };
@@ -8294,30 +8294,30 @@ export default function App() {
   const shareLeague = (league) => {
     const url = `${window.location.origin}${window.location.pathname}?league=${league.id}`;
     navigator.clipboard?.writeText(url);
-    showToast("Invite link copied — share it with members who already have access.");
+    showToast("Invite link copied â€” share it with members who already have access.");
   };
 
-  // "Share app" menu item — for both regular users and admins to send
+  // "Share app" menu item â€” for both regular users and admins to send
   // someone the site itself (SITE_URL, same link used in
   // firstMatchdayNote) so they can open it and install the PWA, as
   // opposed to shareLeague above which deep-links an existing member into
   // one specific league they already belong to. navigator.share opens the
-  // device's native share sheet (WhatsApp, SMS, etc.) when available —
+  // device's native share sheet (WhatsApp, SMS, etc.) when available â€”
   // mainly Android/mobile browsers; falls back to a clipboard copy + toast
   // everywhere else (desktop browsers, iOS Safari without Web Share).
   const shareApp = async () => {
     if (navigator.share) {
       try {
-        await navigator.share({ title: "Matchday", text: "Join me on Matchday ⚽", url: SITE_URL });
+        await navigator.share({ title: "Matchday", text: "Join me on Matchday âš½", url: SITE_URL });
         return;
       } catch {
         // User dismissed the share sheet, or the browser claims support
-        // but throws anyway — either way, fall through to the clipboard
+        // but throws anyway â€” either way, fall through to the clipboard
         // copy below rather than leaving them with no feedback at all.
       }
     }
     navigator.clipboard?.writeText(SITE_URL);
-    showToast("App link copied — share it with anyone to get them onto Matchday.");
+    showToast("App link copied â€” share it with anyone to get them onto Matchday.");
   };
 
   if (session === undefined) {
@@ -8335,7 +8335,7 @@ export default function App() {
             onCancel={() => setAuthPrompt(null)}
             onSignIn={(stay) => signInWithGoogle(stay)} />
         )}
-        {/* No app-install nag on the guest/landing page — appPromoOpen is
+        {/* No app-install nag on the guest/landing page â€” appPromoOpen is
             gated on `session` above and can never be true here. A visitor
             who hasn't signed in yet shouldn't be asked to install the app
             before they've even seen what it is; that ask now only shows up
@@ -8349,19 +8349,19 @@ export default function App() {
   if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} userEmail={session.user.email} onSignOut={signOut} />;
 
   // loadRecentResults and loadBoardComments aren't called here even though
-  // this is "opening" the screen — the effects that poll them already fire
+  // this is "opening" the screen â€” the effects that poll them already fire
   // immediately the moment `view` becomes "challenges" (see below), so
   // calling them again here just fired the same two requests twice back to
   // back on every single visit to this screen.
   // Admins get accounts (with phone numbers) loaded alongside the usual
-  // challenge data — feeds the WhatsApp icon on the escalated-results panel
+  // challenge data â€” feeds the WhatsApp icon on the escalated-results panel
   // below, which needs a phone number for whoever reported the disputed
   // result. Non-admins never fetch this (get_all_accounts is admin-gated
   // server-side anyway), same privacy boundary loadChallengeMembers already
   // draws by leaving phone off the everyone-sees-everyone member picker.
   const openChallengesScreen = () => { setView("challenges"); loadChallengeMembers(); loadChallenges(); loadOpenChallenges(); if (isAdmin) loadAccounts(); };
   const openLadderScreen = () => { setView("ladder"); loadLadder(); loadLadderComments(); loadLadderResults(); };
-  // No separate load — completed leagues are just a filter over the same
+  // No separate load â€” completed leagues are just a filter over the same
   // `leagues` list every other screen already has loaded.
   const openCompletedLeaguesScreen = () => setView("completedLeagues");
 
@@ -8373,14 +8373,14 @@ export default function App() {
   const grabbableCount = (openChallenges || []).filter((ch) => ch.status === "open" && ch.creator_id !== session?.user?.id).length;
 
   // Admin-only: cash-league payment proofs still sitting in "pending" across every
-  // league they manage — mirrors LeagueSection's own per-section pendingReviewCount,
+  // league they manage â€” mirrors LeagueSection's own per-section pendingReviewCount,
   // just rolled up app-wide so it can feed the notification bell below without
   // making an admin go hunting section by section to notice one's waiting.
   const adminPendingPaymentCount = isAdmin
     ? (leagues || []).reduce((sum, l) => sum + (l.league_type === "cash" ? (l.members || []).filter((m) => m.payment_status === "pending").length : 0), 0)
     : 0;
 
-  // The notification bell's feed — every entry here is something that needs the
+  // The notification bell's feed â€” every entry here is something that needs the
   // signed-in person's attention specifically, not a general activity log. Built as
   // a plain array (like quickActionItems below) so it's naturally personalized: a
   // non-admin only ever sees their own pending confirmations and open challenges,
@@ -8398,7 +8398,7 @@ export default function App() {
     }] : []),
     ...(isAdmin && adminEscalatedResultCount > 0 ? [{
       id: "admin-escalated", icon: AlertTriangle,
-      text: `${adminEscalatedResultCount} result${adminEscalatedResultCount > 1 ? "s" : ""} escalated — needs admin review`,
+      text: `${adminEscalatedResultCount} result${adminEscalatedResultCount > 1 ? "s" : ""} escalated â€” needs admin review`,
       onClick: openChallengesScreen,
     }] : []),
     ...(isAdmin && adminPendingPaymentCount > 0 ? [{
@@ -8409,22 +8409,22 @@ export default function App() {
   ];
 
   const quickActionItems = [
-    // Admin-only shortcut into the League Ladder admin screen — kept as the
+    // Admin-only shortcut into the League Ladder admin screen â€” kept as the
     // very first entry (ahead of even the promoted "League N" tile below)
     // so admins reach it without hunting through the rest of the dock.
     ...(isAdmin ? [{ icon: Trophy, label: "League Ladder (Admin)", onClick: openLeagueLadderTestScreen }] : []),
-    // First on the list for everyone else — labeled with the player's actual current tier
+    // First on the list for everyone else â€” labeled with the player's actual current tier
     // ("League 3", etc.) once myLeagueLadderMembership has loaded, so it
     // reads as "jump back into your league" rather than a generic entry
     // point. Not yet a member (or still loading): falls back to a plain
     // "League Ladder" label and sends them Home, where LadderLeagueSection
     // has the Join button.
-    // Gets `special: true` — see MenuTile — so this one tile in the grid
+    // Gets `special: true` â€” see MenuTile â€” so this one tile in the grid
     // reads as promoted (gold gradient/shine + display font) rather than an
     // equal-weight launcher like the rest. Not-yet-joined players get
-    // "Free entry" instead of the generic "League Ladder" label — the
+    // "Free entry" instead of the generic "League Ladder" label â€” the
     // bottom league is genuinely 0N to join (see ladderBottomLeagueId
-    // above) — and tapping it goes straight into that league's Join banner
+    // above) â€” and tapping it goes straight into that league's Join banner
     // (LeagueLadderDetail's JoinLadderLeagueBanner) instead of dumping them
     // on Home to go hunt for the join button themselves.
     {
@@ -8468,7 +8468,7 @@ export default function App() {
           onShareApp={shareApp} />
       )}
       {tutorialOpen && <TutorialTour onClose={() => setTutorialOpen(false)} onSetQuickActionsOpen={setQuickActionsOpen} c={c} />}
-      {/* Quick actions — floating on every screen (not gated behind
+      {/* Quick actions â€” floating on every screen (not gated behind
           `view !== "shop"` the way Header is above), so it's reachable no
           matter where in the app someone is. */}
       <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)} items={quickActionItems} c={c} />
@@ -8565,7 +8565,7 @@ export default function App() {
             )}
             {view === "leaderboard" && (
               <Suspense fallback={<Loader c={c} />}>
-                {/* Same quickActionItems the floating dock uses everywhere else —
+                {/* Same quickActionItems the floating dock uses everywhere else â€”
                     minus the "Leaderboard" tile itself, since that would just
                     reopen the screen already open. */}
                 <LeaderboardPage leagues={leagues} session={session} memberAvatars={challengeMembers} myAvatarUrl={profile?.avatar_url} onBack={goBack}
@@ -8680,17 +8680,17 @@ export default function App() {
   );
 }
 
-// The signed-out homepage. This *is* the site's front door now — visitors can
+// The signed-out homepage. This *is* the site's front door now â€” visitors can
 // scroll the whole thing, see live tables and the ladder, and click around
 // freely. Nothing here loads from tables gated to signed-in users; it's all
 // public_* views (granted to anon in Supabase). The only thing this screen
-// does on its own is offer Google sign-in — every actual action (joining a
+// does on its own is offer Google sign-in â€” every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
 function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId }) {
   // Accent color (used for primary buttons/highlights throughout this page)
-  // is picked from ACCENTS and lives in the app root now — see the comment
-  // by accentKey's useState in App() — so whatever a guest picks here is
+  // is picked from ACCENTS and lives in the app root now â€” see the comment
+  // by accentKey's useState in App() â€” so whatever a guest picks here is
   // still in effect the moment they sign in, instead of resetting to gold.
   const [accentPickerOpen, setAccentPickerOpen] = useState(false);
   useEffect(() => {
@@ -8702,7 +8702,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
   const [termsOpen, setTermsOpen] = useState(false);
-  // Guest page starts showing only the quick-actions row — no league/ladder
+  // Guest page starts showing only the quick-actions row â€” no league/ladder
   // content until "Ladder" or "Leagues" is tapped, per request. Local to
   // this component so every fresh visit/reload starts collapsed again.
   const [guestLeaguesRevealed, setGuestLeaguesRevealed] = useState(false);
@@ -8711,7 +8711,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   }, [initialShopProductId]);
 
   // Same real-history treatment as the signed-in app (see App()'s appNav
-  // effects) — a guest opening the shop and swiping back should land on the
+  // effects) â€” a guest opening the shop and swiping back should land on the
   // homepage, not leave the site.
   const guestShopNavFirstRef = useRef(true);
   useEffect(() => {
@@ -8732,7 +8732,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
   useEffect(() => {
-    document.title = shopOpen ? "Department Store" : "Matchday — eFootball Leagues";
+    document.title = shopOpen ? "Department Store" : "Matchday â€” eFootball Leagues";
   }, [shopOpen]);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
@@ -8740,27 +8740,27 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const scrollTo = (ref) => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   // Everything a guest can see lives behind public_* views (granted SELECT
-  // to anon in Supabase) — loaded once here and handed down as props so the
+  // to anon in Supabase) â€” loaded once here and handed down as props so the
   // ladder strip, league sections, and activity feed don't each fire their
   // own round trip, and so the HUD stats can be computed from the same data.
   const [guestData, setGuestData] = useState(null);
 
-  // Every guest page load (every visitor, every refresh — not gated behind
+  // Every guest page load (every visitor, every refresh â€” not gated behind
   // sign-in) used to fire this whole 8-query bundle straight at Supabase
   // from the browser. Per-browser localStorage caching helped repeat visits
   // from the *same* browser, but every new visitor, new browser, or cleared
-  // cache still paid for a fresh round trip — and this data is identical
+  // cache still paid for a fresh round trip â€” and this data is identical
   // for every guest on the platform, so that was redundant work.
   //
   // Now routed through /api/guest-data (see that file): a Vercel serverless
   // function runs the same narrowed queries and returns them behind a
   // Cache-Control header, so Vercel's CDN edge caches the response and
-  // serves it to every guest for the cache window — one Postgres round trip
+  // serves it to every guest for the cache window â€” one Postgres round trip
   // total per window, not one per guest. See api/guest-data.js for the
   // per-query column reasoning (unchanged) and the cache timing.
   //
   // Deferred until guestLeaguesRevealed flips true (Ladder/Leagues tapped)
-  // rather than firing on every guest page load — the HUD banner, Weekend
+  // rather than firing on every guest page load â€” the HUD banner, Weekend
   // League spotlight, ladder strip, league sections, and activity feed are
   // all hidden until then anyway (see the quick-actions section below), so
   // there's no reason to pay for this even from the CDN before anyone asks
@@ -8785,10 +8785,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 
   // Two real products, picked at random, floating on the shop banner below.
   // Deferred until guestLeaguesRevealed, same reasoning as the guestData
-  // fetch above — the shop banner itself is now only rendered once the
+  // fetch above â€” the shop banner itself is now only rendered once the
   // Leagues/Ladder widget is tapped (see ShopBanner below), so there's no
   // reason to hit shop_products before then. Re-picked once per visit off
-  // that fresh list — so a guest landing on the page gets a different pair
+  // that fresh list â€” so a guest landing on the page gets a different pair
   // each time, without needing an account or touching the shop itself.
   const [shopPicks, setShopPicks] = useState(null);
   useEffect(() => {
@@ -8805,7 +8805,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => { cancelled = true; };
   }, [guestLeaguesRevealed]);
 
-  // Guests only ever see non-cash leagues (see the "Leagues" section below) —
+  // Guests only ever see non-cash leagues (see the "Leagues" section below) â€”
   // cash leagues require signing in first. Every guest-facing number (hero
   // stats, empty states) is derived from funLeagues/funLeagueIds so nothing
   // on this page hints that cash leagues exist before sign-in.
@@ -8816,15 +8816,15 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const totalMatches = guestData ? guestData.fixtures.filter((f) => f.played && funLeagueIds.has(f.league_id)).length : 0;
 
   // Weekend League spotlight: whichever fun leagues an admin created either
-  // kick off fresh over the coming Fri–Sun, or already have unplayed matches
-  // due in that window — sorted so whatever's happening soonest leads.
+  // kick off fresh over the coming Friâ€“Sun, or already have unplayed matches
+  // due in that window â€” sorted so whatever's happening soonest leads.
   // Restricted to admin-created leagues (created_by_admin) so this stays a
   // curated, "official" highlight rather than surfacing whatever any member
   // happened to schedule for the weekend. Recomputed from the same
   // guestData already loaded above, no extra round trip.
   const [weekendStart, weekendEnd] = weekendWindow();
   // public_leagues' WHERE clause (is_platform_admin(created_by)) already
-  // restricts every row this view returns to admin-created leagues — it
+  // restricts every row this view returns to admin-created leagues â€” it
   // doesn't select a created_by_admin column at all, so filtering on one
   // here (like Home does against the raw leagues table) would silently
   // zero out every league instead of narrowing anything.
@@ -8844,7 +8844,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     // league.teams / league.fixtures / league.photo_url directly, the way
     // Home's own league objects carry them nested. The guest dataset keeps
     // those as separate top-level arrays instead (same reason PublicLeagueCard
-    // derives leagueTeams/allLeagueFixtures below) — so without this, l.teams
+    // derives leagueTeams/allLeagueFixtures below) â€” so without this, l.teams
     // and l.fixtures are simply undefined here and the card crashes reading
     // .filter off them the moment a weekend league is live for a guest.
     const leagueTeams = guestData.teams.filter((t) => t.league_id === l.id);
@@ -8855,15 +8855,15 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   }, []).sort((a, b) => a.earliest - b.earliest) : [];
   const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
   // The general Leagues list below excludes anything already shown in the
-  // Weekend League spotlight above — so a weekend league gets one true home
+  // Weekend League spotlight above â€” so a weekend league gets one true home
   // on the page instead of appearing twice.
   const otherFunLeagues = funLeagues.filter((l) => !weekendLeagueIds.has(l.id));
 
   return (
     <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
-      {/* Sticky guest header — same shell language as the signed-in Header,
+      {/* Sticky guest header â€” same shell language as the signed-in Header,
           minus anything that needs an account. Sign In only appears once
-          Leagues/Ladder has been tapped (guestLeaguesRevealed) — the
+          Leagues/Ladder has been tapped (guestLeaguesRevealed) â€” the
           quick-actions-only first screen has nothing to sign into yet. */}
       <header className="border-b sticky top-0 backdrop-blur z-40" style={{ borderColor: c.border, background: `${c.bg}F2` }}>
         <div className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -8919,7 +8919,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </Suspense>
         ) : (
           <>
-        {/* Quick actions — the first thing shown on the guest page now, per
+        {/* Quick actions â€” the first thing shown on the guest page now, per
             request. "Ladder"/"Leagues" both reveal the league/ladder content
             below (unmounted, not just hidden, until then); the two
             account-gated tiles still just prompt sign-in as before. */}
@@ -8932,10 +8932,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
 
         {guestLeaguesRevealed && (
         <>
-        {/* Compact HUD banner — same shell the signed-in Home uses (emblem,
+        {/* Compact HUD banner â€” same shell the signed-in Home uses (emblem,
             live-season pulse, stat strip). No CTA button here on purpose:
             this is the "look, it's real and it's live" beat, not the sign-in
-            beat — the header covers anyone in a hurry, and the single strong
+            beat â€” the header covers anyone in a hurry, and the single strong
             CTA lives at the bottom, after there's something to be convinced by. */}
         <section className="relative mt-4 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -8948,29 +8948,29 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
                 </span>
-                Season 2026 · Live
+                Season 2026 Â· Live
               </div>
               <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Run your table. Own your league.</div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? funLeagues.length : "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{guestData ? funLeagues.length : "â€“"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>leagues</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs || "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalClubs || "â€“"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>clubs</div>
               </div>
               <div className="w-px h-7" style={{ background: c.border }} />
               <div className="text-right font-mono leading-tight">
-                <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches || "–"}</div>
+                <div className="font-bold text-sm" style={{ color: c.text }}>{totalMatches || "â€“"}</div>
                 <div className="text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>played</div>
               </div>
             </div>
           </div>
           <div className="relative px-4 pb-3.5">
-            <p className="font-body text-xs" style={{ color: c.textDim }}>Have a look around — everything below is live.</p>
+            <p className="font-body text-xs" style={{ color: c.textDim }}>Have a look around â€” everything below is live.</p>
           </div>
         </section>
 
@@ -8980,10 +8980,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           ) : <div className="pt-8 flex justify-center"><Loader c={c} /></div>}
         </div>
 
-        {/* Weekend League spotlight — now placed below the League Ladder
+        {/* Weekend League spotlight â€” now placed below the League Ladder
             per request (was previously right after the hero, ahead of the
             ladder). Always rendered rather than hidden outside a
-            qualifying window — the League Ladder's own pass inside it
+            qualifying window â€” the League Ladder's own pass inside it
             (LadderWeekendCard) has no weekend window at all, so an empty
             weekendLeagues list no longer means an empty banner. */}
         <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd} override={guestData?.weekendOverride ?? null}
@@ -8998,7 +8998,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           {guestData && otherFunLeagues.length === 0 && (
             <section className="mt-8">
               <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-                No leagues running yet — sign in and start the first one.
+                No leagues running yet â€” sign in and start the first one.
               </div>
             </section>
           )}
@@ -9017,7 +9017,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         </>
         )}
 
-        {/* The one strong CTA on the page — everything above was proof, this
+        {/* The one strong CTA on the page â€” everything above was proof, this
             is the ask. "Stay signed in" lives here too, right next to the
             button it actually affects, instead of floating on its own. */}
         <div className="mt-10 pt-8 border-t flex flex-col items-center text-center" style={{ borderColor: c.border }}>
@@ -9034,13 +9034,13 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </label>
         </div>
 
-        {/* Shop — moved down here, after the sign-in ask rather than
+        {/* Shop â€” moved down here, after the sign-in ask rather than
             leading the page with it, so a first-time visitor sees the
             league/ladder proof and the sign-in CTA before a store pitch.
             Still open to guests with no account needed (see onOpen above),
             it's just no longer competing with "sign in" for top billing.
             Also gated on guestLeaguesRevealed now, same as the rest of the
-            page content above — hidden and unfetched until Leagues/Ladder
+            page content above â€” hidden and unfetched until Leagues/Ladder
             is tapped. */}
         {guestLeaguesRevealed && (
           <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
@@ -9055,8 +9055,8 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   );
 }
 
-// Time-boxed highlight of whatever's happening over the coming Fri–Sun —
-// leagues kicking off fresh, or leagues with matches already due — surfaced
+// Time-boxed highlight of whatever's happening over the coming Friâ€“Sun â€”
+// leagues kicking off fresh, or leagues with matches already due â€” surfaced
 // right after the hero so the "play this weekend" moment doesn't get buried
 // scrolled down with the general Leagues list. items come pre-filtered and
 // sorted (soonest first) from PublicHome's weekendLeagues.
@@ -9093,13 +9093,13 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0" style={{ background: c.surfaceHover, color: c.text }}>
           {isPaused ? (
-            <><Pause size={10} /> Paused{isOverridden ? " · admin override" : ""}</>
+            <><Pause size={10} /> Paused{isOverridden ? " Â· admin override" : ""}</>
           ) : isLiveNow ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
               </span>
-              Live{isOverridden ? " · admin override" : ""}
+              Live{isOverridden ? " Â· admin override" : ""}
             </>
           ) : (
             <><Clock size={10} /> Starts this weekend</>
@@ -9108,20 +9108,20 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
       </div>
       <div className="relative px-4 pb-1.5 flex items-center gap-1.5 font-body text-xs" style={{ color: c.textDim }}>
         {isPaused
-          ? "Overnight break — results can still be uploaded"
+          ? "Overnight break â€” results can still be uploaded"
           : items.length > 0
             ? `${items.length === 1 ? "One league" : `${items.length} leagues`} in action Friday through Sunday`
-            : hideLadderPass ? "Nothing kicks off this weekend yet" : "The League Ladder — no fixed weekend, jump in anytime"}
+            : hideLadderPass ? "Nothing kicks off this weekend yet" : "The League Ladder â€” no fixed weekend, jump in anytime"}
         {totalMatches > 0 && (
           <span className="flex items-center gap-0.5 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${c.accent}22`, color: c.accent }}>
             <Zap size={9} /> {totalMatches} match{totalMatches === 1 ? "" : "es"}
           </span>
         )}
         {/* League Ladder never turns off Fri-Sun the way the rest of this
-            banner does — this badge is what tells someone glancing at the
+            banner does â€” this badge is what tells someone glancing at the
             "Weekend League" header that the pass in front of them (see
             LadderWeekendCard, first in the row below) isn't tied to the
-            countdown above it. Skipped entirely when hideLadderPass is set —
+            countdown above it. Skipped entirely when hideLadderPass is set â€”
             signed-in Home now has its own League Ladder section below the
             Quick actions row, so this badge would just be pointing at a
             card that's no longer here. */}
@@ -9131,7 +9131,7 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
           </span>
         )}
       </div>
-      {/* Admin-only manual override of the 9pm–9am auto pause/resume — for
+      {/* Admin-only manual override of the 9pmâ€“9am auto pause/resume â€” for
           the odd weekend where the schedule needs a nudge (e.g. keep it
           live late for a big final, or pause early for maintenance).
           Hidden entirely for everyone else, including logged-in players. */}
@@ -9157,7 +9157,7 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
         </div>
       )}
       <div className="relative no-scrollbar flex items-stretch gap-3 overflow-x-auto px-4 pb-4 pt-1.5">
-        {/* League Ladder's own pass — always first, always rendered (not
+        {/* League Ladder's own pass â€” always first, always rendered (not
             gated by isWithinWeekend/items.length the way the cards after it
             are), since it's the one thing in this carousel that's never
             "off". See LadderWeekendCard below for why it self-fetches
@@ -9180,14 +9180,14 @@ function WeekendLeagueSpotlight({ items, weekendStart, weekendEnd, onCardClick, 
   );
 }
 
-// LadderWeekendCard — the League Ladder's own "pass" riding alongside the
+// LadderWeekendCard â€” the League Ladder's own "pass" riding alongside the
 // actual weekend fun-league cards in WeekendLeagueSpotlight's carousel.
 // Self-fetches (same pattern as LadderLeagueSection on Home) rather than
 // threading ladder data down through Home/PublicHome as props, since
 // neither screen already loads it and this card can show up signed-out too.
 //
 // Light gradient background (LADDER_WEEKEND_ICE/MINT) rather than every
-// other card's dark c.surface — asked for explicitly, and it doubles as a
+// other card's dark c.surface â€” asked for explicitly, and it doubles as a
 // visual cue that this pass runs on its own permanent clock, not the
 // Friday-Sunday one the rest of the banner counts down to.
 function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
@@ -9227,7 +9227,7 @@ function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
   if (!state) return null;
   const isMember = !!state.memberLeagueId;
   // Same per-tier theme LeagueLadderDetail uses (see ladderTierThemes.js)
-  // — this carousel card previews whichever
+  // â€” this carousel card previews whichever
   // league tapping it would open.
   const theme = getLadderTierTheme(isMember ? state.tier : state.bottomTier);
 
@@ -9260,7 +9260,7 @@ function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
           </div>
 
           <div className="font-mono text-[10px] uppercase tracking-wide mt-1.5 font-bold" style={{ color: theme.accent }}>
-            {isMember ? "Continue" : "Free entry — join now"}
+            {isMember ? "Continue" : "Free entry â€” join now"}
           </div>
 
           <div className="flex items-center gap-1 font-mono text-[10px] mt-2" style={{ color: theme.textDim }}>
@@ -9273,17 +9273,17 @@ function LadderWeekendCard({ session, onOpenLadderLeague, onRequireAuth, c }) {
 }
 
 
-// The weekend spotlight's own take on a league card — deliberately built to
+// The weekend spotlight's own take on a league card â€” deliberately built to
 // echo LeagueCard's real info (crest, format/stage, club count, progress,
 // leader) rather than the old name-only chip, but with its own silhouette
 // (a clipped "pass"/ticket shape with a folded corner) so it never reads as
-// just another entry in the regular Leagues list — this is the one league
+// just another entry in the regular Leagues list â€” this is the one league
 // the spotlight is telling you not to miss.
 function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardClick, rankColors, c }) {
   const { league: l, kicksOffThisWeekend, matchCount } = item;
   // Defensive fallbacks: the signed-in Home spotlight's league objects
   // always carry these nested, but belt-and-suspenders against any caller
-  // (guest homepage included — see its item-building code) that doesn't.
+  // (guest homepage included â€” see its item-building code) that doesn't.
   const teams = l.teams || [];
   const fixtures = l.fixtures || [];
   const isLadderCup = l.format === "ladder_cup";
@@ -9309,7 +9309,7 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
           background: c.surface,
           border: `1px solid ${rankColor ? rankColor + "77" : c.accent + "55"}`,
         }}>
-        {/* Folded-corner accent — the visual signature that makes this read
+        {/* Folded-corner accent â€” the visual signature that makes this read
             as a "pass" rather than a plain card, colored by weekend rank. */}
         <div className="absolute top-0 right-0 w-[22px] h-[22px]"
           style={{ background: rankColor || c.accent, clipPath: "polygon(100% 0, 0 0, 100% 100%)" }} />
@@ -9346,8 +9346,8 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
           <div className="flex items-center gap-1 mt-1.5 font-mono text-[9px]" style={{ color: c.textDim }}>
             <Shield size={9} /> {teams.length}
             {isLadderCup
-              ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
-              : fixtures.length > 0 && <span className="ml-1">· {played}/{fixtures.length}</span>}
+              ? ladderMatches.length > 0 && <span className="ml-1">Â· {played} played</span>
+              : fixtures.length > 0 && <span className="ml-1">Â· {played}/{fixtures.length}</span>}
           </div>
 
           {leader && leader.p > 0 && (
@@ -9374,7 +9374,7 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
   );
 }
 
-// One equal-weight tile in the guest quick-action grid — same visual as the
+// One equal-weight tile in the guest quick-action grid â€” same visual as the
 // signed-in Home's MenuTile, plus a small lock badge on anything that needs
 // an account. Ladder just scrolls down to content that's already public;
 // Shop carries an "external" badge instead of a lock since it needs no
@@ -9400,7 +9400,7 @@ function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {  r
   );
 }
 
-// The "sign in to continue" gate — shown over whatever the guest was just
+// The "sign in to continue" gate â€” shown over whatever the guest was just
 // looking at, rather than yanking them off to a separate page. Reused for
 // every login-gated action (join, challenges, climbing the ladder, creating
 // a league) with a short reason line so it's clear what unlocks once they do.
@@ -9430,7 +9430,7 @@ function AuthPromptModal({ reason, c, onCancel, onSignIn }) {
   );
 }
 
-// The ladder for guests — visually identical to the signed-in Home's
+// The ladder for guests â€” visually identical to the signed-in Home's
 // LadderStrip (same horizontally-scrolling chips, same rank medals), just
 // swapping the "You're #N" shortcut for a locked "Climb it" prompt since
 // there's no signed-in member to rank. Reads from public_ladder_full (all
@@ -9467,7 +9467,7 @@ function GuestLadderStrip({ ladder, onClimb, c }) {
             )}
             <div className="flex flex-col leading-tight">
               <span className="font-body font-semibold text-sm truncate max-w-[110px]">{row.username}</span>
-              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+              <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{row.points}pts Â· {row.wins}Wâ€“{row.losses}L</span>
             </div>
           </div>
         ))}
@@ -9480,7 +9480,7 @@ function GuestLadderStrip({ ladder, onClimb, c }) {
   );
 }
 
-// Platform-wide "who just played" feed for guests — reuses the exact same
+// Platform-wide "who just played" feed for guests â€” reuses the exact same
 // CommunityResultRow the signed-in Challenges screen uses, fed from
 // public_challenge_results (granted to anon; already existed for the
 // signed-in feed, this just drops the session check). myId is always null
@@ -9510,7 +9510,7 @@ function PublicActivityFeed({ results, c, onChallenge }) {
   );
 }
 
-// A section of league previews for guests — same header format as the
+// A section of league previews for guests â€” same header format as the
 // signed-in Home's LeagueSection (icon badge, title, count pill), but
 // stacked full-width standings previews instead of a horizontal card
 // carousel, since there's no detail page for a guest to tap through to.
@@ -9544,7 +9544,7 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
   const teamName = (id) => leagueTeams.find((t) => t.id === id)?.name || "TBD";
 
   // Guests should never receive a cash league here at all (see funLeagues
-  // in PublicHome), so no cash badge on the header — the description guard
+  // in PublicHome), so no cash badge on the header â€” the description guard
   // below is a defensive backstop, not something guests normally hit.
   const header = (
     <div className="flex items-center justify-between mb-3 gap-2">
@@ -9581,7 +9581,7 @@ function PublicLeagueCard({ league: l, data, onJoin, avatarByTeamId, c }) {
           {allLeagueFixtures.map((f) => (
             <div key={f.id} className="flex items-center justify-between gap-2 font-body text-xs px-2 py-1.5 rounded" style={{ background: c.surfaceHover }}>
               <span className="truncate flex-1 text-right" style={{ color: f.played && f.home_score > f.away_score ? c.text : c.textFaint, fontWeight: f.played && f.home_score > f.away_score ? 600 : 400 }}>{teamName(f.home_team_id)}</span>
-              <span className="font-mono text-[11px] shrink-0" style={{ color: c.textFaint }}>{f.played ? `${f.home_score}–${f.away_score}` : "vs"}</span>
+              <span className="font-mono text-[11px] shrink-0" style={{ color: c.textFaint }}>{f.played ? `${f.home_score}â€“${f.away_score}` : "vs"}</span>
               <span className="truncate flex-1" style={{ color: f.played && f.away_score > f.home_score ? c.text : c.textFaint, fontWeight: f.played && f.away_score > f.home_score ? 600 : 400 }}>{teamName(f.away_team_id)}</span>
             </div>
           ))}
@@ -9635,14 +9635,14 @@ function GoogleIcon({ small }) {
   );
 }
 
-// Full-width promo banner for the WeAfrica Shop — sits at the bottom of the
+// Full-width promo banner for the WeAfrica Shop â€” sits at the bottom of the
 // login page, after the sign-in CTA, so a first-time visitor sees the real
 // league/ladder proof and the sign-in ask before a store pitch. Deliberately
 // in gold, not the app's green, so it registers as a store placement rather
 // than another screen inside the app. The whole card is a tap target (not
 // just the pill), open to guests and members alike since browsing the store
 // needs no account. (No longer surfaced from the signed-in Home's quick
-// actions either — see quickActionItems in App — so this banner is now the
+// actions either â€” see quickActionItems in App â€” so this banner is now the
 // one place the Shop is promoted from.)
 function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   const hasPicks = picks && picks.length > 0;
@@ -9652,7 +9652,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-14 -right-8 w-36 h-36 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.22 }} />
         {!hasPicks && (
-          /* Small "products" bobbing and glowing in the banner's corner —
+          /* Small "products" bobbing and glowing in the banner's corner â€”
              purely decorative fallback shown only while the real picks
              below are loading, or if the shop has nothing with a photo yet. */
           <>
@@ -9675,7 +9675,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: SHOP_GOLD }}>Official store</div>
           <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">{SHOP_NAME}</div>
-          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone</div>
+          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear â€” open to everyone</div>
         </div>
         <span className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
           Shop now <ChevronRight size={12} />
@@ -9683,7 +9683,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
       </div>
       {hasPicks && (
         // Two real products, picked at random on every visit (see
-        // PublicHome) — bobbing hexagon badges instead of generic icon
+        // PublicHome) â€” bobbing hexagon badges instead of generic icon
         // glyphs, so this reads as "here's what's actually in stock right
         // now" rather than a static ad. A fresh pair shows up each time
         // someone lands on the login page.
@@ -9751,7 +9751,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) 
     setPhotoPreview(URL.createObjectURL(file));
   };
 
-  // Object URLs aren't garbage-collected automatically — without this, picking
+  // Object URLs aren't garbage-collected automatically â€” without this, picking
   // a photo then changing it (or leaving this screen, e.g. via the sign-out
   // link above) leaks the blob for the life of the tab. Runs on every change
   // AND on unmount, since the cleanup closes over whichever URL was current.
@@ -9767,7 +9767,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) 
   };
 
   // Lets people finish onboarding by pressing Enter in any field instead of
-  // having to reach for the button — there's no <form> here (this component
+  // having to reach for the button â€” there's no <form> here (this component
   // is embedded, not a standalone page), so Enter wouldn't submit otherwise.
   const handleKeyDown = (e) => {
     if (e.key === "Enter") submit();
@@ -9785,7 +9785,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) 
       </p>
       {userEmail && onSignOut && (
         <p className="font-mono text-[11px] text-center mb-6" style={{ color: c.textFaint }}>
-          Signed in as {userEmail} ·{" "}
+          Signed in as {userEmail} Â·{" "}
           <button type="button" onClick={onSignOut} className="underline">Not you? Sign out</button>
         </p>
       )}
@@ -9808,7 +9808,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) 
           aria-describedby={usernameTrimmed.length > 0 && !usernameIsOneWord ? "pg-username-error" : undefined}
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {usernameTrimmed.length > 0 && !usernameIsOneWord && (
-          <p id="pg-username-error" className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
+          <p id="pg-username-error" className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces â€” use one word, like your actual in-game username (e.g. "Bounce_Academy" not "Bounce Academy").</p>
         )}
         <div className="mb-4" />
         <label htmlFor="pg-age" className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Age</label>
@@ -9862,7 +9862,7 @@ function ProfileGate({ c, theme, toggleTheme, onSubmit, userEmail, onSignOut }) 
   );
 }
 
-// Lets an already-onboarded member update their phone/username later — mainly the
+// Lets an already-onboarded member update their phone/username later â€” mainly the
 // self-service fix for "this phone number is already linked to another account"
 // (phone numbers are unique platform-wide), but also covers the ordinary case of
 // a changed number or in-game name.
@@ -9909,14 +9909,14 @@ function EditProfileModal({ profile, onCancel, onSubmit, onUpdatePhoto, c }) {
             {profile?.avatar_url ? <img src={toProxiedUrl(profile.avatar_url)} alt="" className="w-full h-full object-cover" /> : <Camera size={20} style={{ color: c.textFaint }} />}
           </button>
           <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>
-            {uploadingPhoto ? "Uploading…" : profile?.avatar_url ? "Change photo" : "Add profile photo"}
+            {uploadingPhoto ? "Uploadingâ€¦" : profile?.avatar_url ? "Change photo" : "Add profile photo"}
           </span>
         </div>
         <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>eFootball username <span style={{ color: c.textFaint }}>(one word, exactly as it appears in-game)</span></label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. Ndosi_123"
           className="w-full border rounded-lg px-4 py-2.5 font-body outline-none mb-1.5" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
         {usernameTrimmed.length > 0 && !usernameIsOneWord && (
-          <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces — use one word, like your actual in-game username.</p>
+          <p className="font-body text-xs mb-1.5" style={{ color: c.red }}>No spaces â€” use one word, like your actual in-game username.</p>
         )}
         <div className="mb-4" />
         <label className="block font-mono text-xs uppercase tracking-wider mb-1.5" style={{ color: c.textFaint }}>Phone number <span style={{ color: c.textFaint }}>(with country code)</span></label>
@@ -9943,7 +9943,7 @@ function csvEscape(val) {
 // keeping, and a visible flag for any account still carrying a leftover
 // "(DUPLICATE-n)" marker from the phone-uniqueness cleanup so it's easy to see
 // who still needs to update their number.
-// Admin-only raw activity feed — step 1 of activity tracking (see
+// Admin-only raw activity feed â€” step 1 of activity tracking (see
 // activityLog.js and the get_activity_log RPC). Deliberately plain: no
 // filtering or grouping yet, just the most recent 200 events, newest
 // first. Filters/search/grouping are a good "next small step" once this
@@ -10046,8 +10046,8 @@ function AccountsPanel({ accounts, leagues, session, onDelete, onApprove, messag
       </div>
       <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
         {accounts.length} account{accounts.length === 1 ? "" : "s"} on the platform
-        {pendingCount > 0 && <span style={{ color: "#B8860B" }}> · {pendingCount} pending approval</span>}
-        {flaggedCount > 0 && <span style={{ color: c.red }}> · {flaggedCount} still need{flaggedCount === 1 ? "s" : ""} a phone number fixed</span>}
+        {pendingCount > 0 && <span style={{ color: "#B8860B" }}> Â· {pendingCount} pending approval</span>}
+        {flaggedCount > 0 && <span style={{ color: c.red }}> Â· {flaggedCount} still need{flaggedCount === 1 ? "s" : ""} a phone number fixed</span>}
       </div>
 
       <AccountsMessageEditor messageTemplate={messageTemplate} onUpdateMessageTemplate={onUpdateMessageTemplate}
@@ -10099,7 +10099,7 @@ export function rankLeaderboard(rows, metric) {
 
 // Small two-up card row highlighting the top scorer and the player/club
 // with the best defensive record (fewest goals conceded) out of whatever
-// rows were handed in — reused by both the platform-wide Leaderboard and
+// rows were handed in â€” reused by both the platform-wide Leaderboard and
 // each league's own Table tab, just scoped to a different set of rows.
 export function GoalExtremesBar({ top, least, c }) {
   if (!top) return null;
@@ -10109,7 +10109,7 @@ export function GoalExtremesBar({ top, least, c }) {
         <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}><Target size={13} /></div>
         <div className="min-w-0">
           <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Top scorer</div>
-          <div className="font-body text-xs font-semibold truncate" title={top.name}>{top.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>· {top.gf}⚽</span></div>
+          <div className="font-body text-xs font-semibold truncate" title={top.name}>{top.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>Â· {top.gf}âš½</span></div>
         </div>
       </div>
       {least && (
@@ -10117,7 +10117,7 @@ export function GoalExtremesBar({ top, least, c }) {
           <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, color: c.textDim }}><Shield size={13} /></div>
           <div className="min-w-0">
             <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Defensive team</div>
-            <div className="font-body text-xs font-semibold truncate" title={least.name}>{least.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>· {least.ga} conceded</span></div>
+            <div className="font-body text-xs font-semibold truncate" title={least.name}>{least.name} <span className="font-mono font-normal" style={{ color: c.textDim }}>Â· {least.ga} conceded</span></div>
           </div>
         </div>
       )}
@@ -10126,11 +10126,11 @@ export function GoalExtremesBar({ top, least, c }) {
 }
 
 // Site-wide sibling of MemberMessageEditor (see that component for the
-// original per-league version) — lets an admin override the generic
+// original per-league version) â€” lets an admin override the generic
 // "Hi {username}, this is weAfrica admin Saul." WhatsApp opener with their
 // own wording for every account on the platform, plus a bulk "flag
 // everyone" action that mirrors notifyAllMembers's highlight step. Only
-// {name} is available here (no {league}/{round}/{due}/{start} — accounts
+// {name} is available here (no {league}/{round}/{due}/{start} â€” accounts
 // aren't scoped to a league or fixture the way a league's members are).
 function AccountsMessageEditor({ messageTemplate, onUpdateMessageTemplate, onNotifyAll, c }) {
   const [editing, setEditing] = useState(false);
@@ -10180,10 +10180,10 @@ function AccountsMessageEditor({ messageTemplate, onUpdateMessageTemplate, onNot
   return (
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
-        Used when tapping any account's WhatsApp icon — use <strong>{"{name}"}</strong> for their username.
+        Used when tapping any account's WhatsApp icon â€” use <strong>{"{name}"}</strong> for their username.
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
-        placeholder="Hey {name}! This is weAfrica admin Saul — quick heads up..."
+        placeholder="Hey {name}! This is weAfrica admin Saul â€” quick heads up..."
         className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
       <div className="font-mono text-[10px] text-right mb-2" style={{ color: text.length >= MAX_LEN ? c.red : c.textFaint }}>
         {text.length}/{MAX_LEN}
@@ -10191,7 +10191,7 @@ function AccountsMessageEditor({ messageTemplate, onUpdateMessageTemplate, onNot
       {preview && (
         <div className="rounded-lg px-3 py-2 mb-2 font-body text-xs whitespace-pre-wrap" style={{ background: c.surfaceHover, color: c.textDim }}>
           <span className="font-mono text-[10px] uppercase tracking-wide block mb-1" style={{ color: c.textFaint }}>
-            Preview — as Alex would see it
+            Preview â€” as Alex would see it
           </span>
           {preview}
         </div>
@@ -10204,7 +10204,7 @@ function AccountsMessageEditor({ messageTemplate, onUpdateMessageTemplate, onNot
         )}
         <button onClick={() => { setText(messageTemplate || ""); setEditing(false); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
         <button onClick={save} disabled={saving || !text.trim()} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !text.trim() ? 0.6 : 1 }}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Savingâ€¦" : "Save"}
         </button>
       </div>
     </div>
@@ -10220,7 +10220,7 @@ function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, 
   const isFlagged = (account.phone || "").includes("(DUPLICATE-");
   const digitsOnly = (account.phone || "").replace(/\D/g, "");
   const reminded = isWaReminderActive(account);
-  // Same {name} placeholder convention as the league version — falls back
+  // Same {name} placeholder convention as the league version â€” falls back
   // to the old generic greeting when no custom message has been saved.
   const waText = messageTemplate
     ? messageTemplate.replace(/\{name\}/g, account.efootball_username || "there")
@@ -10256,7 +10256,7 @@ function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, 
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-body text-sm truncate flex items-center gap-1.5">
-          <span className="truncate">{account.efootball_username || "—"}</span>
+          <span className="truncate">{account.efootball_username || "â€”"}</span>
           {account.efootball_username && (
             <button onClick={() => copy("username", account.efootball_username)} title="Copy username" className="shrink-0" style={{ color: copiedField === "username" ? c.greenText : c.textFaint }}>
               <Copy size={11} />
@@ -10270,7 +10270,7 @@ function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, 
         {(leagueCounts.created > 0 || leagueCounts.joined > 0) && (
           <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
             {leagueCounts.created > 0 && `Created ${leagueCounts.created}`}
-            {leagueCounts.created > 0 && leagueCounts.joined > 0 && " · "}
+            {leagueCounts.created > 0 && leagueCounts.joined > 0 && " Â· "}
             {leagueCounts.joined > 0 && `Joined ${leagueCounts.joined}`}
           </div>
         )}
@@ -10314,7 +10314,7 @@ function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, 
         <input type="number" min="1" value={grantAmount} onChange={(e) => setGrantAmount(e.target.value)}
           className="w-24 border rounded-lg px-2 py-1 font-mono text-xs outline-none" style={{ background: c.bg, borderColor: c.border, color: c.text }} />
         <button onClick={grantNets} disabled={granting} className="font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-full font-bold shrink-0" style={{ background: c.accent, color: c.bg, opacity: granting ? 0.6 : 1 }}>
-          {granting ? "Granting…" : `Grant to ${account.efootball_username || "account"}`}
+          {granting ? "Grantingâ€¦" : `Grant to ${account.efootball_username || "account"}`}
         </button>
       </div>
     )}
@@ -10322,14 +10322,14 @@ function AccountRow({ account, leagueCounts, isSelf, messageTemplate, onDelete, 
   );
 }
 
-// Small round avatar used on the Challenges screen — a photo if the member
+// Small round avatar used on the Challenges screen â€” a photo if the member
 // has one, otherwise the same colored-initial fallback used for comments.
 export function MemberAvatar({ url, username, size = 32, c }) {
   if (url) {
     // Every avatar in the app (comments, member lists, leaderboards,
     // challenges) renders through this one component, so this single
     // toProxiedUrl call is what stops old-style direct Supabase avatar
-    // URLs from costing Cached Egress on every view — see mediaUrl.js.
+    // URLs from costing Cached Egress on every view â€” see mediaUrl.js.
     return <img src={toProxiedUrl(url)} alt="" loading="lazy" decoding="async" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
   }
   return (
@@ -10340,38 +10340,38 @@ export function MemberAvatar({ url, username, size = 32, c }) {
   );
 }
 
-// Shared emoji medal for a numeric rank — used by the standings, ladder and
+// Shared emoji medal for a numeric rank â€” used by the standings, ladder and
 // leaderboard tables, and by PlayerProfileModal below, so the top-3 styling
 // can never drift between screens the way it did when each one kept its own
 // copy (Standings' copy had gone stale and always rendered null). Returns
-// null for rank > 3 — callers fall back to "#rank" text themselves.
+// null for rank > 3 â€” callers fall back to "#rank" text themselves.
 export function medalFor(rank) {
-  return rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+  return rank === 1 ? "ðŸ¥‡" : rank === 2 ? "ðŸ¥ˆ" : rank === 3 ? "ðŸ¥‰" : null;
 }
 
-// Rating-card tier for a rank — turns the plain "top 3 get a ring" idea into
+// Rating-card tier for a rank â€” turns the plain "top 3 get a ring" idea into
 // a small FIFA/eFootball-style card system so PlayerProfileModal reads as a
 // player card reveal rather than a settings sheet. Colors are fixed hex (not
 // theme-derived) for the medal tiers so gold/silver/bronze read correctly in
 // both light and dark mode; the two non-medal tiers fall back to the app's
 // own accent color so they still look native to whichever theme is active.
 const CARD_TIERS = {
-  gold: { label: "🥇 GOLD CARD", ring: "#FFD700" },
-  silver: { label: "🥈 SILVER CARD", ring: "#C0C0C0" },
-  bronze: { label: "🥉 BRONZE CARD", ring: "#CD7F32" },
+  gold: { label: "ðŸ¥‡ GOLD CARD", ring: "#FFD700" },
+  silver: { label: "ðŸ¥ˆ SILVER CARD", ring: "#C0C0C0" },
+  bronze: { label: "ðŸ¥‰ BRONZE CARD", ring: "#CD7F32" },
 };
 function tierFor(rank, c) {
   if (rank === 1) return { key: "gold", ...CARD_TIERS.gold };
   if (rank === 2) return { key: "silver", ...CARD_TIERS.silver };
   if (rank === 3) return { key: "bronze", ...CARD_TIERS.bronze };
-  if (rank != null && rank <= 10) return { key: "rated", label: "⭐ IN FORM", ring: c.accent };
+  if (rank != null && rank <= 10) return { key: "rated", label: "â­ IN FORM", ring: c.accent };
   return { key: "standard", label: "SQUAD PLAYER", ring: c.accent };
 }
 
 // Splits a stat value into a numeric part (for count-up animation) plus any
-// fixed prefix/suffix around it — "+3" animates the 3 and keeps the "+",
+// fixed prefix/suffix around it â€” "+3" animates the 3 and keeps the "+",
 // "84%" animates the 84 and keeps the "%". Multi-number strings like
-// "3 · 1 · 2" (W · D · L) don't match, so those stay static; animating three
+// "3 Â· 1 Â· 2" (W Â· D Â· L) don't match, so those stay static; animating three
 // numbers ticking independently inside one string would read as noise, not
 // a game stat reveal.
 function parseNumericStat(raw) {
@@ -10382,7 +10382,7 @@ function parseNumericStat(raw) {
 }
 
 // Counts up from 0 to `target` on mount (ease-out), optionally after a
-// stagger delay — gives each stat tile its own little "reveal" instead of
+// stagger delay â€” gives each stat tile its own little "reveal" instead of
 // all numbers just appearing at once. Returns `target` unchanged (no
 // animation) when target is null, i.e. the stat wasn't numeric.
 function useCountUp(target, { duration = 700, delay = 0 } = {}) {
@@ -10406,7 +10406,7 @@ function useCountUp(target, { duration = 700, delay = 0 } = {}) {
   return target == null ? null : value;
 }
 
-// One stat tile on the player card — a plain number ticks up from 0 and the
+// One stat tile on the player card â€” a plain number ticks up from 0 and the
 // tile itself fades/slides in on a per-index stagger, so the stat grid reads
 // as a reveal rather than a table dump.
 function StatTile({ label, value, index, c, ring }) {
@@ -10424,19 +10424,19 @@ function StatTile({ label, value, index, c, ring }) {
 }
 
 // A read-only popup showing one player's photo and stats, styled as an
-// eFootball-style rated player card — reused by the Leaderboard, Ladder and
+// eFootball-style rated player card â€” reused by the Leaderboard, Ladder and
 // Standings screens so tapping any row (not just your own) feels like
 // pulling a card rather than opening a settings sheet. `stats` is a plain
 // list of {label, value} pairs the caller has already computed, so this
 // component stays completely agnostic to whether it's showing leaderboard
-// fields (W/D/L, goals) or ladder fields (points, rank) — no extra data
+// fields (W/D/L, goals) or ladder fields (points, rank) â€” no extra data
 // fetching happens here, it only ever renders what's already in memory (the
 // same row object the list itself was built from), so opening it costs
 // nothing beyond the avatar image, which already goes through
 // MemberAvatar's egress-safe proxying.
 //
 // The tier (and medal) is derived from `rank` right here rather than taken
-// as a prop — callers used to compute their own medal copy and pass it in,
+// as a prop â€” callers used to compute their own medal copy and pass it in,
 // which is how Standings ended up always passing null (its copy silently
 // went stale). One source of truth now; callers just pass the rank they
 // already have.
@@ -10455,7 +10455,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Tier-tinted wash across the whole card — subtle for the rated/
+        {/* Tier-tinted wash across the whole card â€” subtle for the rated/
             squad tiers, more present for medal cards. */}
         <div className="absolute inset-0 pointer-events-none" style={{ background: `linear-gradient(135deg, ${tier.ring}${isMedal ? "26" : "12"}, transparent 60%)` }} />
         {/* Pack-opening light sweep, medal tiers only, plays once on open. */}
@@ -10493,7 +10493,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
           ))}
         </div>
 
-        {/* Earned badges — same defs the caller's own compact badge row
+        {/* Earned badges â€” same defs the caller's own compact badge row
             uses (e.g. LadderCupBadgeRow), but spelled out here with a
             label and count per chip since the card has room and everyone
             who opens it should be able to tell what each one means, not
@@ -10519,7 +10519,7 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
 }
 
 // Lets any member challenge any other member to a friendly match, and manage
-// the challenges they've sent or received. A challenge starts as "pending" —
+// the challenges they've sent or received. A challenge starts as "pending" â€”
 // visible to both sides, actionable only by whoever received it. Once they
 // accept, both people's WhatsApp icon becomes visible to the other; nobody's
 // number is exposed before that. Declining just tells the sender it was seen.
@@ -10535,7 +10535,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
       if (menuOpen && menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
       if (notifOpen && notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false);
     };
-    // touchstart as well as mousedown — mousedown alone can fire late (or
+    // touchstart as well as mousedown â€” mousedown alone can fire late (or
     // not at all before the next tap) on touch devices, which was part of
     // why this menu was unreliable on mobile.
     document.addEventListener("mousedown", onClick);
@@ -10545,20 +10545,20 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
 
   const notifCount = (notifications || []).length;
 
-  // Everything except Edit profile now lives in here — on a narrow phone
+  // Everything except Edit profile now lives in here â€” on a narrow phone
   // screen, the old row of 7-8 separate icon buttons ran wider than the
   // viewport itself (the page clips horizontal overflow, so anything past
-  // the edge was simply never reachable). Two buttons — profile + this
-  // menu — always fit.
+  // the edge was simply never reachable). Two buttons â€” profile + this
+  // menu â€” always fit.
   const menuItems = [
     { icon: TrendingUp, label: "Ladder", onClick: onOpenLadder },
     { icon: Trophy, label: "Leaderboard", onClick: onOpenLeaderboard },
     { icon: Award, label: "Completed Leagues", onClick: onOpenCompletedLeagues },
     // Hidden once the site is already running as an installed PWA
-    // (showInstall = !isStandalone, see usePwaInstall.js) — no point
+    // (showInstall = !isStandalone, see usePwaInstall.js) â€” no point
     // offering to install an app you're already inside.
     ...(showInstall ? [{ icon: Download, label: "Install app", onClick: onInstallApp }] : []),
-    // Open to every signed-in user (admin or not) — anyone should be able
+    // Open to every signed-in user (admin or not) â€” anyone should be able
     // to hand the app to someone new, not just league admins.
     { icon: Share2, label: "Share app", onClick: onShareApp },
     { icon: MessageCircle, label: "Suggest something", onClick: onOpenSuggestion },
@@ -10577,13 +10577,13 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
         </button>
         {view === "league" && activeLeague && activeLeague.teams && activeLeague.fixtures && (
           <div className="hidden sm:block font-mono text-xs uppercase tracking-wider shrink-0" style={{ color: c.textFaint }}>
-            {activeLeague.teams.length} clubs · {activeLeague.fixtures.filter((f) => f.played).length}/{activeLeague.fixtures.length} played
+            {activeLeague.teams.length} clubs Â· {activeLeague.fixtures.filter((f) => f.played).length}/{activeLeague.fixtures.length} played
           </div>
         )}
         <div className="flex items-center gap-2 shrink-0">
           <NetsBadge c={c} />
 
-          {/* Replays the referee-hosted first-run tour on demand — the same
+          {/* Replays the referee-hosted first-run tour on demand â€” the same
               modal that auto-opens for brand-new users right after
               ProfileGate (see justOnboarded in App()), just triggered
               manually here for anyone who skipped it or wants a refresher. */}
@@ -10592,7 +10592,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
             <GraduationCap size={16} />
           </button>
 
-          {/* Notification bell — a personalized feed of things that actually need
+          {/* Notification bell â€” a personalized feed of things that actually need
               this person's attention (their own pending confirmations/open
               challenges, plus admin-only escalations and payment reviews for
               admins), not a general activity log. Empty state reads "You're all
@@ -10666,7 +10666,7 @@ function Header({ view, setView, activeLeague, theme, toggleTheme, c, onSignOut,
 }
 
 // Global feedback box, reachable from the header on every screen ("top of
-// the website"). Open to any signed-in user — doesn't require joining or
+// the website"). Open to any signed-in user â€” doesn't require joining or
 // managing any particular league.
 function SuggestionModal({ onCancel, onSubmit, c }) {
   const [text, setText] = useState("");
@@ -10694,14 +10694,14 @@ function SuggestionModal({ onCancel, onSubmit, c }) {
         <button onClick={submit} disabled={!text.trim() || posting}
           className="w-full font-body text-sm font-semibold px-4 py-2.5 rounded-full"
           style={text.trim() && !posting ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-          {posting ? "Sending…" : "Send suggestion"}
+          {posting ? "Sendingâ€¦" : "Send suggestion"}
         </button>
       </div>
     </div>
   );
 }
 
-// Shown when there's no programmatic install prompt to trigger — iOS
+// Shown when there's no programmatic install prompt to trigger â€” iOS
 // Safari always (it has none), or any other browser before it's decided
 // the site qualifies for beforeinstallprompt yet. Walks the person through
 // their browser's manual "add to home screen" step instead.
@@ -10717,12 +10717,12 @@ function InstallHelpModal({ isIOS, onClose, c }) {
           <div className="font-body text-sm space-y-2.5" style={{ color: c.textDim }}>
             <div>1. Tap the <b>Share</b> icon in Safari's toolbar (the square with an arrow).</div>
             <div>2. Scroll down and tap <b>Add to Home Screen</b>.</div>
-            <div>3. Tap <b>Add</b> — Matchday now opens full-screen from your Home Screen, just like any other app.</div>
+            <div>3. Tap <b>Add</b> â€” Matchday now opens full-screen from your Home Screen, just like any other app.</div>
           </div>
         ) : (
           <div className="font-body text-sm space-y-2.5" style={{ color: c.textDim }}>
-            <div>Open your browser's menu (usually the ⋮ or ⋯ icon) and look for <b>Install app</b> or <b>Add to Home screen</b>.</div>
-            <div>Once installed, Matchday opens in its own window with its own icon — no browser bar.</div>
+            <div>Open your browser's menu (usually the â‹® or â‹¯ icon) and look for <b>Install app</b> or <b>Add to Home screen</b>.</div>
+            <div>Once installed, Matchday opens in its own window with its own icon â€” no browser bar.</div>
           </div>
         )}
       </div>
@@ -10731,7 +10731,7 @@ function InstallHelpModal({ isIOS, onClose, c }) {
 }
 
 // App-download nag for anyone signed in and browsing in a regular tab
-// (not the installed PWA) — see appPromoOpen above, gated on `session` so
+// (not the installed PWA) â€” see appPromoOpen above, gated on `session` so
 // it never shows on the pre-login guest/landing page. Picks one of ten
 // different pitches at random each time it's shown, so a person who
 // dismisses it today and sees it again tomorrow doesn't get the exact
@@ -10740,14 +10740,14 @@ function InstallHelpModal({ isIOS, onClose, c }) {
 // browser supports it and falls back to InstallHelpModal's manual steps
 // otherwise (iOS, or before beforeinstallprompt fires).
 const APP_PROMO_PITCHES = [
-  { headline: "Get the app. Get the edge.", body: "Faster fixtures, instant result alerts, zero browser clutter — Matchday the way it's meant to be played." },
+  { headline: "Get the app. Get the edge.", body: "Faster fixtures, instant result alerts, zero browser clutter â€” Matchday the way it's meant to be played." },
   { headline: "Your ladder rank is waiting.", body: "Install Matchday and never miss a challenge, a result, or a chance to climb." },
-  { headline: "One tap. Full-screen football.", body: "No address bar, no tabs — just Matchday, launching straight from your home screen like a real app." },
-  { headline: "This is the upgrade you didn't know you needed.", body: "Same league, same account — just faster, smoother, and always one tap away." },
+  { headline: "One tap. Full-screen football.", body: "No address bar, no tabs â€” just Matchday, launching straight from your home screen like a real app." },
+  { headline: "This is the upgrade you didn't know you needed.", body: "Same league, same account â€” just faster, smoother, and always one tap away." },
   { headline: "Stop searching for the tab.", body: "Put Matchday on your home screen and open it as fast as you open WhatsApp." },
-  { headline: "Built for people who take their league seriously.", body: "Install the app and get instant access every matchday — no browser required." },
+  { headline: "Built for people who take their league seriously.", body: "Install the app and get instant access every matchday â€” no browser required." },
   { headline: "Your rivals already have the app.", body: "Don't get caught refreshing a browser tab while they get instant alerts." },
-  { headline: "Matchday, minus the browser.", body: "Install once and it feels exactly like a real app — because it is one." },
+  { headline: "Matchday, minus the browser.", body: "Install once and it feels exactly like a real app â€” because it is one." },
   { headline: "You're one tap from the full experience.", body: "Install Matchday for a faster, cleaner, distraction-free way to run your leagues." },
   { headline: "Level up how you play.", body: "The installed app loads instantly and keeps you closer to every fixture, result, and challenge." },
 ];
@@ -10783,7 +10783,7 @@ function AppPromoModal({ onInstall, onClose, c }) {
   );
 }
 
-// League Ladder maintenance notice — see ladderMaintenanceOpen above.
+// League Ladder maintenance notice â€” see ladderMaintenanceOpen above.
 // Purely informational: it doesn't gate the Ladder tab itself, just warns
 // the player before they tap in so a stale/paused board doesn't read as a
 // bug. Mirrors AppPromoModal's overlay/close pattern above it.
@@ -10799,7 +10799,7 @@ function LadderMaintenanceModal({ onClose, c }) {
         </div>
         <div className="font-display font-black text-lg leading-tight mb-1.5 text-center">Ladder under maintenance</div>
         <div className="font-body text-sm mb-5 text-center" style={{ color: c.textDim }}>
-          The League Ladder is getting some quick repairs and will be back shortly. Everything else — leagues, challenges, the Shop — is up and running as normal.
+          The League Ladder is getting some quick repairs and will be back shortly. Everything else â€” leagues, challenges, the Shop â€” is up and running as normal.
         </div>
         <button onClick={onClose} className="w-full font-body font-semibold px-4 py-3 rounded-full" style={{ background: c.accent, color: c.accentText }}>
           Got it
@@ -10812,28 +10812,28 @@ function LadderMaintenanceModal({ onClose, c }) {
 function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
-  // leaderboard machinery below — none of which is time-sensitive — also
+  // leaderboard machinery below â€” none of which is time-sensitive â€” also
   // re-ran every 60 seconds for as long as Home stayed mounted, plus on
   // every unrelated realtime ping (a challenges/ladder update elsewhere on
   // the platform) that happened to touch state Home reads. The league-card
   // lists are the only part that actually needs to notice time passing on
-  // its own (a result's confirm window silently expiring), so that tick —
-  // and the sort/attention-score work it drives — now lives in
+  // its own (a result's confirm window silently expiring), so that tick â€”
+  // and the sort/attention-score work it drives â€” now lives in
   // LeagueListsSection instead, scoped to just that piece of the tree.
   const funLeagues = leagues.filter((l) => l.league_type !== "cash");
   const myId = session?.user?.id;
 
   // Same Weekend League spotlight PublicHome shows guests, surfaced here
-  // too so a signed-in player who hasn't joined yet — or who's a member of
-  // an entirely different set of leagues — still sees what's kicking off
-  // this Friday–Sunday and can jump straight in with one tap instead of
+  // too so a signed-in player who hasn't joined yet â€” or who's a member of
+  // an entirely different set of leagues â€” still sees what's kicking off
+  // this Fridayâ€“Sunday and can jump straight in with one tap instead of
   // only discovering it while logged out.
   const [weekendStart, weekendEnd] = weekendWindow();
   const weekendLeagues = funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
     // A groups_knockout league's real cutoff is its shared group_stage_due_at,
-    // not each match's own (now-advisory) due_at — so if that shared deadline
+    // not each match's own (now-advisory) due_at â€” so if that shared deadline
     // falls this weekend, every unplayed group-stage fixture counts as due,
     // even ones whose individual due_at happens to fall on a different day.
     const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
@@ -10851,13 +10851,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
     items.push({ league: l, kicksOffThisWeekend, matchCount: dueFixtures.length, earliest });
     return items;
   }, []).sort((a, b) => a.earliest - b.earliest);
-  // The Leagues list below already excludes these — a weekend league gets
+  // The Leagues list below already excludes these â€” a weekend league gets
   // one true home (the spotlight above), the same way PublicHome's
   // otherFunLeagues keeps guests from seeing it twice.
   const weekendLeagueIds = new Set(weekendLeagues.map((it) => it.league.id));
 
   // Accepted challenges (direct or random) sitting with no score logged yet,
-  // on either the challenge or open-challenge track — surfaced right at the
+  // on either the challenge or open-challenge track â€” surfaced right at the
   // top of Home so an opponent can log a result without first digging into
   // Challenges or the Ladder screen.
   const pendingResultItems = [
@@ -10875,7 +10875,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
       })),
   ].sort((a, b) => new Date(b.challenge.created_at) - new Date(a.challenge.created_at));
 
-  // Defensive: same reasoning as leagueFixtures above — don't let one league
+  // Defensive: same reasoning as leagueFixtures above â€” don't let one league
   // row with a missing teams/fixtures join crash the whole homepage.
   const totalClubs = leagues.reduce((sum, l) => sum + (l.teams || []).length, 0);
   const totalMatches = leagues.reduce((sum, l) => sum + (l.fixtures || []).filter((f) => f.played).length, 0);
@@ -10884,10 +10884,10 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   const myProgress = computeMyProgress(leagues, myTeam);
   const myDisplayName = profileFirstName(session) || session?.user?.email || "";
 
-  // Achievement badges — a second, more permanent collection layer next to
+  // Achievement badges â€” a second, more permanent collection layer next to
   // the level/XP bar. Recomputed from the same data Home already has, so it
   // can't drift out of sync with a player's real record. Every stat any
-  // badge's value() function reads must be listed below — miss one and that
+  // badge's value() function reads must be listed below â€” miss one and that
   // badge can silently fail to unlock the moment it's earned, only catching
   // up whenever some other listed stat happens to change too. Ladder rank
   // depends on rank_position only (a primitive), not the whole myLadderRank
@@ -10895,14 +10895,14 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   // ladder poll even when the rank itself hasn't moved.
   const joinedLeagueCount = leagues.filter((l) => isMemberOf(l)).length;
   const myLeaguesWon = useMemo(() => computeMyLeagueWins(leagues, myId), [leagues, myId]);
-  // Every league title, grouped by who won it and which league/when — feeds
+  // Every league title, grouped by who won it and which league/when â€” feeds
   // the Wall of Fame's per-row titles list. Kept separate from
   // myLeaguesWon (which only needs a count, for the achievement) since this
   // one runs across every user, not just the signed-in one.
   const championshipsByUserId = useMemo(() => computeAllLeagueChampionships(leagues), [leagues]);
   const ladderTitlesByUserId = useMemo(() => computeLadderTitlesByUserId(ladderChampions), [ladderChampions]);
   // Signed-in member's own League 1 win count, for the ladder_champion
-  // achievement — same "just a count for the achievement" split as
+  // achievement â€” same "just a count for the achievement" split as
   // myLeaguesWon vs championshipsByUserId above.
   const myLadderLeague1Wins = (ladderChampions || []).filter((r) => r.user_id === myId).length;
   const achievements = useMemo(
@@ -10913,26 +10913,26 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   const [achievementsOpen, setAchievementsOpen] = useState(false);
 
   // Fires a one-time toast the moment a badge is newly earned, the same
-  // localStorage-per-user pattern the level-up toast above uses — so a
+  // localStorage-per-user pattern the level-up toast above uses â€” so a
   // badge already earned in a previous session never re-fires here, only
   // one crossed since the last time this ran on this device.
   useEffect(() => {
     if (!myId || achievements.length === 0) return;
     const key = `efootball-badges-seen-${myId}`;
     let seen = [];
-    try { seen = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { /* ignore — storage unavailable */ }
+    try { seen = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { /* ignore â€” storage unavailable */ }
     const earnedIds = achievements.filter((a) => a.earned).map((a) => a.id);
     const newOnes = earnedIds.filter((id) => !seen.includes(id));
     if (newOnes.length > 0) {
       if (seen.length > 0 && showToast) {
         const first = achievements.find((a) => a.id === newOnes[0]);
-        showToast(newOnes.length === 1 ? `Achievement unlocked: ${first.label} 🏆` : `${newOnes.length} new achievements unlocked 🏆`);
+        showToast(newOnes.length === 1 ? `Achievement unlocked: ${first.label} ðŸ†` : `${newOnes.length} new achievements unlocked ðŸ†`);
       }
-      try { localStorage.setItem(key, JSON.stringify(earnedIds)); } catch (e) { /* ignore — storage unavailable */ }
+      try { localStorage.setItem(key, JSON.stringify(earnedIds)); } catch (e) { /* ignore â€” storage unavailable */ }
     }
   }, [myId, achievements, showToast]);
 
-  // Wall of Fame — every member's badge count/score, ranked. memberAvatars
+  // Wall of Fame â€” every member's badge count/score, ranked. memberAvatars
   // only lists *other* members (see list_challengeable_members), so the
   // signed-in player's own name/photo is merged in here from session data
   // before aggregating, otherwise their own row would be silently dropped.
@@ -10945,12 +10945,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   const wallOfFame = useMemo(() => computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId), [allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId]);
   const [wallOfFameOpen, setWallOfFameOpen] = useState(false);
 
-  // Mirrors every earned badge to Supabase — this is what lets a badge
+  // Mirrors every earned badge to Supabase â€” this is what lets a badge
   // earned on one device show up on another, and what the Wall of Fame
   // reads from. Requires the `achievements` table from
   // supabase/achievements-migration.sql. Skips the round trip when the
   // earned set is identical to the last one actually synced (tracked in a
-  // ref, not state, so comparing it doesn't itself trigger a re-render) —
+  // ref, not state, so comparing it doesn't itself trigger a re-render) â€”
   // without this, every background poll that touches myProgress/ladder
   // would re-upsert the same rows for no reason. Refreshes the Wall of
   // Fame's data on success so a badge earned just now shows up there
@@ -10974,12 +10974,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   // Fires a one-time celebration the moment a player's level actually goes
   // up, instead of leaving it as a silent bar reset. The last-seen level is
   // stashed in localStorage per user so a level reached in a previous
-  // session never re-fires here on a later visit — only a level crossed
+  // session never re-fires here on a later visit â€” only a level crossed
   // since the last time this ran on this device.
   const [progressOpen, setProgressOpen] = useState(false);
   // The two Home widgets below (results waiting to be logged, upcoming
   // fixtures) each pop out into their own overlay instead of sitting inline
-  // on the page — see the compact bars right above "Where you stand" for why
+  // on the page â€” see the compact bars right above "Where you stand" for why
   // each opens differently. Quick actions now lives in the app-wide floating
   // dock instead (see App's root return), so it doesn't need state here.
   const [resultsToLogOpen, setResultsToLogOpen] = useState(false);
@@ -10988,16 +10988,16 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
     if (!myId || myProgress.played === 0) return;
     const key = `efootball-level-seen-${myId}`;
     let lastSeen = 0;
-    try { lastSeen = Number(localStorage.getItem(key)) || 0; } catch (e) { /* ignore — storage unavailable */ }
+    try { lastSeen = Number(localStorage.getItem(key)) || 0; } catch (e) { /* ignore â€” storage unavailable */ }
     if (myProgress.level > lastSeen) {
-      if (lastSeen > 0 && showToast) showToast(`Level up! You're now Lvl ${myProgress.level} · ${myProgress.levelTitle} 🎉`);
-      try { localStorage.setItem(key, String(myProgress.level)); } catch (e) { /* ignore — storage unavailable */ }
+      if (lastSeen > 0 && showToast) showToast(`Level up! You're now Lvl ${myProgress.level} Â· ${myProgress.levelTitle} ðŸŽ‰`);
+      try { localStorage.setItem(key, String(myProgress.level)); } catch (e) { /* ignore â€” storage unavailable */ }
     }
   }, [myId, myProgress.level, myProgress.played, myProgress.levelTitle, showToast]);
 
   return (
     <div>
-      {/* Player card — leads the page like a game's home dashboard: who's
+      {/* Player card â€” leads the page like a game's home dashboard: who's
           signed in, what season is live, the numbers that matter at a
           glance. Everything else below is "what do you want to do now". */}
       <section className="relative mt-1 rounded-2xl overflow-hidden" style={{ background: `linear-gradient(120deg, ${c.green}33, ${c.surface})`, border: `1px solid ${c.border}` }}>
@@ -11014,7 +11014,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full" style={{ background: c.accent }} />
               </span>
-              Season 2026 · Live
+              Season 2026 Â· Live
             </div>
             <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">Welcome back{myDisplayName ? `, ${myDisplayName}` : ""}</div>
           </div>
@@ -11036,7 +11036,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           </div>
         </div>
 
-        {/* Level + XP bar, with a streak chip when the player is on a run —
+        {/* Level + XP bar, with a streak chip when the player is on a run â€”
             the "there's a game underneath the leagues" layer of the page.
             Tapping it opens the full breakdown (level, XP-to-go, record).
             Before a player's first match, a quiet teaser line stands in for
@@ -11046,7 +11046,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             className="relative px-4 pb-3.5 -mt-1 flex items-center gap-2 cursor-pointer">
             <div className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5"
               style={{ background: `${tierColorFor(myProgress.level)}1F`, color: tierColorFor(myProgress.level), border: `1px solid ${tierColorFor(myProgress.level)}55` }}>
-              <Star size={10} /> Lvl {myProgress.level} · {myProgress.levelTitle}
+              <Star size={10} /> Lvl {myProgress.level} Â· {myProgress.levelTitle}
             </div>
             <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}
               role="progressbar" aria-valuenow={myProgress.xpIntoLevel} aria-valuemin={0} aria-valuemax={myProgress.xpForNextLevel}
@@ -11070,7 +11070,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
 
       {progressOpen && <ProgressBreakdownModal progress={myProgress} onClose={() => setProgressOpen(false)} c={c} />}
 
-      {/* Wildcard Match — the open/"random" challenge broadcast, promoted
+      {/* Wildcard Match â€” the open/"random" challenge broadcast, promoted
           out of the header's small badge icon into its own spotlight right
           under the player card, so it's the first thing anyone sees after
           "who am I" and before "what's due". Deliberately its own teal/
@@ -11078,7 +11078,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           special one-tap event, not just another list item. */}
       <WildcardMatchSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges} c={c} />
 
-      {/* Continue playing — each of these pops out on tap instead of sitting
+      {/* Continue playing â€” each of these pops out on tap instead of sitting
           inline, so the page reads top-to-bottom as: who you are, what needs
           you next, right in front of you at a glance, without two scrolling
           strips eating the fold. Results to log is urgent and needs a
@@ -11100,18 +11100,18 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           onClose={() => setUpNextOpen(false)} c={c} />
       )}
 
-      {/* Where you stand — Leaderboard preview then the Ladder banner, moved
+      {/* Where you stand â€” Leaderboard preview then the Ladder banner, moved
           up to right after quick actions. This is the core eFootball-style
           competitive loop (rank, points, who's above you), so it now beats
           the collectibles below it to the top of the fold instead of trailing
-          them — "how am I doing" before "what have I collected". */}
+          them â€” "how am I doing" before "what have I collected". */}
       <div className="mt-8">
         {/* Same quick-action tiles as the floating dock, placed right above
             the leaderboard preview per request. Mobile keeps the original
             horizontally-scrollable strip (screen's too narrow to show every
             tile at once anyway); sm and up switches to flex-wrap so a
-            laptop/desktop viewport — with plenty of spare width inside the
-            max-w-3xl column — shows every tile up front instead of hiding
+            laptop/desktop viewport â€” with plenty of spare width inside the
+            max-w-3xl column â€” shows every tile up front instead of hiding
             the tail end behind a scrollbar nobody expects to need on a
             mouse-driven screen. */}
         {quickActions && quickActions.length > 0 && (
@@ -11123,7 +11123,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             ))}
           </div>
         )}
-        {/* Rapid Cup — horizontal banner right under Quick Actions (see
+        {/* Rapid Cup â€” horizontal banner right under Quick Actions (see
             RAPID-CUP-BUILD-PLAN.md Section 12). Self-contained: it polls
             for the current open/filling/live lobby itself and renders
             nothing when there isn't one, so it never pushes the rest of
@@ -11139,16 +11139,16 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           showToast={showToast}
           c={c}
         />
-        {/* League Ladder section — moved up to sit directly below the Quick
+        {/* League Ladder section â€” moved up to sit directly below the Quick
             actions row per request (was further down inside
             LeagueListsSection, after the plain Leagues grid). Replaces the
             old standalone LeagueLadderQuickBanner here, which is removed
             entirely now that the real section (with live League 1-5 cards)
             sits in this spot instead of a banner just pointing at it. */}
         <LadderLeagueSection session={session} isAdmin={isAdmin} onOpenLadderLeague={onOpenLadderLeague} c={c} />
-        {/* Weekend League — sits directly below the League Ladder section
+        {/* Weekend League â€” sits directly below the League Ladder section
             and above the Leaderboard preview, per request. Always
-            rendered — the League Ladder pass inside it (LadderWeekendCard)
+            rendered â€” the League Ladder pass inside it (LadderWeekendCard)
             isn't weekend-gated, so this no longer disappears entirely just
             because no fun league kicks off this Friday-Sunday.
             hideLadderPass stays true since the League Ladder section right
@@ -11161,13 +11161,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
       </div>
       <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} session={session} onJoinLadder={onJoinLadder} showToast={showToast} c={c} />
 
-      {/* Achievements — the badge collection layer, right after "where you
+      {/* Achievements â€” the badge collection layer, right after "where you
           stand" so a player sees their rank first, then what they've earned
           chasing it. */}
       <AchievementsStrip achievements={achievements} earnedCount={earnedAchievementCount} onOpen={() => setAchievementsOpen(true)} c={c} />
       {achievementsOpen && <AchievementsModal achievements={achievements} earnedCount={earnedAchievementCount} onClose={() => setAchievementsOpen(false)} c={c} />}
 
-      {/* Wall of Fame — the shared, cross-player view of the same badges,
+      {/* Wall of Fame â€” the shared, cross-player view of the same badges,
           right under the personal Achievements strip so "what I've earned"
           and "how I stack up against everyone else" sit side by side. */}
       <WallOfFameStrip standings={wallOfFame} onOpen={() => setWallOfFameOpen(true)} c={c} />
@@ -11180,7 +11180,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
               <Gamepad2 size={22} style={{ color: c.accent }} />
             </span>
             <div className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>No leagues yet</div>
-            <div className="font-body text-sm max-w-[220px]" style={{ color: c.textDim }}>Start the first one — it takes about a minute.</div>
+            <div className="font-body text-sm max-w-[220px]" style={{ color: c.textDim }}>Start the first one â€” it takes about a minute.</div>
             <button onClick={onCreate} className="mt-1 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-lg px-4 py-2 transition-transform active:scale-95"
               style={{ background: c.accent, color: c.accentText }}>
               <Plus size={13} /> Create a league
@@ -11197,7 +11197,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   );
 }
 
-// Compact "Up next" bar — sits inline on Home showing only the soonest
+// Compact "Up next" bar â€” sits inline on Home showing only the soonest
 // fixture (plus a count of how many more are queued behind it), and pops
 // the full list open in UpNextModal on tap. Renders nothing for a visitor
 // with no upcoming fixtures (new signups, or someone only spectating), so
@@ -11213,7 +11213,7 @@ function UpNextBar({ fixtures, onOpen, c }) {
       <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
         <span className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {next.opponent.name}</span>
         <span className="font-mono text-[10px] shrink-0" style={{ color: c.textDim }}>
-          {next.isHome ? "Home" : "Away"}{next.due_at ? ` · Due ${fmtDate(next.due_at)}` : ""}
+          {next.isHome ? "Home" : "Away"}{next.due_at ? ` Â· Due ${fmtDate(next.due_at)}` : ""}
         </span>
       </span>
       {rest > 0 && (
@@ -11225,7 +11225,7 @@ function UpNextBar({ fixtures, onOpen, c }) {
 }
 
 // The full "Up next" list, popped out into a light dismissible sheet from
-// UpNextBar — this one's just for browsing what's ahead (not urgent, no
+// UpNextBar â€” this one's just for browsing what's ahead (not urgent, no
 // decision needed), so unlike the results modal below it doesn't need to
 // grab full attention; a flick-through-and-dismiss overlay fits better.
 function UpNextModal({ fixtures, onOpen, onClose, c }) {
@@ -11247,12 +11247,12 @@ function UpNextModal({ fixtures, onOpen, onClose, c }) {
               <div className="flex items-center justify-between gap-1.5 mt-1.5">
                 <div className="font-mono text-[10px] min-w-0 truncate" style={{ color: c.textDim }}>
                   {f.isHome ? "Home" : "Away"}
-                  {f.due_at ? ` · Due ${fmtDate(f.due_at)}` : ""}
+                  {f.due_at ? ` Â· Due ${fmtDate(f.due_at)}` : ""}
                 </div>
                 {f.opponent.phone && (
                   <div onClick={(e) => e.stopPropagation()} className="shrink-0">
                     <WhatsAppCallLink phone={f.opponent.phone} iconOnly
-                      text={`Hi, it's ${f.team.name} 🔥 Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} ⚽🕹️${firstMatchdayNote(f.round)}`} c={c} />
+                      text={`Hi, it's ${f.team.name} ðŸ”¥ Call me when you're ready to play so we can lock in the time${f.due_at ? ` (due ${fmtDate(f.due_at)})` : ""} âš½ðŸ•¹ï¸${firstMatchdayNote(f.round)}`} c={c} />
                   </div>
                 )}
               </div>
@@ -11264,7 +11264,7 @@ function UpNextModal({ fixtures, onOpen, onClose, c }) {
   );
 }
 
-// Compact "Results to log" bar — sits inline on Home, right above "Up
+// Compact "Results to log" bar â€” sits inline on Home, right above "Up
 // next", showing just the count of matches waiting on the signed-in player
 // to log. Pops the full list open in PendingResultsModal on tap. Renders
 // nothing when nothing's waiting.
@@ -11285,7 +11285,7 @@ function PendingResultsBar({ items, onOpen, c }) {
 }
 
 // The full "Results to log" list, popped out into a full attention-grabbing
-// modal from PendingResultsBar — unlike Up next, this one always needs an
+// modal from PendingResultsBar â€” unlike Up next, this one always needs an
 // actual decision (a score to enter), so it opens as a modal that sits in
 // front of everything else rather than a light dismissible sheet.
 function PendingResultsModal({ items, onOpenLogResult, onOpenLogResultOpen, onClose, c }) {
@@ -11318,19 +11318,19 @@ function PendingResultsModal({ items, onOpenLogResult, onOpenLogResultOpen, onCl
   );
 }
 
-// Small helper — first name off the signed-in user's email, purely cosmetic
+// Small helper â€” first name off the signed-in user's email, purely cosmetic
 // (falls back to nothing, which the caller already handles).
 function profileFirstName(session) {
   const raw = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name;
   return raw ? raw.split(" ")[0] : "";
 }
 
-// One equal-weight tile in the quick-action menu grid — icon on top, label
+// One equal-weight tile in the quick-action menu grid â€” icon on top, label
 // below, small badge count in the corner when relevant. Every action here
 // carries the same visual weight; none is "the" highlighted button. The
 // Shop tile carries an "external" badge instead of a count, since it leaves
 // the app rather than opening a screen inside it.
-// LADDER_GOLD — reuses SHOP_GOLD's trophy-gold rather than inventing a new
+// LADDER_GOLD â€” reuses SHOP_GOLD's trophy-gold rather than inventing a new
 // brand color, so the one "special" tile in an otherwise uniform grid reads
 // as a promoted/premium feature (same visual language the Shop banner
 // already uses) instead of a random one-off accent.
@@ -11362,7 +11362,7 @@ export function MenuTile({ icon: Icon, label, badge, external, onClick, c, speci
       </span>
       {/* Special tile's label swaps the grid's plain font-body for the
           same display font the app's headings use (Oswald), bold italic
-          and letter-spaced, so it doesn't just look gold — it's set in a
+          and letter-spaced, so it doesn't just look gold â€” it's set in a
           different typographic voice than every other tile's label. */}
       <span className={`relative text-center leading-tight ${special ? "text-[10px] font-extrabold uppercase italic tracking-wider" : "text-[10px] font-semibold"}`}
         style={{ color: special ? LADDER_GOLD : c.textDim, fontFamily: special ? "'Oswald', sans-serif" : undefined }}>
@@ -11372,16 +11372,16 @@ export function MenuTile({ icon: Icon, label, badge, external, onClick, c, speci
   );
 }
 
-// Quick actions — a floating dock rendered once at the app root (see App's
+// Quick actions â€” a floating dock rendered once at the app root (see App's
 // root return) rather than a bar or modal, and rendered on every screen
 // instead of just Home. These are launch points someone might reach for
-// from anywhere in the app — everything that used to live only in the
-// header's hamburger menu or Home's action grid now lives in one place —
+// from anywhere in the app â€” everything that used to live only in the
+// header's hamburger menu or Home's action grid now lives in one place â€”
 // so it makes sense for the dock to stay put as a floating button while
 // scrolling/navigating instead of a one-shot overlay tied to a single
 // screen. Tapping the FAB pops the same equal-weight tile grid open above
 // it; tapping it again, an outside tap, or picking a tile all close it.
-// `items` is a flat list of { icon, label, onClick, badge?, external? } —
+// `items` is a flat list of { icon, label, onClick, badge?, external? } â€”
 // callers assemble the full set (including which admin-only tiles to
 // include) once at the top of the app.
 function QuickActionsDock({ open, onToggle, items, c }) {
@@ -11416,13 +11416,13 @@ function QuickActionsDock({ open, onToggle, items, c }) {
   );
 }
 
-// Wildcard Match — a dedicated, standalone spotlight for the open/"random"
+// Wildcard Match â€” a dedicated, standalone spotlight for the open/"random"
 // challenge broadcast (see sendRandomChallenge/acceptOpenChallenge in App,
 // and the "Random challenge" board in ChallengesScreen), promoted out of
 // the header's small badge icon into its own eye-catching card right at the
-// top of Home. It never fires or grabs a challenge itself — same "preview
+// top of Home. It never fires or grabs a challenge itself â€” same "preview
 // card that opens the full screen" contract as LadderStrip/LeaderboardStrip
-// below — it just makes the feature impossible to miss and always shows the
+// below â€” it just makes the feature impossible to miss and always shows the
 // most exciting truth available: someone else's open challenge beats your
 // own waiting one, which beats the plain "try it" pitch.
 function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpenChallenges, c }) {
@@ -11487,7 +11487,7 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
                   <span className="w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint, boxShadow: `0 0 0 2px ${c.surface}` }}>+{grabbable.length - 4}</span>
                 )}
               </div>
-              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it — before someone else does.</div>
+              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it â€” before someone else does.</div>
             </>
           )}
           {state === "waiting" && (
@@ -11497,7 +11497,7 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
                 <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.3s" }} />
                 <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.6s" }} />
               </span>
-              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
+              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone â€” waiting for someone to grab it.</div>
             </>
           )}
           {state === "idle" && (
@@ -11514,7 +11514,7 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
 }
 
 // A single compact widget pointing at the Completed Leagues page (view ===
-// "completedLeagues") — this used to be a full horizontal-scroll
+// "completedLeagues") â€” this used to be a full horizontal-scroll
 // LeagueSection sitting inline on Home; now that finished leagues live on
 // their own page (also reachable from Quick Actions and the header menu),
 // this is just the "here's where they went" pointer from the leagues list,
@@ -11532,7 +11532,7 @@ function CompletedLeaguesWidget({ count, onOpen, c }) {
         <div className="flex-1 min-w-0">
           <div className="font-extrabold uppercase tracking-tight text-sm leading-none">Completed Leagues</div>
           <div className="font-mono text-[11px] mt-1" style={{ color: c.textFaint }}>
-            {count} finished league{count === 1 ? "" : "s"} — final tables, past champions
+            {count} finished league{count === 1 ? "" : "s"} â€” final tables, past champions
           </div>
         </div>
         <ChevronRight size={16} style={{ color: c.textFaint }} className="shrink-0" />
@@ -11541,7 +11541,7 @@ function CompletedLeaguesWidget({ count, onOpen, c }) {
   );
 }
 
-// The Kit Room — a standalone marketplace spotlight for club transfers and
+// The Kit Room â€” a standalone marketplace spotlight for club transfers and
 // eFootball team sales (see TransferMarket.jsx), placed at the bottom of
 // the Home leagues list, after the Completed Leagues widget, so it reads
 // as "done with this season? here's where clubs and teams change hands"
@@ -11549,14 +11549,14 @@ function CompletedLeaguesWidget({ count, onOpen, c }) {
 // Deliberately built as a "retail tag" rather than another soft-glow event
 // card (see KIT_ROOM_COBALT/KIT_ROOM_STEEL): a solid left rail, a faint
 // diagonal fabric-stripe texture (evoking a kit/jersey), and a rotated
-// corner tag — its own visual family, not a WildcardMatchSpotlight reskin.
+// corner tag â€” its own visual family, not a WildcardMatchSpotlight reskin.
 function KitRoomSpotlight({ onOpenTransferMarket, c }) {
   return (
     <section className="mt-6">
       <div role="button" tabIndex={0} onClick={onOpenTransferMarket} onKeyDown={(e) => { if (e.key === "Enter") onOpenTransferMarket(); }}
         className="relative w-full rounded-2xl pl-5 pr-4 py-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
         style={{ background: c.surface, border: `1px solid ${c.border}`, borderLeft: `4px solid ${KIT_ROOM_COBALT}` }}>
-        {/* Faint diagonal fabric-stripe texture — the widget's own visual
+        {/* Faint diagonal fabric-stripe texture â€” the widget's own visual
             signature, standing in for Wildcard's glow blobs / shine sweep. */}
         <div className="pointer-events-none absolute inset-0 opacity-[0.05]"
           style={{ backgroundImage: `repeating-linear-gradient(135deg, ${KIT_ROOM_COBALT} 0px, ${KIT_ROOM_COBALT} 2px, transparent 2px, transparent 14px)` }} />
@@ -11598,39 +11598,39 @@ function KitRoomSpotlight({ onOpenTransferMarket, c }) {
   );
 }
 
-// The permanent ladder, sitting in front of everything else on Home — a
+// The permanent ladder, sitting in front of everything else on Home â€” a
 // horizontally-scrolling strip, not a boxed-off card, so it reads as part of
 // the page rather than a widget bolted onto it. Shows the top 5 by
 // rank_position (which never resets) plus, if the viewer has a spot on it
 // themselves, a quiet "you're #N" line that opens the challenge picker.
-// The permanent ladder, sitting in front of everything else on Home — a
+// The permanent ladder, sitting in front of everything else on Home â€” a
 // horizontally-scrolling strip, not a boxed-off card, so it reads as part of
 // the page rather than a widget bolted onto it. Shows the top 5 by
 // rank_position (which never resets), plus one of three states for the
 // viewer themselves:
 //   - signed out: no personal state, just a plain way in
-//   - signed in, not yet a member: a friendly one-liner + a Join button —
+//   - signed in, not yet a member: a friendly one-liner + a Join button â€”
 //     the one place on Home this fee is explained, so it's spelled out
 //     rather than assumed
 //   - signed in, already a member: the "you're #N" chip this always had
 //
 // Previously this only ever showed the "you're #N" chip when myLadderRank
-// existed and silently showed nothing in its place otherwise — a brand new
+// existed and silently showed nothing in its place otherwise â€” a brand new
 // player had no way to tell from this widget that joining was even a thing,
 // let alone that it cost anything. That's the gap this redesign closes.
 function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder, showToast }) {
   const theme = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
   const [rulesOpen, setRulesOpen] = useState(false);
   const [joining, setJoining] = useState(false);
-  if (!ladder) return null; // still loading — nothing to show either way yet
+  if (!ladder) return null; // still loading â€” nothing to show either way yet
   const top5 = ladder.slice(0, 5);
   const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
   const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
   const isMember = !!myLadderRank;
   const canJoin = !!session && !isMember;
   // A truly empty ladder (nobody's ever joined, or everyone who never
-  // played got purged) used to make this whole card vanish — Join button
-  // included — which meant the very first person who'd want to click Join
+  // played got purged) used to make this whole card vanish â€” Join button
+  // included â€” which meant the very first person who'd want to click Join
   // could never see it. Only bail out now if there's genuinely nothing
   // useful to show: no members AND no Join card for this viewer either.
   if (top5.length === 0 && !canJoin) return null;
@@ -11679,7 +11679,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
             onClick={(e) => e.stopPropagation()}
             style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
             <div className="font-body text-xs min-w-0" style={{ color: theme.textDim }}>
-              Not on the ladder yet — one-time <span className="font-bold" style={{ color: theme.accent }}><NetsAmount amount={LADDER_JOIN_FEE_NETS} /></span> to join.
+              Not on the ladder yet â€” one-time <span className="font-bold" style={{ color: theme.accent }}><NetsAmount amount={LADDER_JOIN_FEE_NETS} /></span> to join.
             </div>
             <button onClick={handleJoin} disabled={joining}
               className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-50"
@@ -11693,7 +11693,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
           {top5.length === 0 ? (
             <div className="flex items-center shrink-0 rounded-xl px-3.5 py-2.5 font-body text-xs"
               style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
-              No one's on the ladder yet — be the first.
+              No one's on the ladder yet â€” be the first.
             </div>
           ) : top5.map((row, i) => (
             <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
@@ -11717,7 +11717,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
               )}
               <div className="flex flex-col leading-tight">
                 <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: theme.text }}>{row.username}</span>
-                <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+                <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts Â· {row.wins}Wâ€“{row.losses}L</span>
               </div>
             </div>
           ))}
@@ -11733,7 +11733,7 @@ function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder
 }
 
 // Compact homepage preview of the platform-wide Leaderboard (the full
-// screen lives behind the header menu) — top 5 by wins for the current
+// screen lives behind the header menu) â€” top 5 by wins for the current
 // season, styled like a podium rather than a plain list, with the same
 // press-and-glow language as the rest of the dashboard. Renders nothing
 // until at least one match has been played anywhere, same as the ladder.
@@ -11769,7 +11769,7 @@ function LeaderboardStrip({ leagues, session, memberAvatars, myAvatarUrl, onOpen
             </span>
             <div className="leading-tight">
               <div className="font-extrabold uppercase tracking-tight text-sm leading-none">Leaderboard</div>
-              <div className="font-mono text-[9px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>This season · every league</div>
+              <div className="font-mono text-[9px] uppercase tracking-wider mt-0.5" style={{ color: c.textFaint }}>This season Â· every league</div>
             </div>
           </div>
           {myRow && (
@@ -11817,7 +11817,7 @@ function LeaderboardStrip({ leagues, session, memberAvatars, myAvatarUrl, onOpen
   );
 }
 
-// The picker for who a member is allowed to send a ladder challenge to —
+// The picker for who a member is allowed to send a ladder challenge to â€”
 // anyone ranked above them within 10 points, closest first. A search box lets
 // them type a name to jump straight to it instead of scrolling the list.
 function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
@@ -11843,7 +11843,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
         )}
         {targets.length === 0 ? (
           <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>
-            {myRank && myRank.rank_position === 1 ? "You're #1 — nobody left to challenge." : "No one within 10 points of you yet."}
+            {myRank && myRank.rank_position === 1 ? "You're #1 â€” nobody left to challenge." : "No one within 10 points of you yet."}
           </div>
         ) : filtered.length === 0 ? (
           <div className="font-body text-sm text-center py-6" style={{ color: c.textFaint }}>No one eligible matches "{query}".</div>
@@ -11871,7 +11871,7 @@ function LadderChallengeSheet({ myRank, targets, onChallenge, onCancel, c }) {
 // Shareable leaderboard/ladder image export.
 //
 // Lets anyone download a themed PNG snapshot of a 10-club/10-player slice of
-// the Ladder or a league's standings table — same columns, same colours as
+// the Ladder or a league's standings table â€” same columns, same colours as
 // the on-screen table, just baked into an image they can post or send on
 // WhatsApp. Rendered with plain Canvas2D (no extra dependencies): we draw a
 // header, the column headings, up to 10 rows, and a small WeAfrica footer,
@@ -11881,13 +11881,13 @@ const SHARE_PAGE_SIZE = 10;
 const SHARE_BRAND = "weafrica.co.za";
 
 // Shrinks `text` with a trailing ellipsis until it fits inside `maxWidth`
-// for whatever font is currently set on `ctx` — canvas has no built-in
+// for whatever font is currently set on `ctx` â€” canvas has no built-in
 // text-overflow, so this is the manual equivalent.
 function fitCanvasText(ctx, text, maxWidth) {
   if (ctx.measureText(text).width <= maxWidth) return text;
   let t = text;
-  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
-  return t + "…";
+  while (t.length > 1 && ctx.measureText(t + "â€¦").width > maxWidth) t = t.slice(0, -1);
+  return t + "â€¦";
 }
 
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -11906,7 +11906,7 @@ function roundRectPath(ctx, x, y, w, h, r) {
 // Column widths across a config should sum to 968 (the table width below).
 const SHARE_STANDINGS_COLUMNS = [
   { key: "rank", label: "#", width: 64, align: "center", isRank: true },
-  { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " · OUT" : r.atRisk ? " · AT RISK" : "") },
+  { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " Â· OUT" : r.atRisk ? " Â· AT RISK" : "") },
   { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
   { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
   { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
@@ -12031,7 +12031,7 @@ function drawShareCard(canvas, { c, kicker, title, subtitle, rangeLabel, totalCo
 // The range-picker + live preview shown when someone taps "Download image"
 // on the Ladder or a league's Standings table. `rows` should already be the
 // FULL ranked list (not a filtered/search subset) with a numeric `.rank`
-// field on every row — position ranges are sliced 10 at a time off of it.
+// field on every row â€” position ranges are sliced 10 at a time off of it.
 export function ShareRangeModal({ onClose, kicker, title, subtitle, rows, columns, c, defaultRank }) {
   const totalCount = rows.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / SHARE_PAGE_SIZE));
@@ -12042,7 +12042,7 @@ export function ShareRangeModal({ onClose, kicker, title, subtitle, rows, column
   const pageRows = rows.slice(page * SHARE_PAGE_SIZE, page * SHARE_PAGE_SIZE + SHARE_PAGE_SIZE);
   const rangeStart = page * SHARE_PAGE_SIZE + 1;
   const rangeEnd = page * SHARE_PAGE_SIZE + pageRows.length;
-  const rangeLabel = `#${rangeStart}–${rangeEnd}`;
+  const rangeLabel = `#${rangeStart}â€“${rangeEnd}`;
 
   useEffect(() => {
     if (!canvasRef.current || pageRows.length === 0) return;
@@ -12089,7 +12089,7 @@ export function ShareRangeModal({ onClose, kicker, title, subtitle, rows, column
                   <button key={i} onClick={() => setPage(i)}
                     className="shrink-0 font-mono text-xs font-semibold px-3 py-1.5 rounded-full"
                     style={page === i ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textDim }}>
-                    {s}–{e}
+                    {s}â€“{e}
                   </button>
                 );
               })}
@@ -12115,16 +12115,16 @@ export function ShareRangeModal({ onClose, kicker, title, subtitle, rows, column
 }
 
 export const REACTIONS = [
-  { key: "like", emoji: "👍" },
-  { key: "love", emoji: "❤️" },
-  { key: "laugh", emoji: "😂" },
-  { key: "fire", emoji: "🔥" },
-  { key: "wow", emoji: "😮" },
-  { key: "skull", emoji: "💀" },
+  { key: "like", emoji: "ðŸ‘" },
+  { key: "love", emoji: "â¤ï¸" },
+  { key: "laugh", emoji: "ðŸ˜‚" },
+  { key: "fire", emoji: "ðŸ”¥" },
+  { key: "wow", emoji: "ðŸ˜®" },
+  { key: "skull", emoji: "ðŸ’€" },
 ];
 export const REACTION_EMOJI = Object.fromEntries(REACTIONS.map((r) => [r.key, r.emoji]));
 
-// A reaction bar for the league itself — same emoji-picker pattern as a
+// A reaction bar for the league itself â€” same emoji-picker pattern as a
 // comment's reaction button, just scoped to league_reactions instead of
 // comment_likes. Open to anyone signed in (not gated by canComment/joined),
 // so the general public can react to a league without joining it.
@@ -12181,7 +12181,7 @@ export function LeagueReactionBar({ league, session, onToggle, c, compact = fals
   };
 
   // Reacting lives inside league cards on Home (so people can react before
-  // ever opening a league) as well as inside LeagueDetail — stopping
+  // ever opening a league) as well as inside LeagueDetail â€” stopping
   // propagation here keeps a tap on the reaction button from also
   // triggering the card's onClick (which opens the league).
   return (
@@ -12191,10 +12191,10 @@ export function LeagueReactionBar({ league, session, onToggle, c, compact = fals
           ? "flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded-full transition-colors"
           : "flex items-center gap-1.5 font-mono text-[11px] px-2.5 py-1.5 rounded-full transition-colors"}
         style={{ background: c.surface, color: myReaction ? c.accent : c.textFaint }}>
-        <span style={{ fontSize: compact ? 12 : 13, lineHeight: 1 }}>{myReaction ? REACTION_EMOJI[myReaction] : "🤍"}</span>
+        <span style={{ fontSize: compact ? 12 : 13, lineHeight: 1 }}>{myReaction ? REACTION_EMOJI[myReaction] : "ðŸ¤"}</span>
         {!compact && (myReaction ? "You reacted" : "React to this league")}
         {reactions.length > 0 && (
-          <span>{compact ? "" : "· "}{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
+          <span>{compact ? "" : "Â· "}{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
         )}
       </button>
 
@@ -12215,10 +12215,10 @@ export function LeagueReactionBar({ league, session, onToggle, c, compact = fals
 
 // Shared by CommunityResultRow (styling a single row) and ChallengesScreen
 // (pulling escalated rows out of the feed into their own admin-facing
-// section) — a community-results row counts as escalated once it's still
+// section) â€” a community-results row counts as escalated once it's still
 // unconfirmed and the opponent's 30-minute confirm window has passed. The
 // view doesn't expose result_reported_at directly, but result_confirmed_at
-// is already populated (and used for timeAgo) even on unconfirmed rows —
+// is already populated (and used for timeAgo) even on unconfirmed rows â€”
 // same report timestamp under a name that only tells the truth once the
 // result is actually confirmed.
 export function isCommunityResultEscalated(r) {
@@ -12241,12 +12241,12 @@ export function CommunityResultRow({ result: r, myId, c }) {
       <div className="flex-1 min-w-0">
         <div className="font-body text-sm flex items-center gap-1.5 min-w-0">
           <span className="truncate" style={nameStyle(p1Wins)}>{r.player_one}</span>
-          <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}–{r.score_two}</span>
+          <span className="font-mono text-xs shrink-0" style={{ color: c.textFaint }}>{r.score_one}â€“{r.score_two}</span>
           <span className="truncate" style={nameStyle(p2Wins)}>{r.player_two}</span>
         </div>
         <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: pastConfirmWindow ? c.red : c.textFaint }}>
-          {r.kind === "open" ? "Random challenge" : "Challenge"} · {timeAgo(r.result_confirmed_at)}
-          {!r.confirmed && (pastConfirmWindow ? " · Escalated to admin" : " · Awaiting confirmation")}
+          {r.kind === "open" ? "Random challenge" : "Challenge"} Â· {timeAgo(r.result_confirmed_at)}
+          {!r.confirmed && (pastConfirmWindow ? " Â· Escalated to admin" : " Â· Awaiting confirmation")}
         </div>
       </div>
       {r.confirmed && <FacebookHighlightsIcon c={c} size={12} iconOnly />}
@@ -12258,13 +12258,13 @@ export const BOARD_PAGE_SIZE = 8;
 export const BOARD_MAX_INDENT_DEPTH = 4;
 
 // A single platform-wide comment wall at the very bottom of the Challenges
-// screen — banter, callouts, "who's on tonight" — open to any signed-in
+// screen â€” banter, callouts, "who's on tonight" â€” open to any signed-in
 // member regardless of which challenges they're personally involved in.
-// Threads nest to unlimited depth, same as the per-league comments system —
+// Threads nest to unlimited depth, same as the per-league comments system â€”
 // a reply can be replied to, and so on, with no cap on how many levels deep
 // a conversation under one root comment can go. Indentation stops growing
 // past a few levels purely for legibility on a phone; that's cosmetic only.
-export function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c, heading = "Challenge board", emptyText = "No comments yet — say something to get things going." }) {
+export function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost, onDelete, onToggleReaction, c, heading = "Challenge board", emptyText = "No comments yet â€” say something to get things going." }) {
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [visibleCount, setVisibleCount] = useState(BOARD_PAGE_SIZE);
@@ -12400,7 +12400,7 @@ export function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost,
           )}
           {voiceRecorder.state === "denied" && (
             <div className="font-mono text-[10px] mb-2 ml-10" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
+              Couldn't access your microphone â€” check your browser's permissions.
             </div>
           )}
           <div className="flex items-end gap-2">
@@ -12411,7 +12411,7 @@ export function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost,
             <textarea ref={textareaRef} value={text}
               onChange={(e) => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"; }}
               onKeyDown={onKeyDown}
-              placeholder="Say something…" rows={1} maxLength={1000}
+              placeholder="Say somethingâ€¦" rows={1} maxLength={1000}
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2.5 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
             {voiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={voiceRecorder} c={c} />}
@@ -12428,8 +12428,8 @@ export function ChallengeBoard({ session, comments, isAdmin, myUsername, onPost,
   );
 }
 
-// A single comment on the challenge board, its reaction/reply row, and —
-// recursively — every reply underneath it, no matter how deep. Each node
+// A single comment on the challenge board, its reaction/reply row, and â€”
+// recursively â€” every reply underneath it, no matter how deep. Each node
 // owns its own "reply box open?" / "replies expanded?" state independently
 // of its siblings and ancestors, exactly like the per-league CommentNode.
 function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onToggleReaction, c, depth }) {
@@ -12537,7 +12537,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
             <span className="font-body font-semibold text-xs truncate">{cm.username}</span>
             <div className="flex items-center gap-2 shrink-0">
               <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>
-                {cm.pending ? "sending…" : timeAgo(cm.created_at)}
+                {cm.pending ? "sendingâ€¦" : timeAgo(cm.created_at)}
               </span>
               {!cm.pending && cm.body && (
                 <button onClick={() => commentSpeech.speak(cm.id, `${cm.username} said: ${cm.body}`)} title="Read comment aloud"
@@ -12562,7 +12562,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
                   className="flex items-center gap-1 font-mono text-[10px] transition-colors"
                   style={{ color: myReaction ? c.accent : c.textFaint }}>
                   <span key={popKey} className={popKey > 0 ? "board-react-pop" : ""} style={{ fontSize: 12, lineHeight: 1 }}>
-                    {myReaction ? REACTION_EMOJI[myReaction] : "🤍"}
+                    {myReaction ? REACTION_EMOJI[myReaction] : "ðŸ¤"}
                   </span>
                   {reactions.length > 0 && (
                     <span>{summary.slice(0, 3).map(([key]) => REACTION_EMOJI[key]).join("")} {reactions.length}</span>
@@ -12632,14 +12632,14 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
           )}
           {replyVoiceRecorder.state === "denied" && (
             <div className="font-mono text-[10px] mb-1.5" style={{ color: c.red }}>
-              Couldn't access your microphone — check your browser's permissions.
+              Couldn't access your microphone â€” check your browser's permissions.
             </div>
           )}
           <div className="flex items-end gap-2">
             <textarea ref={replyRef} value={replyText}
               onChange={(e) => { setReplyText(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; }}
               onKeyDown={onReplyKeyDown}
-              placeholder={`Reply to ${cm.username}…`} rows={1} maxLength={1000} autoFocus
+              placeholder={`Reply to ${cm.username}â€¦`} rows={1} maxLength={1000} autoFocus
               className="board-textarea flex-1 font-body text-sm rounded-xl px-3 py-2 resize-none outline-none transition-colors"
               style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
             {replyVoiceRecorder.state !== "recorded" && <VoiceRecorderButton recorder={replyVoiceRecorder} c={c} size={36} iconSize={13} />}
@@ -12655,7 +12655,7 @@ function BoardCommentNode({ comment: cm, session, isAdmin, onPost, onDelete, onT
   );
 }
 
-// One grabbable row in the open-challenge pool — anyone but the creator can
+// One grabbable row in the open-challenge pool â€” anyone but the creator can
 // accept it. The accept button locally disables itself the instant it's
 // tapped so a slow network round-trip can't look like nothing happened,
 // and the row simply vanishes (via the next reload) once it's taken.
@@ -12667,7 +12667,7 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
   const counterpartUsername = iAmChallenger ? ch.opponent_username : ch.challenger_username;
   const counterpartPhone = iAmChallenger ? ch.opponent_phone : ch.challenger_phone;
 
-  // Scores are stored from the challenger's perspective — flip them for
+  // Scores are stored from the challenger's perspective â€” flip them for
   // display when the signed-in member is the opponent, so "my score" always
   // reads on the left regardless of who challenged whom.
   const myScore = iAmChallenger ? ch.challenger_score : ch.opponent_score;
@@ -12708,15 +12708,15 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
           ); })()}
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
-              Final: you {myScore} – {theirScore} {counterpartUsername}
-              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
+              Final: you {myScore} â€“ {theirScore} {counterpartUsername}
+              {ch.auto_verified && <span title="Screenshot verified automatically">Â· auto-approved</span>}
             </div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} – {theirScore} them · waiting for confirmation</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.textFaint }}><Clock size={10} /> You {myScore} â€“ {theirScore} them Â· waiting for confirmation</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} – {theirScore} them</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.accent }}>They reported you {myScore} â€“ {theirScore} them</div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && !challengeResultConfirmExpired(ch) && (() => { const m = challengeResultMinutesLeft(ch); return m !== null && (
             <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: m <= 5 ? c.red : c.textFaint }}>
@@ -12724,11 +12724,11 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
             </div>
           ); })()}
           {ch.status === "accepted" && ch.result_status === "pending" && challengeResultConfirmExpired(ch) && (
-            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} – {theirScore} them · escalated to admin for review</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.red }}><Clock size={10} /> You {myScore} â€“ {theirScore} them Â· escalated to admin for review</div>
           )}
-          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted — say hi and set a time</div>}
+          {ch.status === "accepted" && !ch.result_status && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.greenText }}>Accepted â€” say hi and set a time</div>}
           {ch.status === "declined" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "They declined" : "You declined"}</div>}
-          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover — admin closed it out" : "Expired — you didn't respond in time"}</div>}
+          {ch.status === "expired" && <div className="font-mono text-[10px] uppercase tracking-wide" style={{ color: c.red }}>{iAmChallenger ? "Walkover â€” admin closed it out" : "Expired â€” you didn't respond in time"}</div>}
         </div>
         {ch.status === "pending" && !iAmChallenger && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -12741,13 +12741,13 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
         )}
         {ch.status === "accepted" && !ch.result_status && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} ðŸ”¥ Game's on! Call me when you're ready to play so we can lock in the time âš½ðŸ•¹ï¸`} c={c} />
             <button onClick={() => onRemove(ch)} title="Remove" className="w-7 h-7 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}><Trash2 size={12} /></button>
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && iReported && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} 🔥 Game's on! Call me when you're ready to play so we can lock in the time ⚽🕹️`} c={c} />
+            <WhatsAppCallLink phone={counterpartPhone} iconOnly text={`Hi, this is ${myUsername} ðŸ”¥ Game's on! Call me when you're ready to play so we can lock in the time âš½ðŸ•¹ï¸`} c={c} />
           </div>
         )}
         {ch.status === "accepted" && ch.result_status === "pending" && !iReported && !challengeResultConfirmExpired(ch) && (
@@ -12790,8 +12790,8 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
   );
 }
 
-// Lets two people already matched — an accepted direct challenge or a
-// grabbed random challenge — message each other without leaving the site.
+// Lets two people already matched â€” an accepted direct challenge or a
+// grabbed random challenge â€” message each other without leaving the site.
 // Backed by a small `challenge_messages` table (see
 // supabase/chat-migration.sql) plus Supabase Realtime, so new messages show
 // up live on both ends without a refresh. History loads once on open; the
@@ -12823,7 +12823,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 
     // Live updates: postgres_changes filters can only match one column, so
     // it's filtered by challenge_id here and challenge_kind is re-checked in
-    // the handler — direct and open challenges never actually share an id
+    // the handler â€” direct and open challenges never actually share an id
     // (both are uuids from separate tables) but this keeps it airtight.
     const channel = supabase.channel(`challenge-chat-${kind}-${challengeId}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "challenge_messages", filter: `challenge_id=eq.${challengeId}` },
@@ -12834,7 +12834,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
       .subscribe((status, err) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.error("Chat realtime subscription failed:", status, err?.message);
-          showToast?.("Live chat updates aren't connecting — try reopening the chat.");
+          showToast?.("Live chat updates aren't connecting â€” try reopening the chat.");
         }
       });
 
@@ -12857,7 +12857,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
     if (error) {
       console.error("Couldn't send message:", error.message);
       showToast?.(`Couldn't send: ${error.message}`);
-      setBody(text); // send failed — put the draft back rather than lose it
+      setBody(text); // send failed â€” put the draft back rather than lose it
     }
   };
 
@@ -12876,7 +12876,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
           {messages === null ? (
             <Loader c={c} />
           ) : messages.length === 0 ? (
-            <div className="font-body text-xs text-center mt-6" style={{ color: c.textFaint }}>Say hi — messages stay right here, no need to leave the site.</div>
+            <div className="font-body text-xs text-center mt-6" style={{ color: c.textFaint }}>Say hi â€” messages stay right here, no need to leave the site.</div>
           ) : (
             messages.map((m) => {
               const mine = m.sender_id === myId;
@@ -12894,7 +12894,7 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 
         <div className="flex items-center gap-2 px-4 py-3 border-t shrink-0" style={{ borderColor: c.border }}>
           <input value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder="Message…" maxLength={1000}
+            placeholder="Messageâ€¦" maxLength={1000}
             className="flex-1 min-w-0 border rounded-full px-4 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
           <button onClick={send} disabled={!body.trim() || sending} title="Send"
             className="w-9 h-9 flex items-center justify-center rounded-full shrink-0"
@@ -12910,24 +12910,24 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 // Owns the one piece of Home that genuinely needs to notice time passing on
 // its own: a league's attention badge (a result gone unconfirmed past its
 // 30/10-minute window, a pending payment, etc.) has no other trigger to
-// reappear once its deadline quietly elapses. Everything else Home renders —
-// achievements, Wall of Fame, the XP bar, the leaderboard/ladder previews —
+// reappear once its deadline quietly elapses. Everything else Home renders â€”
+// achievements, Wall of Fame, the XP bar, the leaderboard/ladder previews â€”
 // only changes when the underlying data actually changes, so it doesn't
 // need this tick and shouldn't pay for it. Splitting this out means the
 // once-a-minute re-sort (and the attention-score pass over every league on
 // the platform that goes with it) only re-renders this list, not all of
-// Home — which used to redo that same work on every unrelated re-render
+// Home â€” which used to redo that same work on every unrelated re-render
 // too (a challenges/ladder realtime update, an achievement sync, anything),
 // not just the tick.
-// LadderLeagueSection — League Ladder's own row on Home, alongside "Leagues"
+// LadderLeagueSection â€” League Ladder's own row on Home, alongside "Leagues"
 // and "Cash leagues". Self-fetches rather than taking `leagues` as a prop:
 // ladder_leagues/ladder_cycle/ladder_memberships are a completely separate
 // schema from the `leagues` table LeagueSection/LeagueCard are built around
 // (format, members, result_submissions, etc.), so there's no shared shape
-// to piggyback on — this queries its own three tables directly instead of
+// to piggyback on â€” this queries its own three tables directly instead of
 // forcing ladder data through LeagueCard's contract.
 //
-// Only the bottom (highest-tier) league is ever joinable here — mirrors
+// Only the bottom (highest-tier) league is ever joinable here â€” mirrors
 // join_ladder_league()'s own restriction (see 20260867): every other tier
 // is reached only by promotion, an auction win, or a relegated arrival,
 // never a direct join, so a card for a higher tier the viewer isn't in
@@ -12938,22 +12938,22 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const [membership, setMembership] = useState(null);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState(null);
-  // leaderByLeagueId — league_id -> { efootball_username, avatar_url } for
+  // leaderByLeagueId â€” league_id -> { efootball_username, avatar_url } for
   // whoever's currently #1 in that league's table, so each card can show
   // its current leader's profile picture. Computed the same way
   // LeagueLadderDetail's own Standings table does (computeStandings on
   // that week's fixtures), just run once per league here instead of once
   // for whichever single league that screen has open.
   const [leaderByLeagueId, setLeaderByLeagueId] = useState({});
-  // eliteLeagueIds — set of league_id whose rank-1 player currently holds
+  // eliteLeagueIds â€” set of league_id whose rank-1 player currently holds
   // the Elite Safety Zone badge (see classifyLadderZones in
-  // formats/leagueLadder.js — rank 1 at least 6 points clear of rank 2).
+  // formats/leagueLadder.js â€” rank 1 at least 6 points clear of rank 2).
   // Same zone LeagueLadderDetail's own Standings table already surfaces
   // per-row for whichever single league is open; this reruns the same
   // pure classifier per league here so the tier strip can flag it on
   // every card at a glance, without opening each league to check.
   const [eliteLeagueIds, setEliteLeagueIds] = useState(() => new Set());
-  // Find User — admin-only (see the bottom-league card swap below).
+  // Find User â€” admin-only (see the bottom-league card swap below).
   // Scrolling the whole tier strip to find one specific league (or worse,
   // whichever league a specific player currently sits in) doesn't scale
   // once there are more than a handful of tiers, so admins get a search
@@ -12963,13 +12963,13 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const [findLeagueNumber, setFindLeagueNumber] = useState("");
   const [findBusy, setFindBusy] = useState(false);
   const [findError, setFindError] = useState(null);
-  // scrollRef/cardRefs — the horizontal strip container and a league_id ->
+  // scrollRef/cardRefs â€” the horizontal strip container and a league_id ->
   // card-DOM-node map. Leagues render in their natural tier order (League
   // 1, League 2, ...) rather than the viewer's own league being pulled to
-  // the front — jumping the tier order around per-viewer read as
+  // the front â€” jumping the tier order around per-viewer read as
   // confusing/unnatural. Instead, once the viewer's own (or, for a brand
   // new player, the joinable bottom) league's card has mounted, an effect
-  // below scrolls the strip so that card is in view — same destination,
+  // below scrolls the strip so that card is in view â€” same destination,
   // without reshuffling what everyone else sees.
   const scrollRef = useRef(null);
   const cardRefs = useRef({});
@@ -12993,7 +12993,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
     }
 
     // A league with no fixtures yet, or where nobody's played a game yet
-    // this week, is simply skipped below — computeStandings sorts an
+    // this week, is simply skipped below â€” computeStandings sorts an
     // all-zero table by user_id (not rank), so there's no meaningful "#1"
     // to show a picture for until at least one match has been played.
     const week = cycleRow?.current_week ?? 0;
@@ -13015,7 +13015,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
         if (top && top.p > 0) {
           leaderUserIdByLeague[leagueId] = top.user_id;
           // classifyLadderZones needs the full table (it's a gap check
-          // against rank 2), not just the top row — same call
+          // against rank 2), not just the top row â€” same call
           // LeagueLadderDetail makes for its Standings table.
           if (classifyLadderZones(leagueStandings)[top.user_id] === "elite_safe") {
             eliteIds.add(leagueId);
@@ -13045,14 +13045,14 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // priorityLeagueId — the one card the auto-scroll effect below should
+  // priorityLeagueId â€” the one card the auto-scroll effect below should
   // bring into view: the viewer's own active league if they're on the
-  // ladder, or — for a brand new player with no membership yet — the
+  // ladder, or â€” for a brand new player with no membership yet â€” the
   // joinable league (always the bottom/highest tier; join_ladder_league
   // always seats new joiners there), so "where do I join?" is what
   // scrolls into view for them. Computed here (null-safe, ahead of the
   // "no leagues yet" bailout below) so the effect that reads it stays
-  // unconditional — every hook in this component must run on every
+  // unconditional â€” every hook in this component must run on every
   // render, or React throws "Rendered more hooks than during the
   // previous render" (error #310) the first time ladderLeagues goes
   // from empty to populated.
@@ -13063,7 +13063,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   // Auto-scroll the strip to priorityLeagueId once its card exists. Runs
   // after ladderLeagues/membership load (and again if the priority
   // league changes, e.g. promotion/relegation), scrolling the horizontal
-  // strip so that card is centered rather than jumping the page itself —
+  // strip so that card is centered rather than jumping the page itself â€”
   // scrollIntoView with a block:'nearest' container match keeps this
   // strip-local instead of also fighting the outer page scroll.
   useEffect(() => {
@@ -13075,10 +13075,10 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   if (!ladderLeagues || ladderLeagues.length === 0) return null;
 
   const currentWeek = cycle?.current_week ?? 0;
-  // hasActiveMembership — true if the viewer is active on the ladder AT
+  // hasActiveMembership â€” true if the viewer is active on the ladder AT
   // ALL, regardless of which tier. isMemberOf below is scoped to a single
   // card's league (decides "Open" vs "Promotion only"/"Join" for THAT
-  // card); this one is what the bottom-league card's Join button needs —
+  // card); this one is what the bottom-league card's Join button needs â€”
   // a player already active in League 3 has nowhere to join in League 8,
   // same restriction join_ladder_league() itself already enforces
   // server-side ("already on the ladder"), just surfaced here so the
@@ -13088,10 +13088,10 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const bottomLeague = ladderLeagues[ladderLeagues.length - 1];
   const myTier = hasActiveMembership ? ladderLeagues.find((l) => l.id === membership.league_id)?.tier : null;
 
-  // displayLeagues — the strip always renders in natural tier order
+  // displayLeagues â€” the strip always renders in natural tier order
   // (League 1, League 2, ...); which card matters most to the viewer is
   // handled by auto-scrolling to it (see effect above) rather than
-  // reordering the list itself, which felt unnatural — a "League 1, 2, 3"
+  // reordering the list itself, which felt unnatural â€” a "League 1, 2, 3"
   // strip where League 4 sometimes leads is more confusing than it is
   // convenient.
   const displayLeagues = ladderLeagues;
@@ -13108,9 +13108,9 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
     await load();
   };
 
-  // findUser — resolves the "Find User" modal's two fields into a
+  // findUser â€” resolves the "Find User" modal's two fields into a
   // leagueId and jumps straight there. Username takes priority (it's the
-  // more specific ask — "take me to wherever THIS player currently is"),
+  // more specific ask â€” "take me to wherever THIS player currently is"),
   // falling back to a plain league-number lookup when no username is
   // given, or when the named player turns up but isn't active on the
   // ladder right now. A league number entered but not found errors out
@@ -13177,25 +13177,25 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
       </div>
       <div ref={scrollRef} className="flex gap-3 overflow-x-auto pb-1">
         {/* Admins used to have the bottom league's card replaced outright
-            by "Find User" here — but that meant the bottom (highest-tier)
+            by "Find User" here â€” but that meant the bottom (highest-tier)
             league silently vanished from this strip for admins the moment
             it existed, including right after auto-create/overflow-split
             (_ensure_ladder_league_internal above) spins up a brand new
             bottom tier. Find User is still genuinely more useful than a
             Join/View card for jumping to an arbitrary player or tier, so
-            it stays — just appended after the full list now instead of
+            it stays â€” just appended after the full list now instead of
             swapped in for one specific card, so every tier (bottom
             included) always has a card here for every viewer. */}
         {displayLeagues.map((lg) => {
           const mine = isMemberOf(lg.id);
           // Admins aren't a member of every tier, but still need to be able
-          // to open any of them — to review fixtures, approve/reject
+          // to open any of them â€” to review fixtures, approve/reject
           // escalated results, etc. (see LeagueLadderDetail's own isAdmin
-          // branches) — not just whichever tier they personally play in.
+          // branches) â€” not just whichever tier they personally play in.
           const canOpen = mine || isAdmin;
           const isBottom = lg.id === bottomLeague.id;
           const leader = leaderByLeagueId[lg.id];
-          // Per-tier theme (see ladderTierThemes.js) — same function
+          // Per-tier theme (see ladderTierThemes.js) â€” same function
           // LeagueLadderDetail.jsx and the Home widgets use, so this card
           // previews the exact look opening that league leads to.
           const theme = getLadderTierTheme(lg.tier);
@@ -13208,7 +13208,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <div className="font-mono text-[10px] uppercase tracking-widest" style={{ color: theme.textFaint }}>League {lg.tier}</div>
-                  {/* Elite Safety Zone badge — this league's rank 1 is 6+
+                  {/* Elite Safety Zone badge â€” this league's rank 1 is 6+
                       points clear of rank 2 (classifyLadderZones), same
                       zone the Standings table shows per-row once you're
                       inside a league. Surfaced here too so it's visible
@@ -13224,12 +13224,12 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                 </div>
                 {leader && (
                   <div className="flex items-center gap-1" title={`#1: ${leader.efootball_username || "Unknown player"}`}>
-                    <span aria-hidden="true">🥇</span>
+                    <span aria-hidden="true">ðŸ¥‡</span>
                     <MemberAvatar url={leader.avatar_url} username={leader.efootball_username} size={20} c={theme} />
                   </div>
                 )}
               </div>
-              {/* Week number only shown on the viewer's OWN league card —
+              {/* Week number only shown on the viewer's OWN league card â€”
                   every other tier can be sitting on a different week
                   (overflow/newly-split leagues start at week 1 while
                   older ones are already several weeks in), so a single
@@ -13243,7 +13243,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                 </div>
               ) : currentWeek === 0 ? (
                 <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
-                  Join anytime — no fixed start date
+                  Join anytime â€” no fixed start date
                 </div>
               ) : (
                 <div className="mb-2" />
@@ -13271,12 +13271,12 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                   <button onClick={(e) => { e.stopPropagation(); join(); }} disabled={joining}
                     className="w-full font-mono text-[10px] uppercase px-3 py-2 rounded"
                     style={{ background: theme.accent, color: theme.accentText }}>
-                    {joining ? "…" : "Join"}
+                    {joining ? "â€¦" : "Join"}
                   </button>
                 )
               ) : isAdmin ? (
                 // Admins can open any tier to review fixtures/results, even
-                // ones they'd only otherwise reach via promotion — see
+                // ones they'd only otherwise reach via promotion â€” see
                 // canOpen above.
                 <button onClick={(e) => { e.stopPropagation(); onOpenLadderLeague(lg.id); }}
                   className="w-full font-mono text-[10px] uppercase px-3 py-2 rounded"
@@ -13321,11 +13321,11 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   );
 }
 
-// LadderFindUserModal — the admin-only "jump straight to a league" tool
+// LadderFindUserModal â€” the admin-only "jump straight to a league" tool
 // that fills the bottom league's card slot in LadderLeagueSection above.
 // An admin can already open any tier (canOpen = mine || isAdmin), but
-// scrolling the whole horizontal strip to find one specific tier — or
-// worse, whichever tier a particular player is currently sitting in —
+// scrolling the whole horizontal strip to find one specific tier â€” or
+// worse, whichever tier a particular player is currently sitting in â€”
 // doesn't scale as more leagues get seeded. Username takes priority when
 // both are given (see findUser): it resolves to that player's CURRENT
 // active league, which is usually what an admin actually wants ("go to
@@ -13354,14 +13354,14 @@ function LadderFindUserModal({ username, leagueNumber, onChangeUsername, onChang
         <button onClick={onSubmit} disabled={busy || (!username.trim() && !leagueNumber.trim())}
           className="w-full font-body text-sm font-semibold px-4 py-2.5 rounded-full"
           style={(!busy && (username.trim() || leagueNumber.trim())) ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>
-          {busy ? "Searching…" : "Go"}
+          {busy ? "Searchingâ€¦" : "Go"}
         </button>
       </div>
     </div>
   );
 }
 
-// Full page for finished leagues — reachable from Quick Actions, the
+// Full page for finished leagues â€” reachable from Quick Actions, the
 // header menu, and the CompletedLeaguesWidget pointer on Home. Used to be
 // a horizontal-scroll section living inline on Home (LeagueSection); this
 // is the same LeagueCard grid, just as its own page (same back-button/
@@ -13372,7 +13372,7 @@ function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, quali
   const [query, setQuery] = useState("");
 
   // Same "still needs the viewer's attention" boost LeagueListsSection
-  // uses for the live sections — a completed cash league can still have a
+  // uses for the live sections â€” a completed cash league can still have a
   // payment sitting in pending review, and that shouldn't get buried once
   // the league itself is archived here.
   const attentionScore = (l) => {
@@ -13396,13 +13396,13 @@ function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, quali
         <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Completed Leagues</h1>
       </div>
       <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
-        {leagues.length} finished league{leagues.length === 1 ? "" : "s"} — final tables, past champions
+        {leagues.length} finished league{leagues.length === 1 ? "" : "s"} â€” final tables, past champions
       </div>
 
       {leagues.length > 4 && (
         <div className="relative mb-5">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search completed leagues…"
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search completed leaguesâ€¦"
             className="w-full font-body text-sm rounded-full pl-9 pr-4 py-2.5 outline-none" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }} />
         </div>
       )}
@@ -13429,23 +13429,23 @@ function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, quali
 function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, onOpenLadderLeague, onOpenCompletedLeagues, c }) {
   useNow(60000);
   // hideLeagueIds excludes whatever's already shown in the Weekend League
-  // spotlight above (see Home) — otherwise a weekend league appeared both
+  // spotlight above (see Home) â€” otherwise a weekend league appeared both
   // there and again in the plain "Leagues" list below it. Cash leagues are
   // never weekend leagues (the spotlight only ever draws from fun leagues),
   // so this only needs to apply to the fun-leagues filter.
   // Survival Ladder Cup lives in the plain "Leagues" grid like every other
-  // format — LeagueCard already has full ladder_cup-aware rendering (see
+  // format â€” LeagueCard already has full ladder_cup-aware rendering (see
   // isLadderCup branches below), so no separate section is needed.
   const funLeagues = leagues.filter((l) => l.league_type !== "cash" && !isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
   const cashLeagues = leagues.filter((l) => l.league_type === "cash" && !isLeagueCompleted(l));
 
-  // Finished leagues move here instead of lingering in the sections above —
+  // Finished leagues move here instead of lingering in the sections above â€”
   // a completed round robin/knockout/cash league or a finalized Ladder Cup
   // has nothing left for anyone to act on, so it no longer belongs among
   // the leagues someone might still join or play in. Used to be its own
   // inline section on Home; now it's a dedicated page (view ===
   // "completedLeagues", reachable from Quick Actions and the header menu)
-  // — CompletedLeaguesWidget below is just the pointer to it from here.
+  // â€” CompletedLeaguesWidget below is just the pointer to it from here.
   const completedLeagues = leagues.filter((l) => isLeagueCompleted(l) && !(hideLeagueIds && hideLeagueIds.has(l.id)));
 
   // Leagues that need the viewer's attention (something to review, or their
@@ -13462,7 +13462,7 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
     return score;
   };
 
-  // Same fun-league "active in this format-kind" map the join guard uses —
+  // Same fun-league "active in this format-kind" map the join guard uses â€”
   // needed here to know whether a fun league is actually joinable (not just
   // not-yet-joined) before deciding whether to lead with it.
   const activeByKindForSort = activeFunLeaguesByKind(leagues, session);
@@ -13471,7 +13471,7 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
     return l.league_type !== "fun" || !blockingLeagueFor(activeByKindForSort, l);
   };
 
-  // Ordering priority: a league the player can actually join goes first —
+  // Ordering priority: a league the player can actually join goes first â€”
   // that's the one action worth surfacing. If nothing in this list is
   // joinable right now, lead with the league they're currently active in
   // instead, so they can jump back into their live match. Attention score
@@ -13552,7 +13552,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
 }
 
 function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, qualified, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
-  // Ladder Cup never writes to `fixtures` — it plays entirely through
+  // Ladder Cup never writes to `fixtures` â€” it plays entirely through
   // `ladder_cup_matches` (see ensureLadderCupEntry / initiateLadderCupMatch
   // in App.jsx). Every count below that used to read straight off
   // l.fixtures needs a ladder_cup-aware branch, or the card reads as
@@ -13561,7 +13561,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
   const isLadderCup = l.format === "ladder_cup";
   // Defensive: a league row with a missing teams/fixtures join (see the
   // homepage crash fixes elsewhere in this file) shouldn't take down every
-  // other card in the list — fall back to empty arrays for just this one.
+  // other card in the list â€” fall back to empty arrays for just this one.
   const teams = l.teams || [];
   const fixtures = l.fixtures || [];
   const ladderMatches = isLadderCup ? (l.ladder_cup_matches || []) : [];
@@ -13612,7 +13612,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
           <LeagueReactionBar league={l} session={session} onToggle={onToggleLeagueReaction} c={c} compact />
         </div>
         {isLadderCup ? (
-          // No fixed match count to show a progress bar against — Ladder
+          // No fixed match count to show a progress bar against â€” Ladder
           // Cup is either waiting on its first club, or already live (it
           // has no separate start step; see LadderCupPendingPanel).
           teams.length === 0 ? (
@@ -13638,8 +13638,8 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
         <div className="flex items-center gap-1 mt-2 font-mono text-[9px]" style={{ color: c.textDim }}>
           <Shield size={9} /> {teams.length}
           {isLadderCup
-            ? ladderMatches.length > 0 && <span className="ml-1">· {played} played</span>
-            : fixtures.length > 0 && <span className="ml-1">· {played}/{fixtures.length}</span>}
+            ? ladderMatches.length > 0 && <span className="ml-1">Â· {played} played</span>
+            : fixtures.length > 0 && <span className="ml-1">Â· {played}/{fixtures.length}</span>}
         </div>
 
         {isCash && canSeePool && (
@@ -13663,19 +13663,19 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
           ) : closed ? (
             <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Closed</span>
           ) : blockedByLeague ? (
-            <span title={`Active in "${blockedByLeague.name}" — finish or get eliminated there first`}
+            <span title={`Active in "${blockedByLeague.name}" â€” finish or get eliminated there first`}
               className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>Locked</span>
           ) : !qualified ? (
             <span title="Requires a top-20% finish in a completed Survival Ladder Cup"
               className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.surfaceHover, color: c.textFaint }}>Locked</span>
           ) : (() => {
-            // Same "fun leagues only" rule as LeagueDetail's Join button —
+            // Same "fun leagues only" rule as LeagueDetail's Join button â€”
             // cash leagues pick their own Rand entry fee at join time, so
             // there's no fixed Nets amount to show here for those.
             const entryFee = l.league_type === "fun" ? entryFeeForLeagueFormat(l.format) : null;
             return (
               <button onClick={(e) => { e.stopPropagation(); onJoin(l.id); }} className="btn-join w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full"
-                style={{ color: "#1A1206" }}>Join{entryFee ? <> — <NetsAmount amount={entryFee} /></> : ""}</button>
+                style={{ color: "#1A1206" }}>Join{entryFee ? <> â€” <NetsAmount amount={entryFee} /></> : ""}</button>
             );
           })()}
         </div>
@@ -13717,7 +13717,7 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
 
   // In an active (non-final) survivor stage, work out exactly which clubs
   // are currently sitting in the cut zone for this stage. Gated on at least
-  // one match actually being played/expired in the stage — with 0 played,
+  // one match actually being played/expired in the stage â€” with 0 played,
   // every club is tied 0-0-0 and the "bottom N" would just be an arbitrary
   // alphabetical slice, wrongly painting untouched clubs red as if they
   // were already doomed.
@@ -13739,7 +13739,7 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
       <div className="flex items-center justify-between gap-3 mb-3 px-2">
         <div className="font-mono text-xs" style={{ color: c.textFaint }}>
           {stageFixtures.filter((f) => f.played).length} of {stageFixtures.length} matches played
-          {isSurvivor ? ` · ${league.final_stage_started ? "final stage" : `stage ${league.current_stage}`}` : ""}
+          {isSurvivor ? ` Â· ${league.final_stage_started ? "final stage" : `stage ${league.current_stage}`}` : ""}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {standings.length > STANDINGS_VISIBLE_ROWS && (
@@ -13817,7 +13817,7 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
         </div>
       </div>
       {scrolls && (
-        <div className="font-mono text-[10px] text-center mt-2" style={{ color: c.textFaint }}>Scroll for more — showing {STANDINGS_VISIBLE_ROWS} of {filtered.length}</div>
+        <div className="font-mono text-[10px] text-center mt-2" style={{ color: c.textFaint }}>Scroll for more â€” showing {STANDINGS_VISIBLE_ROWS} of {filtered.length}</div>
       )}
 
       {profileRow && (
@@ -13829,7 +13829,7 @@ export function StandingsPanel({ standings, zoneFor, stageFixtures, isSurvivor, 
           stats={[
             { label: "Played", value: profileRow.p },
             { label: "Points", value: profileRow.pts },
-            { label: "W · D · L", value: `${profileRow.w} · ${profileRow.d} · ${profileRow.l}` },
+            { label: "W Â· D Â· L", value: `${profileRow.w} Â· ${profileRow.d} Â· ${profileRow.l}` },
             { label: "Goal diff", value: `${profileRow.gd >= 0 ? "+" : ""}${profileRow.gd}` },
             { label: "Goals for", value: profileRow.gf },
             { label: "Goals against", value: profileRow.ga },
@@ -13850,24 +13850,24 @@ function aggregateFor(legs, teamId) {
 
 // A single fixture row: shows the scoreline (read-only) or, for anyone who can
 // manage the league, editable score inputs plus a required photo attach and a
-// Save button (disabled until a photo is attached — same proof requirement as
+// Save button (disabled until a photo is attached â€” same proof requirement as
 // regular players). A joined non-manager instead gets a "Submit result" button
-// that opens the photo + score modal — their result lands as pending until an
+// that opens the photo + score modal â€” their result lands as pending until an
 // admin approves it, or shows a pending/rejected tag if one's already in flight.
 // Used by both the group-stage and knockout full fixtures lists below.
 //
 // showContact (knockout only, see KnockoutFixturesList) adds a small WhatsApp
 // call icon next to each side of an unplayed fixture, so either club can ring
 // the other directly off the bracket instead of hunting them down through
-// "Find yourself" — each icon calls the OTHER team's number and is signed
+// "Find yourself" â€” each icon calls the OTHER team's number and is signed
 // with the icon-owner's own club name.
-function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, hideDueDate, league, c }) {
+function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLabel, joined, submission, onOpenSubmitResult, showContact, hideDueDate, league, myTeamId, c }) {
   const [h, setH] = useState(fixture.home_score);
   const [a, setA] = useState(fixture.away_score);
   const [ph, setPh] = useState(fixture.pens_home ?? "");
   const [pa, setPa] = useState(fixture.pens_away ?? "");
   const [saveState, setSaveState] = useState("idle");
-  const [photo, setPhoto] = useState(null); // photo proof, required before saving — same rule as regular players
+  const [photo, setPhoto] = useState(null); // photo proof, required before saving â€” same rule as regular players
   const photoInputRef = useRef(null);
 
   useEffect(() => {
@@ -13878,9 +13878,9 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
 
   if (!homeTeam || !awayTeam) return null;
 
-  // The final — and a decider leg, added automatically when a non-final
+  // The final â€” and a decider leg, added automatically when a non-final
   // tie is still level after the configured home & away legs (see
-  // advanceKnockout) — are always single decisive matches: a level
+  // advanceKnockout) â€” are always single decisive matches: a level
   // scoreline here needs a penalty score before it can be saved, since
   // there's no further leg to fall back on.
   const isFinal = isFinalFixture(fixture, league);
@@ -13896,21 +13896,23 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
   };
 
   const callText = (fromTeam) =>
-    `Hi, it's ${fromTeam.name} 🔥 Call me when you're ready to play — matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time ⚽🕹️${firstMatchdayNote(fixture.round)}`;
+    `Hi, it's ${fromTeam.name} ðŸ”¥ Call me when you're ready to play â€” matchday ${fixture.round} is due ${fmtDate(fixture.due_at)}, let's lock in the time âš½ðŸ•¹ï¸${firstMatchdayNote(fixture.round)}`;
   const offerContact = showContact && !fixture.played;
+  const iAmHome = myTeamId != null && fixture.home_team_id === myTeamId;
+  const iAmAway = myTeamId != null && fixture.away_team_id === myTeamId;
 
   return (
     <div className="flex flex-wrap items-center gap-2 py-2">
       {legLabel && <span className="font-mono text-[10px] uppercase tracking-wide shrink-0 w-12" style={{ color: c.textFaint }}>{legLabel}</span>}
       <span className="flex-1 min-w-[64px] truncate font-body text-sm text-right">{homeTeam.name}</span>
-      {offerContact && awayTeam.phone && (
+      {offerContact && awayTeam.phone && !iAmAway && (
         <WhatsAppCallLink phone={awayTeam.phone} iconOnly text={callText(homeTeam)} c={c} />
       )}
       {canManage ? (
         <div className="flex items-center gap-2 basis-full sm:basis-auto justify-center order-last sm:order-none">
           <input type="number" min={0} value={h} onChange={(e) => { setH(Number(e.target.value)); setSaveState("idle"); }}
             className="w-11 text-center rounded font-mono text-sm px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
-          <span className="shrink-0" style={{ color: c.textFaint }}>–</span>
+          <span className="shrink-0" style={{ color: c.textFaint }}>â€“</span>
           <input type="number" min={0} value={a} onChange={(e) => { setA(Number(e.target.value)); setSaveState("idle"); }}
             className="w-11 text-center rounded font-mono text-sm px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
           {needsPens && (
@@ -13918,7 +13920,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
               <span className="shrink-0 font-mono text-[10px]" style={{ color: c.red }}>pens</span>
               <input type="number" min={0} value={ph} onChange={(e) => { setPh(e.target.value === "" ? "" : Number(e.target.value)); setSaveState("idle"); }}
                 className="w-9 text-center rounded font-mono text-xs px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
-              <span className="shrink-0" style={{ color: c.textFaint }}>–</span>
+              <span className="shrink-0" style={{ color: c.textFaint }}>â€“</span>
               <input type="number" min={0} value={pa} onChange={(e) => { setPa(e.target.value === "" ? "" : Number(e.target.value)); setSaveState("idle"); }}
                 className="w-9 text-center rounded font-mono text-xs px-1 py-1 outline-none shrink-0" style={{ background: c.surfaceHover, color: c.text }} />
             </>
@@ -13926,20 +13928,20 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
         </div>
       ) : (
         <span className="font-mono text-sm w-14 text-center shrink-0" style={{ color: c.text }}>
-          {fixture.played ? `${fixture.home_score} – ${fixture.away_score}` : "– : –"}
+          {fixture.played ? `${fixture.home_score} â€“ ${fixture.away_score}` : "â€“ : â€“"}
           {fixture.played && fixture.pens_home != null && fixture.pens_away != null && (
             <span className="block font-mono text-[9px]" style={{ color: c.textFaint }}>pens {fixture.pens_home}-{fixture.pens_away}</span>
           )}
         </span>
       )}
-      {offerContact && homeTeam.phone && (
+      {offerContact && homeTeam.phone && !iAmHome && (
         <WhatsAppCallLink phone={homeTeam.phone} iconOnly text={callText(awayTeam)} c={c} />
       )}
       <span className="flex-1 min-w-[64px] truncate font-body text-sm">{awayTeam.name}</span>
-      {/* For a two-legged tie, both legs now share one due_at — showing it
+      {/* For a two-legged tie, both legs now share one due_at â€” showing it
           on every row would just repeat the same date twice. The shared
-          start–expiry window is shown once instead, at the tie level (see
-          KnockoutFixturesList) — this column is skipped here via
+          startâ€“expiry window is shown once instead, at the tie level (see
+          KnockoutFixturesList) â€” this column is skipped here via
           hideDueDate, except "Expired" still shows per row since a
           leg-specific played/unplayed state is still worth flagging. */}
       <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
@@ -13957,7 +13959,7 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
           <button onClick={save} disabled={saveState === "saving" || !photo || !pensReady} title={!photo ? "Attach a photo proof to save" : !pensReady ? "Enter a decisive penalty score" : undefined}
             className="shrink-0 font-body text-xs font-semibold px-2.5 py-1 rounded-full"
             style={{ background: saveState === "saved" ? c.greenSoft : c.accent, color: saveState === "saved" ? c.greenText : c.accentText, opacity: (saveState === "saving" || !photo || !pensReady) ? 0.5 : 1 }}>
-            {saveState === "saved" ? <Check size={12} /> : saveState === "saving" ? "…" : "Save"}
+            {saveState === "saved" ? <Check size={12} /> : saveState === "saving" ? "â€¦" : "Save"}
           </button>
         </div>
       )}
@@ -14006,7 +14008,7 @@ export function GroupFixturesList({ league, groupStageFixtures, canManage, joine
                       const home = league.teams.find((t) => t.id === f.home_team_id);
                       const away = f.away_team_id ? league.teams.find((t) => t.id === f.away_team_id) : null;
                       if (!away) {
-                        return <div key={f.id} className="py-2 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} — bye this round</div>;
+                        return <div key={f.id} className="py-2 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} â€” bye this round</div>;
                       }
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={home} awayTeam={away} canManage={canManage} onSave={onRecordResult}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
@@ -14024,16 +14026,16 @@ export function GroupFixturesList({ league, groupStageFixtures, canManage, joine
 
 // Full listing of every knockout-bracket fixture, organized by round. Legs of the
 // same tie (home & away) are grouped together with an aggregate score shown.
-export function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, c }) {
+export function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, myTeamId, c }) {
   const rounds = {};
   bracketFixtures.forEach((f) => { (rounds[f.round] ||= []).push(f); });
   const roundNumbers = Object.keys(rounds).map(Number).sort((a, b) => a - b);
   const maxRoundNumber = roundNumbers.length ? Math.max(...roundNumbers) : null;
-  // A generic "Round 3" doesn't read as anything special — give the last
+  // A generic "Round 3" doesn't read as anything special â€” give the last
   // round (and, for a short bracket like Rapid Cup's 2-round shape, the
   // one right before it) an actual name instead.
   const roundLabel = (r) => {
-    if (r === maxRoundNumber) return "🏆 The Final";
+    if (r === maxRoundNumber) return "ðŸ† The Final";
     if (r === maxRoundNumber - 1) return "Semi-Finals";
     return `Round ${r}`;
   };
@@ -14062,7 +14064,7 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
                 const f0 = legs[0];
                 const home = league.teams.find((t) => t.id === f0.home_team_id);
                 if (f0.away_team_id === null) {
-                  return <div key={f0.id} className="px-4 py-2.5 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} — bye, advances automatically</div>;
+                  return <div key={f0.id} className="px-4 py-2.5 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} â€” bye, advances automatically</div>;
                 }
                 const away = league.teams.find((t) => t.id === f0.away_team_id);
                 const twoLegged = legs.length > 1;
@@ -14075,7 +14077,7 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
                 const pensA = pensAggregateFor(legs, f0.away_team_id);
                 // Two-legged ties now carry ONE shared due_at across both
                 // legs (see knockoutRoundFixtures), so this shows as one
-                // "start → expiry (N days)" range instead of two separate
+                // "start â†’ expiry (N days)" range instead of two separate
                 // per-leg dates. f0.starts_at is the real recorded start
                 // moment; only fall back to reconstructing it from due_at
                 // for older fixtures created before that column existed.
@@ -14090,7 +14092,7 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
                       <div className="font-mono text-[10px] mb-1.5" style={{ color: tieExpired ? c.red : c.textDim }}>
                         {tieExpired
                           ? "Expired"
-                          : `${fmtDate(tieStartAt)} → ${fmtDate(tieDueAt)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
+                          : `${fmtDate(tieStartAt)} â†’ ${fmtDate(tieDueAt)} (${tieWindowDays} day${tieWindowDays === 1 ? "" : "s"})`}
                       </div>
                     )}
                     {legs.map((f) => {
@@ -14098,20 +14100,20 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
                       const legAway = league.teams.find((t) => t.id === f.away_team_id);
                       return <FixtureScoreRow key={f.id} fixture={f} homeTeam={legHome} awayTeam={legAway} canManage={canManage}
                         onSave={onRecordResult} legLabel={twoLegged ? `Leg ${f.leg || 1}` : null} showContact={canSeePhones}
-                        hideDueDate={twoLegged}
+                        hideDueDate={twoLegged} myTeamId={myTeamId}
                         joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
                     })}
                     {(twoLegged || level) && (
                       <div className="font-mono text-[10px] mt-1" style={{ color: c.textDim }}>
-                        {twoLegged && <>Aggregate: {home?.name} {hAgg} – {aAgg} {away?.name}</>}
+                        {twoLegged && <>Aggregate: {home?.name} {hAgg} â€“ {aAgg} {away?.name}</>}
                         {level && isFinalTie && pensH !== null && pensA !== null && pensH !== pensA && (
-                          <span style={{ color: c.textDim }}> · pens {pensH}-{pensA}</span>
+                          <span style={{ color: c.textDim }}> Â· pens {pensH}-{pensA}</span>
                         )}
                         {level && isFinalTie && !(pensH !== null && pensA !== null && pensH !== pensA) && (
-                          <span style={{ color: c.red }}> · level — needs a penalty shootout score to decide the winner</span>
+                          <span style={{ color: c.red }}> Â· level â€” needs a penalty shootout score to decide the winner</span>
                         )}
                         {level && !isFinalTie && (
-                          <span style={{ color: c.greenText }}> · level on aggregate — both clubs advance</span>
+                          <span style={{ color: c.greenText }}> Â· level on aggregate â€” both clubs advance</span>
                         )}
                       </div>
                     )}
@@ -14129,14 +14131,14 @@ export function KnockoutFixturesList({ league, bracketFixtures, canManage, joine
 export function GroupTables({ league, groupStageFixtures, avatarByTeamId, session, myTeamId, c }) {
   const groupsCount = league.groups_count || 0;
   // Show the viewer's own group's table first, then the rest of the groups
-  // in their normal order — so a club opening the group stage lands on
+  // in their normal order â€” so a club opening the group stage lands on
   // their own standings before scrolling past every other group to find it.
   const myGroupNumber = myTeamId != null ? (league.teams || []).find((t) => t.id === myTeamId)?.group_number : null;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i)
     .sort((a, b) => (a === myGroupNumber ? -1 : b === myGroupNumber ? 1 : 0));
 
   // One search box for the whole group stage instead of one per group
-  // table — searching a club used to mean opening each group's table in
+  // table â€” searching a club used to mean opening each group's table in
   // turn to check it. Groups with no matching club are hidden entirely
   // while a search is active, so the matching club's table surfaces
   // immediately regardless of which group it's in.
@@ -14171,7 +14173,7 @@ export function GroupTables({ league, groupStageFixtures, avatarByTeamId, sessio
             <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2 flex items-center gap-2" style={{ color: c.textFaint }}>
               {groupLabel(g)}
               {qualifiers > 0 && n > 0 && (
-                <span className="normal-case font-body text-[11px]" style={{ color: c.greenText }}>· top {Math.min(qualifiers, n)} advance</span>
+                <span className="normal-case font-body text-[11px]" style={{ color: c.greenText }}>Â· top {Math.min(qualifiers, n)} advance</span>
               )}
             </div>
             <StandingsPanel standings={standings} zoneFor={zoneFor} stageFixtures={groupFx} isSurvivor={false} league={league} avatarByTeamId={avatarByTeamId} session={session} myTeamId={myTeamId} c={c}
@@ -14211,7 +14213,7 @@ export function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
           <button onClick={() => inputRef.current?.click()} disabled={uploading}
             className="absolute bottom-2 right-2 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
             style={{ background: c.bg, color: c.text, opacity: uploading ? 0.6 : 0.92 }}>
-            <Settings2 size={12} /> {uploading ? "Uploading…" : league.photo_url ? "Change photo" : "Add photo"}
+            <Settings2 size={12} /> {uploading ? "Uploadingâ€¦" : league.photo_url ? "Change photo" : "Add photo"}
           </button>
         </>
       )}
@@ -14225,16 +14227,16 @@ export function LeaguePhotoBanner({ league, canManage, onUpdatePhoto, c }) {
 // change after the league already exists, without needing to delete and
 // recreate it. Mirrors LeagueDescriptionBlock's edit-in-place pattern.
 export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpdateRoundPeriod, c }) {
-  // Survival Ladder Cup has no entry-close date of its own — clubs join
+  // Survival Ladder Cup has no entry-close date of its own â€” clubs join
   // until the ladder's own monthly cutoff (shown separately in
-  // LadderCupPendingPanel), not a generic registration window — so this
+  // LadderCupPendingPanel), not a generic registration window â€” so this
   // field is hidden and unrequired for that format. See entryClosed in
   // App.jsx for the matching join-gating logic.
   //
   // starts_at is likewise no longer admin-editable for this format: since
   // 20260901_ladder_cup_monthly_cycle.sql, each cup's starts_at is set
   // automatically (to the moment the monthly auto-cycle opens it) and its
-  // name is derived from that same month — hand-editing the start date
+  // name is derived from that same month â€” hand-editing the start date
   // here would just drift out of sync with the name and the cutoff the
   // cron computed. The Edit affordance below is hidden entirely for
   // ladder_cup; the isLadderCup branches in the editing view further down
@@ -14247,7 +14249,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
   const [roundPeriodHours, setRoundPeriodHours] = useState(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS);
   const [saving, setSaving] = useState(false);
   const inputStyle = { background: c.surfaceHover, borderColor: c.border, color: c.text };
-  // Fixtures only exist once the admin has started the league — the due-date
+  // Fixtures only exist once the admin has started the league â€” the due-date
   // period is baked into each fixture's due_at at that point, so it can only
   // still be changed for a league that hasn't started yet.
   const notStartedYet = (league.fixtures || []).length === 0;
@@ -14289,7 +14291,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
           </div>
         </div>
         {isLadderCup && (
-          <div className="font-mono text-[11px] mb-2" style={{ color: c.textFaint }}>Clubs can join anytime — Survival Ladder Cup has no entry-close date, only its own monthly cutoff.</div>
+          <div className="font-mono text-[11px] mb-2" style={{ color: c.textFaint }}>Clubs can join anytime â€” Survival Ladder Cup has no entry-close date, only its own monthly cutoff.</div>
         )}
         {datesOutOfOrder && (
           <div className="font-mono text-[11px] mb-2" style={{ color: c.red }}>Start date must be on or after entry closes.</div>
@@ -14304,14 +14306,14 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
           </div>
         ) : (
           <div className="font-mono text-[11px] mb-1.5" style={{ color: c.textFaint }}>
-            Match due-date period ({league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS} hour{(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS) === 1 ? "" : "s"}) is locked in — the league has already started.
+            Match due-date period ({league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS} hour{(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS) === 1 ? "" : "s"}) is locked in â€” the league has already started.
           </div>
         ))}
         <div className="flex items-center gap-2 justify-end">
           <button onClick={() => { setEntryClosesAt(toDatetimeLocalValue(league.entry_closes_at)); setStartsAt(toDatetimeLocalValue(league.starts_at)); setRoundPeriodHours(league.round_period_hours || DEFAULT_ROUND_PERIOD_HOURS); setEditing(false); }}
             className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
           <button onClick={save} disabled={saving || (!isLadderCup && !entryClosesAt) || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || (!isLadderCup && !entryClosesAt) || !startsAt || datesOutOfOrder || (notStartedYet && !roundPeriodValid) ? 0.6 : 1 }}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Savingâ€¦" : "Save"}
           </button>
         </div>
       </div>
@@ -14323,7 +14325,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
       <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: c.textFaint }}>
         <Clock size={11} /> {isLadderCup
           ? (league.ladder_cup_started_at ? `Started ${fmtDate(league.starts_at)}` : "Open for joining")
-          : `Entry closes ${fmtDate(league.entry_closes_at)} · Starts ${fmtDate(league.starts_at)}`}
+          : `Entry closes ${fmtDate(league.entry_closes_at)} Â· Starts ${fmtDate(league.starts_at)}`}
       </div>
       {canManage && !isLadderCup && (
         <button onClick={() => setEditing(true)} className="flex items-center gap-1 font-mono text-[11px] font-semibold px-1.5 py-0.5 -my-0.5 rounded"
@@ -14337,7 +14339,7 @@ export function LeagueScheduleLine({ league, canManage, onUpdateSchedule, onUpda
 
 // Groups + Knockout only: lets whoever manages the league set (or clear) the
 // shared deadline for submitting every result in the group stage. Each
-// matchday's own due_at stays purely advisory once this exists — it's still
+// matchday's own due_at stays purely advisory once this exists â€” it's still
 // shown on every fixture as a nudge, but this date is what actually decides
 // when unplayed matches get locked out and auto-scored as a no-show loss.
 export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, c }) {
@@ -14364,7 +14366,7 @@ export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, 
         <input type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)}
           className="w-full sm:w-64 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
         <div className="font-mono text-[11px] mt-1.5 mb-2" style={{ color: c.textFaint }}>
-          Individual matchday due dates stay advisory — this is the real cutoff for the whole group stage.
+          Individual matchday due dates stay advisory â€” this is the real cutoff for the whole group stage.
         </div>
         <div className="flex items-center gap-2 justify-end">
           <button onClick={() => { setDueAt(toDatetimeLocalValue(league.group_stage_due_at)); setEditing(false); }}
@@ -14375,7 +14377,7 @@ export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, 
           )}
           <button onClick={save} disabled={saving || !dueAt} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full"
             style={{ background: c.accent, color: c.accentText, opacity: saving || !dueAt ? 0.6 : 1 }}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Savingâ€¦" : "Save"}
           </button>
         </div>
       </div>
@@ -14387,7 +14389,7 @@ export function GroupStageDueLine({ league, canManage, onUpdateGroupStageDueAt, 
       <div className="font-mono text-[11px] flex items-center gap-1.5" style={{ color: passed ? c.red : c.textFaint }}>
         <Clock size={11} />
         {league.group_stage_due_at
-          ? `Group stage due ${fmtDate(league.group_stage_due_at)}${passed ? " · expired" : ""}${isWeekendLeague(league) ? " · knockout auto-starts then" : ""}`
+          ? `Group stage due ${fmtDate(league.group_stage_due_at)}${passed ? " Â· expired" : ""}${isWeekendLeague(league) ? " Â· knockout auto-starts then" : ""}`
           : "Group stage due date not set"}
       </div>
       {canManage && (
@@ -14430,11 +14432,11 @@ export function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDesc
         editing ? (
           <div className="mt-2 rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
-              placeholder="Rules, prize info, WhatsApp group link — anything players should know."
+              placeholder="Rules, prize info, WhatsApp group link â€” anything players should know."
               className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none mb-2" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
             <div className="flex items-center gap-2 justify-end">
               <button onClick={() => { setText(league.description || ""); setEditing(false); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
-              <button onClick={save} disabled={saving} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving ? 0.6 : 1 }}>{saving ? "Saving…" : "Save"}</button>
+              <button onClick={save} disabled={saving} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving ? 0.6 : 1 }}>{saving ? "Savingâ€¦" : "Save"}</button>
             </div>
           </div>
         ) : (
@@ -14453,12 +14455,12 @@ export function LeagueDescriptionBlock({ league, canManage, joined, onUpdateDesc
 }
 
 // Lets whoever manages the league (creator or admin) override the
-// auto-generated WhatsApp nudge text — see adminStatusMessage — with their
+// auto-generated WhatsApp nudge text â€” see adminStatusMessage â€” with their
 // own wording for every member in this league. Mirrors
 // LeagueDescriptionBlock's edit-in-place pattern. {name} and {league} are
 // swapped in per member when the message is actually sent, so the saved
 // template can still read as personal even though it's the same text for
-// everyone. Admin-only — this is an internal tool for whoever's sending
+// everyone. Admin-only â€” this is an internal tool for whoever's sending
 // the nudges, not something the rest of the league needs to see.
 export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAllMembers, c }) {
   const [editing, setEditing] = useState(false);
@@ -14504,7 +14506,7 @@ export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAll
   }
 
   // A real member's display_name if one's already joined, so the preview
-  // reads like an actual message rather than a placeholder — falls back to
+  // reads like an actual message rather than a placeholder â€” falls back to
   // a generic name for a brand-new league with no members yet.
   const sampleName = (league.members || []).find((m) => m.display_name)?.display_name || "Alex";
   const sampleFixture = nextFixtureForLeague(league);
@@ -14519,11 +14521,11 @@ export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAll
   return (
     <div className="rounded-xl p-4 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
       <div className="font-mono text-[11px] uppercase tracking-wide mb-2" style={{ color: c.textDim }}>
-        Sent to every member's WhatsApp icon in this league — use <strong>{"{name}"}</strong> for their name, <strong>{"{league}"}</strong> for the league name,
+        Sent to every member's WhatsApp icon in this league â€” use <strong>{"{name}"}</strong> for their name, <strong>{"{league}"}</strong> for the league name,
         <strong> {"{round}"}</strong> for their next round number, <strong> {"{due}"}</strong> for its deadline, and <strong> {"{start}"}</strong> for when that round actually kicks off. Round, due, and start all update automatically each round.
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_LEN))} rows={4} maxLength={MAX_LEN}
-        placeholder="Hey {name}! Round {round} of {league} is due {due} — lock it in! 🔥⚽"
+        placeholder="Hey {name}! Round {round} of {league} is due {due} â€” lock it in! ðŸ”¥âš½"
         className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
       <div className="font-mono text-[10px] text-right mb-2" style={{ color: text.length >= MAX_LEN ? c.red : c.textFaint }}>
         {text.length}/{MAX_LEN}
@@ -14531,7 +14533,7 @@ export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAll
       {preview && (
         <div className="rounded-lg px-3 py-2 mb-2 font-body text-xs whitespace-pre-wrap" style={{ background: c.surfaceHover, color: c.textDim }}>
           <span className="font-mono text-[10px] uppercase tracking-wide block mb-1" style={{ color: c.textFaint }}>
-            Preview — as {sampleName} would see it
+            Preview â€” as {sampleName} would see it
           </span>
           {preview}
         </div>
@@ -14544,14 +14546,14 @@ export function MemberMessageEditor({ league, onUpdateMemberMessage, onNotifyAll
         )}
         <button onClick={() => { setText(league.wa_message_template || ""); setEditing(false); }} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: c.textFaint }}>Cancel</button>
         <button onClick={save} disabled={saving || !text.trim()} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: saving || !text.trim() ? 0.6 : 1 }}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Savingâ€¦" : "Save"}
         </button>
       </div>
     </div>
   );
 }
 
-// One row for a joined member — team, and (for cash leagues) payment status with
+// One row for a joined member â€” team, and (for cash leagues) payment status with
 // admin download/approve/reject controls. Shared between the pre-start registration
 // list and the Members tab so payments can be reviewed at any stage of the league.
 // Admin/creator-only queue of player-submitted results awaiting review.
@@ -14573,7 +14575,7 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
           const home = fixture ? league.teams.find((t) => t.id === fixture.home_team_id) : null;
           const away = fixture ? league.teams.find((t) => t.id === fixture.away_team_id) : null;
           // The club that submitted this result, resolved via the member row
-          // that matches submitted_by (a user id, same as members.user_id) —
+          // that matches submitted_by (a user id, same as members.user_id) â€”
           // result_submissions carries no team_id of its own, so this is the
           // only path from "who submitted this" to "which club's WhatsApp".
           const submitterMember = showSubmitterWhatsApp
@@ -14583,7 +14585,7 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
             ? league.teams.find((t) => t.id === submitterMember.team_id)
             : null;
           const submitterWhatsAppText = submitterTeam
-            ? `Hi ${submitterTeam.name}, your result for${fixture ? ` Matchday ${fixture.round}:` : ""} ${home?.name || "Home"} ${s.home_score} – ${s.away_score} ${away?.name || "Away"} in "${league.name}" is with me for approval now — I'll get to it shortly.`
+            ? `Hi ${submitterTeam.name}, your result for${fixture ? ` Matchday ${fixture.round}:` : ""} ${home?.name || "Home"} ${s.home_score} â€“ ${s.away_score} ${away?.name || "Away"} in "${league.name}" is with me for approval now â€” I'll get to it shortly.`
             : null;
           return (
             <div key={s.id} className="rounded-lg px-4 py-2.5" style={{ background: c.surface }}>
@@ -14593,27 +14595,27 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} – {s.away_score} {away?.name || "Away"}</div>
+                    <div className="font-body text-sm truncate">{home?.name || "Home"} {s.home_score} â€“ {s.away_score} {away?.name || "Away"}</div>
                     {showSubmitterWhatsApp && submitterTeam?.phone && (
                       <WhatsAppLink phone={submitterTeam.phone} text={submitterWhatsAppText} iconOnly
                         title={`Message ${submitterTeam.name} about this result`} c={c} />
                     )}
                   </div>
-                  <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` · Matchday ${fixture.round}` : ""} · {timeAgo(s.created_at)}</div>
+                  <div className="font-mono text-[11px]" style={{ color: c.textFaint }}>Submitted by {s.submitted_by_username}{fixture ? ` Â· Matchday ${fixture.round}` : ""} Â· {timeAgo(s.created_at)}</div>
                   {showDeadline && (() => {
                     const reason = resultEscalationReason(league, s);
                     return (
                       <div className="font-mono text-[11px] mt-0.5" style={{ color: reason ? c.red : (resultConfirmMinutesLeft(s, league) <= 5 ? c.red : "#B8860B") }}>
                         {reason === "dispute-cap"
-                          ? "This fixture's been disputed too many times already — sent straight to the admin"
+                          ? "This fixture's been disputed too many times already â€” sent straight to the admin"
                           : reason === "timeout"
-                          ? "Confirmation window passed — this has been sent to the admin"
-                          : `${resultConfirmMinutesLeft(s, league)}m left to respond — after that it goes to the admin`}
+                          ? "Confirmation window passed â€” this has been sent to the admin"
+                          : `${resultConfirmMinutesLeft(s, league)}m left to respond â€” after that it goes to the admin`}
                       </div>
                     );
                   })()}
                   {!showDeadline && showEscalationReason && resultEscalationReason(league, s) === "dispute-cap" && (
-                    <div className="font-mono text-[11px] mt-0.5" style={{ color: c.red }}>Escalated — this fixture's been disputed too many times already</div>
+                    <div className="font-mono text-[11px] mt-0.5" style={{ color: c.red }}>Escalated â€” this fixture's been disputed too many times already</div>
                   )}
                 </div>
               </div>
@@ -14638,7 +14640,7 @@ export function PendingResultsPanel({ league, submissions, onDownloadProof, onAp
 
 // Single status line at the top of every league (any format, cash or fun):
 // before kickoff it names the start date; once fixtures exist it switches
-// automatically to the next unplayed fixture's due date — the viewer's own
+// automatically to the next unplayed fixture's due date â€” the viewer's own
 // club's next game if they have one, otherwise the league's next game overall.
 export function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
   if (notStarted) {
@@ -14661,16 +14663,16 @@ export function LeagueStatusBanner({ league, notStarted, myTeam, c }) {
 
 // Builds the admin's WhatsApp icon message for a member, based on that
 // member's club status right now: eliminated, not-yet-started league, or
-// the next fixture due date. Kept upbeat on purpose — this is the message
+// the next fixture due date. Kept upbeat on purpose â€” this is the message
 // that lands in a player's WhatsApp, not a formal notice.
 // Whether THIS member would actually get the league's saved custom
-// template, or fall back to the automated status message — shared by
+// template, or fall back to the automated status message â€” shared by
 // adminStatusMessage (to decide what to send) and the members tab (to
 // decide which of the two lists a member belongs in), so the two can never
 // disagree about which bucket a member is in.
 //
 // A template that references {round}/{due} needs real fixture data to fill
-// them — for a member with none (eliminated, or nothing left to play),
+// them â€” for a member with none (eliminated, or nothing left to play),
 // sending it would read as a broken half-blank line like "Round is due ".
 // Rather than inventing filler text for that gap, such members fall back to
 // automated. Templates that don't reference {round} or {due} at all apply
@@ -14685,12 +14687,12 @@ export function usesCustomMessage(t, league) {
   return !!(upcoming || due);
 }
 
-// The real kickoff moment for a fixture — when players should actually
+// The real kickoff moment for a fixture â€” when players should actually
 // start playing it, as opposed to due_at (the deadline by which it must be
 // done). Knockout fixtures record this directly in starts_at (see
 // knockoutRoundFixtures); round-robin/group fixtures don't have their own
 // column for it, so it's derived by stepping due_at back by one round
-// period — same fallback logic already used for two-legged knockout ties
+// period â€” same fallback logic already used for two-legged knockout ties
 // elsewhere (NextOpponentCard, OpponentFinder) when starts_at is missing on
 // an older fixture.
 function fixtureStartsAt(fixture, league) {
@@ -14704,14 +14706,14 @@ function adminStatusMessage(m, t, league) {
   const name = m.display_name || "there";
   // An admin-edited template on the league overrides the status-based
   // message entirely, for every eligible member (see usesCustomMessage
-  // above), until it's edited or cleared again — see
+  // above), until it's edited or cleared again â€” see
   // updateLeagueMemberMessage. {name} and {league} get swapped in per
   // member so a single saved template still reads as personal. {round} and
-  // {due} are also live — sourced from this member's own next unplayed
+  // {due} are also live â€” sourced from this member's own next unplayed
   // fixture (same lookup the default message uses), so a custom template
   // still tracks the bracket forward each round instead of freezing on
   // whatever round it was written during. {start} is that same fixture's
-  // real kickoff moment (see fixtureStartsAt) — blank if there's no
+  // real kickoff moment (see fixtureStartsAt) â€” blank if there's no
   // upcoming fixture yet to attach one to.
   if (usesCustomMessage(t, league)) {
     const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
@@ -14726,13 +14728,13 @@ function adminStatusMessage(m, t, league) {
       .replace(/\{start\}/g, start ? fmtDate(start) : "");
   }
   if (t?.eliminated) {
-    return `Hey ${name}! 👋\n🔴 Tough one — you've been eliminated from ${league.name}.\n🔥 Try again on the next one — jump into one of our other available leagues and get straight back in the fight!\n👉 ${SITE_URL}`;
+    return `Hey ${name}! ðŸ‘‹\nðŸ”´ Tough one â€” you've been eliminated from ${league.name}.\nðŸ”¥ Try again on the next one â€” jump into one of our other available leagues and get straight back in the fight!\nðŸ‘‰ ${SITE_URL}`;
   }
   const notStarted = league.fixtures.length === 0;
   if (notStarted) {
     return league.starts_at
-      ? `Hey ${name}! 🎉\n🏆 ${league.name} kicks off ${fmtDate(league.starts_at)}.\n⚽ Get ready, it's going to be a good one!`
-      : `Hey ${name}! 🎉\n📋 ${league.name} is filling up fast.\n⚽ We'll confirm the kickoff date soon — get hyped!`;
+      ? `Hey ${name}! ðŸŽ‰\nðŸ† ${league.name} kicks off ${fmtDate(league.starts_at)}.\nâš½ Get ready, it's going to be a good one!`
+      : `Hey ${name}! ðŸŽ‰\nðŸ“‹ ${league.name} is filling up fast.\nâš½ We'll confirm the kickoff date soon â€” get hyped!`;
   }
   // {round} is read fresh off this member's own next unplayed fixture every
   // time this message is generated (never stored), so as soon as a round's
@@ -14740,23 +14742,23 @@ function adminStatusMessage(m, t, league) {
   // this message goes out it names the new round on its own.
   const upcoming = t ? nextFixtureForTeam(league, t.id) : null;
   if (upcoming) {
-    // The window this fixture can be played in — real kickoff moment
+    // The window this fixture can be played in â€” real kickoff moment
     // through the deadline. For most rounds these are genuinely different
     // times (see fixtureStartsAt); if they happen to land on the exact same
     // moment (e.g. an older fixture with no round period recorded), only
     // show it once rather than printing the same time twice.
     const start = fixtureStartsAt(upcoming, league);
     const windowLine = start && start !== upcoming.due_at
-      ? `📅 Starts ${fmtDate(start)} · Due ${fmtDate(upcoming.due_at)}`
-      : `📅 Due ${fmtDate(upcoming.due_at)}`;
-    // Round 1 of a fresh stage means this club just survived a cut — the
+      ? `ðŸ“… Starts ${fmtDate(start)} Â· Due ${fmtDate(upcoming.due_at)}`
+      : `ðŸ“… Due ${fmtDate(upcoming.due_at)}`;
+    // Round 1 of a fresh stage means this club just survived a cut â€” the
     // knockout bracket starting for groups_knockout, or a new survivor
-    // stage (current_stage > 1) — so lead with a congrats line instead of
+    // stage (current_stage > 1) â€” so lead with a congrats line instead of
     // the plain reminder. Round 1 of stage 1 (a league just starting, or
     // plain single/double round-robin with no earlier cut to survive)
     // isn't a promotion, so it's excluded here on purpose.
     //
-    // A plain knockout league has no earlier stage to be promoted FROM —
+    // A plain knockout league has no earlier stage to be promoted FROM â€”
     // round 1 is just the bracket starting, same as any other league's
     // opening round. But round 2 onward is different: reaching it always
     // means this club just won its previous tie (or, rarely, had a bye),
@@ -14772,11 +14774,11 @@ function adminStatusMessage(m, t, league) {
       const throughTo = league.format === "knockout" ? "the next round"
         : league.format === "survivor" ? (league.final_stage_started ? "the final stage" : "the next stage")
         : "the knockout stage";
-      return `Hey ${name}! 🎉\n🏆 Congrats — you're through to ${throughTo} of ${league.name}!\n🏟️ Round ${upcoming.round} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!\n👉 ${SITE_URL}`;
+      return `Hey ${name}! ðŸŽ‰\nðŸ† Congrats â€” you're through to ${throughTo} of ${league.name}!\nðŸŸï¸ Round ${upcoming.round} is up next.\n${windowLine} â€” lock in a time with your opponent.\nðŸ”¥ Bring the heat!\nðŸ‘‰ ${SITE_URL}`;
     }
-    return `Hey ${name}! ⚡\n🏟️ Round ${upcoming.round} in ${league.name} is up next.\n${windowLine} — lock in a time with your opponent.\n🔥 Bring the heat!${firstMatchdayNote(upcoming.round)}`;
+    return `Hey ${name}! âš¡\nðŸŸï¸ Round ${upcoming.round} in ${league.name} is up next.\n${windowLine} â€” lock in a time with your opponent.\nðŸ”¥ Bring the heat!${firstMatchdayNote(upcoming.round)}`;
   }
-  return `Hey ${name}! 👋\n💬 This is weAfrica admin Saul, checking in on ${league.name}.`;
+  return `Hey ${name}! ðŸ‘‹\nðŸ’¬ This is weAfrica admin Saul, checking in on ${league.name}.`;
 }
 
 // Red "reminded" highlight for a member row. members.wa_reminder_due_at is
@@ -14784,7 +14786,7 @@ function adminStatusMessage(m, t, league) {
 // sent that member the WhatsApp text, and stored in Supabase so the
 // highlight is the same for every admin looking at the league, not just
 // whoever sent it. Active for WA_REMINDER_WINDOW_MS after that timestamp,
-// regardless of fixtures, due dates, or elimination status — purely "was
+// regardless of fixtures, due dates, or elimination status â€” purely "was
 // this person messaged recently".
 export function isWaReminderActive(m) {
   if (!m.wa_reminder_due_at) return false;
@@ -14869,7 +14871,7 @@ export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove 
   );
 }
 
-// Contribution → direct prize → redistributed → total balance, for every
+// Contribution â†’ direct prize â†’ redistributed â†’ total balance, for every
 // approved member, per the WeAfrica payout rule. Ranked live off current
 // standings, so it's a running projection until the league is complete.
 export function PrizeBreakdownPanel({ league, c }) {
@@ -14882,7 +14884,7 @@ export function PrizeBreakdownPanel({ league, c }) {
   const pool = rows.reduce((sum, r) => sum + (r.m.entry_fee || 0), 0);
   const knockoutFormat = isKnockoutFormat(league);
   const orgFee = organizerFee(league);
-  const medal = (rank) => (rank === 1 ? "🥇 " : rank === 2 ? "🥈 " : rank === 3 ? "🥉 " : `#${rank} `);
+  const medal = (rank) => (rank === 1 ? "ðŸ¥‡ " : rank === 2 ? "ðŸ¥ˆ " : rank === 3 ? "ðŸ¥‰ " : `#${rank} `);
 
   return (
     <div className="rounded-xl border mt-4" style={{ borderColor: c.border }}>
@@ -14894,9 +14896,9 @@ export function PrizeBreakdownPanel({ league, c }) {
       </div>
       <div className="px-4 pb-3 font-mono text-[11px]" style={{ color: c.textFaint }}>
         {knockoutFormat
-          ? `Pool ${formatRand(pool)} · 75% champion · 20% runner-up · 5% organizer fee`
-          : `Pool ${formatRand(pool)} · 55% gold · 25% silver · 15% bronze · 5% organizer fee`}
-        {!complete ? " · updates live as results come in" : ""}
+          ? `Pool ${formatRand(pool)} Â· 75% champion Â· 20% runner-up Â· 5% organizer fee`
+          : `Pool ${formatRand(pool)} Â· 55% gold Â· 25% silver Â· 15% bronze Â· 5% organizer fee`}
+        {!complete ? " Â· updates live as results come in" : ""}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full font-mono text-xs">
@@ -14914,17 +14916,17 @@ export function PrizeBreakdownPanel({ league, c }) {
               <tr key={m.id} className="border-t" style={{ borderColor: c.border }}>
                 <td className="px-4 py-2">{prize ? medal(prize.rank) : ""}{m.display_name}</td>
                 <td className="text-right px-2 py-2">{formatRand(m.entry_fee || 0)}</td>
-                <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.directPrize)) : "—"}</td>
-                <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.redistributed)) : "—"}</td>
+                <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.directPrize)) : "â€”"}</td>
+                <td className="text-right px-2 py-2">{prize ? formatRand(Math.round(prize.redistributed)) : "â€”"}</td>
                 <td className="text-right px-4 py-2 font-semibold" style={{ color: prize ? c.greenText : c.text }}>{formatRand(Math.round(prize?.total || 0))}</td>
               </tr>
             ))}
             {orgFee > 0 && (
               <tr className="border-t" style={{ borderColor: c.border }}>
                 <td className="px-4 py-2" style={{ color: c.textFaint }}>Organizer fee (5%)</td>
-                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
-                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
-                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>—</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>â€”</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>â€”</td>
+                <td className="text-right px-2 py-2" style={{ color: c.textFaint }}>â€”</td>
                 <td className="text-right px-4 py-2 font-semibold" style={{ color: c.text }}>{formatRand(Math.round(orgFee))}</td>
               </tr>
             )}
@@ -14935,7 +14937,7 @@ export function PrizeBreakdownPanel({ league, c }) {
   );
 }
 
-// Kebab menu on the league page for admin/creator actions — keeps "Delete league"
+// Kebab menu on the league page for admin/creator actions â€” keeps "Delete league"
 // tucked away behind a deliberate open-then-tap, rather than a bare trash icon
 // sitting next to the back button where it's easy to hit by accident.
 export function LeagueMenu({ league, onShare, onDelete, c }) {
