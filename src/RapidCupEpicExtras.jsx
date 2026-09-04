@@ -136,6 +136,88 @@ export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// League-start alarm — rings once a lobby reaches 4 players and the league
+// is starting. Fires for players actually in that lobby, not spectators
+// browsing an open one.
+//
+// Can't use a plain ref like the drumroll above: the drumroll's window
+// (10s inside an "open" lobby) closes on its own, so a remount after that
+// can't refire it. This lobby stays "filling"/"live" for the ENTIRE
+// tournament, sometimes a long time — RapidCupBanner.jsx's own comment
+// block explains why Home (and this banner with it) remounts constantly
+// during that window. A plain ref resets on every one of those remounts,
+// so the alarm would ring again each time a player left and came back to
+// Home mid-tournament. Same problem AUTO_OPENED_STORAGE_KEY already
+// solved for the auto-redirect-into-league effect — reusing that
+// sessionStorage approach here instead of a ref.
+const ALARMED_LOBBY_STORAGE_KEY = "rapidCup:alarmedLobbyIds";
+
+function loadAlarmedLobbyIds() {
+  try {
+    const raw = sessionStorage.getItem(ALARMED_LOBBY_STORAGE_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set(); // fail open, same reasoning as the auto-open guard
+  }
+}
+
+function markLobbyAlarmed(lobbyId) {
+  const ids = loadAlarmedLobbyIds();
+  ids.add(lobbyId);
+  try {
+    sessionStorage.setItem(ALARMED_LOBBY_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Storage unavailable — worst case the alarm can refire once more.
+  }
+}
+
+export function useLeagueStartAlarm(status, lobbyId, enabled) {
+  useEffect(() => {
+    if (!enabled || lobbyId == null) return;
+    if (status !== "filling" && status !== "live") return;
+    if (loadAlarmedLobbyIds().has(lobbyId)) return;
+    markLobbyAlarmed(lobbyId);
+
+    let ctx;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      ctx = new AudioCtx();
+    } catch {
+      return; // no Web Audio support — silently skip, this is pure polish
+    }
+
+    // Classic alarm-clock ring: two alternating tones, 6 short pulses.
+    const start = ctx.currentTime + 0.05;
+    const pulseDur = 0.25;
+    const gapDur = 0.12;
+    let t = start;
+    for (let i = 0; i < 6; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = i % 2 === 0 ? 880 : 660;
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(0.0001, t);
+      gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+      gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
+      osc.connect(gainNode).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + pulseDur);
+      t += pulseDur + gapDur;
+    }
+
+    // Same navigate-away fix as the drumroll: close immediately on
+    // unmount instead of only scheduling the close for later, so leaving
+    // the page actually stops the ringing instead of leaving it playing
+    // in the background.
+    const cleanupMs = (t + 0.3 - ctx.currentTime) * 1000;
+    const cleanupTimer = setTimeout(() => { ctx.close?.(); }, Math.max(0, cleanupMs));
+    return () => { clearTimeout(cleanupTimer); ctx.close?.(); };
+  }, [status, lobbyId, enabled]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Pack-opening reveal — wraps the Cup box's revealed state (Section 13:
 // "Pack-opening reveal animation on the Cup box"). Purely presentational:
 // takes whatever children the caller already renders for "collected" and

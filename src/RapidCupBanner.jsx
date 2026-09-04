@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
+import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
 
 // RapidCupBanner — horizontal banner for the home screen, sits under
 // Quick Actions (see App.jsx home layout). Shows the current open
@@ -208,6 +209,16 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
 
   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
   const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
+
+  // Countdown drumroll (Section 13, Phase 9) — last 10s of this same
+  // lobby-reset timer, once per lobby. Only while the lobby is still
+  // "open" (filling), same gating as the 15/5/1 min toasts below.
+  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
+
+  // League-start alarm — rings once this lobby hits 4 players and starts,
+  // for this viewer only if they're actually one of the 4 (myEntry), not
+  // for someone just browsing the open lobby before joining.
+  useLeagueStartAlarm(lobby?.status, lobby?.id ?? null, !!myEntry);
 
   // Countdown notifications at 15/5/1 min remaining — fires once per
   // threshold per lobby.
