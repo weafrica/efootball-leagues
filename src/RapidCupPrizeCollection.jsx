@@ -4,6 +4,8 @@ import { supabase } from "./supabaseClient";
 import { RapidCupLiveFees } from "./RapidCupFeeDisplay.jsx";
 import { RapidCupInvestorPanel } from "./RapidCupInvestment.jsx";
 import { getRapidCupTheme } from "./rapidCupThemes.js";
+import { CupboxPackReveal, RapidCupMvpCard } from "./RapidCupEpicExtras.jsx";
+import { RapidCupHallOfFame } from "./RapidCupHallOfFame.jsx";
 import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
 
 // Rapid Cup — Phase 6: Winbox / Cup box tap-to-collect (Section 8).
@@ -12,10 +14,13 @@ import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
 // file never computes or displays a number it isn't already sure the
 // server will pay, and never lets the client claim on someone else's
 // behalf. See supabase/migrations/20260903210000_rapid_cup_prize_collection.sql
-// for the server side (collect_rapid_cup_winbox / collect_rapid_cup_cupbox)
-// and the full pack-opening reveal / "Underdog"/"All-In" polish is Section
-// 13 (Phase 9) — deliberately not built here, this is the plain
-// functional version.
+// for the server side (collect_rapid_cup_winbox / collect_rapid_cup_cupbox).
+//
+// The Cup box's pack-opening animation, and the Winbox's MVP shareable
+// card, are Section 13 (Phase 9) polish — see RapidCupEpicExtras.jsx. Kept
+// in that separate file rather than inlined here so this file's own job
+// (talk to the server, show an honest number) stays easy to read on its
+// own.
 
 function useCollectionStatus(userId, boxType, refId) {
   const [collected, setCollected] = useState(null); // null = loading, else the row (or false if none)
@@ -66,10 +71,15 @@ function computeIWon(fixture, myTeamId) {
 // whether you won using the same rule the server uses) OR an explicit
 // `iWon` boolean if the caller already knows it. `iWon`, when passed,
 // always wins over the computed value.
-export function RapidCupWinbox({ fixtureId, myUserId, myTeamId, fixture, iWon, amountHint = 3, showToast, c }) {
+// teamNameById (optional) — { [team_id]: name } so the MVP card can show
+// real names. Caller (RapidCupTournamentExtras) already has league.teams
+// loaded, so building this map costs it nothing; omitting it just falls
+// back to generic labels rather than breaking anything.
+export function RapidCupWinbox({ fixtureId, myUserId, myTeamId, fixture, iWon, amountHint = 3, teamNameById, cupName, showToast, c }) {
   const { collected, reload } = useCollectionStatus(myUserId, "winbox", fixtureId);
   const [collecting, setCollecting] = useState(false);
   const [justWon, setJustWon] = useState(null); // amount from the RPC's own response, for the reveal
+  const [showMvp, setShowMvp] = useState(false); // only auto-show right after collecting, not on every revisit
 
   const won = iWon !== undefined ? iWon : computeIWon(fixture, myTeamId);
 
@@ -81,11 +91,19 @@ export function RapidCupWinbox({ fixtureId, myUserId, myTeamId, fixture, iWon, a
     setCollecting(false);
     if (error) { showToast?.(error.message || "Couldn't open the Winbox."); return; }
     setJustWon(data);
+    setShowMvp(true);
     await reload();
   };
 
   const already = collected && collected.amount != null;
   const revealAmount = justWon ?? (already ? collected.amount : null);
+
+  const opponentTeamId = fixture && myTeamId
+    ? (fixture.home_team_id === myTeamId ? fixture.away_team_id : fixture.home_team_id)
+    : null;
+  const myScore = fixture && myTeamId ? (fixture.home_team_id === myTeamId ? fixture.home_score : fixture.away_score) : null;
+  const opponentScore = fixture && myTeamId ? (fixture.home_team_id === myTeamId ? fixture.away_score : fixture.home_score) : null;
+  const roundLabel = fixture?.round === 2 ? "Final" : fixture?.round === 1 ? "Semi-Final" : "";
 
   return (
     <div style={{ borderRadius: 10, border: `1px solid ${c?.border || "#333"}`, padding: 12, marginTop: 8 }}>
@@ -101,6 +119,17 @@ export function RapidCupWinbox({ fixtureId, myUserId, myTeamId, fixture, iWon, a
         >
           {collecting ? "Opening…" : `🎁 Open Winbox (+${amountHint} Nets)`}
         </button>
+      )}
+      {showMvp && revealAmount != null && myScore != null && opponentScore != null && (
+        <RapidCupMvpCard
+          winnerName={teamNameById?.[myTeamId] || "You"}
+          opponentName={teamNameById?.[opponentTeamId] || "opponent"}
+          myScore={myScore}
+          opponentScore={opponentScore}
+          roundLabel={roundLabel}
+          cupName={cupName}
+          c={c}
+        />
       )}
     </div>
   );
@@ -128,16 +157,22 @@ export function RapidCupCupbox({ lobbyId, myUserId, showToast, c }) {
 
   const already = collected && collected.amount != null;
   const revealAmount = justWon ?? (already ? collected.amount : null);
+  // Only play the pack-opening animation on the tap that just revealed it
+  // (justWon set) — reopening the page to an already-collected box just
+  // shows the plain result, no replay.
+  const justRevealed = justWon != null;
 
   return (
     <div style={{ borderRadius: 12, border: `1px solid ${c?.border || "#333"}`, padding: 16, marginTop: 12 }}>
       {revealAmount != null ? (
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 22 }}>🏆</div>
-          <div style={{ fontWeight: 700, marginTop: 4 }}>
-            {revealAmount > 0 ? `Cup box collected — +${revealAmount} Nets` : "Cup box collected — nothing this time"}
+        <CupboxPackReveal active={justRevealed}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 22 }}>🏆</div>
+            <div style={{ fontWeight: 700, marginTop: 4 }}>
+              {revealAmount > 0 ? `Cup box collected — +${revealAmount} Nets` : "Cup box collected — nothing this time"}
+            </div>
           </div>
-        </div>
+        </CupboxPackReveal>
       ) : (
         <button
           onClick={collect}
@@ -198,6 +233,11 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
 
   const showBoxes = myPlayedFixtures.length > 0 || lobby.status === "completed";
 
+  // For the MVP card's names — cheap to build, league.teams is already
+  // loaded for this page regardless of Rapid Cup.
+  const teamNameById = Object.fromEntries((league.teams || []).map((t) => [t.id, t.name]));
+  const cupName = getRapidCupTheme(lobby.cup_number).name;
+
   return (
     <div className="space-y-2">
       <RapidCupHelpButton league={league} myUsername={myUsername} c={cupTheme} />
@@ -206,10 +246,16 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
         <RapidCupInvestorPanel lobbyId={lobby.id} myUserId={myUserId} isSpectator={!myTeamId} showToast={showToast} c={cupTheme} />
       )}
       {showBoxes && myPlayedFixtures.map((f) => (
-        <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={cupTheme} />
+        <RapidCupWinbox
+          key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f}
+          teamNameById={teamNameById} cupName={cupName} showToast={showToast} c={cupTheme}
+        />
       ))}
       {lobby.status === "completed" && (
-        <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
+        <>
+          <RapidCupCupbox lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
+          <RapidCupHallOfFame myUserId={myUserId} c={cupTheme} />
+        </>
       )}
     </div>
   );

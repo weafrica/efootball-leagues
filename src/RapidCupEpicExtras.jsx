@@ -122,10 +122,16 @@ export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
     hit.start(t);
     hit.stop(t + 0.3);
 
-    // Tear the context down well after the last scheduled sound finishes.
+    // Tear the context down well after the last scheduled sound finishes —
+    // but if this component unmounts first (viewer navigates away mid-
+    // countdown), the cleanup below closes it immediately instead. Web
+    // Audio scheduling runs independently of React: without this, leaving
+    // the page didn't stop the already-scheduled noise bursts, so the
+    // drumroll kept playing in the background and the context was never
+    // released.
     const cleanupMs = (t + 0.4 - ctx.currentTime) * 1000;
     const cleanupTimer = setTimeout(() => { ctx.close?.(); }, Math.max(0, cleanupMs));
-    return () => clearTimeout(cleanupTimer);
+    return () => { clearTimeout(cleanupTimer); ctx.close?.(); };
   }, [msLeft, lobbyId, enabled]);
 }
 
