@@ -64,8 +64,29 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    // Not JSON (shouldn't happen — send-rapid-cup-push always sends JSON) —
-    // fall back to a bare notification rather than dropping the push silently.
+    // Not JSON (shouldn't happen — send-rapid-cup-push and send-match-push
+    // always send JSON) — fall back to a bare notification rather than
+    // dropping the push silently.
+  }
+
+  // "Next match set" — League Ladder, regular leagues, and random matches
+  // (send-match-push). Deliberately the opposite of the Rapid Cup alarm
+  // below: one quiet ping, no sound, nothing requiring interaction, no
+  // Stop/Enter actions. send-match-push always stamps this kind itself
+  // (see that function's header) so a caller can never fall through to the
+  // alarm shape by omitting it.
+  if (payload.data?.kind === "next_match") {
+    const title = payload.title || "⚡ Next match set";
+    const body = payload.body || "Your next match is ready.";
+    event.waitUntil(
+      self.registration.showNotification(title, {
+        body,
+        silent: true,
+        requireInteraction: false,
+        data: payload.data,
+      })
+    );
+    return;
   }
 
   const title = payload.title || "⚡ Rapid Cup";
@@ -151,6 +172,17 @@ async function stopAlarmDirectly(lobbyId) {
 }
 
 self.addEventListener("notificationclick", (event) => {
+  if (event.notification?.data?.kind === "next_match") {
+    event.notification.close();
+    event.waitUntil(
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+        if (clients.length) return clients[0].focus();
+        return self.clients.openWindow("/");
+      })
+    );
+    return;
+  }
+
   const action = event.action || "enter"; // tapping the body (no action) behaves like "enter"
   const lobbyId = event.notification?.data?.lobbyId ?? null;
   event.notification.close();

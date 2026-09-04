@@ -15,6 +15,15 @@ import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN
 import { computeStandings as computeLeagueLadderStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
+// Next-match push notifications (League Ladder, regular leagues, random
+// matches) reuse the exact same subscribe/resubscribe plumbing Rapid Cup
+// already shipped — one push_subscriptions table, one VAPID key pair, one
+// browser subscription per device. RapidCupBanner still calls
+// subscribeToRapidCupPush() itself on join (harmless — it's an upsert on
+// endpoint), but that only ever ran for players who'd opened a Rapid Cup
+// lobby. Every signed-in player now needs a subscription, so this is
+// called from the sessionKey effect below instead of only from there.
+import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -3569,6 +3578,12 @@ export default function App() {
     const id = setInterval(() => setAppNow(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
+  // Same listener RapidCupBanner registers on its own mount — kept here too
+  // so a device's push subscription still gets repaired after a browser-
+  // initiated endpoint rotation even on a visit that never renders Home
+  // (and therefore never mounts RapidCupBanner). Registering it twice is
+  // harmless (each just adds its own message listener).
+  useEffect(() => listenForPushResubscribe(), []);
   // Admin override for the Weekend League spotlight's nightly auto-pause
   // (see isWeekendPauseHour / WeekendLeagueSpotlight). null = follow the
   // 9pm–9am SAST schedule as usual; "paused" / "live" forces that state
@@ -5061,6 +5076,11 @@ export default function App() {
     if (!session) { setProfile(undefined); setLeagues(null); setIsAdmin(false); return; }
     supabase.from("profiles").select("*").eq("user_id", session.user.id).maybeSingle()
       .then(({ data }) => setProfile(data || null));
+    // Fire-and-forget, same as every other call to this helper — a
+    // declined permission prompt or unsupported browser must never block
+    // sign-in. See the import comment above for why this now runs for
+    // every session, not only from RapidCupBanner.
+    subscribeToRapidCupPush();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
   }, [sessionKey]);
 
