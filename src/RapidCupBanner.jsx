@@ -239,7 +239,7 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null
   );
 
   // Countdown notifications at 15/5/1 min remaining — fires once per

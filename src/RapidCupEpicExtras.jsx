@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { supabase } from "./supabaseClient";
+import { saveAlarmSyncCredentials, clearAlarmSyncCredentials } from "./rapidCupAlarmSync.js";
 
 // Rapid Cup — Phase 9: Epic Extras (Section 13).
 //
@@ -237,7 +239,7 @@ async function closeLeagueStartNotification(lobbyId) {
   }
 }
 
-export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter) {
+export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
   const [isRinging, setIsRinging] = useState(false);
@@ -249,12 +251,56 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter) {
   const onEnterRef = useRef(onEnter);
   useEffect(() => { onEnterRef.current = onEnter; }, [onEnter]);
 
+  // Push Alarm Step 6 (cross-device stop sync): true while this stopAlarm()
+  // call is only reacting to a Realtime row-change that ALREADY happened in
+  // the database (another of this player's own devices stopped it first).
+  // Guards against writing straight back what we just read — not a
+  // correctness issue (stop_rapid_cup_alarm is idempotent either way), just
+  // avoids a pointless round-trip on every remote-triggered stop.
+  const fromRemoteRef = useRef(false);
+
   const stopAlarm = useCallback(() => {
-    if (lobbyId != null) { markAlarmStopped(lobbyId); closeLeagueStartNotification(lobbyId); }
+    if (lobbyId != null) {
+      markAlarmStopped(lobbyId);
+      closeLeagueStartNotification(lobbyId);
+      if (!fromRemoteRef.current && userId != null) {
+        // Fire-and-forget — every other of this player's own open tabs/
+        // devices picks this up via the Realtime subscription below, and a
+        // failed write here just means this one device stays locally
+        // stopped while others might still ring, not a broken feature.
+        supabase.rpc("stop_rapid_cup_alarm", { p_lobby_id: lobbyId }).then(() => {});
+      }
+      clearAlarmSyncCredentials();
+    }
+    fromRemoteRef.current = false;
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     setIsRinging(false);
-  }, [lobbyId]);
+  }, [lobbyId, userId]);
+
+  // Push Alarm Step 6: the actual cross-device sync. Whichever of this
+  // player's own devices stops the alarm first writes alarm_stopped_at
+  // (via the RPC call above, or sw.js's own direct write when there's no
+  // open tab at all — see notificationclick in sw.js); every other open
+  // tab/device for the SAME player + lobby hears about it here and stops
+  // ringing too, regardless of which device actually set it.
+  useEffect(() => {
+    if (lobbyId == null || userId == null) return;
+    const channel = supabase
+      .channel(`rapid-cup-alarm-stop-${lobbyId}-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "rapid_cup_lobby_players", filter: `lobby_id=eq.${lobbyId}` },
+        (payload) => {
+          if (payload.new?.user_id === userId && payload.new?.alarm_stopped_at) {
+            fromRemoteRef.current = true;
+            stopAlarm();
+          }
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [lobbyId, userId, stopAlarm]);
 
   // Taps on the phone notification arrive here as a postMessage from
   // sw.js's notificationclick listener (a service worker can't call
@@ -294,6 +340,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter) {
     }
     ctxRef.current = ctx;
     setIsRinging(true);
+    saveAlarmSyncCredentials(lobbyId); // Step 6: so sw.js can stop this alarm even with zero tabs open
     showLeagueStartNotification(lobbyId);
 
     playAlarmCycle(ctx); // ring immediately, then keep looping
