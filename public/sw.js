@@ -46,6 +46,43 @@ self.addEventListener("pushsubscriptionchange", (event) => {
   );
 });
 
+// Rapid Cup Push Alarm — Step 5: handles an actual server-sent push
+// arriving while nothing else may be running. send-rapid-cup-push (Step 3)
+// sends { title, body, data: { lobbyId } } — same shape the already-shipped
+// local notification uses (RapidCupEpicExtras.jsx showLeagueStartNotification),
+// same `tag`/`actions`/`requireInteraction`, so a push and a local
+// notification for the same lobby collapse into one instead of stacking,
+// and the existing notificationclick handler below already handles taps
+// on either kind with no changes needed.
+const PUSH_NOTIFICATION_ACTIONS = [
+  { action: "enter", title: "Enter Rapid Cup" },
+  { action: "stop", title: "Stop alarm" },
+];
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    // Not JSON (shouldn't happen — send-rapid-cup-push always sends JSON) —
+    // fall back to a bare notification rather than dropping the push silently.
+  }
+
+  const title = payload.title || "⚡ Rapid Cup";
+  const body = payload.body || "Your league has started — tap to enter!";
+  const lobbyId = payload.data?.lobbyId ?? null;
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag: lobbyId ? `rapid-cup-alarm-${lobbyId}` : "rapid-cup-alarm",
+      requireInteraction: true,
+      actions: PUSH_NOTIFICATION_ACTIONS,
+      data: { lobbyId },
+    })
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   const action = event.action || "enter"; // tapping the body (no action) behaves like "enter"
   const lobbyId = event.notification?.data?.lobbyId ?? null;
