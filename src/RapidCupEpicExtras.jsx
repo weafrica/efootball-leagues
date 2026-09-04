@@ -174,7 +174,29 @@ function markAlarmStopped(lobbyId) {
 
 const RING_LOOP_MS = 2600; // one 6-beep cycle (~2s) plus a short gap before repeating
 
-function playAlarmCycle(ctx) {
+// Ring for up to a minute, fading in rather than blasting instantly, then
+// go quiet for 5 minutes and try again — repeating until stopAlarm() fires
+// (banner tapped open, "Stop" tapped, another of the player's own devices
+// stops it, etc.). "Balanced": long enough on and off that a laptop left
+// open in another room doesn't blare nonstop, short enough between
+// attempts that it's still trying to get someone's attention rather than
+// giving up after one pass.
+const RING_ACTIVE_MS = 60_000; // one ringing attempt
+const RING_REST_MS = 5 * 60_000; // quiet gap before the next attempt
+const VOLUME_RAMP_SECONDS = 40; // fade-in length within each attempt...
+const VOLUME_START = 0.15; // ...from this quiet starting level...
+const VOLUME_FULL = 1; // ...up to full volume, reached with time to spare before the attempt ends
+
+// Give up after an hour of nobody responding — roughly 8-9 on/off attempts
+// at 6 minutes each. This also happens to close the one known edge case
+// from the alarm-sync credential save (Step 6): those credentials are tied
+// to a normal access token, which is only good for about an hour, so
+// ringing indefinitely past that point would eventually hit attempts using
+// a token that's already expired. Capping here means it never gets that
+// far in the first place.
+const MAX_TOTAL_RING_MS = 60 * 60_000;
+
+function playAlarmCycle(ctx, masterGain) {
   const start = ctx.currentTime + 0.02;
   const pulseDur = 0.25;
   const gapDur = 0.12;
@@ -188,7 +210,7 @@ function playAlarmCycle(ctx) {
     gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
     gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
     gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
-    osc.connect(gainNode).connect(ctx.destination);
+    osc.connect(gainNode).connect(masterGain); // through the per-attempt fade-in, not straight to destination
     osc.start(t);
     osc.stop(t + pulseDur);
     t += pulseDur + gapDur;
@@ -242,6 +264,7 @@ async function closeLeagueStartNotification(lobbyId) {
 export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
+  const phaseTimerRef = useRef(null); // pending "pause after 1min" or "resume after 5min" timeout
   const [isRinging, setIsRinging] = useState(false);
 
   // Ref, not a dependency — so a caller passing a fresh onEnter closure
@@ -273,6 +296,11 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
       clearAlarmSyncCredentials();
     }
     fromRemoteRef.current = false;
+    // Cancel whichever pause/resume timer is currently pending too — without
+    // this, stopping mid-attempt (or mid-rest) still leaves the next phase's
+    // timeout armed, and it would silently start the alarm ringing again a
+    // few minutes after the player already stopped it.
+    if (phaseTimerRef.current) { clearTimeout(phaseTimerRef.current); phaseTimerRef.current = null; }
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     setIsRinging(false);
@@ -330,16 +358,57 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
       return;
     }
 
-    let ctx;
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      ctx = new AudioCtx();
-    } catch {
-      return; // no Web Audio support — silently skip, this is pure polish
-    }
-    ctxRef.current = ctx;
-    setIsRinging(true);
+    // One "attempt": open a fresh context, fade the volume in over
+    // VOLUME_RAMP_SECONDS, ring on a loop for RING_ACTIVE_MS, then tear the
+    // context down and line up the next attempt RING_REST_MS later. Ramping
+    // the volume back up from VOLUME_START on every attempt (not just the
+    // very first) is deliberate — coming back from 5 minutes of silence
+    // should still ease in, not immediately blare at full volume.
+    //
+    // ringSessionStart marks when THIS armed session began (reset whenever
+    // this effect reruns — new lobby, status flip, etc.) — used only to cut
+    // off further attempts once MAX_TOTAL_RING_MS has passed.
+    const ringSessionStart = Date.now();
+
+    const startActivePhase = () => {
+      let ctx;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        ctx = new AudioCtx();
+      } catch {
+        return; // no Web Audio support — silently skip, this is pure polish
+      }
+      ctxRef.current = ctx;
+
+      const masterGain = ctx.createGain();
+      masterGain.connect(ctx.destination);
+      masterGain.gain.setValueAtTime(VOLUME_START, ctx.currentTime);
+      masterGain.gain.linearRampToValueAtTime(VOLUME_FULL, ctx.currentTime + VOLUME_RAMP_SECONDS);
+
+      setIsRinging(true);
+      playAlarmCycle(ctx, masterGain); // ring immediately, then keep looping
+      intervalRef.current = setInterval(() => playAlarmCycle(ctx, masterGain), RING_LOOP_MS);
+
+      phaseTimerRef.current = setTimeout(() => {
+        // End of this attempt — go quiet (still "armed", just resting)
+        // and schedule the next one, unless we've been at this for an
+        // hour already, in which case just give up quietly. Nothing else
+        // needs cleaning up here: the notification (if any) stays put,
+        // the DB alarm flag is untouched, this is purely "stop making
+        // noise on this device."
+        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+        if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
+        setIsRinging(false);
+
+        if (Date.now() - ringSessionStart >= MAX_TOTAL_RING_MS) {
+          phaseTimerRef.current = null;
+          return;
+        }
+        phaseTimerRef.current = setTimeout(startActivePhase, RING_REST_MS);
+      }, RING_ACTIVE_MS);
+    };
+
     // Step 6 fix: save the sync credentials FIRST, and only show the
     // notification once that's actually finished — otherwise there was a
     // narrow window where a lightning-fast tap on the notification could
@@ -351,21 +420,19 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
     // few milliseconds.
     saveAlarmSyncCredentials(lobbyId).then(() => showLeagueStartNotification(lobbyId));
 
-    playAlarmCycle(ctx); // ring immediately, then keep looping
-    const interval = setInterval(() => playAlarmCycle(ctx), RING_LOOP_MS);
-    intervalRef.current = interval;
+    startActivePhase();
 
-    // Unmount/navigate-away or a status change (e.g. filling -> live)
-    // tears this cycle's context down — same immediate-close fix as the
-    // drumroll and the one-shot alarm before it, so leaving the page (or
-    // the lobby moving on) actually stops the sound instead of leaving a
-    // stray context ringing in the background. If still eligible, the
-    // effect re-runs right after and opens a fresh context to keep going.
+    // Unmount/navigate-away or a status change (e.g. filling -> live) tears
+    // down whatever's currently sounding AND cancels any pending pause/
+    // resume timer — same immediate-close fix as the drumroll and the
+    // one-shot alarm before it, so leaving the page (or the lobby moving
+    // on) actually stops the cycle instead of a stray timer reviving it in
+    // the background later. If still eligible, the effect re-runs right
+    // after and starts a fresh attempt to keep going.
     return () => {
-      clearInterval(interval);
-      ctx.close?.();
-      if (ctxRef.current === ctx) ctxRef.current = null;
-      if (intervalRef.current === interval) intervalRef.current = null;
+      if (phaseTimerRef.current) { clearTimeout(phaseTimerRef.current); phaseTimerRef.current = null; }
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+      if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     };
   }, [status, lobbyId, enabled]);
 
