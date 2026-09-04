@@ -3,6 +3,7 @@ import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
+import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
 
 // RapidCupBanner — horizontal banner for the home screen, sits under
 // Quick Actions (see App.jsx home layout). Shows the current open
@@ -199,6 +200,12 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
     return () => clearInterval(t);
   }, []);
 
+  // Push Alarm Step 2 — pick up any browser-initiated resubscribe (see
+  // sw.js's pushsubscriptionchange handler + rapidCupPush.js) and actually
+  // save it to Supabase. One listener for the life of this banner, not
+  // tied to any particular lobby.
+  useEffect(() => listenForPushResubscribe(), []);
+
   // Reset fired-notification tracking whenever we land on a new lobby.
   useEffect(() => {
     if (lobby?.id !== lastLobbyId.current) {
@@ -298,6 +305,11 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
     setJoining(false);
     if (error) { showToast?.(error.message || "Couldn't join Rapid Cup."); return; }
     setShowJoinModal(false);
+    // Natural moment to ask for push permission (Section 4): the player has
+    // just committed to a lobby, so the ask has an obvious reason attached
+    // to it. Fire-and-forget — a decline or an unsupported browser must
+    // never block the join that already succeeded.
+    subscribeToRapidCupPush();
     await reload();
   };
 

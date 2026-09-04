@@ -16,6 +16,36 @@ const SHELL_URLS = ["/", "/manifest.webmanifest", "/splash.jpg"];
 // this listener just handles what happens when the person taps the
 // notification or one of its action buttons, since that has to happen
 // here in the service worker, not in the page.
+// Rapid Cup Push Alarm — Step 2: browsers occasionally rotate a
+// subscription's endpoint on their own (expiry, key rotation, etc.). This
+// service worker has no Supabase session to save the new one with directly
+// — it re-subscribes here, then hands the result to whichever tab is open
+// to actually persist it (src/rapidCupPush.js's listenForPushResubscribe).
+// If no tab happens to be open when this fires, the new subscription is
+// lost until the next time one opens and this fires again naturally on a
+// future rotation — acceptable given how rarely this event occurs.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const oldEndpoint = event.oldSubscription?.endpoint || null;
+  const applicationServerKey = event.oldSubscription?.options?.applicationServerKey;
+
+  event.waitUntil(
+    self.registration.pushManager
+      .subscribe(applicationServerKey ? { userVisibleOnly: true, applicationServerKey } : { userVisibleOnly: true })
+      .then((newSub) =>
+        self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+          for (const client of clients) {
+            client.postMessage({
+              type: "rapid-cup-push-resubscribed",
+              subscription: newSub.toJSON(),
+              oldEndpoint,
+            });
+          }
+        })
+      )
+      .catch(() => {})
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   const action = event.action || "enter"; // tapping the body (no action) behaves like "enter"
   const lobbyId = event.notification?.data?.lobbyId ?? null;
