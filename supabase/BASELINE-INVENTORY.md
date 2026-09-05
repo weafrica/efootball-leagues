@@ -174,6 +174,33 @@ never touches production's history table) but will block or corrupt the
 next real `supabase db push` to production unless repaired first — see
 Step 6 of the plan.
 
+## 8. Found while writing the baseline (Step 4), not caught in this Step 1 pass
+
+Re-verified independently against live production while assembling
+`20260810235959_baseline_schema.sql` — not carried over from any prior
+summary:
+
+- The trigger *functions* backing the 4 fixtures/profiles triggers in
+  section 3 (`trg_snapshot_fixture_points`, `trg_resolve_ladder_fixture`,
+  `trg_resolve_league_fixture`, `sync_ladder_profile`) also have no local
+  `create function` anywhere — only the `create trigger` statements were
+  flagged above. Now included in the baseline.
+- `trg_resolve_ladder_fixture` calls
+  `apply_ladder_result(text, uuid, uuid, int, int, uuid, int, int)`,
+  which likewise has no local `create function`. Three overloads of
+  `apply_ladder_result` exist live (2, 6, and 8 args); only the 8-arg one
+  is actually called by this trigger and is the one now in the baseline.
+  This function depends on `ladder_ranks`, created much later
+  (`20260827_ladder_ranks_and_resolve_trigger.sql`) — including it in
+  the pre-`20260811` baseline is safe (Postgres doesn't check a
+  function body's table references until the function is actually
+  called) but it doesn't semantically belong to the pre-migration era;
+  flagging it here rather than implying otherwise.
+- `rls_auto_enable()` had no matching `create event trigger` in any
+  local file either — the function alone doesn't do anything; the event
+  trigger wiring it to `ddl_command_end` was missing too. Both are now
+  in the baseline.
+
 ## Not yet done in this pass
 
 - Column-level diff per table (types, defaults, not-null, generated

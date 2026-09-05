@@ -195,7 +195,67 @@ Don't rename them to fit the timestamp pattern and leave them in
 place — replaying a one-off data fix against a fresh CI database is very
 likely wrong (it was written assuming specific rows already existed).
 
-## Step 4 — Write the baseline migration
+## Step 4 — Write the baseline migration ✅ done
+
+Pulled exact DDL for every object on the Step 1 list directly from
+production (project `jobgzxljuczzqljwavyq`) via SQL introspection
+(`information_schema.columns`, `pg_get_constraintdef`, `pg_indexes`,
+`pg_policies`, `pg_get_functiondef`, `pg_get_triggerdef`,
+`pg_extension`) rather than reconstructing by hand, per the plan.
+Two files landed in `supabase/migrations/`:
+
+- `20260810235959_baseline_schema.sql` — the baseline itself: 4
+  extensions, 30 tables, PK/UNIQUE constraints, FK constraints, CHECK
+  constraints, non-constraint indexes, RLS enable + all policies on
+  those 30 tables, the 3 helper functions
+  (`is_league_admin`/`is_member_of_league`/`is_platform_admin`) plus
+  `increment_balance` and `check_comment_parent_same_league`, the
+  `rls_auto_enable()` event-trigger function **and** the matching
+  `create event trigger` (the function alone does nothing without it —
+  not previously wired up in any local file), and the 4
+  fixtures/profiles triggers together with their trigger functions.
+- `20260811_ladder_cup_second_life_offers_baseline.sql` — everything
+  that could NOT go in the baseline because it depends on
+  `ladder_cup_entries`/`ladder_cup_matches`, which are only created by
+  `20260811_ladder_cup.sql` itself: the whole
+  `ladder_cup_second_life_offers` table, and the
+  `comments.ladder_cup_match_id` foreign key (the column and its index
+  are still in the baseline — only the FK constraint had to wait).
+  Filename chosen so it sorts after `20260811_ladder_cup.sql` under
+  plain lexical ordering — verified against this repo's actual file
+  list, not assumed.
+
+**Two things this pass found that Step 1's original inventory missed**
+(re-verified independently against live production and the local
+migration files, not taken on faith from a prior summary):
+
+1. The 4 fixtures/profiles trigger *functions* themselves
+   (`trg_snapshot_fixture_points`, `trg_resolve_ladder_fixture`,
+   `trg_resolve_league_fixture`, `sync_ladder_profile`) also have no
+   local `create function` anywhere — Step 1 only flagged the missing
+   `create trigger` statements, not that the functions they call are
+   equally uncaptured. Included in the baseline alongside their
+   triggers.
+2. `trg_resolve_ladder_fixture` calls
+   `apply_ladder_result(text, uuid, uuid, int, int, uuid, int, int)`,
+   which also has no local `create function` anywhere — a third,
+   previously uncaught gap. Three overloads of `apply_ladder_result`
+   exist live; only the 8-argument one this trigger actually calls is
+   included here. This function depends on `ladder_ranks` (created by
+   `20260827_ladder_ranks_and_resolve_trigger.sql`, well after this
+   baseline's cutoff) — safe to include anyway since Postgres doesn't
+   validate a function body's table references at `CREATE FUNCTION`
+   time, only at call time. Flagged in `BASELINE-INVENTORY.md` as a
+   fourth gap category, distinct from the pre-`20260811` baseline this
+   file otherwise covers.
+
+**Not yet done:** actually running this against a fresh database
+(Step 5) — that needs either a Supabase branch (has a cost, needs your
+go-ahead) or your local `supabase db reset`/`supabase test db`. The
+files here are the migration to run through that, not a substitute for
+running it.
+
+## Step 4 — Write the baseline migration (original plan, kept for reference)
 
 1. Generate the create-statements for everything on the Step 1 list —
    `pg_dump --schema-only` (or the equivalent read via the SQL editor /
