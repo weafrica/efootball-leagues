@@ -124,14 +124,51 @@ rather than trusting this summary count — policy details (not just
 counts) matter and weren't fully dumped here, and column-level types/
 defaults/constraints haven't been diffed at all yet.
 
-## Step 2 — Decide the cutoff point
+## Step 2 — Decide the cutoff point ✅ done
 
 Everything dated `20260811_ladder_cup.sql` or later already has a real
 migration file and should NOT be touched — only what predates
-migration-tracking goes in the baseline. Confirm the exact boundary by
-checking whether `20260811_ladder_cup.sql` (and a few files right after
-it) apply cleanly once the baseline exists — if they still fail on a
-missing relation, the cutoff needs to move later than currently assumed.
+migration-tracking goes in the baseline. The plan originally called for
+confirming this by applying the baseline + early files against a live
+database, but that requires Step 4's baseline to already exist. Did a
+static check instead, without waiting on Step 4:
+
+- **Confirmed `20260811_ladder_cup.sql` really is the earliest file.**
+  Sorting every numeric-prefixed filename, nothing predates it. The four
+  malformed-name files (Step 3) don't change this — they're excluded from
+  CI's ordering entirely regardless of what date is in their content.
+- **Traced every foreign-key `references` clause across all 165 files**
+  (11 distinct target tables: `item_listings`, `ladder_cup_matches`,
+  `ladder_fixtures`, `ladder_league_comments`, `ladder_leagues`,
+  `leagues`, `rapid_cup_lobbies`, `rapid_cup_payouts`,
+  `team_sale_listings`, `teams`, `transfer_listings`, plus
+  Supabase-managed `auth.users`). Every one of them is either created by
+  an earlier local migration, or is `leagues`/`teams` — both already on
+  the Step 1 baseline-gap list. **No local file references a table that
+  is neither local-created nor covered by the planned baseline** — so
+  nothing forces the cutoff later than `20260811_ladder_cup.sql`.
+- **Checked for creation syntax the Step 1 `create table` grep could have
+  missed** — `create table ... as select`, `select ... into <table>`
+  (vs. a PL/pgSQL variable), and `alter table ... rename to`. None exist
+  anywhere in the repo; every `select ... into` hit is a PL/pgSQL local
+  variable (`v_match`, `v_fixture`, etc.), not a table. So the 32-table
+  gap from Step 1 is real, not an artifact of a renamed or
+  differently-created table hiding in plain sight.
+- **Checked the two same-day files** (`20260811_ladder_cup.sql` and
+  `20260811_ladder_cup_start.sql`, which sort in that order) for a
+  forward-reference between them — `_start.sql` doesn't create or
+  reference anything `_ladder_cup.sql` doesn't already provide, so their
+  same-day ordering isn't a problem.
+
+**Conclusion: the cutoff stays exactly where the plan assumed** — the
+baseline migration should be dated any time before `20260811_ladder_cup.sql`
+(e.g. `20260810235959_baseline_schema.sql`). This is a strong static
+signal, not a substitute for actually replaying the migrations once the
+baseline exists (Step 5's job) — dynamic SQL, a role/grant ordering issue,
+or a sequence/default that isn't declared as a plain `references` clause
+wouldn't show up in a text search. Re-verify with a real `supabase test db`
+run after Step 4, and treat this as confirmation the assumption was
+reasonable, not as skipping Step 5.
 
 ## Step 3 — Handle the four malformed files first
 
