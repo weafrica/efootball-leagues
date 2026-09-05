@@ -886,7 +886,12 @@ function nextFixtureForLeague(league) {
 // that's about what stays visible in the spotlight card, not about which
 // league a fixture's confirmation window belongs to.
 export function isWeekendLeague(league, now = new Date()) {
-  if (!league || !league.created_by_admin || !league.starts_at) return false;
+  // format === "groups_knockout" is required too — otherwise an unrelated
+  // admin-created league (FA Cup, a Rapid Cup instance, etc.) whose
+  // starts_at happens to land in the current Fri-Sun window gets counted
+  // as THE Weekend League (Three-Day Titans League), which is the only
+  // league this format is actually used for. Found & fixed Sep 2026.
+  if (!league || !league.created_by_admin || !league.starts_at || league.format !== "groups_knockout") return false;
   const [start, end] = weekendWindow(now);
   const startsAtDate = new Date(league.starts_at);
   return startsAtDate >= start && startsAtDate <= end;
@@ -8833,12 +8838,19 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // here (like Home does against the raw leagues table) would silently
   // zero out every league instead of narrowing anything.
   const weekendLeagues = guestData ? funLeagues.reduce((items, l) => {
+    // Restricted to groups_knockout — Three-Day Titans League's own format —
+    // so an unrelated admin-created league (FA Cup, a Rapid Cup instance)
+    // with a starts_at or due fixture that happens to land this weekend
+    // can't get pulled into the spotlight and bump the real Weekend League
+    // out of it (and out of the normal leagues list below, which excludes
+    // anything shown here). Found & fixed Sep 2026.
+    if (l.format !== "groups_knockout") return items;
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
     // Mirrors Home's logic: a groups_knockout league's real cutoff is its
     // shared group_stage_due_at, not each match's own advisory due_at.
     const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
-    const groupStageDueThisWeekend = l.format === "groups_knockout" && groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
+    const groupStageDueThisWeekend = groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
     const dueFixtures = groupStageDueThisWeekend
       ? guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.stage === 1)
       : guestData.fixtures.filter((f) => f.league_id === l.id && !f.played && f.due_at && new Date(f.due_at) >= weekendStart && new Date(f.due_at) <= weekendEnd);
@@ -10837,6 +10849,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
   // only discovering it while logged out.
   const [weekendStart, weekendEnd] = weekendWindow();
   const weekendLeagues = funLeagues.filter((l) => l.created_by_admin).reduce((items, l) => {
+    // Restricted to groups_knockout — Three-Day Titans League's own format —
+    // so an unrelated admin-created league (FA Cup, a Rapid Cup instance)
+    // with a starts_at or due fixture that happens to land this weekend
+    // can't get pulled into the spotlight and bump the real Weekend League
+    // out of it. Found & fixed Sep 2026 — mirrors PublicHome's same fix.
+    if (l.format !== "groups_knockout") return items;
     const startsAtDate = l.starts_at ? new Date(l.starts_at) : null;
     const kicksOffThisWeekend = startsAtDate && startsAtDate >= weekendStart && startsAtDate <= weekendEnd;
     // A groups_knockout league's real cutoff is its shared group_stage_due_at,
@@ -10844,7 +10862,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
     // falls this weekend, every unplayed group-stage fixture counts as due,
     // even ones whose individual due_at happens to fall on a different day.
     const groupStageDueDate = l.group_stage_due_at ? new Date(l.group_stage_due_at) : null;
-    const groupStageDueThisWeekend = l.format === "groups_knockout" && groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
+    const groupStageDueThisWeekend = groupStageDueDate && groupStageDueDate >= weekendStart && groupStageDueDate <= weekendEnd;
     // Defensive: every league fetched via LEAGUE_SELECT carries a joined
     // fixtures array, but a null/missing join on any one row (a brand-new
     // league mid-creation, a malformed row) would otherwise crash this
