@@ -249,11 +249,60 @@ migration files, not taken on faith from a prior summary):
    fourth gap category, distinct from the pre-`20260811` baseline this
    file otherwise covers.
 
-**Not yet done:** actually running this against a fresh database
-(Step 5) — that needs either a Supabase branch (has a cost, needs your
-go-ahead) or your local `supabase db reset`/`supabase test db`. The
-files here are the migration to run through that, not a substitute for
-running it.
+## Step 5 — Verify against a fresh database ✅ done (free path, no branch)
+
+Rather than spend on a Supabase branch, installed Postgres 16 locally
+(sandbox-only, no cost), stubbed the minimal Supabase surface the
+baseline actually depends on (`auth.users`, `auth.uid()`, the `anon`/
+`authenticated`/`service_role` roles — confirmed by grep these are
+the *only* Supabase-specific dependencies in the file), and ran the
+real files against it with `psql -v ON_ERROR_STOP=1`. This caught two
+real bugs a static FK/text trace could not, since Postgres validates
+function calls in `CREATE POLICY` clauses and duplicate PK constraints
+at execution time, not via static reference-matching:
+
+1. **Function-ordering bug in `baseline_schema.sql`**: `is_league_admin`,
+   `is_member_of_league`, and `is_platform_admin` were defined in
+   section 5, *after* the section-4 policies that call them inside
+   their `USING`/`WITH CHECK` clauses. Postgres resolves those calls at
+   `CREATE POLICY` time, not lazily — this failed immediately on a real
+   run (`function is_platform_admin(uuid) does not exist`). Fixed by
+   moving those three function definitions into a new section 3b,
+   before section 4. Section 5 keeps the remaining functions
+   (`increment_balance`, `check_comment_parent_same_league`,
+   `rls_auto_enable`), none of which are called from policies in this
+   file.
+2. Confirmed (not a bug): `20260811_ladder_cup_second_life_offers_baseline.sql`
+   only succeeds when run after the real `20260811_ladder_cup.sql`,
+   exactly as its own header comment says — tested standalone first
+   (expected failure: `ladder_cup_entries` doesn't exist yet), then in
+   the correct sequence (clean).
+
+**Full clean run, in true Supabase apply order** (baseline →
+`20260811_ladder_cup.sql` → `20260811_ladder_cup_second_life_offers_baseline.sql`):
+0 errors. 32 baseline tables + 3 from `ladder_cup.sql` = 35 tables, all
+FKs/indexes/RLS policies/functions/triggers created successfully.
+
+**Known, deliberate gap in this local test:** the `pg_net` extension
+is Supabase-hosted-only and isn't installable on vanilla Postgres, so
+it was commented out *only in the disposable test copy* — the real
+repo file still has `create extension if not exists pg_net ...`
+untouched. This is an environment limitation of local testing, not a
+migration bug; it would need either a Supabase branch or the actual
+linked project to verify.
+
+**Not yet done:** running the *full* 167-migration history (not just
+these two new files) end-to-end — that would still need a Supabase
+branch or `supabase db reset` against the real CLI/project, since a
+generic local Postgres can't stand in for Supabase-specific pieces
+used later in the history (`pg_net`, `cron`, `storage`, `vault`, etc.).
+Also worth noting from the earlier static pass: several migration
+filenames past `20260900` mix 8-digit dates with 14-digit timestamps
+(e.g. `20260901_x.sql` vs `20260901052706_y.sql`); lexicographic
+sort — which is what Supabase actually uses to order migrations —
+runs the 14-digit ones first on the same day. Doesn't affect this
+baseline's own ordering, but worth being aware of for that later
+range.
 
 ## Step 4 — Write the baseline migration (original plan, kept for reference)
 

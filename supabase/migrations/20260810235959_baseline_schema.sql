@@ -612,6 +612,54 @@ create index if not exists idx_teams_league_id on public.teams using btree (leag
 create unique index if not exists teams_league_id_lower_name_key on public.teams using btree (league_id, lower(name));
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- 3b. RLS-helper functions, moved ahead of section 4 because several
+-- policies below call them directly in their USING/WITH CHECK clauses —
+-- Postgres resolves those calls at CREATE POLICY time, not lazily, so the
+-- functions must exist first. (Originally placed in section 5; moved here
+-- after a local dry run against a real Postgres caught the ordering bug.)
+-- ─────────────────────────────────────────────────────────────────────────
+create or replace function public.is_league_admin(check_league_id uuid)
+returns boolean
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select exists (
+    select 1
+    from public.leagues l
+    where l.id = check_league_id
+      and (
+        l.created_by = auth.uid()
+        or exists (select 1 from public.admins a where a.user_id = auth.uid())
+      )
+  );
+$function$;
+
+create or replace function public.is_member_of_league(p_league_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select exists (
+    select 1 from members
+    where members.league_id = p_league_id
+    and members.user_id = p_user_id
+  );
+$function$;
+
+create or replace function public.is_platform_admin(check_user_id uuid)
+returns boolean
+language sql
+stable security definer
+set search_path to 'public'
+as $function$
+  select exists (
+    select 1 from admins where user_id = check_user_id
+  );
+$function$;
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- 4. Row level security — enable on every table, then policies.
 -- ─────────────────────────────────────────────────────────────────────────
 alter table public.admins enable row level security;
@@ -843,50 +891,10 @@ create policy "Teams visible if league is visible" on public.teams for select to
 create policy "Users can view their own transactions" on public.transactions for select to public using ((auth.uid() = user_id));
 
 -- ─────────────────────────────────────────────────────────────────────────
--- 5. Core RLS-helper / utility functions with no local `create function`
--- anywhere, despite being load-bearing for RLS across most tables above.
+-- 5. Remaining RLS-helper / utility functions with no local `create function`
+-- anywhere. (is_league_admin, is_member_of_league, is_platform_admin moved
+-- to section 3b above — they're called inside CREATE POLICY clauses.)
 -- ─────────────────────────────────────────────────────────────────────────
-create or replace function public.is_league_admin(check_league_id uuid)
-returns boolean
-language sql
-security definer
-set search_path to 'public'
-as $function$
-  select exists (
-    select 1
-    from public.leagues l
-    where l.id = check_league_id
-      and (
-        l.created_by = auth.uid()
-        or exists (select 1 from public.admins a where a.user_id = auth.uid())
-      )
-  );
-$function$;
-
-create or replace function public.is_member_of_league(p_league_id uuid, p_user_id uuid)
-returns boolean
-language sql
-security definer
-set search_path to 'public'
-as $function$
-  select exists (
-    select 1 from members
-    where members.league_id = p_league_id
-    and members.user_id = p_user_id
-  );
-$function$;
-
-create or replace function public.is_platform_admin(check_user_id uuid)
-returns boolean
-language sql
-stable security definer
-set search_path to 'public'
-as $function$
-  select exists (
-    select 1 from admins where user_id = check_user_id
-  );
-$function$;
-
 create or replace function public.increment_balance(p_user_id uuid, p_amount numeric)
 returns void
 language sql
