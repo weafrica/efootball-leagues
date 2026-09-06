@@ -8440,9 +8440,19 @@ export default function App() {
   // The notification bell's feed — every entry here is something that needs the
   // signed-in person's attention specifically, not a general activity log. Built as
   // a plain array (like quickActionItems below) so it's naturally personalized: a
-  // non-admin only ever sees their own pending confirmations and open challenges,
-  // while isAdmin adds the escalated-results and payment-review entries on top.
+  // non-admin only ever sees their own pending confirmations (regular challenges
+  // and, as of the ladder-pending-confirm entry below, League Ladder fixtures too)
+  // and open challenges, while isAdmin adds the escalated-results and
+  // payment-review entries on top.
   const notificationItems = [
+    ...(myLadderActionCount > 0 ? [{
+      id: "ladder-pending-confirm", icon: Clock,
+      text: `${myLadderActionCount} ladder result${myLadderActionCount > 1 ? "s" : ""} waiting on your confirmation`,
+      onClick: () => {
+        if (myLeagueLadderMembership) openLeagueLadder(myLeagueLadderMembership.leagueId);
+        else if (ladderBottomLeagueId) openLeagueLadder(ladderBottomLeagueId);
+      },
+    }] : []),
     ...(incomingPendingCount > 0 ? [{
       id: "pending-confirm", icon: Clock,
       text: `${incomingPendingCount} result${incomingPendingCount > 1 ? "s" : ""} waiting on your confirmation`,
@@ -8519,7 +8529,7 @@ export default function App() {
           onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
           onOpenActivity={() => { setView("activity"); loadActivityLog(); }}
           onOpenChallenges={openChallengesScreen}
-          challengeBadge={incomingPendingCount + adminEscalatedResultCount}
+          challengeBadge={incomingPendingCount + adminEscalatedResultCount + myLadderActionCount}
           notifications={notificationItems}
           showInstall={!isStandalone}
           onInstallApp={handleInstallClick}
