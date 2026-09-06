@@ -12,7 +12,7 @@ import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHigh
 import NetsBadge from "./NetsBadge.jsx";
 import { creditNets, debitNets, formatNets } from "./nets.js";
 import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS } from "./economy.js";
-import { computeStandings as computeLeagueLadderStandings, classifyLadderZones } from "./formats/leagueLadder.js";
+import { computeStandings as computeLeagueLadderStandings, classifyLadderZones, nextLadderCloseAt, ladderZoneForRank } from "./formats/leagueLadder.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
 // Next-match push notifications (League Ladder, regular leagues, random
@@ -12944,6 +12944,109 @@ export function ChallengeChatModal({ challengeId, kind, myId, counterpartUsernam
 // Home — which used to redo that same work on every unrelated re-render
 // too (a challenges/ladder realtime update, an achievement sync, anything),
 // not just the tick.
+// LadderCloseClock — homepage-wide "raid timer" for the League Ladder's
+// Sunday 23:59 UTC close (nextLadderCloseAt / 'ladder-close-week-sunday').
+// Sits full-width above the tier strip, ticking down to the second, so the
+// week's cutoff is something the whole homepage builds toward rather than
+// a fact you only see once you open a league. Gets visually louder as it
+// gets closer: the ladder's normal gold look under 24h left, amber under
+// 2h, a pulsing red in the final 10 minutes — the same "tension rises as
+// the timer runs out" beat a raid/event timer uses elsewhere.
+function LadderCloseClock({ theme }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const target = nextLadderCloseAt(now);
+  const msLeft = Math.max(0, target.getTime() - now.getTime());
+  const totalSeconds = Math.floor(msLeft / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const hoursLeft = msLeft / (3600 * 1000);
+  const urgency = hoursLeft <= (10 / 60) ? "critical" : hoursLeft <= 2 ? "warning" : "normal";
+  const palette = {
+    normal: { bg: theme.bg, border: theme.border, text: theme.accent, sub: theme.textDim },
+    warning: { bg: "#3D2A0E", border: "#F5A623", text: "#F5A623", sub: "#E0B15C" },
+    critical: { bg: "#3D0E12", border: "#FF4D4D", text: "#FF4D4D", sub: "#FF9494" },
+  }[urgency];
+
+  // Below 1h, show minutes:seconds ticking so the last stretch actually
+  // feels like a countdown rather than a static "0h left" — that's most of
+  // the point of an event clock.
+  const display = days > 0
+    ? `${days}d ${hours}h ${minutes}m`
+    : hours > 0
+      ? `${hours}h ${minutes}m`
+      : `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+
+  return (
+    <div className={`flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 mb-3 ${urgency === "critical" ? "animate-pulse" : ""}`}
+      style={{ background: palette.bg, border: `1px solid ${palette.border}` }}>
+      <div className="flex items-center gap-2 min-w-0">
+        <Clock size={14} style={{ color: palette.text }} className="shrink-0" />
+        <span className="font-mono text-[10px] uppercase tracking-widest truncate" style={{ color: palette.sub }}>
+          {urgency === "critical" ? "Week closes any second" : "Week closes in"}
+        </span>
+      </div>
+      <span className="font-mono text-sm font-bold tabular-nums shrink-0" style={{ color: palette.text }}>{display}</span>
+    </div>
+  );
+}
+
+// PromotionRelegationBar — "you're #N" made visual: a row of pips, one per
+// spot in the viewer's own league table, coloured by which side of the
+// promotion/relegation line each spot sits on (ladderZoneForRank — same
+// rank-1-promotes/bottom-2-relegate rule Sunday's close job resolves with,
+// just read live). The viewer's own pip is ringed and slightly larger.
+// Shown on the "mine" card in the tier strip so climbing or slipping is
+// something you see the moment you open the app, not just something that
+// happens to you once a week.
+function PromotionRelegationBar({ standings, userId, tier, theme }) {
+  const rows = standings || [];
+  const total = rows.length;
+  if (total === 0) return null;
+  const myIdx = rows.findIndex((r) => r.user_id === userId);
+  if (myIdx === -1) return null;
+  const myRank = myIdx + 1;
+  const myZone = ladderZoneForRank(myRank, total, tier);
+
+  const zoneColor = { promotion: "#2ECC71", safe: theme.textFaint, relegation: "#FF5C5C" }[myZone];
+  const caption = myZone === "promotion"
+    ? `Promotion spot — #${myRank} of ${total}`
+    : myZone === "relegation"
+      ? `Relegation zone — #${myRank} of ${total}`
+      : `#${myRank} of ${total} — safe for now`;
+
+  return (
+    <div className="mb-2">
+      <div className="flex items-center gap-1 mb-1">
+        {rows.map((r, i) => {
+          const rank = i + 1;
+          const zone = ladderZoneForRank(rank, total, tier);
+          const pipColor = zone === "promotion" ? "#2ECC71" : zone === "relegation" ? "#FF5C5C" : theme.borderStrong;
+          const isMe = i === myIdx;
+          return (
+            <span key={r.user_id}
+              title={zone === "promotion" ? "Promotion spot" : zone === "relegation" ? "Relegation zone" : undefined}
+              className="rounded-full shrink-0"
+              style={{
+                width: isMe ? 10 : 7, height: isMe ? 10 : 7,
+                background: pipColor,
+                boxShadow: isMe ? `0 0 0 2px ${theme.surface}, 0 0 0 3px ${pipColor}` : "none",
+              }} />
+          );
+        })}
+      </div>
+      <div className="font-mono text-[9px] uppercase tracking-wide" style={{ color: zoneColor }}>{caption}</div>
+    </div>
+  );
+}
+
 // LadderLeagueSection — League Ladder's own row on Home, alongside "Leagues"
 // and "Cash leagues". Self-fetches rather than taking `leagues` as a prop:
 // ladder_leagues/ladder_cycle/ladder_memberships are a completely separate
@@ -12978,6 +13081,14 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   // pure classifier per league here so the tier strip can flag it on
   // every card at a glance, without opening each league to check.
   const [eliteLeagueIds, setEliteLeagueIds] = useState(() => new Set());
+  // standingsByLeagueId — league_id -> that league's full computeStandings
+  // array for the current week (already sorted best-to-worst), so the
+  // viewer's own card can show exactly where they sit relative to the
+  // promotion/relegation line (see PromotionRelegationBar below) without a
+  // second query — the leader/elite computation above already builds this
+  // same table per league, this just keeps the whole thing instead of only
+  // the top row.
+  const [standingsByLeagueId, setStandingsByLeagueId] = useState({});
   // Find User — admin-only (see the bottom-league card swap below).
   // Scrolling the whole tier strip to find one specific league (or worse,
   // whichever league a specific player currently sits in) doesn't scale
@@ -13034,8 +13145,10 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
       });
       const leaderUserIdByLeague = {};
       const eliteIds = new Set();
+      const standingsMap = {};
       Object.entries(fixturesByLeague).forEach(([leagueId, fx]) => {
         const leagueStandings = computeLeagueLadderStandings(fx);
+        standingsMap[leagueId] = leagueStandings;
         const top = leagueStandings[0];
         if (top && top.p > 0) {
           leaderUserIdByLeague[leagueId] = top.user_id;
@@ -13048,6 +13161,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
         }
       });
       setEliteLeagueIds(eliteIds);
+      setStandingsByLeagueId(standingsMap);
       const leaderUserIds = [...new Set(Object.values(leaderUserIdByLeague))];
       if (leaderUserIds.length > 0) {
         const { data: profileRows } = await supabase.from("profiles")
@@ -13065,6 +13179,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
     } else {
       setLeaderByLeagueId({});
       setEliteLeagueIds(new Set());
+      setStandingsByLeagueId({});
     }
   }, [session?.user?.id]);
 
@@ -13200,6 +13315,7 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
           <div className="font-extrabold uppercase tracking-tight text-lg leading-none">League Ladder</div>
         </div>
       </div>
+      {currentWeek > 0 && <LadderCloseClock theme={c} />}
       <div ref={scrollRef} className="flex gap-3 overflow-x-auto pb-1">
         {/* Admins used to have the bottom league's card replaced outright
             by "Find User" here — but that meant the bottom (highest-tier)
@@ -13267,9 +13383,14 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                   player's actual week in THIS league), not the global
                   cycle.current_week. */}
               {mine ? (
-                <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
-                  Week {membership.week_number}
-                </div>
+                <>
+                  <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
+                    Week {membership.week_number}
+                  </div>
+                  {/* Promotion/relegation zone pips — only meaningful once
+                      the viewer is actually seated in this league. */}
+                  <PromotionRelegationBar standings={standingsByLeagueId[lg.id]} userId={session?.user?.id} tier={lg.tier} theme={theme} />
+                </>
               ) : currentWeek === 0 ? (
                 <div className="font-extrabold text-sm mb-2" style={{ color: theme.text }}>
                   Join anytime — no fixed start date

@@ -26,6 +26,8 @@ import {
   ladderRoundReleaseOffsetsHours,
   isFixtureForfeited,
   classifyLadderZones,
+  nextLadderCloseAt,
+  ladderZoneForRank,
 } from "../src/formats/leagueLadder.js";
 
 const PLAYERS = ["p1", "p2", "p3", "p4", "p5", "p6"];
@@ -454,6 +456,45 @@ check("an already-forfeited fixture doesn't re-forfeit", () => {
 check("a fixture with no countdown yet (null) never forfeits", () => {
   const fixture = { status: "pending", countdown_expires_at: null };
   assert.equal(isFixtureForfeited(fixture, "2026-01-02T00:00:00Z"), false);
+});
+
+console.log("nextLadderCloseAt");
+
+check("mid-week rolls forward to the coming Sunday 23:59 UTC", () => {
+  assert.equal(nextLadderCloseAt(new Date("2026-09-09T10:00:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
+});
+
+check("Sunday just before the cutoff still targets today", () => {
+  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:58:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
+});
+
+check("Sunday right at/after the cutoff rolls to next week", () => {
+  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:59:30Z")).toISOString(), "2026-09-20T23:59:00.000Z");
+});
+
+console.log("ladderZoneForRank");
+
+check("tier 1 never has a promotion zone — rank 1 is just safe", () => {
+  assert.equal(ladderZoneForRank(1, 6, 1), "safe");
+});
+
+check("any tier below 1: rank 1 is the promotion spot", () => {
+  assert.equal(ladderZoneForRank(1, 6, 4), "promotion");
+});
+
+check("bottom 2 of a full 6-player league are the relegation zone", () => {
+  assert.equal(ladderZoneForRank(5, 6, 4), "relegation");
+  assert.equal(ladderZoneForRank(6, 6, 4), "relegation");
+});
+
+check("mid-table ranks are safe", () => {
+  assert.equal(ladderZoneForRank(2, 6, 4), "safe");
+  assert.equal(ladderZoneForRank(4, 6, 4), "safe");
+});
+
+check("degenerate 2-player tier-1 league relegates both (same edge case resolveLadderWeek already surfaces)", () => {
+  assert.equal(ladderZoneForRank(1, 2, 1), "relegation");
+  assert.equal(ladderZoneForRank(2, 2, 1), "relegation");
 });
 
 console.log(`\n${passed} passed, 0 failed`);

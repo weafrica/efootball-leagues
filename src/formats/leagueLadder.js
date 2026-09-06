@@ -458,4 +458,46 @@ export function classifyLadderZones(standings) {
   return zones;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// nextLadderCloseAt — the next Sunday 23:59 UTC cutoff from `now`, i.e. the
+// exact instant 'ladder-close-week-sunday' (schedule '59 23 * * 0', see
+// migrations 20260856/20260917) next fires. Pure date arithmetic, no
+// Supabase read needed — the cron schedule IS the spec. Used by the
+// homepage's week-close countdown clock so it counts down to the real
+// cutoff without a round trip.
+//
+// If `now` is already past this Sunday's 23:59 UTC (including the exact
+// second — close_week has already run or is running right now), rolls
+// forward to next week's instead, same as the cron just firing again in
+// 7 days.
+// ─────────────────────────────────────────────────────────────────────────
+export function nextLadderCloseAt(now = new Date()) {
+  const n = new Date(now);
+  const daysUntilSunday = (7 - n.getUTCDay()) % 7; // getUTCDay(): 0 = Sunday
+  let close = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysUntilSunday, 23, 59, 0, 0));
+  if (close.getTime() <= n.getTime()) {
+    close = new Date(close.getTime() + 7 * 24 * 60 * 60 * 1000);
+  }
+  return close;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ladderZoneForRank — which side of the promotion/relegation line a given
+// rank sits on, for a league of `total` players at tier `tier`. Same rule
+// resolveLadderWeek already resolves with server-side at Sunday close
+// (rank 1 promotes, unless tier 1; bottom 2 relegate) — this is the
+// live-standings read of that same line, for showing a player where they
+// stand *before* Sunday, not for deciding anything.
+//
+// rank is 1-indexed (rank 1 = top of the table, matching computeStandings'
+// sort order). Returns one of 'promotion' | 'safe' | 'relegation'.
+// ─────────────────────────────────────────────────────────────────────────
+export function ladderZoneForRank(rank, total, tier) {
+  const promoteCount = tier > 1 ? Math.min(1, total) : 0;
+  const relegateCount = Math.min(2, Math.max(0, total - promoteCount));
+  if (rank <= promoteCount) return "promotion";
+  if (rank > total - relegateCount) return "relegation";
+  return "safe";
+}
+
 export { LADDER_ROSTER_SIZE, LADDER_SAFETY_ZONE_GAP };
