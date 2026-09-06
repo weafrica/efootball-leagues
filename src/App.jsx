@@ -29,6 +29,12 @@ import { formatCountdown } from "./utils/formatCountdown.js";
 // lobby. Every signed-in player now needs a subscription, so this is
 // called from the sessionKey effect below instead of only from there.
 import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
+// Contextual "turn on notifications" card — asks at good moments (a new
+// week starting, just joining a league/cup) with an actual explanation,
+// instead of the bare native browser prompt. See notificationOptIn.js's
+// header comment for the full reasoning.
+import NotificationOptInPrompt from "./NotificationOptInPrompt.jsx";
+import { checkAndMarkNewWeek, shouldOfferNotificationOptIn, recordNotificationOptInShown } from "./utils/notificationOptIn.js";
 // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
 // thousand lines, and neither it nor the Terms page is needed for the
 // initial render — bundling them in eagerly meant every single visitor
@@ -3579,6 +3585,25 @@ export default function App() {
   // the onboarding effect (e.g. a refresh mid-ProfileGate).
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
+  // Contextual notification opt-in card (see notificationOptIn.js) — holds
+  // the `reason` key it should currently show, or null for "not showing".
+  // triggerNotificationOptIn is the single gate every trigger site below
+  // calls through, so the cooldown/already-decided checks only live in one
+  // place.
+  const [notifOptInReason, setNotifOptInReason] = useState(null);
+  const triggerNotificationOptIn = useCallback((reason) => {
+    if (!session?.user?.id) return;
+    if (!shouldOfferNotificationOptIn(session.user.id)) return;
+    recordNotificationOptInShown(session.user.id, reason);
+    setNotifOptInReason(reason);
+  }, [session?.user?.id]);
+  const dismissNotificationOptIn = useCallback(() => setNotifOptInReason(null), []);
+  const enableNotificationsFromOptIn = useCallback(async () => {
+    // promptIfDefault defaults to true here — this IS the moment someone
+    // just tapped our own explanatory "Turn on" button, so the native
+    // browser prompt firing right now has context behind it.
+    await subscribeToRapidCupPush();
+  }, []);
   // Ticks once a minute purely so time-derived values that don't have a DB
   // row to change underneath them — like a challenge result's 30-minute
   // confirm window lapsing — get re-evaluated even if nothing else caused
@@ -5126,8 +5151,25 @@ export default function App() {
     // Fire-and-forget, same as every other call to this helper — a
     // declined permission prompt or unsupported browser must never block
     // sign-in. See the import comment above for why this now runs for
-    // every session, not only from RapidCupBanner.
-    subscribeToRapidCupPush();
+    // every session, not only from RapidCupBanner. promptIfDefault: false
+    // — a routine sign-in is not an explained, contextual moment, so this
+    // only ever (re)confirms a subscription for someone who already said
+    // yes; it never cold-fires the native permission dialog. The actual
+    // ask now happens through the notification opt-in card below.
+    subscribeToRapidCupPush({ promptIfDefault: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
+  }, [sessionKey]);
+
+  // "New week" trigger — the first app load each ISO week (Mon-based) for
+  // this signed-in person, fixtures/ladder moves/lobbies have just reset,
+  // so it's a genuinely good moment to ask. checkAndMarkNewWeek returns
+  // false on someone's very first-ever visit (nothing to compare against
+  // yet) and false again on every later load within the same week.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    if (checkAndMarkNewWeek(session.user.id)) {
+      triggerNotificationOptIn("new_week");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
   }, [sessionKey]);
 
@@ -6859,6 +6901,9 @@ export default function App() {
     logActivity("league_joined", { league_id: leagueId, league_name: league.name, as_team: !!match });
     await refreshLeague(leagueId);
     showToast(match ? `Joined — you're playing as ${match.name}.` : "Joined as a spectator — your username isn't on this league's team list.");
+    // Just joined — a good, obvious moment to explain why turning on
+    // notifications helps (new members joining, fixtures posting, etc).
+    triggerNotificationOptIn(league.format === "ladder_cup" ? "joined_cup" : "joined_league");
     } finally {
       joinInFlight.current.delete(leagueId);
     }
@@ -8585,7 +8630,8 @@ export default function App() {
                 myLadderActionCount={myLadderActionCount}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} onOpenCompletedLeagues={openCompletedLeaguesScreen} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
-                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
+                weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems}
+                onSuggestNotifications={() => triggerNotificationOptIn("joined_cup")} c={c} />
             )}
             {view === "create" && (
               <Suspense fallback={<Loader c={c} />}>
@@ -8747,6 +8793,7 @@ export default function App() {
       )}
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
       {activeReferee && <RefereeNotification data={activeReferee} c={c} onClose={dismissReferee} />}
+      <NotificationOptInPrompt reason={notifOptInReason} onEnable={enableNotificationsFromOptIn} onDismiss={dismissNotificationOptIn} c={c} />
       <SupportWhatsAppButton context={view === "shop" ? SHOP_NAME : "the Matchday app"} />
       <TermsFooterLink onOpen={() => setView("terms")} c={c} />
     </div>
@@ -10893,7 +10940,7 @@ function LadderMaintenanceModal({ onClose, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, onSuggestNotifications, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -11230,6 +11277,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
           onOpenLeague={onOpen}
           showToast={showToast}
+          onSuggestNotifications={onSuggestNotifications}
           c={c}
         />
         {/* Ladder banner — pinned above the League Ladder section itself

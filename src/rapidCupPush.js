@@ -34,11 +34,37 @@ async function saveSubscription(subscriptionJson) {
   );
 }
 
-// Called once, from the natural moment the plan calls out: right after a
-// successful join_rapid_cup_lobby (see RapidCupBanner.jsx's join()). Fire-
-// and-forget from the caller's side — a declined prompt or an unsupported
+// Shared tail end of the flow, once we already know permission is
+// "granted" — creates (or reuses) the push subscription and saves it.
+async function ensureSubscriptionSaved() {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  }
+  await saveSubscription(sub.toJSON());
+}
+
+// Called from the natural moments the plan calls out (right after a
+// successful join_rapid_cup_lobby, and once per signed-in session — see
+// RapidCupBanner.jsx's join() and App.jsx's sessionKey effect). Fire-and-
+// forget from the caller's side — a declined prompt or an unsupported
 // browser must never block or fail the actual join.
-export async function subscribeToRapidCupPush() {
+//
+// `promptIfDefault` controls whether this is allowed to cold-call the
+// native Notification.requestPermission() dialog when permission hasn't
+// been decided yet ("default"). Pass false for any call that isn't itself
+// the direct result of someone tapping an explanatory "Turn on
+// notifications" button of ours (see NotificationOptInPrompt.jsx +
+// notificationOptIn.js) — an unexplained native prompt is the single
+// biggest driver of people reflexively hitting "Block", which then can
+// never be undone by a page prompt again. When permission is already
+// "granted" this silently (re)confirms the subscription either way, which
+// is exactly what a routine per-session call wants.
+export async function subscribeToRapidCupPush({ promptIfDefault = true } = {}) {
   if (!VAPID_PUBLIC_KEY) return; // Step 1/2 deployed but VITE_VAPID_PUBLIC_KEY not set yet in this environment
   if (
     typeof Notification === "undefined" ||
@@ -47,20 +73,11 @@ export async function subscribeToRapidCupPush() {
   ) return;
 
   try {
-    if (Notification.permission === "default") {
+    if (Notification.permission === "default" && promptIfDefault) {
       await Notification.requestPermission();
     }
     if (Notification.permission !== "granted") return;
-
-    const reg = await navigator.serviceWorker.ready;
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-    }
-    await saveSubscription(sub.toJSON());
+    await ensureSubscriptionSaved();
   } catch {
     // Same "purely additive" reasoning as the rest of the alarm feature.
   }

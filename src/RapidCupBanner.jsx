@@ -186,7 +186,7 @@ function RapidCupHelpModal({ open, onClose, c }) {
   );
 }
 
-export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c }) {
+export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
   const { lobby, playerCount, myEntry, reload } = useOpenRapidCupLobby();
   const [now, setNow] = useState(() => Date.now());
   const [joining, setJoining] = useState(false);
@@ -305,11 +305,15 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, c
     setJoining(false);
     if (error) { showToast?.(error.message || "Couldn't join Rapid Cup."); return; }
     setShowJoinModal(false);
-    // Natural moment to ask for push permission (Section 4): the player has
-    // just committed to a lobby, so the ask has an obvious reason attached
-    // to it. Fire-and-forget — a decline or an unsupported browser must
-    // never block the join that already succeeded.
-    subscribeToRapidCupPush();
+    // Natural moment to ask about notifications: the player has just
+    // committed to a lobby, so the ask has an obvious reason attached to
+    // it. This now goes through App.jsx's explanatory opt-in card
+    // (onSuggestNotifications) rather than cold-calling the native browser
+    // prompt directly — see notificationOptIn.js for why. Someone who's
+    // already granted permission is unaffected either way: the card only
+    // ever shows when permission is still undecided.
+    onSuggestNotifications?.();
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") subscribeToRapidCupPush();
     await reload();
   };
 
