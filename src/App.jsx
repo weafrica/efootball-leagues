@@ -13217,7 +13217,11 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
           // to open any of them — to review fixtures, approve/reject
           // escalated results, etc. (see LeagueLadderDetail's own isAdmin
           // branches) — not just whichever tier they personally play in.
-          const canOpen = mine || isAdmin;
+          // lg.tier === 1 added so League 1 (top tier) is viewable by
+          // everyone, not just its own members/admins — LeagueLadderDetail
+          // already renders fine for a non-member viewer (see isMember
+          // checks there), this just lets a non-member actually click in.
+          const canOpen = mine || isAdmin || lg.tier === 1;
           const isBottom = lg.id === bottomLeague.id;
           const leader = leaderByLeagueId[lg.id];
           // Per-tier theme (see ladderTierThemes.js) — same function
