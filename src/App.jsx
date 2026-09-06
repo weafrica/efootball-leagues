@@ -13312,6 +13312,17 @@ function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
                   style={{ background: theme.surfaceHover, color: theme.text, border: `1px solid ${theme.border}` }}>
                   View
                 </button>
+              ) : lg.tier === 1 ? (
+                // League 1 (top tier) is viewable by everyone (see canOpen
+                // above) even if it's not your own league — an explicit
+                // View button here, instead of falling through to the
+                // generic "Promotion only" text below, is what actually
+                // tells a non-member the card is clickable at all.
+                <button onClick={(e) => { e.stopPropagation(); onOpenLadderLeague(lg.id); }}
+                  className="w-full font-mono text-[10px] uppercase px-3 py-2 rounded"
+                  style={{ background: theme.surfaceHover, color: theme.text, border: `1px solid ${theme.border}` }}>
+                  View
+                </button>
               ) : (
                 <div className="font-mono text-[10px] uppercase text-center py-2" style={{ color: theme.textFaint }}>Promotion only</div>
               )}

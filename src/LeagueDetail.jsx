@@ -2079,9 +2079,14 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
                 getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
                 onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} canSeePhones={canSeePhones} myTeamId={myTeam?.id} c={c} />
             ) : (
+              // myTeam + inKnockoutBracket let OpponentFinder auto-resolve
+              // straight to "your next match" instead of making a knockout
+              // player manually search for the one opponent they already
+              // saw in NextOpponentCard above — see the effect inside
+              // OpponentFinder guarded by autoTeam/autoResolve.
               <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
-                getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-                canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} league={league} leagues={leagues} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
+                getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult} myTeam={myTeam} inKnockoutBracket={inKnockoutBracket} league={league}
+                canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} leagues={leagues} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
             )
           )}
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
@@ -3409,7 +3414,7 @@ function FindYourself({ league, stageFixtures, inGroupStage, inKnockoutBracket, 
   );
 }
 
-function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, leagues, playerLocations, myTimezone, c }) {
+function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSubmission, onOpenSubmitResult, canSeePhones, onRecordResult, league, leagues, playerLocations, myTimezone, myTeam, inKnockoutBracket, c }) {
   const [matchday, setMatchday] = useState("");
   const [teamQuery, setTeamQuery] = useState("");
   const [result, setResult] = useState(null);
@@ -3419,6 +3424,34 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
   const [photos, setPhotos] = useState({}); // fixture id -> File, admin's optional photo proof
   const photoInputRef = useRef(null);
   const [photoTargetId, setPhotoTargetId] = useState(null);
+
+  // In a knockout bracket there's exactly one possible opponent per round —
+  // the same one NextOpponentCard already shows above this — so making a
+  // player manually type their own club name and matchday number just to
+  // reach the submit-result form is a pointless extra step. When we know
+  // the viewer's own team, resolve straight to it instead of waiting for
+  // the manual search below. Admins reviewing without a specific myTeam in
+  // context (or anyone in a non-knockout, multi-opponent stage) still get
+  // the manual search, since there isn't a single obvious match to jump to.
+  useEffect(() => {
+    if (!inKnockoutBracket || !myTeam) return;
+    const primaryFixture = nextFixtureForTeam(league, myTeam.id);
+    if (!primaryFixture) { setResult(null); return; }
+    const legs = fixtures.filter((f) => f.round === primaryFixture.round && (f.home_team_id === myTeam.id || f.away_team_id === myTeam.id))
+      .sort((x, y) => x.leg - y.leg);
+    if (legs.length === 0) { setResult(null); return; }
+    const anyExpired = legs.some((f) => isFixtureLocked(f, league));
+    const opponentId = legs[0].home_team_id === myTeam.id ? legs[0].away_team_id : legs[0].home_team_id;
+    const opponent = opponentId ? teams.find((t) => t.id === opponentId) : null;
+    setMatchday(String(primaryFixture.round));
+    setTeamQuery(myTeam.name);
+    setScores(Object.fromEntries(legs.map((f) => [f.id, { h: f.home_score, a: f.away_score }])));
+    setPensScores(Object.fromEntries(legs.map((f) => [f.id, { ph: f.pens_home ?? "", pa: f.pens_away ?? "" }])));
+    setSaveState({});
+    setResult({ legs, team: myTeam, opponent, bye: opponentId === null, expired: anyExpired, twoLegged: legs.length > 1 });
+  }, [inKnockoutBracket, myTeam?.id, fixtures, league, teams]);
+
+  const autoResolved = inKnockoutBracket && !!myTeam;
 
   const search = () => {
     const md = Number(matchday);
@@ -3462,15 +3495,19 @@ function OpponentFinder({ teams, fixtures, totalRounds, canManage, joined, getSu
     <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
       <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0] || null; if (photoTargetId) setPhotos((p) => ({ ...p, [photoTargetId]: f })); }} />
-      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>Find your opponent</div>
-      <div className="flex flex-col sm:flex-row gap-2">
-        <input type="number" min={1} max={totalRounds} value={matchday} onChange={(e) => setMatchday(e.target.value)} placeholder="Matchday #"
-          className="w-full sm:w-32 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Your club name"
-          className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
-        <datalist id="team-names-datalist">{teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
-        <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
+      <div className="font-mono text-xs uppercase tracking-[0.2em] mb-3" style={{ color: c.textFaint }}>
+        {autoResolved ? "Your next match" : "Find your opponent"}
       </div>
+      {!autoResolved && (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input type="number" min={1} max={totalRounds} value={matchday} onChange={(e) => setMatchday(e.target.value)} placeholder="Matchday #"
+            className="w-full sm:w-32 border rounded-lg px-3 py-2 font-mono text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          <input list="team-names-datalist" value={teamQuery} onChange={(e) => setTeamQuery(e.target.value)} placeholder="Your club name"
+            className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surfaceHover, borderColor: c.border, color: c.text }} />
+          <datalist id="team-names-datalist">{teams.map((t) => <option key={t.id} value={t.name} />)}</datalist>
+          <button onClick={search} className="font-body text-sm font-semibold px-4 py-2 rounded-lg shrink-0" style={{ background: c.accent, color: c.accentText }}>Find</button>
+        </div>
+      )}
 
       {result && (result.notFound ? (
         <div className="font-body text-xs mt-3" style={{ color: c.textFaint }}>{result.reason}</div>
