@@ -77,10 +77,38 @@ function usePlayerFees(lobbyId) {
   return { players, reload: load };
 }
 
+// useMyFeeCap — 20% of the player's own Nets balance, floored at 400 (the
+// slider's absolute ceiling regardless of balance). Mirrors the same cap
+// join_rapid_cup_lobby/raise_rapid_cup_entry_fee enforce server-side, so
+// the slider stops where the server would actually reject anyway, rather
+// than letting a player drag to 400 and only find out it's too high once
+// they hit Join/Raise.
+function useMyFeeCap() {
+  const [cap, setCap] = useState(400);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from("balances").select("amount").eq("user_id", user.id).maybeSingle();
+      if (cancelled) return;
+      const balance = data?.amount || 0;
+      setCap(Math.max(0, Math.min(400, Math.floor(balance * 0.2))));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return cap;
+}
+
 // Fee-picker modal — shown before the initial join() call. Wire this in
 // wherever the banner's "Join" tap currently calls join() directly.
 export function RapidCupJoinModal({ open, onClose, onConfirm, joining, c }) {
   const [fee, setFee] = useState(0);
+  const feeCap = useMyFeeCap();
+  // If the cap loads in lower than whatever's already dragged (or the
+  // player had it set from a previous open), pull it back down rather than
+  // leaving the slider showing a value the server will reject on confirm.
+  useEffect(() => { setFee((f) => Math.min(f, feeCap)); }, [feeCap]);
   if (!open) return null;
   return (
     <div
@@ -92,9 +120,9 @@ export function RapidCupJoinModal({ open, onClose, onConfirm, joining, c }) {
     >
       <div style={{ background: c?.cardBg || "#1a1a1a", border: `1px solid ${c?.border || "#333"}`, borderRadius: 12, padding: 20, width: 320 }}>
         <div style={{ fontWeight: 700, marginBottom: 12 }}>Set your entry fee</div>
-        <EntryFeeSlider value={fee} onChange={setFee} disabled={joining} />
+        <EntryFeeSlider value={fee} onChange={setFee} max={feeCap} disabled={joining} />
         <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
-          You can raise this later before your next match — never mid-match, and never lower.
+          Capped at 20% of your Nets balance ({feeCap} Nets right now). You can raise this later before your next match — never mid-match, and never lower.
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <button onClick={onClose} disabled={joining} style={{ flex: 1, padding: "8px 0", borderRadius: 8 }}>Cancel</button>
@@ -115,6 +143,7 @@ export function RapidCupLiveFees({ lobbyId, myUserId, showToast, c }) {
   const { players, reload } = usePlayerFees(lobbyId);
   const [raising, setRaising] = useState(false);
   const [draftFee, setDraftFee] = useState(null);
+  const feeCap = useMyFeeCap();
 
   const fees = players.map((p) => p.entry_fee);
   const maxStake = computeMaxStake(fees);
@@ -164,7 +193,10 @@ export function RapidCupLiveFees({ lobbyId, myUserId, showToast, c }) {
           </button>
         ) : (
           <div style={{ marginTop: 12 }}>
-            <EntryFeeSlider value={draftFee} onChange={setDraftFee} min={mine.entry_fee} disabled={raising} />
+            <EntryFeeSlider value={draftFee} onChange={setDraftFee} min={mine.entry_fee} max={Math.max(feeCap, mine.entry_fee)} disabled={raising} />
+            {feeCap < 400 && (
+              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>Capped at 20% of your Nets balance ({feeCap} Nets).</div>
+            )}
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button onClick={() => setDraftFee(null)} disabled={raising} style={{ flex: 1, padding: "8px 0", borderRadius: 8 }}>Cancel</button>
               <button

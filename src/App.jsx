@@ -14022,6 +14022,42 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
 
 // Full listing of every group-stage fixture, organized by group then matchday.
 // Small enough (unlike full round-robin leagues) that a plain list beats search.
+// NextOpponentsList — survivor's current stage is a round robin (not one
+// fixed opponent like a knockout bracket), so a player can have several of
+// their own matches lined up in the current stage at once. Rather than
+// making them search matchday-by-matchday via OpponentFinder to find each
+// one, this shows their own next few upcoming (unplayed) fixtures directly,
+// reusing the same inline score-submission row GroupFixturesList uses, so
+// they can act on any of them right here without searching first.
+export function NextOpponentsList({ league, myTeam, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, count = 5, c }) {
+  if (!myTeam) return null;
+  const myFixtures = (league.fixtures || [])
+    .filter((f) => f.stage === league.current_stage
+      && (f.home_team_id === myTeam.id || f.away_team_id === myTeam.id)
+      && f.away_team_id !== null
+      && !f.played)
+    .sort((a, b) => a.round - b.round);
+  const next = myFixtures.slice(0, count);
+  if (next.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>
+        Your next {next.length > 1 ? `${next.length} opponents` : "opponent"}
+      </div>
+      <div className="rounded-xl border divide-y px-4" style={{ borderColor: c.border, background: c.surface }}>
+        {next.map((f) => {
+          const home = league.teams.find((t) => t.id === f.home_team_id);
+          const away = league.teams.find((t) => t.id === f.away_team_id);
+          return <FixtureScoreRow key={f.id} fixture={f} homeTeam={home} awayTeam={away} canManage={canManage} onSave={onRecordResult}
+            legLabel={`MD${f.round}`} joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult}
+            showContact league={league} myTeamId={myTeam.id} c={c} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function GroupFixturesList({ league, groupStageFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
   const groupsCount = league.groups_count || 0;
   const groupNumbers = Array.from({ length: groupsCount }, (_, i) => i);

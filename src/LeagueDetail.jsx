@@ -34,7 +34,7 @@ function formatCountdown(deadline, now) {
   return `${minutes}m left`;
 }
 import {
-  FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS,
+  FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS, NextOpponentsList,
   KnockoutFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
   LeagueScheduleLine, LeagueStatusBanner, MemberAvatar, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
   PendingResultsPanel, PlayerProfileModal, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
@@ -2067,6 +2067,11 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           )}
           {(inGroupStage || inKnockoutBracket) && joined && myTeam && (!canManage || isWeekendLeague(league)) && (
             <NextOpponentCard league={league} leagues={leagues} myTeam={myTeam} canSeePhones={canSeePhones} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
+          )}
+          {isSurvivor && joined && myTeam && (
+            <NextOpponentsList league={league} myTeam={myTeam} canManage={canManage} joined={joined}
+              getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+              onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
           )}
           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
