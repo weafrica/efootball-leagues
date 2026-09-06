@@ -25,6 +25,7 @@
 // callers' `{countdownText && ...}` guard, just built in).
 
 import React, { useEffect, useState } from "react";
+import { formatCountdown } from "./utils/formatCountdown.js";
 
 function tierFor(msLeft) {
   if (msLeft <= 0) return "expired";
@@ -97,15 +98,12 @@ const TIER_STYLE = {
   },
 };
 
-function formatTimeLeft(msLeft) {
-  const totalMinutes = Math.max(0, Math.floor(msLeft / 60000));
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}d ${hours}h left`;
-  if (hours > 0) return `${hours}h left`;
-  return `${minutes}m left`;
-}
+// formatTimeLeft removed — this badge's tier system (tierFor above)
+// already branches to "expired"/"Overdue" the instant msLeft hits 0, so
+// the render below calls the shared formatCountdown directly (minMinutes:
+// 0, since that hand-off makes a literal "0m left" for the last second or
+// two harmless here — same as this file always showed before the shared
+// util existed).
 
 export default function CountdownBadge({ expiresAt, className = "" }) {
   const [now, setNow] = useState(() => Date.now());
@@ -131,7 +129,7 @@ export default function CountdownBadge({ expiresAt, className = "" }) {
   const msLeft = new Date(expiresAt).getTime() - now;
   const tier = tierFor(msLeft);
   const style = TIER_STYLE[tier];
-  const text = tier === "expired" ? "Overdue" : formatTimeLeft(msLeft);
+  const text = tier === "expired" ? "Overdue" : formatCountdown(expiresAt, { now, minMinutes: 0 });
   const mascot = mascotByTier[tier];
 
   return (

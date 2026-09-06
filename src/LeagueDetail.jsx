@@ -7,32 +7,13 @@ import {
 import { supabase } from "./supabaseClient";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { countryCodeToFlagEmoji, countryName, formatLocalTimeNow, suggestPlayTime } from "./utils/timezone";
+import { formatCountdown } from "./utils/formatCountdown.js";
 import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, winScaledFee, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import { entryFeeForLeagueFormat, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_BASE_VISIBLE_OPPONENTS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS, LADDER_CUP_MAX_VISIBLE_OPPONENTS } from "./economy.js";
 import { NetsAmount } from "./NetCoinIcon";
 import { RapidCupTournamentExtras } from "./RapidCupPrizeCollection.jsx";
 
-// Live "Xh Ym left" text for a deadline, ticking against a shared `now`
-// (passed down from a parent's own setInterval rather than each row
-// running its own timer — see LadderCupOpponentBoard's `now` state).
-// Below one hour switches to minutes only; deadline in the past reads
-// "Overdue" rather than going negative, since the caller (poolSightingDeadline
-// et al.) stops returning a value the instant the pairing is exempted, but
-// there's a brief window each tick where a just-expired deadline is still
-// the prop in hand.
-function formatCountdown(deadline, now) {
-  if (!deadline) return null;
-  const ms = new Date(deadline).getTime() - now;
-  if (ms <= 0) return "Overdue";
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}d ${hours}h left`;
-  if (hours > 0) return `${hours}h ${minutes}m left`;
-  return `${minutes}m left`;
-}
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS, NextOpponentsList,
   KnockoutFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
@@ -721,12 +702,15 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
               clock hasn't started yet). Disappears the instant the
               WhatsApp icon above is tapped for this opponent, same as the
               deadline prop itself going null once contacted_at is set.
-              Live-ticking against the board's shared `now` (formatCountdown)
-              rather than a static date; red once under 3h to flag it's
-              about to drop off. */}
+              Live-ticking against the board's shared `now` (formatCountdown,
+              from utils/formatCountdown.js — see that file's header for why
+              the options below reproduce this exact spot's old local
+              behavior: "Overdue" past the deadline, minutes shown even
+              alongside hours, no 1-minute floor) rather than a static
+              date; red once under 3h to flag it's about to drop off. */}
           {!match && poolSightingDeadlineAt && (
             <div className="font-mono text-[9px] mt-0.5" style={{ color: new Date(poolSightingDeadlineAt).getTime() - now <= 3 * 60 * 60 * 1000 ? c.red : c.textFaint }}>
-              {formatCountdown(poolSightingDeadlineAt, now)} to message them or they drop off your list
+              {formatCountdown(poolSightingDeadlineAt, { now, expiredLabel: "Overdue", showMinutesWithHours: true, minMinutes: 0 })} to message them or they drop off your list
             </div>
           )}
         </div>

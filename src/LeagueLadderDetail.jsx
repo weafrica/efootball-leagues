@@ -35,6 +35,7 @@ import { WhatsAppLink, WhatsAppCallLink, waLink, WHATSAPP_GREEN } from "./App.js
 import { CommentsSection } from "./LeagueDetail.jsx";
 import { Globe } from "lucide-react";
 import { countryCodeToFlagEmoji, countryName, formatLocalTimeNow, suggestPlayTime } from "./utils/timezone.js";
+import { formatCountdown } from "./utils/formatCountdown.js";
 // Same upload path Survivor Ladder Cup's submitLadderCupMatchResult uses
 // (App.jsx) — downscale client-side, then straight to the shared
 // "result-proofs" Blob bucket (src/utils/blobUpload.js's KNOWN_BUCKETS).
@@ -690,7 +691,10 @@ function forfeitedLabelForWeek(date = new Date()) {
 // briefly show "Expired" before it flips to 'forfeited' — that's expected,
 // not a bug). null in, null out — callers only render this for fixtures
 // that actually have a countdown (Phase 6 onward; older/legacy rows can
-// still be null).
+// still be null). Promoted to utils/formatCountdown.js (imported above) —
+// this file's calls below rely on that shared function's defaults
+// (Date.now(), "Expired", no minutes alongside hours, 1m floor) matching
+// exactly what used to be hardcoded here.
 // OPPONENT_CHASE_MESSAGES — 20 variations of the same "let's lock in a
 // time, the clock's running, don't make me claim the walkover" vibe, so
 // tapping the WhatsApp icon doesn't send the exact same text every time.
@@ -760,16 +764,6 @@ function buildOpponentChaseMessage(name, countdownText, theirLocation = null, my
   const timeLine = buildOpponentTimeLine(theirLocation, myTimezone);
   if (timeLine) lines.push(timeLine);
   return lines.join("\n");
-}
-
-function formatCountdown(expiresAt) {
-  if (!expiresAt) return null;
-  const msLeft = new Date(expiresAt).getTime() - Date.now();
-  if (msLeft <= 0) return "Expired";
-  const hours = Math.floor(msLeft / (3600 * 1000));
-  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h left`;
-  if (hours >= 1) return `${hours}h left`;
-  return `${Math.max(1, Math.floor(msLeft / (60 * 1000)))}m left`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
