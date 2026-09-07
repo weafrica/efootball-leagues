@@ -1,35 +1,88 @@
 # Continue-from-here notes
-_Rewritten after the session that closed out items 6, 7, 9, 12, and 13, and fixed a live bidding gap — see `league-ladder-fix-plan-status.md` for full detail on every item._
+_Rewritten 2026-09-07, after the session that reconciled tier 18's two
+paid-but-blank fixtures, fixed the leg-scoping bug, and wrote three
+previously-live-only changes back to the repo as migrations 20260931–20260933.
+Independently verified against live `pg_get_functiondef` this session — not
+just carried forward from the prior doc._
 
 ## Project facts
 - Repo: `efootball-leagues-repo` (weafrica.co.za)
 - Live Supabase project: `weafrica Leagues`, project ref `jobgzxljuczzqljwavyq`
-- No CI/CD — migrations are applied manually. **Always check live vs. repo before trusting a file, including this one.** `pg_get_functiondef` on the live project is the source of truth, not any doc.
-
-## Full status — see `league-ladder-fix-plan-status.md` for details
-| Item | Status |
-|---|---|
-| 1. Audit core system vs. live | ✅ Done |
-| 2. Auction-winner labeling bug | ✅ Done, live |
-| 3. League history cleanup | ✅ Done — all tiers audited clean |
-| 4. Re-close each league's real week 1 | ✅ Done — Tier 13/Ben fixed, decay step removed |
-| 5. Promotion/relegation skip-unaffordable fix | ✅ Confirmed live — real migration is `20260870`, not the `20260916` earlier notes cited |
-| 6. Roster cap recheck | ✅ Done — every tier confirmed live at exactly 6 (1–11), drained tail tiers correctly at 0 |
-| 7. "Asked to join again" complaint | ✅ Resolved — traced to item 11's root cause (Sunday cron guard), confirmed live, no stragglers |
-| 8. Wall of Fame display | ✅ Done |
-| 9. Minor bid edge case | ✅ Fixed live — free (0-fee) leagues can now take a 0-amount bid; migration `ladder_allow_zero_amount_bid_on_free_league` |
-| 10. Relegation teleport bug | ✅ Fixed |
-| 11. Sunday auto-close/open not firing | ✅ Fixed |
-| 12. Redesign build spec (Phases A–G) | ✅ Done — all 7 phases confirmed live; Phase D's one real gap (live bid re-eligibility on fixture results) closed this session |
-| 13. Full week-1 → week-2 placement audit | ✅ Done |
+- No CI/CD — migrations are applied manually. **Always check live vs. repo
+  before trusting a file, including this one.** `pg_get_functiondef` on the
+  live project is the source of truth, not any doc.
 
 ## What's actually left
-Nothing outstanding on this plan. Tier 13 (the empty league shell, drained, no real matches ever played there) was also removed by request.
+1. **Tier 18 reset mechanism, unsolved.** Two fixtures (`c600b38e`,
+   `edf9bf76`) were found reset from paid/played back to blank pending
+   sometime Sept 6 ~22:15–23:59, despite `_generate_round_robin_fixtures_internal`
+   explicitly guarding against touching any fixture with a
+   `ladder_reward_ledger` row. Symptom fixed (both now correctly show
+   `played`, 3-3, matching their original approved submissions; no
+   double-payment — `ladder_reward_ledger` still has exactly the original
+   4 rows). Root cause of the reset itself is still unknown; looks like a
+   manual `UPDATE` outside the normal fixture-regen path. `query_logs` only
+   covers a rolling 24h window and that window has now passed — Postgres
+   logs for that moment are likely gone, but worth a targeted check if this
+   recurs.
+2. **The safety-net backfill block in `_ladder_resolve_promotion_relegation_internal`
+   needs a design decision, not just documentation.** It's real, it's
+   live, and it's now captured in migration `20260932` — but nobody has
+   confirmed on purpose that it's inconsistent by design: the single
+   guaranteed promotion per league has NO affordability check anymore,
+   but the *extra* safety-net promotions (covering tier 1's structural
+   one-seat-per-week loss) are still affordability-gated. Worth asking
+   whether that's intentional or itself needs the same treatment as the
+   fee-removal decision already covered.
+
+## Verified live and matching the repo as of this session
+- `_ladder_fall_through_internal` — no affordability check, no entry fee
+  either direction on relegation fall-through (migration `20260931`).
+- `_ladder_resolve_promotion_relegation_internal` — no affordability check
+  on the single guaranteed promotion; safety-net backfill block present
+  (migration `20260932`).
+- `_generate_round_robin_fixtures_internal` — duplicate-pairing check
+  scoped by `leg` (migration `20260933`). Sits on the real weekly cron
+  path (`ladder-close-week-sunday` → `_ladder_close_week_internal` →
+  `_ladder_open_week_internal` → `_ladder_sync_fixtures_internal` → this
+  function) — protects the natural Sunday cutover, not just manual repairs.
+- Every league (tiers 1–19) has a schedule with matched leg1/leg2 counts
+  for week 3 — no other tier besides the already-fixed 17 and 18 had the
+  leg1-only gap.
+- Tier counts at week 3 (verified live, will drift as the week plays out):
+  tiers 1, 3, 4, 7–12, 14, 16, 18, 19 at 6 (or 7 for 18, one over the usual
+  cap — deliberate, see below); tiers 2, 5, 6, 13 short-handed, which
+  reflects normal week-to-week churn, not a bug.
+- Tier 18 sits at 7 (one over the usual 6 cap) — intentionally not pushed
+  down further, since that cascade would land on the same reward-ledger
+  tangle described in item 1 above. Revisit once item 1 is actually
+  resolved, not before.
 
 ## Gotchas learned across these sessions (don't repeat these)
-- This is a **double round-robin**: every pairing legitimately gets 2 fixtures (leg 1 home, leg 2 away). Don't flag 2-per-pairing as a duplicate — scope any duplicate check by `leg` too, or you'll drown in false positives across every league.
-- Tier numbers and league IDs are not stable landmarks across sessions — leagues get consolidated, drained, and recreated. Before auditing "Tier N," re-query live for what's actually in it now; don't assume the tier layout from an older status doc still holds. Tier 13 in particular was fully deleted this session — if any future note still references it, that league no longer exists.
-- Empty `ladder_leagues` rows (0 memberships, 0 fixtures) can be leftover from corrected overflow-cascade bugs — harmless, but worth a periodic `select tier from ladder_leagues where id not in (select distinct league_id from ladder_memberships)` sweep. Rows *with* real history (even fully drained ones) are a judgment call, not an automatic delete — check fixtures/fee-events before removing.
-- **Docs drift from live fast, in both directions.** More than once this session a doc claimed something was "not deployed" when it was actually live (item 5's real migration number was wrong; item 12 was marked "not started" when almost the whole redesign was already live). Always verify against `pg_get_functiondef` / a live query before trusting a status doc's claim either way — including this file.
-- When adding new bidding logic, remember all four wallet/pool helper functions (`_nets_debit_internal`, `_nets_credit_internal`, `_ladder_pool_credit`, `_ladder_pool_debit`) reject non-positive amounts outright — any code path that might legitimately involve a `0` amount (e.g. the free-tier bid floor) needs to skip those calls explicitly, not just relax its own validation.
-- For live-DB sanity checks without touching real data: `set local request.jwt.claim.sub = '<uuid>'` inside a query lets you exercise `auth.uid()`-gated functions as a specific user; wrap the actual test in a small plpgsql probe that catches exceptions and returns `sqlerrm`, so nothing writes unless the call would have genuinely succeeded.
+- This is a **double round-robin**: every pairing legitimately gets 2
+  fixtures (leg 1 home, leg 2 away). Scope any duplicate check by `leg`
+  too, or you'll drown in false positives across every league.
+- Tier numbers and league IDs are not stable landmarks across sessions —
+  leagues get consolidated, drained, and recreated. Re-query live for
+  what's actually in a tier now; don't assume an older status doc's tier
+  layout still holds.
+- **Docs drift from live fast, in both directions**, and now provably by
+  more than "a migration wasn't written down" — this session found a
+  whole undocumented backfill code block live that no doc, migration, or
+  prior session summary mentioned at all. Treat any doc (including this
+  one) as a starting hypothesis, not a source of truth. `pg_get_functiondef`
+  / a live query is the only source of truth.
+- `Supabase:apply_migration` records a migration in the *live project's*
+  own migration history — it does **not** write anything back to this repo
+  folder. Any live change made that way needs a matching `.sql` file
+  committed here in the same session, or it becomes exactly this kind of
+  drift again.
+- When adding new bidding logic, remember all four wallet/pool helper
+  functions (`_nets_debit_internal`, `_nets_credit_internal`,
+  `_ladder_pool_credit`, `_ladder_pool_debit`) reject non-positive amounts
+  outright — any code path that might legitimately involve a `0` amount
+  needs to skip those calls explicitly.
+- For live-DB sanity checks without touching real data: `set local
+  request.jwt.claim.sub = '<uuid>'` inside a query lets you exercise
+  `auth.uid()`-gated functions as a specific user; wrap the actual test in
+  a small plpgsql probe that catches exceptions and returns `sqlerrm`.
