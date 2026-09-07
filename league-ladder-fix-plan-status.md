@@ -39,11 +39,10 @@ the fee entirely rather than just skip unaffordable players.
   Confirmed nothing had been played yet anywhere at the time, so this was
   safe.
 
-**Open question, not yet decided:** `20260932`'s safety-net backfill block
-(see item 15) still runs its *own* affordability check on the extra
-promotions it grants — inconsistent with the guaranteed-promotion path
-right above it in the same function. Needs an explicit decision on
-whether that's intentional.
+**Correction to this section (caught same session):** promotion's
+affordability check was NOT removed — only relegation/fall-through was.
+An earlier draft of migration `20260932` wrongly said otherwise; fixed
+before anyone acted on it.
 
 ---
 
@@ -55,13 +54,17 @@ migration comment, or session note anywhere. Backfills a destination
 tier's shortfall (beyond its one guaranteed promotion) from the *source*
 league's own next-best non-relegated finishers, capped by how many extra
 seats the destination actually needs after accounting for pending paid
-bids. Exists almost entirely to cover tier 1's structural one-seat-per-week
-loss (tier 1 has no tier above it to relegate players in from). Written up
-and captured verbatim in migration `20260932` so it stops being
-invisible — see that file's header for the full mechanism.
+bids, and gated by the same affordability check as the guaranteed
+promotion — no inconsistency there (an earlier draft of this doc claimed
+one; that was wrong, corrected same session). Exists almost entirely to
+cover tier 1's structural one-seat-per-week loss. Written up and captured
+verbatim in migration `20260932` so it stops being invisible.
 
-**Status: documented, not evaluated.** Nobody has confirmed the
-affordability-check asymmetry against the rest of item 14 is intentional.
+**Status: documented, mechanism sound.** One thing still worth a
+deliberate sign-off: the extra promotions can pull a player up from a
+different source league than the one directly below the shortfall — new
+behavior nobody explicitly signed off on, separate from the affordability
+question.
 
 ---
 
@@ -94,9 +97,16 @@ tier 18 was 20/2.
   still shows exactly the original 4 rows. Ran the now-fixed generator for
   tier 18's 7 members: correctly skipped the 3 real matches and filled in
   the rest. Tier 18 is now a clean 42/42 (21 per leg, 7 players).
-- **Still unknown:** what actually reset those two fixtures from
-  played/paid back to blank after the fact. Looks like a manual `UPDATE`
-  outside the guarded regen path — see `CONTINUE-FROM-HERE.md` item 1.
+- **Root cause found (same session, after this section was first
+  written):** not a bug. Admin account "WeAfrica" ran
+  `cancel_ladder_fixture_result` on both fixtures at 2026-09-07 05:22–05:24
+  UTC — logged in `ladder_fixture_cancellations`. That function
+  intentionally leaves already-paid rewards untouched on cancel, which is
+  exactly the state that got found and "fixed" above. **The reconciliation
+  above therefore silently reversed a deliberate admin cancellation** made
+  roughly 40 minutes before this session started. See
+  `CONTINUE-FROM-HERE.md` item 1 — needs the admin's actual reason before
+  deciding whether the 3-3 result should stand or be cancelled again.
 - Confirmed ladder-wide, post-fix: no other tier besides 17 and 18 had the
   leg1-only gap.
 

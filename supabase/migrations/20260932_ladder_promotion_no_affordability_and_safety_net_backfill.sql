@@ -2,21 +2,34 @@
 -- confirmed still running via pg_get_functiondef on 2026-09-07, never
 -- written back to the repo.
 --
--- This one bundles TWO distinct live changes on top of
--- 20260870_ladder_affordability_fallbacks.sql's version:
+-- CORRECTION (same session, caught before this ever reached you): an
+-- earlier draft of this file wrongly simplified promotion to
+-- "always promote standings[1], no balance check" — that was a
+-- transcription mistake on my part, not something live. Re-verified
+-- pg_get_functiondef twice to be sure: promotion's affordability walk
+-- (the "for i in 1..v_n" loop below) was NEVER removed. Only
+-- relegation/fall-through (20260931) had its affordability check
+-- stripped. This file now matches the live function exactly.
 --
--- 1. Affordability check removed from promotion, matching the same
---    decision as 20260931 (fall-through): standings[1] is always
---    promoted now, no wallet-balance walk, no v_dest_fee gate on who
---    qualifies.
+-- So this migration captures ONE live change plus one already-live
+-- discovery, not two changes:
+--
+-- 1. NOT a change — confirmed unchanged from 20260870/repo: promotion's
+--    affordability walk. Included here only because it's in the same
+--    function as item 2.
 --
 -- 2. NEW, UNDOCUMENTED ANYWHERE — a "safety-net backfill" block with no
 --    header comment, no mention in CONTINUE-FROM-HERE.md,
 --    league-ladder-fix-plan-status.md, or the session notes pasted into
 --    this conversation. Found only by diffing pg_get_functiondef against
---    the repo's last known version. FLAGGING FOR REVIEW — the rationale
---    below is reconstructed from the live function's own inline comments,
---    not confirmed against any design doc:
+--    the repo's last known version, and its own extra-promotion pool
+--    IS affordability-gated too (see the loop inside the "if
+--    v_extra_needed > 0" block) — consistent with the guaranteed
+--    promotion above it, not an inconsistency. FLAGGING FOR REVIEW
+--    anyway, since the mechanism itself (extra promotions can now come
+--    from a DIFFERENT league than the one relegating) is still worth a
+--    deliberate sign-off, not just documentation. Rationale below is
+--    reconstructed from the live function's own inline comments:
 --
 --    Every league only ever gets ONE guaranteed replacement (the single
 --    promotion) no matter how many players it relegates (up to 2).
@@ -143,10 +156,21 @@ begin
       v_dest_tier := v_league.tier - 1;
       v_dest_fee := _ladder_entry_fee_for_tier(v_dest_tier);
 
-      if v_n > 0 then
-        v_promoted := v_standings[1];
-        v_promoted_idx := 1;
-      end if;
+      for i in 1 .. v_n loop
+        if v_dest_fee <= 0 then
+          v_promoted := v_standings[i];
+          v_promoted_idx := i;
+          exit;
+        end if;
+
+        select coalesce(balance, 0) into v_balance from nets_wallets where user_id = v_standings[i];
+
+        if coalesce(v_balance, 0) >= v_dest_fee then
+          v_promoted := v_standings[i];
+          v_promoted_idx := i;
+          exit;
+        end if;
+      end loop;
     end if;
 
     if v_promoted_idx is not null then

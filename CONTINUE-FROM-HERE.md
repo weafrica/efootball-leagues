@@ -13,34 +13,34 @@ just carried forward from the prior doc._
   live project is the source of truth, not any doc.
 
 ## What's actually left
-1. **Tier 18 reset mechanism, unsolved.** Two fixtures (`c600b38e`,
-   `edf9bf76`) were found reset from paid/played back to blank pending
-   sometime Sept 6 ~22:15–23:59, despite `_generate_round_robin_fixtures_internal`
-   explicitly guarding against touching any fixture with a
-   `ladder_reward_ledger` row. Symptom fixed (both now correctly show
-   `played`, 3-3, matching their original approved submissions; no
-   double-payment — `ladder_reward_ledger` still has exactly the original
-   4 rows). Root cause of the reset itself is still unknown; looks like a
-   manual `UPDATE` outside the normal fixture-regen path. `query_logs` only
-   covers a rolling 24h window and that window has now passed — Postgres
-   logs for that moment are likely gone, but worth a targeted check if this
-   recurs.
-2. **The safety-net backfill block in `_ladder_resolve_promotion_relegation_internal`
-   needs a design decision, not just documentation.** It's real, it's
-   live, and it's now captured in migration `20260932` — but nobody has
-   confirmed on purpose that it's inconsistent by design: the single
-   guaranteed promotion per league has NO affordability check anymore,
-   but the *extra* safety-net promotions (covering tier 1's structural
-   one-seat-per-week loss) are still affordability-gated. Worth asking
-   whether that's intentional or itself needs the same treatment as the
-   fee-removal decision already covered.
+1. **Tier 18 "reset" — actually solved, and it needs a human decision, not
+   a fix.** Not a bug. Admin account "WeAfrica" called
+   `cancel_ladder_fixture_result` on both fixtures at 2026-09-07 05:22–05:24
+   UTC (logged in `ladder_fixture_cancellations`, `cancelled_by` resolves to
+   an admin). That function is documented to intentionally leave already-paid
+   rewards untouched when cancelling a result — so the "corruption" was a
+   deliberate admin cancellation, working exactly as designed.
+   **The problem: an earlier session (06:04–06:38 UTC the same morning,
+   before this note) didn't know that, treated it as an anomaly, and
+   manually re-marked both fixtures `played`/3-3 again — silently reversing
+   the admin's cancellation.** Nobody has asked WeAfrica why those two
+   results were cancelled. Find out before deciding whether to leave the
+   reinstated 3-3 results in place or cancel them again.
+2. **Safety-net backfill (migration `20260932`) — not actually
+   inconsistent, that was my own mistake last time.** Re-verified live: the
+   guaranteed promotion still has its affordability check, same as the
+   extra safety-net promotions — no asymmetry. What IS worth a sign-off:
+   the extra promotions can now pull a player up from a source league that
+   isn't the one directly below the shortfall, which is new territory
+   nobody explicitly approved.
 
 ## Verified live and matching the repo as of this session
 - `_ladder_fall_through_internal` — no affordability check, no entry fee
   either direction on relegation fall-through (migration `20260931`).
-- `_ladder_resolve_promotion_relegation_internal` — no affordability check
-  on the single guaranteed promotion; safety-net backfill block present
-  (migration `20260932`).
+- `_ladder_resolve_promotion_relegation_internal` — promotion's
+  affordability check is UNCHANGED from `20260870`/repo (only relegation
+  had it removed); safety-net backfill block present, also
+  affordability-gated (migration `20260932`).
 - `_generate_round_robin_fixtures_internal` — duplicate-pairing check
   scoped by `leg` (migration `20260933`). Sits on the real weekly cron
   path (`ladder-close-week-sunday` → `_ladder_close_week_internal` →
