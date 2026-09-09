@@ -39,7 +39,7 @@ revoke all on function _ladder_record_wall_of_fame_internal(p_week_number intege
 revoke all on function _ladder_resolve_promotion_relegation_internal() from public, anon, authenticated;
 revoke all on function _ladder_retroactive_topup_internal(p_week_number integer) from public, anon, authenticated;
 revoke all on function _ladder_settle_bids_internal(p_week_number integer) from public, anon, authenticated;
-do $
+do $$
 begin
   if exists (
     select 1 from pg_proc
@@ -48,7 +48,7 @@ begin
     revoke all on function _ladder_settle_queued_reward_payouts_internal() from public, anon, authenticated;
   end if;
 end
-$;
+$$;
 revoke all on function _ladder_settle_week_fees_internal(p_week_number integer) from public, anon, authenticated;
 revoke all on function _ladder_sync_fixtures_internal(p_league_id uuid, p_week_number integer) from public, anon, authenticated;
 revoke all on function _nets_debit_internal(p_user_id uuid, p_amount bigint, p_reason text, p_note text, p_ref_type text, p_ref_id text, p_team_id uuid) from public, anon, authenticated;
