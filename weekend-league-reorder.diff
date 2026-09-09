@@ -1,0 +1,40 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 0000000..0000000 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -11218,6 +11218,17 @@
+             inside WeekendLeagueSpotlight's carousel (that carousel gets
+             hideLadderPass={true} below so it isn't duplicated). */}
+         <LeagueLadderQuickBanner session={session} onOpenLadderLeague={onOpenLadderLeague} c={c} />
++        {/* Weekend League — moved up to sit directly below the League
++            Ladder banner and above the Leaderboard preview, per request.
++            Always rendered — the League Ladder pass inside it
++            (LadderWeekendCard) isn't weekend-gated, so this no longer
++            disappears entirely just because no fun league kicks off this
++            Friday-Sunday. hideLadderPass stays true since the standalone
++            LeagueLadderQuickBanner right above already covers that. */}
++        <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
++          isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
++          onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} session={session} onOpenLadderLeague={onOpenLadderLeague}
++          hideLadderPass c={c} />
+         <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
+       </div>
+       <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} session={session} onJoinLadder={onJoinLadder} showToast={showToast} c={c} />
+@@ -11254,17 +11265,6 @@
+         myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} onOpenTransferMarket={onOpenTransferMarket} onOpenLadderLeague={onOpenLadderLeague} onOpenCompletedLeagues={onOpenCompletedLeagues} c={c} />
+ 
+-      {/* Live event banner — sits below LeagueListsSection now, specifically
+-          below the Survival Ladder Cup marquee (the last thing that section
+-          renders), per request. Always rendered — the League Ladder pass
+-          inside it (LadderWeekendCard) isn't weekend-gated, so this no
+-          longer disappears entirely just because no fun league kicks off
+-          this Friday-Sunday. */}
+-      <WeekendLeagueSpotlight items={weekendLeagues} weekendStart={weekendStart} weekendEnd={weekendEnd}
+-        isJoined={(l) => isMemberOf(l)} override={weekendOverride} isAdmin={isAdmin} onSetOverride={onSetWeekendOverride}
+-        onCardClick={(l) => (isMemberOf(l) ? onOpen(l.id) : onJoin(l.id))} session={session} onOpenLadderLeague={onOpenLadderLeague}
+-        hideLadderPass c={c} />
+-
+     </div>
+   );
+ }

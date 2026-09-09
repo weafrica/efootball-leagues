@@ -1,0 +1,99 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 8ce2312..3697a28 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -3754,6 +3754,16 @@ export default function App() {
+   // is 0N since d = maxActiveTier - tier = 0 for that league — see
+   // ladderTierRow in economy.js) rather than just dumping them on Home.
+   const [ladderBottomLeagueId, setLadderBottomLeagueId] = useState(null);
++  // Count of the signed-in member's own League Ladder fixtures sitting on
++  // "your move" — an opponent has submitted a score and it's still
++  // status='pending' in ladder_fixture_result_submissions (not yet
++  // approved/rejected/auto-approved), so the ball is in the viewer's court
++  // to confirm or dispute it. Feeds the red badge on the Quick actions
++  // dock's League Ladder tile (see quickActionItems below) — the same
++  // `badge` prop MenuTile already renders for the "Random" tile's
++  // grabbableCount, just a second, independent count. Homepage Ladder plan
++  // step 2 (nav badge) — step 1 (formatCountdown) landed in f3f557c.
++  const [myLadderActionCount, setMyLadderActionCount] = useState(0);
+   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
+   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
+   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
+@@ -4416,6 +4426,33 @@ export default function App() {
+     setMyLeagueLadderMembership(leagueRow ? { leagueId: memberRow.league_id, tier: leagueRow.tier } : null);
+   }, [session]);
+ 
++  // "Your move" count for the Quick actions dock's League Ladder badge —
++  // two-step query, same shape as loadChallenges'/loadOpenChallenges' own
++  // .or(...eq...) participant filters just above: first the fixture ids
++  // the viewer is actually in (home_user_id/away_user_id both indexed —
++  // idx_ladder_fixtures_home/_away), then the pending submissions against
++  // those ids that someone *else* filed. Deliberately not scoped to the
++  // current cycle week — a pending submission always resolves within an
++  // hour (auto-approve sweep, 20260891) or gets responded to, so one
++  // lingering into a following week is exactly the stuck case this badge
++  // exists to surface, not one to filter out.
++  const loadMyLadderActionCount = useCallback(async () => {
++    if (!session) { setMyLadderActionCount(0); return; }
++    const { data: myFixtureRows, error: fixturesError } = await supabase.from("ladder_fixtures")
++      .select("id")
++      .or(`home_user_id.eq.${session.user.id},away_user_id.eq.${session.user.id}`);
++    if (fixturesError) { console.error("Couldn't load your ladder fixtures for the action badge:", fixturesError.message); return; }
++    const fixtureIds = (myFixtureRows || []).map((f) => f.id);
++    if (fixtureIds.length === 0) { setMyLadderActionCount(0); return; }
++    const { data: pendingRows, error: pendingError } = await supabase.from("ladder_fixture_result_submissions")
++      .select("id")
++      .in("fixture_id", fixtureIds)
++      .eq("status", "pending")
++      .neq("submitted_by", session.user.id);
++    if (pendingError) { console.error("Couldn't load pending ladder submissions for the action badge:", pendingError.message); return; }
++    setMyLadderActionCount((pendingRows || []).length);
++  }, [session]);
++
+   // Every confirmed challenge/fixture/random-challenge result attempts a
+   // ladder update, but it only actually lands if both players are on the
+   // ladder and within 10 points of each other (see apply_ladder_result in
+@@ -5136,13 +5173,14 @@ export default function App() {
+     loadLadderTop5(); // Home's LadderStrip only — see ladderTop5 comment; the full loadLadder() is loaded on-demand by openLadderScreen instead
+     loadMyLadderRank();
+     loadMyLeagueLadderMembership(); // feeds the Quick actions dock's League Ladder tile label/link
++    loadMyLadderActionCount(); // feeds that same tile's red "your move" badge
+     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
+     loadTeamAvatars(); // also feeds the Table's club photos
+     loadPlayerLocations(); // feeds opponent flags/local-time/suggested-time (roadmap 2a/2b/2c)
+     loadAllAchievements(); // feeds the Wall of Fame
+     loadLadderChampions(); // feeds the Wall of Fame's ladder_champion badge + titles
+     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
+-  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
++  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadMyLadderActionCount, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
+ 
+   // The ladder never resets, but ranks can move any time someone else's
+   // challenge gets confirmed — so refresh it quietly while Home is open,
+@@ -5183,6 +5221,15 @@ export default function App() {
+   // discrete events rather than something that drifts second to second.
+   useRealtimeRefresh("ladder_memberships", loadMyLeagueLadderMembership, !!session);
+ 
++  // "Your move" badge count — not view-gated for the same reason as the
++  // membership tile it lives on (the dock floats on every screen). Refreshed
++  // off the submissions table itself (an opponent reporting a score inserts
++  // the row that puts a fixture in "your move"; a response, admin action, or
++  // the auto-approve sweep resolving it away from 'pending' takes it back
++  // out) rather than polled — same discrete-event reasoning as the
++  // membership subscription just above.
++  useRealtimeRefresh("ladder_fixture_result_submissions", loadMyLadderActionCount, !!session);
++
+   // The Challenges screen is a genuine "race to accept" — members watching
+   // that screen want the pool to move without a manual refresh, so it stays
+   // on the fast realtime + 30s poll. Kept live for admins on every screen
+@@ -8437,6 +8484,11 @@ export default function App() {
+       label: myLeagueLadderMembership ? `League ${myLeagueLadderMembership.tier}` : "Free entry",
+       special: true,
+       tourId: "qa-ladder",
++      // Red "your move" count — an opponent's submitted score is sitting
++      // unconfirmed on one of the viewer's own fixtures (see
++      // loadMyLadderActionCount above). Same badge slot MenuTile already
++      // draws for the "Random" tile's grabbableCount just below.
++      badge: myLadderActionCount || null,
+       onClick: () => {
+         if (myLeagueLadderMembership) openLeagueLadder(myLeagueLadderMembership.leagueId);
+         else if (ladderBottomLeagueId) openLeagueLadder(ladderBottomLeagueId);

@@ -1,0 +1,310 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 8ce2312..35b1a52 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -15,6 +15,11 @@ import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN
+ import { computeStandings as computeLeagueLadderStandings, classifyLadderZones, nextLadderCloseAt, ladderZoneForRank } from "./formats/leagueLadder.js";
+ import { getLadderTierTheme } from "./ladderTierThemes.js";
+ import RapidCupBanner from "./RapidCupBanner.jsx";
++// LadderMoveBanner's countdown chip + "Xd Xh left" text — same components
++// LeagueLadderDetail.jsx's own fixture rows already use, imported here for
++// the first time now that a homepage banner needs them too.
++import CountdownBadge from "./CountdownBadge.jsx";
++import { formatCountdown } from "./utils/formatCountdown.js";
+ // Next-match push notifications (League Ladder, regular leagues, random
+ // matches) reuse the exact same subscribe/resubscribe plumbing Rapid Cup
+ // already shipped — one push_subscriptions table, one VAPID key pair, one
+@@ -3754,6 +3759,16 @@ export default function App() {
+   // is 0N since d = maxActiveTier - tier = 0 for that league — see
+   // ladderTierRow in economy.js) rather than just dumping them on Home.
+   const [ladderBottomLeagueId, setLadderBottomLeagueId] = useState(null);
++  // Count of the signed-in member's own League Ladder fixtures sitting on
++  // "your move" — an opponent has submitted a score and it's still
++  // status='pending' in ladder_fixture_result_submissions (not yet
++  // approved/rejected/auto-approved), so the ball is in the viewer's court
++  // to confirm or dispute it. Feeds the red badge on the Quick actions
++  // dock's League Ladder tile (see quickActionItems below) — the same
++  // `badge` prop MenuTile already renders for the "Random" tile's
++  // grabbableCount, just a second, independent count. Homepage Ladder plan
++  // step 2 (nav badge) — step 1 (formatCountdown) landed in f3f557c.
++  const [myLadderActionCount, setMyLadderActionCount] = useState(0);
+   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
+   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
+   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
+@@ -4416,6 +4431,33 @@ export default function App() {
+     setMyLeagueLadderMembership(leagueRow ? { leagueId: memberRow.league_id, tier: leagueRow.tier } : null);
+   }, [session]);
+ 
++  // "Your move" count for the Quick actions dock's League Ladder badge —
++  // two-step query, same shape as loadChallenges'/loadOpenChallenges' own
++  // .or(...eq...) participant filters just above: first the fixture ids
++  // the viewer is actually in (home_user_id/away_user_id both indexed —
++  // idx_ladder_fixtures_home/_away), then the pending submissions against
++  // those ids that someone *else* filed. Deliberately not scoped to the
++  // current cycle week — a pending submission always resolves within an
++  // hour (auto-approve sweep, 20260891) or gets responded to, so one
++  // lingering into a following week is exactly the stuck case this badge
++  // exists to surface, not one to filter out.
++  const loadMyLadderActionCount = useCallback(async () => {
++    if (!session) { setMyLadderActionCount(0); return; }
++    const { data: myFixtureRows, error: fixturesError } = await supabase.from("ladder_fixtures")
++      .select("id")
++      .or(`home_user_id.eq.${session.user.id},away_user_id.eq.${session.user.id}`);
++    if (fixturesError) { console.error("Couldn't load your ladder fixtures for the action badge:", fixturesError.message); return; }
++    const fixtureIds = (myFixtureRows || []).map((f) => f.id);
++    if (fixtureIds.length === 0) { setMyLadderActionCount(0); return; }
++    const { data: pendingRows, error: pendingError } = await supabase.from("ladder_fixture_result_submissions")
++      .select("id")
++      .in("fixture_id", fixtureIds)
++      .eq("status", "pending")
++      .neq("submitted_by", session.user.id);
++    if (pendingError) { console.error("Couldn't load pending ladder submissions for the action badge:", pendingError.message); return; }
++    setMyLadderActionCount((pendingRows || []).length);
++  }, [session]);
++
+   // Every confirmed challenge/fixture/random-challenge result attempts a
+   // ladder update, but it only actually lands if both players are on the
+   // ladder and within 10 points of each other (see apply_ladder_result in
+@@ -5136,13 +5178,14 @@ export default function App() {
+     loadLadderTop5(); // Home's LadderStrip only — see ladderTop5 comment; the full loadLadder() is loaded on-demand by openLadderScreen instead
+     loadMyLadderRank();
+     loadMyLeagueLadderMembership(); // feeds the Quick actions dock's League Ladder tile label/link
++    loadMyLadderActionCount(); // feeds that same tile's red "your move" badge
+     loadChallengeMembers(); // also feeds the Leaderboard's profile photos
+     loadTeamAvatars(); // also feeds the Table's club photos
+     loadPlayerLocations(); // feeds opponent flags/local-time/suggested-time (roadmap 2a/2b/2c)
+     loadAllAchievements(); // feeds the Wall of Fame
+     loadLadderChampions(); // feeds the Wall of Fame's ladder_champion badge + titles
+     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sessionKey, not session; see sessionKey comment above
+-  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
++  }, [sessionKey, profile, loadLeagues, loadChallenges, loadOpenChallenges, loadLadderTop5, loadMyLadderRank, loadMyLeagueLadderMembership, loadMyLadderActionCount, loadChallengeMembers, loadTeamAvatars, loadPlayerLocations, loadAllAchievements, loadLadderChampions]);
+ 
+   // The ladder never resets, but ranks can move any time someone else's
+   // challenge gets confirmed — so refresh it quietly while Home is open,
+@@ -5183,6 +5226,15 @@ export default function App() {
+   // discrete events rather than something that drifts second to second.
+   useRealtimeRefresh("ladder_memberships", loadMyLeagueLadderMembership, !!session);
+ 
++  // "Your move" badge count — not view-gated for the same reason as the
++  // membership tile it lives on (the dock floats on every screen). Refreshed
++  // off the submissions table itself (an opponent reporting a score inserts
++  // the row that puts a fixture in "your move"; a response, admin action, or
++  // the auto-approve sweep resolving it away from 'pending' takes it back
++  // out) rather than polled — same discrete-event reasoning as the
++  // membership subscription just above.
++  useRealtimeRefresh("ladder_fixture_result_submissions", loadMyLadderActionCount, !!session);
++
+   // The Challenges screen is a genuine "race to accept" — members watching
+   // that screen want the pool to move without a manual refresh, so it stays
+   // on the fast realtime + 30s poll. Kept live for admins on every screen
+@@ -8388,9 +8440,19 @@ export default function App() {
+   // The notification bell's feed — every entry here is something that needs the
+   // signed-in person's attention specifically, not a general activity log. Built as
+   // a plain array (like quickActionItems below) so it's naturally personalized: a
+-  // non-admin only ever sees their own pending confirmations and open challenges,
+-  // while isAdmin adds the escalated-results and payment-review entries on top.
++  // non-admin only ever sees their own pending confirmations (regular challenges
++  // and, as of the ladder-pending-confirm entry below, League Ladder fixtures too)
++  // and open challenges, while isAdmin adds the escalated-results and
++  // payment-review entries on top.
+   const notificationItems = [
++    ...(myLadderActionCount > 0 ? [{
++      id: "ladder-pending-confirm", icon: Clock,
++      text: `${myLadderActionCount} ladder result${myLadderActionCount > 1 ? "s" : ""} waiting on your confirmation`,
++      onClick: () => {
++        if (myLeagueLadderMembership) openLeagueLadder(myLeagueLadderMembership.leagueId);
++        else if (ladderBottomLeagueId) openLeagueLadder(ladderBottomLeagueId);
++      },
++    }] : []),
+     ...(incomingPendingCount > 0 ? [{
+       id: "pending-confirm", icon: Clock,
+       text: `${incomingPendingCount} result${incomingPendingCount > 1 ? "s" : ""} waiting on your confirmation`,
+@@ -8437,6 +8499,11 @@ export default function App() {
+       label: myLeagueLadderMembership ? `League ${myLeagueLadderMembership.tier}` : "Free entry",
+       special: true,
+       tourId: "qa-ladder",
++      // Red "your move" count — an opponent's submitted score is sitting
++      // unconfirmed on one of the viewer's own fixtures (see
++      // loadMyLadderActionCount above). Same badge slot MenuTile already
++      // draws for the "Random" tile's grabbableCount just below.
++      badge: myLadderActionCount || null,
+       onClick: () => {
+         if (myLeagueLadderMembership) openLeagueLadder(myLeagueLadderMembership.leagueId);
+         else if (ladderBottomLeagueId) openLeagueLadder(ladderBottomLeagueId);
+@@ -8462,7 +8529,7 @@ export default function App() {
+           onEditProfile={() => setEditProfileOpen(true)} isAdmin={isAdmin} onOpenAccounts={() => { setView("accounts"); loadAccounts(); }}
+           onOpenActivity={() => { setView("activity"); loadActivityLog(); }}
+           onOpenChallenges={openChallengesScreen}
+-          challengeBadge={incomingPendingCount + adminEscalatedResultCount}
++          challengeBadge={incomingPendingCount + adminEscalatedResultCount + myLadderActionCount}
+           notifications={notificationItems}
+           showInstall={!isStandalone}
+           onInstallApp={handleInstallClick}
+@@ -8515,6 +8582,7 @@ export default function App() {
+                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
+                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
+                 ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder} onOpenLadderLeague={openLeagueLadder}
++                myLadderActionCount={myLadderActionCount}
+                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
+                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} onOpenCompletedLeagues={openCompletedLeaguesScreen} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
+                 weekendOverride={weekendOverride} onSetWeekendOverride={setWeekendOverride} showToast={showToast} quickActions={quickActionItems} c={c} />
+@@ -10825,7 +10893,7 @@ function LadderMaintenanceModal({ onClose, c }) {
+   );
+ }
+ 
+-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
++function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, c }) {
+   // The per-minute attention-score tick (see LeagueListsSection below) used
+   // to live here, which meant the achievements/Wall of Fame/XP-bar/
+   // leaderboard machinery below — none of which is time-sensitive — also
+@@ -11164,6 +11232,13 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
+           showToast={showToast}
+           c={c}
+         />
++        {/* Ladder banner — pinned above the League Ladder section itself
++            (not inside it), the "can't miss it" slot Candy Crush-style
++            featured events get above the level map: this week's fixture/
++            opponent, a live countdown, and a progress strip, all in one
++            tap-through card. Hides itself entirely when there's nothing to
++            show (see LadderMoveBanner). */}
++        <LadderMoveBanner session={session} myLadderActionCount={myLadderActionCount} onOpenLadderLeague={onOpenLadderLeague} c={c} />
+         {/* League Ladder section — moved up to sit directly below the Quick
+             actions row per request (was further down inside
+             LeagueListsSection, after the plain Leagues grid). Replaces the
+@@ -13047,6 +13122,136 @@ function PromotionRelegationBar({ standings, userId, tier, theme }) {
+   );
+ }
+ 
++// LadderMoveBanner — the "can't miss it" slot pinned above LadderLeagueSection
++// on Home, the Candy Crush-style featured-event banner: current fixture/
++// opponent + a live countdown + a progress strip, all above the fold,
++// instead of one card lost in the League Ladder scroll strip below it.
++//
++// Self-fetches (same reasoning as LadderLeagueSection.load() and
++// LadderWeekendCard just above: neither Home nor App already holds this
++// data in this shape) — membership + cycle to find the viewer's active
++// league/week, then that week's ladder_fixtures scoped to fixtures the
++// viewer is actually in (home_user_id/away_user_id = me, both indexed —
++// idx_ladder_fixtures_home/_away — see loadMyLadderActionCount above for
++// the identical indexing reasoning).
++//
++// myLadderActionCount is the one piece NOT re-fetched here — it's threaded
++// down from App (the same count behind the Quick actions dock's red nav
++// badge, see loadMyLadderActionCount) so the banner's "Your move" swap and
++// the badge can never disagree about whether it's the viewer's turn.
++//
++// Edge cases: no active membership this week, or the league's fixtures for
++// this week don't exist yet → renders nothing (null), same as the badge
++// simply reading 0. More than one pending fixture → shows the
++// soonest-expiring (lowest countdown_expires_at). Every fixture already
++// played/forfeited → swaps the headline to "All matches played" instead of
++// showing a countdown for nothing.
++function LadderMoveBanner({ session, myLadderActionCount, onOpenLadderLeague, c }) {
++  const [state, setState] = useState(null); // { leagueId, opponent, countdownExpiresAt, played, total } | null
++
++  useEffect(() => {
++    let cancelled = false;
++    if (!session?.user?.id) { setState(null); return undefined; }
++    (async () => {
++      const [{ data: memberRow }, { data: cycleRow }] = await Promise.all([
++        supabase.from("ladder_memberships").select("league_id, week_number, status").eq("user_id", session.user.id)
++          .order("week_number", { ascending: false }).limit(1).maybeSingle(),
++        supabase.from("ladder_cycle").select("current_week").eq("id", true).maybeSingle(),
++      ]);
++      const currentWeek = cycleRow?.current_week ?? 0;
++      if (!memberRow || memberRow.status !== "active" || memberRow.week_number < currentWeek) {
++        if (!cancelled) setState(null);
++        return;
++      }
++
++      const { data: fixtureRows, error: fixturesError } = await supabase.from("ladder_fixtures")
++        .select("id, home_user_id, away_user_id, status, countdown_expires_at")
++        .eq("league_id", memberRow.league_id)
++        .eq("week_number", currentWeek)
++        .or(`home_user_id.eq.${session.user.id},away_user_id.eq.${session.user.id}`);
++      if (fixturesError) { console.error("Couldn't load your ladder fixtures for the move banner:", fixturesError.message); return; }
++
++      const fixtures = fixtureRows || [];
++      if (fixtures.length === 0) { if (!cancelled) setState(null); return; }
++
++      const played = fixtures.filter((f) => f.status === "played" || f.status === "forfeited").length;
++      // Soonest-expiring pending fixture wins when there's more than one —
++      // that's the one actually worth surfacing above the fold.
++      const nextUp = fixtures
++        .filter((f) => f.status === "pending")
++        .sort((a, b) => new Date(a.countdown_expires_at || 0) - new Date(b.countdown_expires_at || 0))[0] || null;
++
++      let opponent = null;
++      if (nextUp) {
++        const opponentId = nextUp.home_user_id === session.user.id ? nextUp.away_user_id : nextUp.home_user_id;
++        const { data: opponentRow } = await supabase.from("profiles")
++          .select("efootball_username, avatar_url").eq("user_id", opponentId).maybeSingle();
++        opponent = opponentRow || null;
++      }
++
++      if (!cancelled) {
++        setState({
++          leagueId: memberRow.league_id,
++          opponent,
++          countdownExpiresAt: nextUp?.countdown_expires_at ?? null,
++          played,
++          total: fixtures.length,
++        });
++      }
++    })();
++    return () => { cancelled = true; };
++  }, [session?.user?.id]);
++
++  if (!state) return null;
++
++  const allPlayed = state.total > 0 && state.played >= state.total;
++  const yourMove = !allPlayed && myLadderActionCount > 0;
++  const progressPct = state.total > 0 ? Math.round((state.played / state.total) * 100) : 0;
++  const countdownText = !allPlayed && state.countdownExpiresAt ? formatCountdown(state.countdownExpiresAt) : null;
++
++  const headline = allPlayed
++    ? "All matches played — see standings"
++    : yourMove
++      ? (state.opponent?.efootball_username ? `Your move vs ${state.opponent.efootball_username}` : "Your move")
++      : state.opponent?.efootball_username
++        ? `Next: ${state.opponent.efootball_username}`
++        : countdownText ? `Next opponent in ${countdownText}` : "Next opponent";
++
++  return (
++    <section className="mt-6">
++      <button onClick={() => onOpenLadderLeague?.(state.leagueId)}
++        className="relative w-full rounded-2xl p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
++        style={{ background: `linear-gradient(135deg, ${LADDER_GOLD}26, ${c.surface} 60%, ${LADDER_GOLD}14)`, border: `1px solid ${LADDER_GOLD}55` }}>
++        <div className="relative flex items-center gap-2.5">
++          {state.opponent ? (
++            <MemberAvatar url={state.opponent.avatar_url} username={state.opponent.efootball_username} size={36} c={c} />
++          ) : (
++            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: `${LADDER_GOLD}26`, border: `1px solid ${LADDER_GOLD}66` }}>
++              <Trophy size={16} style={{ color: LADDER_GOLD }} />
++            </span>
++          )}
++          <div className="flex-1 min-w-0 leading-tight">
++            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: LADDER_GOLD }}>League Ladder</div>
++            <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
++          </div>
++          {countdownText && <CountdownBadge expiresAt={state.countdownExpiresAt} />}
++        </div>
++
++        {/* Progress strip — a filling bar, not a checklist, per the
++            Candy Crush comparison this whole banner is built off of. */}
++        <div className="relative mt-3 pt-3" style={{ borderTop: `1px dashed ${LADDER_GOLD}40` }}>
++          <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wide mb-1" style={{ color: c.textFaint }}>
++            <span>{state.played}/{state.total} matches played this week</span>
++          </div>
++          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: c.surfaceHover }}>
++            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, background: LADDER_GOLD }} />
++          </div>
++        </div>
++      </button>
++    </section>
++  );
++}
++
+ // LadderLeagueSection — League Ladder's own row on Home, alongside "Leagues"
+ // and "Cash leagues". Self-fetches rather than taking `leagues` as a prop:
+ // ladder_leagues/ladder_cycle/ladder_memberships are a completely separate

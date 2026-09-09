@@ -1,0 +1,93 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index c0bbc5f..bd8bd54 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -164,7 +164,7 @@ const SHOP_PROMO_TEXT = "Sale";
+ // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
+ // to false once the Ladder is back to normal — the notice just won't fire
+ // again, no redeploy-adjacent cleanup needed.
+-const LADDER_MAINTENANCE_ACTIVE = true;
++const LADDER_MAINTENANCE_ACTIVE = false;
+ 
+ // Cash league entry fees: members choose their own amount in this range when they join.
+ export const ENTRY_FEE_MIN = 10;
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index 1fe8722..f5d38ce 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -916,7 +916,26 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSigh
+   // hook count between renders.
+   const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
+   const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
+-  const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
++  // "Opponents only face each other once": exclude any club this club has
++  // a FINALIZED ladder_cup_matches row against, in either home/away slot.
++  // finalized_at covers both played results and approved walkover claims
++  // (approve_ladder_cup_walkover_claim inserts a real matches row and runs
++  // it through _apply_ladder_cup_match_win, which sets finalized_at) — so
++  // one check here catches both routes to "these two have already met".
++  const alreadyFacedClubIds = useMemo(() => {
++    if (!myTeam) return new Set();
++    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
++    const ids = new Set();
++    for (const m of finalized) {
++      if (m.home_team_id === myTeam.id) ids.add(m.away_team_id);
++      else if (m.away_team_id === myTeam.id) ids.add(m.home_team_id);
++    }
++    return ids;
++  }, [league.ladder_cup_matches, myTeam]);
++  const opponents = useMemo(
++    () => (myEntry ? getOpponentPool(myEntry, mapped, alreadyFacedClubIds) : []),
++    [myEntry, mapped, alreadyFacedClubIds]
++  );
+ 
+   // 12h pool visibility timer (see ladderCupOpponentTimerState /
+   // ladder_cup_pool_sightings) — mySightings is just this club's own rows
+@@ -1248,7 +1267,16 @@ function LadderCupFindOpponent({ league, c }) {
+     if (!team) { setResult({ notFound: true, reason: "No club with that exact name — pick one from the suggestions." }); return; }
+     const entry = mapped.find((e) => e.club_id === team.id);
+     if (!entry) { setResult({ notFound: true, reason: `${team.name} hasn't been placed on the ladder yet.` }); return; }
+-    const pool = entry.status === "active" ? getOpponentPool(entry, mapped) : [];
++    // Same "already faced" exclusion LadderCupOpponentBoard applies —
++    // otherwise this finder would surface a rematch pairing as available
++    // when the actual Challenge flow (and the server-side RPC) refuses it.
++    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
++    const alreadyFacedClubIds = new Set();
++    for (const m of finalized) {
++      if (m.home_team_id === team.id) alreadyFacedClubIds.add(m.away_team_id);
++      else if (m.away_team_id === team.id) alreadyFacedClubIds.add(m.home_team_id);
++    }
++    const pool = entry.status === "active" ? getOpponentPool(entry, mapped, alreadyFacedClubIds) : [];
+     setResult({ team, entry, pool });
+   };
+ 
+diff --git a/src/formats/ladderCup.js b/src/formats/ladderCup.js
+index 7051bd8..77abc21 100644
+--- a/src/formats/ladderCup.js
++++ b/src/formats/ladderCup.js
+@@ -503,11 +503,23 @@ export function computeEloUpdate(winnerRating, loserRating, kFactor = LADDER_CUP
+  * Re-run this after any result is logged (played or walkover) — that's the
+  * "logging a result refreshes your opponent slate" rule; it's just calling
+  * this again with fresh entries, not a separate mechanism.
++ *
++ * alreadyFacedClubIds (optional) excludes clubs this entry has already
++ * played a finalized match against (played or walkover) in this Survivor
++ * Ladder Cup — the "opponents only face each other once" rule. Pass the
++ * set of club_ids derived from finalized ladder_cup_matches rows; omitting
++ * it (undefined) preserves the old no-restriction behavior for any caller
++ * that hasn't been updated yet.
+  */
+-export function getOpponentPool(entry, allEntries) {
++export function getOpponentPool(entry, allEntries, alreadyFacedClubIds) {
+   const R = LADDER_CUP_RULES;
+   const myRating = entry.ladder_rating ?? R.RATING_START;
+-  const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
++  const eligible = allEntries.filter(
++    (e) =>
++      e.club_id !== entry.club_id &&
++      e.status === "active" &&
++      !(alreadyFacedClubIds && alreadyFacedClubIds.has(e.club_id))
++  );
+   if (eligible.length === 0) return [];
+ 
+   const ratingOf = (e) => e.ladder_rating ?? R.RATING_START;

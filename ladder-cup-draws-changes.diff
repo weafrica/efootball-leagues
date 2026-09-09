@@ -1,0 +1,484 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index c0bbc5f..6921905 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -70,7 +70,7 @@ import { pickBestVoice } from "./utils/pickBestVoice";
+ // by the RPC's own logic, mirrored in SQL rather than called from JS.
+ // rankLadderCupStandings/getOpponentPool stay imported where they're
+ // actually consumed (LeagueDetail.jsx) rather than duplicated here.
+-import { rankLadderCupStandings, recordLadderCupWin, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
++import { rankLadderCupStandings, recordLadderCupWin, recordLadderCupDraw, resolveMatchWinner, acceptSecondLife, declineOrExpireSecondLife, createWalkoverClaim, approveWalkoverClaim, rejectWalkoverClaim, finalizeAtCutoff, crownChampion, hasLadderCupCutoffPassed, createLadderCupEntry, reborn, rebirthAnnouncement, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+ import {
+   Trophy, Plus, Users, Calendar, ChevronRight, X, Check,
+   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
+@@ -164,7 +164,7 @@ const SHOP_PROMO_TEXT = "Sale";
+ // League Ladder maintenance notice (see ladderMaintenanceOpen below). Flip
+ // to false once the Ladder is back to normal — the notice just won't fire
+ // again, no redeploy-adjacent cleanup needed.
+-const LADDER_MAINTENANCE_ACTIVE = true;
++const LADDER_MAINTENANCE_ACTIVE = false;
+ 
+ // Cash league entry fees: members choose their own amount in this range when they join.
+ export const ENTRY_FEE_MIN = 10;
+@@ -3101,12 +3101,18 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
+   const [eta, setEta] = useState(0);
+   const [ph, setPh] = useState("");
+   const [pa, setPa] = useState("");
++  const [isDraw, setIsDraw] = useState(false); // step 16: only ever true while regulationLevel
+   const [file, setFile] = useState(null);
+   const [saving, setSaving] = useState(false);
+ 
+   const regulationLevel = Number(h) === Number(a);
++  // A level scoreline no longer forces extra time/penalties — the reporter
++  // picks "Draw" or "Play extra time" first; isDraw is reset the moment
++  // the scoreline stops being level so it can never survive into a
++  // decisive-result submission.
++  useEffect(() => { if (!regulationLevel && isDraw) setIsDraw(false); }, [regulationLevel, isDraw]);
+   const extraTimeLevel = Number(eth) === Number(eta);
+-  const needsPens = regulationLevel && extraTimeLevel;
++  const needsPens = regulationLevel && !isDraw && extraTimeLevel;
+   const pensReady = !needsPens || (ph !== "" && pa !== "" && Number(ph) !== Number(pa));
+ 
+   const submit = async () => {
+@@ -3114,7 +3120,8 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
+     setSaving(true);
+     await onSubmit({
+       homeGoals: Number(h), awayGoals: Number(a),
+-      extraTimeHomeGoals: Number(eth), extraTimeAwayGoals: Number(eta),
++      isDraw,
++      extraTimeHomeGoals: isDraw ? 0 : Number(eth), extraTimeAwayGoals: isDraw ? 0 : Number(eta),
+       pensHome: needsPens ? Number(ph) : null, pensAway: needsPens ? Number(pa) : null,
+       file,
+     });
+@@ -3149,7 +3156,33 @@ function LadderCupResultModal({ match, homeTeam, awayTeam, onCancel, onSubmit, c
+ 
+         {regulationLevel && (
+           <div className="mb-4">
+-            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — extra time score</div>
++            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Level after regulation — draw, or play extra time?</div>
++            {/* Step 16: a level scoreline is no longer forced into extra
++                time/penalties — pick a draw (2 pts + 3 Nets each, no life
++                lost) or go to extra time toward a decisive result. */}
++            <div className="grid grid-cols-2 gap-2">
++              <button type="button" onClick={() => setIsDraw(true)}
++                className="font-body text-sm font-semibold px-3 py-2.5 rounded-xl border transition-colors"
++                style={isDraw ? { background: c.accent, color: c.accentText, borderColor: c.accent } : { background: c.surfaceHover, color: c.text, borderColor: c.border }}>
++                Draw
++              </button>
++              <button type="button" onClick={() => setIsDraw(false)}
++                className="font-body text-sm font-semibold px-3 py-2.5 rounded-xl border transition-colors"
++                style={!isDraw ? { background: c.accent, color: c.accentText, borderColor: c.accent } : { background: c.surfaceHover, color: c.text, borderColor: c.border }}>
++                Play extra time
++              </button>
++            </div>
++            {isDraw && (
++              <div className="font-mono text-[11px] mt-2" style={{ color: c.textFaint }}>
++                A draw pays both clubs {LADDER_CUP_RULES.DRAW_POINTS} pts and <NetsAmount amount={LADDER_CUP_RULES.DRAW_NETS_REWARD} /> each — no life lost, no elimination.
++              </div>
++            )}
++          </div>
++        )}
++
++        {regulationLevel && !isDraw && (
++          <div className="mb-4">
++            <div className="font-mono text-xs mb-2" style={{ color: c.textDim }}>Extra time score</div>
+             <div className="flex items-center gap-2">
+               <div className="flex-1 min-w-0">
+                 <div className="font-body text-xs truncate mb-1" style={{ color: c.textDim }}>{homeTeam?.name || "Home"} (ET)</div>
+@@ -6110,7 +6143,7 @@ export default function App() {
+   const ladderCupEntryFromRow = (row, clubName) => ({
+     club_id: row.team_id,
+     club_name: clubName,
+-    pts: row.pts, w: row.w, l: row.l, gd: row.gd, streak: row.streak,
++    pts: row.pts, w: row.w, l: row.l, d: row.d || 0, gd: row.gd, streak: row.streak,
+     // Separate from pts — see formats/ladderCup.js. Falls back to the
+     // starting rating for any row written before this column existed.
+     ladder_rating: row.ladder_rating ?? LADDER_CUP_RULES.RATING_START,
+@@ -6132,7 +6165,7 @@ export default function App() {
+     past_lives: row.past_lives || [],
+   });
+   const ladderCupRowPatchFromEntry = (entry) => ({
+-    pts: entry.pts, w: entry.w, l: entry.l, gd: entry.gd, streak: entry.streak,
++    pts: entry.pts, w: entry.w, l: entry.l, d: entry.d || 0, gd: entry.gd, streak: entry.streak,
+     ladder_rating: entry.ladder_rating,
+     status: entry.status,
+     second_life_used: entry.second_life_used,
+@@ -6201,19 +6234,22 @@ export default function App() {
+   // dispute and an admin's reject) wipes a reported-but-not-yet-applied
+   // result back to scratch so either side can re-log it, same as
+   // disputeChallengeResult/adminRejectChallengeResult do for challenges.
+-  const submitLadderCupMatchResult = async (league, match, teamId, { homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
++  const submitLadderCupMatchResult = async (league, match, teamId, { homeGoals, awayGoals, isDraw = false, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, file }) => {
+     if (hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) { showToast("The Ladder Cup cutoff has passed — this result can't be logged."); return false; }
+     if (!file) { showToast("Attach a photo of the final scoreboard before saving."); return false; }
+     if (!teamId) { showToast("Couldn't tell which club you're logging this for — try refreshing."); return false; }
+ 
+     let winnerSide, decidedBy;
+     try {
+-      ({ winnerSide, decidedBy } = resolveMatchWinner({ homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway }));
++      ({ winnerSide, decidedBy } = resolveMatchWinner({ homeGoals, awayGoals, extraTimeHomeGoals, extraTimeAwayGoals, pensHome, pensAway, isDraw }));
+     } catch (err) {
+       showToast(err.message);
+       return false;
+     }
+-    const winnerTeamId = winnerSide === "home" ? match.home_team_id : match.away_team_id;
++    // Step 16: a draw has no winner side — resolveMatchWinner returns
++    // { isDraw: true, decidedBy: "draw" } instead of a winnerSide for this
++    // case, so winnerTeamId stays null.
++    const winnerTeamId = decidedBy === "draw" ? null : (winnerSide === "home" ? match.home_team_id : match.away_team_id);
+ 
+     const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.85 });
+     const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
+@@ -6229,11 +6265,12 @@ export default function App() {
+     const { error } = await supabase.rpc("submit_ladder_cup_match_result", {
+       p_match_id: match.id, p_team_id: teamId,
+       p_home_goals: homeGoals, p_away_goals: awayGoals,
+-      p_extra_time_home_goals: decidedBy === "regulation" ? null : extraTimeHomeGoals,
+-      p_extra_time_away_goals: decidedBy === "regulation" ? null : extraTimeAwayGoals,
++      p_extra_time_home_goals: decidedBy === "regulation" || decidedBy === "draw" ? null : extraTimeHomeGoals,
++      p_extra_time_away_goals: decidedBy === "regulation" || decidedBy === "draw" ? null : extraTimeAwayGoals,
+       p_pens_home: decidedBy === "penalties" ? pensHome : null,
+       p_pens_away: decidedBy === "penalties" ? pensAway : null,
+       p_decided_by: decidedBy, p_winner_team_id: winnerTeamId, p_proof_url: proofUrl,
++      p_is_draw: decidedBy === "draw",
+     });
+     if (error) {
+       // Mirrors initiateLadderCupMatch's handling of the same race one step
+@@ -6277,12 +6314,13 @@ export default function App() {
+   const applyLadderCupMatchResult = async (league, match) => {
+     const decidedBy = match.decided_by;
+     const winnerTeamId = match.winner_team_id;
+-    const winnerSide = winnerTeamId === match.home_team_id ? "home" : "away";
+-    const loserTeamId = winnerSide === "home" ? match.away_team_id : match.home_team_id;
++    const isDraw = decidedBy === "draw"; // step 16: no winner/loser side on a draw
++    const winnerSide = isDraw ? null : (winnerTeamId === match.home_team_id ? "home" : "away");
++    const loserTeamId = isDraw ? null : (winnerSide === "home" ? match.away_team_id : match.home_team_id);
+ 
+     const teamsById = Object.fromEntries((league.teams || []).map((t) => [t.id, t]));
+     const rowsById = Object.fromEntries((league.ladder_cup_entries || []).map((r) => [r.team_id, r]));
+-    if (!rowsById[winnerTeamId] || !rowsById[loserTeamId]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
++    if (!rowsById[match.home_team_id] || !rowsById[match.away_team_id]) { showToast("Couldn't find both clubs' ladder entries — try refreshing."); return false; }
+ 
+     // Routed through confirm_ladder_cup_match_result (RPC, security
+     // definer — see supabase/migrations/20260820_ladder_cup_match_admin_rpc.sql
+@@ -6306,8 +6344,17 @@ export default function App() {
+     let scoreLine = `${homeName} ${match.home_goals} – ${match.away_goals} ${awayName}`;
+     if (decidedBy === "extra_time") scoreLine += ` (aet ${match.extra_time_home_goals}-${match.extra_time_away_goals})`;
+     if (decidedBy === "penalties") scoreLine += ` (pens ${match.penalties_home}-${match.penalties_away})`;
++    if (isDraw) scoreLine += " (draw)";
+     await postComment(league, `Ladder Cup — ${scoreLine}`, null, null, match.proof_url, true, null, null, match.id);
+ 
++    if (isDraw) {
++      // Neither side is eliminated or offered a second life on a draw —
++      // nothing to read back, unlike the win/loss path below.
++      await refreshLeague(league.id);
++      showToast(`Result confirmed — draw, both clubs get ${LADDER_CUP_RULES.DRAW_POINTS} pts.`);
++      return true;
++    }
++
+     // Read back the loser's post-confirm status for the toast — the
+     // server (not this client) decided whether that was elimination or a
+     // second-life offer, so ask it rather than recomputing locally.
+@@ -7924,6 +7971,18 @@ export default function App() {
+     const events = [];
+     for (const m of (league.ladder_cup_matches || [])) {
+       if (!m.finalized_at) continue; // never confirmed, or disputed away — never happened
++      // Step 16 (draws): decided_by === "draw" has no winner_team_id — push
++      // a draw event instead of forcing it through the winner/loser shape,
++      // otherwise winner_team_id === null !== home_team_id would silently
++      // misreplay it as an away win.
++      if (m.decided_by === "draw") {
++        events.push({
++          at: new Date(m.finalized_at).getTime(),
++          isDraw: true,
++          teamAId: m.home_team_id, teamBId: m.away_team_id,
++        });
++        continue;
++      }
+       const winnerIsHome = m.winner_team_id === m.home_team_id;
+       events.push({
+         at: new Date(m.finalized_at).getTime(),
+@@ -7952,6 +8011,20 @@ export default function App() {
+     const walkoverBadgeCount = new Map(); // team_id -> count; recordLadderCupWin doesn't touch this counter itself
+ 
+     for (const ev of events) {
++      // Step 16 (draws): symmetric, no winner/loser — handled entirely
++      // separately from the win/loss branch below, since recordLadderCupWin
++      // trusts winner/loser completely and a draw has neither.
++      if (ev.isDraw) {
++        const teamAEntry = entries.get(ev.teamAId);
++        const teamBEntry = entries.get(ev.teamBId);
++        if (!teamAEntry || !teamBEntry) continue;
++        if (teamAEntry.status === "pending_second_life" || teamBEntry.status === "pending_second_life") continue;
++        const { teamA, teamB } = recordLadderCupDraw({ teamA: teamAEntry, teamB: teamBEntry });
++        entries.set(ev.teamAId, teamA);
++        entries.set(ev.teamBId, teamB);
++        continue;
++      }
++
+       const winnerEntry = entries.get(ev.winnerTeamId);
+       const loserEntry = entries.get(ev.loserTeamId);
+       // Missing club (removed from the league since?) — skip this one
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index 1fe8722..6c7dcc2 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -234,14 +234,15 @@ function LadderCupPodium({ standings, avatarByTeamId, c }) {
+   );
+ }
+ 
+-// Same shape as SHARE_STANDINGS_COLUMNS (App.jsx) but without the Draws
+-// column — Ladder Cup has no draws — and with Streak added since it's the
+-// one extra stat that actually matters for this format's share image.
++// Same shape as SHARE_STANDINGS_COLUMNS (App.jsx), with Streak added since
++// it's the one extra stat that actually matters for this format's share
++// image. Draws (step 16) sit between W and L, same order as the table.
+ const LADDER_CUP_SHARE_COLUMNS = [
+   { key: "rank", label: "#", width: 64, align: "center", isRank: true },
+   { key: "name", label: "Club", width: 456, align: "left", isName: true, get: (r) => r.name + (r.eliminated ? " · OUT" : r.statusLabel ? ` · ${r.statusLabel.toUpperCase()}` : "") },
+   { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
+   { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
++  { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
+   { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
+   { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
+   { key: "streak", label: "Streak", width: 96, align: "center", get: (r) => String(r.streak) },
+@@ -325,7 +326,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
+     return "transparent";
+   };
+   const shareRows = standings.map((r) => ({
+-    rank: r.rank_position, name: r.club_name, p: r._row.w + r._row.l, w: r._row.w, l: r._row.l,
++    rank: r.rank_position, name: r.club_name, p: r._row.w + (r._row.d || 0) + r._row.l, w: r._row.w, d: r._row.d || 0, l: r._row.l,
+     gd: r.gd, streak: r._row.streak, pts: r.pts, eliminated: r._row.status === "eliminated",
+     statusLabel: r._row.status !== "active" && r._row.status !== "eliminated" ? LADDER_CUP_STATUS_LABEL[r._row.status]
+       : isFinalized && r._row.status === "active" ? LADDER_CUP_STATUS_LABEL.survived : null,
+@@ -373,6 +374,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
+               <th className="text-left py-2 font-medium">Club</th>
+               <th className="text-center py-2 font-medium">P</th>
+               <th className="text-center py-2 font-medium">W</th>
++              <th className="text-center py-2 font-medium">D</th>
+               <th className="text-center py-2 font-medium">L</th>
+               <th className="text-center py-2 font-medium">GD</th>
+               <th className="text-center py-2 font-medium">Streak</th>
+@@ -381,7 +383,7 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
+           </thead>
+           <tbody>
+             {filtered.length === 0 ? (
+-              <tr><td colSpan={8} className="py-8 text-center font-body text-sm" style={{ color: c.textFaint }}>No club matches "{query}".</td></tr>
++              <tr><td colSpan={9} className="py-8 text-center font-body text-sm" style={{ color: c.textFaint }}>No club matches "{query}".</td></tr>
+             ) : filtered.map((r) => {
+               const row = r._row;
+               const eliminated = row.status === "eliminated";
+@@ -453,13 +455,14 @@ function LadderCupStandingsTable({ league, leagues, allAchievements, avatarByTea
+                       readable even once pts/w/l reset to zero on rebirth. */}
+                   {eliminated && (
+                     <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
+-                      Final: {row.pts} pts · {row.w}W-{row.l}L
++                      Final: {row.pts} pts · {row.w}W-{row.d || 0}D-{row.l}L
+                     </div>
+                   )}
+                   <LadderCupBadgeRow row={row} c={c} />
+                 </td>
+-                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + row.l}</td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w + (row.d || 0) + row.l}</td>
+                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.w}</td>
++                <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.d || 0}</td>
+                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{row.l}</td>
+                 <td className="text-center py-2.5" style={{ color: c.textDim }}>{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
+                 <td className="text-center py-2.5" style={{ color: c.textDim }}>
+@@ -880,7 +883,7 @@ function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
+         <Skull size={26} className="mx-auto mb-2" style={{ color: c.textFaint }} />
+         <div className="font-display font-extrabold text-lg uppercase tracking-wide" style={{ color: c.text }}>Fallen</div>
+         <div className="font-body text-xs mt-2 mb-1" style={{ color: c.textDim }}>
+-          Eliminated with {entryRow.pts} pts ({entryRow.w}W-{entryRow.l}L) on the board — that record stays yours
++          Eliminated with {entryRow.pts} pts ({entryRow.w}W-{entryRow.d || 0}D-{entryRow.l}L) on the board — that record stays yours
+           whether you buy back in or not.
+         </div>
+         {rebirthCount > 0 && (
+@@ -916,7 +919,26 @@ function LadderCupOpponentBoard({ league, myTeam, canSeePhones, onEnsurePoolSigh
+   // hook count between renders.
+   const mapped = useMemo(() => toLadderCupEngineEntries(league), [league]);
+   const myEntry = myTeam ? mapped.find((e) => e.club_id === myTeam.id) : null;
+-  const opponents = useMemo(() => (myEntry ? getOpponentPool(myEntry, mapped) : []), [myEntry, mapped]);
++  // "Opponents only face each other once": exclude any club this club has
++  // a FINALIZED ladder_cup_matches row against, in either home/away slot.
++  // finalized_at covers both played results and approved walkover claims
++  // (approve_ladder_cup_walkover_claim inserts a real matches row and runs
++  // it through _apply_ladder_cup_match_win, which sets finalized_at) — so
++  // one check here catches both routes to "these two have already met".
++  const alreadyFacedClubIds = useMemo(() => {
++    if (!myTeam) return new Set();
++    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
++    const ids = new Set();
++    for (const m of finalized) {
++      if (m.home_team_id === myTeam.id) ids.add(m.away_team_id);
++      else if (m.away_team_id === myTeam.id) ids.add(m.home_team_id);
++    }
++    return ids;
++  }, [league.ladder_cup_matches, myTeam]);
++  const opponents = useMemo(
++    () => (myEntry ? getOpponentPool(myEntry, mapped, alreadyFacedClubIds) : []),
++    [myEntry, mapped, alreadyFacedClubIds]
++  );
+ 
+   // 12h pool visibility timer (see ladderCupOpponentTimerState /
+   // ladder_cup_pool_sightings) — mySightings is just this club's own rows
+@@ -1248,7 +1270,16 @@ function LadderCupFindOpponent({ league, c }) {
+     if (!team) { setResult({ notFound: true, reason: "No club with that exact name — pick one from the suggestions." }); return; }
+     const entry = mapped.find((e) => e.club_id === team.id);
+     if (!entry) { setResult({ notFound: true, reason: `${team.name} hasn't been placed on the ladder yet.` }); return; }
+-    const pool = entry.status === "active" ? getOpponentPool(entry, mapped) : [];
++    // Same "already faced" exclusion LadderCupOpponentBoard applies —
++    // otherwise this finder would surface a rematch pairing as available
++    // when the actual Challenge flow (and the server-side RPC) refuses it.
++    const finalized = (league.ladder_cup_matches || []).filter((m) => m.finalized_at);
++    const alreadyFacedClubIds = new Set();
++    for (const m of finalized) {
++      if (m.home_team_id === team.id) alreadyFacedClubIds.add(m.away_team_id);
++      else if (m.away_team_id === team.id) alreadyFacedClubIds.add(m.home_team_id);
++    }
++    const pool = entry.status === "active" ? getOpponentPool(entry, mapped, alreadyFacedClubIds) : [];
+     setResult({ team, entry, pool });
+   };
+ 
+diff --git a/src/formats/ladderCup.js b/src/formats/ladderCup.js
+index 7051bd8..59f287f 100644
+--- a/src/formats/ladderCup.js
++++ b/src/formats/ladderCup.js
+@@ -14,8 +14,10 @@
+ //   - badge display logic beyond the raw counters recordLadderCupWin tracks
+ //
+ // Pure functions only — no React, no Supabase. Field names mirror the rest
+-// of the codebase's format engines (`pts`, `w`, `l`, `gd`); no `d` since
+-// this format has no draws.
++// of the codebase's format engines (`pts`, `w`, `l`, `d`, `gd`). STEP 16
++// added draws: a level scoreline can now be logged as a draw (no extra
++// time/penalties needed) instead of always being forced to a decisive
++// result — see recordLadderCupDraw and resolveMatchWinner's isDraw path.
+ //
+ // FORMATS registration (add to the FORMATS array in App.jsx):
+ //   { id: "ladder_cup", label: "Survival Ladder Cup", kind: "ladder_cup",
+@@ -69,6 +71,10 @@ export const LADDER_CUP_RULES = {
+   UPSET_BONUS: 1,
+   HEATER_BONUS: 1,
+   BOUNTY_BONUS: 2,
++  // STEP 16 (draws): flat, same for both clubs — no upset/heater/bounty
++  // stacking, same shape as a walkover's flat scoring.
++  DRAW_POINTS: 2,
++  DRAW_NETS_REWARD: 3, // Nets paid to EACH club's members on a draw (see _credit_ladder_battle_draw_reward)
+   // OPEN DECISION (see ruleset "STILL OPEN"): does extra-time scoring count
+   // toward goal difference? Penalties never do, that's settled. Regulation
+   // always does. This flag is the one switch to flip once that's decided.
+@@ -90,6 +96,7 @@ export function createLadderCupEntry(clubId, clubName) {
+     pts: 0,
+     w: 0,
+     l: 0,
++    d: 0,                  // draws (step 16) — never resets a streak into a positive one, just to 0
+     gd: 0,                // regulation-time goal difference only (see COUNT_EXTRA_TIME_IN_GD)
+     streak: 0,             // current consecutive-win streak, resets to 0 on any loss
+     // Second, independent rating — see the "Matchmaking rating" section
+@@ -270,6 +277,32 @@ export function recordLadderCupWin({
+   return { winner: newWinner, loser: newLoser, winnerPointsBreakdown: breakdown };
+ }
+ 
++/**
++ * STEP 16 (draws): applies a draw to both entries. Flat DRAW_POINTS each —
++ * no upset/heater/bounty bonuses, same "flat, no stacking" shape a
++ * walkover's scoring already uses. Neither side loses a life or moves
++ * toward elimination (a draw isn't a loss); streak (a WIN streak) resets
++ * to 0 for both, same as applyLoss already does on a loss — a draw breaks
++ * a run just as much as losing does, it just doesn't cost a life. gd is
++ * unaffected (the scoreline is level by definition). Nets for a draw
++ * (DRAW_NETS_REWARD each) are credited server-side
++ * (_credit_ladder_battle_draw_reward) — nothing here touches Nets.
++ *
++ * Returns new (not mutated) entry objects: { teamA, teamB }. Call
++ * rankLadderCupStandings on the full entry list again afterward, same as
++ * recordLadderCupWin.
++ */
++export function recordLadderCupDraw({ teamA, teamB }) {
++  const gained = LADDER_CUP_RULES.DRAW_POINTS;
++  const apply = (entry) => ({
++    ...entry,
++    pts: entry.pts + gained,
++    d: (entry.d || 0) + 1,
++    streak: 0,
++  });
++  return { teamA: apply(teamA), teamB: apply(teamB) };
++}
++
+ // ---------------------------------------------------------------------------
+ // Elimination & Second Life
+ // ---------------------------------------------------------------------------
+@@ -503,11 +536,23 @@ export function computeEloUpdate(winnerRating, loserRating, kFactor = LADDER_CUP
+  * Re-run this after any result is logged (played or walkover) — that's the
+  * "logging a result refreshes your opponent slate" rule; it's just calling
+  * this again with fresh entries, not a separate mechanism.
++ *
++ * alreadyFacedClubIds (optional) excludes clubs this entry has already
++ * played a finalized match against (played or walkover) in this Survivor
++ * Ladder Cup — the "opponents only face each other once" rule. Pass the
++ * set of club_ids derived from finalized ladder_cup_matches rows; omitting
++ * it (undefined) preserves the old no-restriction behavior for any caller
++ * that hasn't been updated yet.
+  */
+-export function getOpponentPool(entry, allEntries) {
++export function getOpponentPool(entry, allEntries, alreadyFacedClubIds) {
+   const R = LADDER_CUP_RULES;
+   const myRating = entry.ladder_rating ?? R.RATING_START;
+-  const eligible = allEntries.filter((e) => e.club_id !== entry.club_id && e.status === "active");
++  const eligible = allEntries.filter(
++    (e) =>
++      e.club_id !== entry.club_id &&
++      e.status === "active" &&
++      !(alreadyFacedClubIds && alreadyFacedClubIds.has(e.club_id))
++  );
+   if (eligible.length === 0) return [];
+ 
+   const ratingOf = (e) => e.ladder_rating ?? R.RATING_START;
+@@ -732,9 +777,15 @@ export function substitutionsAllowed(decidedBy) {
+  * applies points — so everything that could make a result nonsensical has
+  * to be caught here first.
+  *
++ * STEP 16 (draws): pass isDraw: true instead of an extra time/penalty
++ * score to log a level scoreline as a draw rather than forcing it to a
++ * decisive result. Only valid when homeGoals === awayGoals — throws
++ * otherwise, same as every other inconsistent combination here.
++ *
+  * Doesn't touch entries or points itself. Returns { winnerSide: "home" |
+- * "away" }; throws an Error with a message safe to show the user directly
+- * on anything inconsistent.
++ * "away", decidedBy } for a decisive result, or { isDraw: true, decidedBy:
++ * "draw" } for a draw; throws an Error with a message safe to show the
++ * user directly on anything inconsistent.
+  *
+  * @param {object} p
+  * @param {number} p.homeGoals - regulation-time goals
+@@ -743,11 +794,18 @@ export function substitutionsAllowed(decidedBy) {
+  * @param {number} [p.extraTimeAwayGoals]
+  * @param {number|null} [p.pensHome]
+  * @param {number|null} [p.pensAway]
++ * @param {boolean} [p.isDraw]
+  */
+ export function resolveMatchWinner({
+   homeGoals, awayGoals, extraTimeHomeGoals = 0, extraTimeAwayGoals = 0,
+-  pensHome = null, pensAway = null,
++  pensHome = null, pensAway = null, isDraw = false,
+ }) {
++  if (isDraw) {
++    if (homeGoals !== awayGoals) {
++      throw new Error("Scores aren't level — this can't be logged as a draw.");
++    }
++    return { isDraw: true, decidedBy: "draw" };
++  }
+   if (homeGoals !== awayGoals) {
+     return { winnerSide: homeGoals > awayGoals ? "home" : "away", decidedBy: "regulation" };
+   }
+@@ -755,7 +813,7 @@ export function resolveMatchWinner({
+     return { winnerSide: extraTimeHomeGoals > extraTimeAwayGoals ? "home" : "away", decidedBy: "extra_time" };
+   }
+   if (pensHome == null || pensAway == null) {
+-    throw new Error("Match finished level — add an extra time or penalty shootout score.");
++    throw new Error("Match finished level — add an extra time or penalty shootout score, or log it as a draw.");
+   }
+   if (pensHome === pensAway) {
+     throw new Error("Penalties can't be level too — someone has to win.");

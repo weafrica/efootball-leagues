@@ -1,0 +1,24 @@
+--- /home/claude/orig/RapidCupBanner.jsx	2026-09-04 03:00:55.066810075 +0000
++++ src/RapidCupBanner.jsx	2026-09-04 03:02:23.919782990 +0000
+@@ -1,7 +1,8 @@
+ import React, { useState, useEffect, useCallback, useRef } from "react";
+ import { Info, X } from "lucide-react";
+ import { supabase } from "./supabaseClient";
+-import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
++import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
++import { useCountdownDrumroll } from "./RapidCupEpicExtras.jsx";
+ 
+ // RapidCupBanner — horizontal banner for the home screen, sits under
+ // Quick Actions (see App.jsx home layout). Shows the current open
+@@ -209,6 +210,11 @@
+   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
+   const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
+ 
++  // Countdown drumroll (Section 13, Phase 9) — last 10s of this same
++  // lobby-reset timer, once per lobby. Only while the lobby is still
++  // "open" (filling), same gating as the 15/5/1 min toasts below.
++  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
++
+   // Countdown notifications at 15/5/1 min remaining — fires once per
+   // threshold per lobby.
+   useEffect(() => {

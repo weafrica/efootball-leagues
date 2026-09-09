@@ -1,0 +1,140 @@
+diff --git a/RAPID-CUP-BUILD-PLAN.md b/RAPID-CUP-BUILD-PLAN.md
+index 4b9bb14..5454024 100644
+--- a/RAPID-CUP-BUILD-PLAN.md
++++ b/RAPID-CUP-BUILD-PLAN.md
+@@ -203,5 +203,11 @@ player_gets    = invested_share × 20%   (on top of self_share, and on top of ba
+   - **Frontend `iWon` gap closed:** `RapidCupWinbox` now accepts `fixture` + `myTeamId` and computes eligibility itself (mirroring the server's exact winner rule), instead of requiring the caller to work out "did I win" and pass it in as a boolean. An explicit `iWon` prop still overrides if a caller wants to supply it directly. Purely cosmetic before (server always enforced this correctly either way), but removes a class of "button doesn't show / shows a confusing error" caller mistakes.
+   - **Still open, unchanged from before:** the Winbox/Cup box buttons aren't wired into the actual fixture-detail/tournament pages yet — still waiting on that page's code path to do the integration.
+ - ⬜ Phase 7 — not started
++- ✅ **Phase 7 — shipped** (`src/App.jsx` Home + `SUPPORT_WHATSAPP_NUMBER` export, `src/RapidCupPrizeCollection.jsx` RapidCupHelpButton, `src/LeagueDetail.jsx` myUsername plumbing)
++  - **History archive:** no new code needed — `isLeagueCompleted()` already treats `format === "knockout"` (what `generate_rapid_cup_bracket` creates every Rapid Cup league as) as completed once the bracket is down to one winner, so a finished Rapid Cup automatically moves into `CompletedLeaguesPage` the same way every other league does, with the same read-only reopen via `onOpen`. Verified against a live Supabase test league.
++  - **Help button → WhatsApp:** new `RapidCupHelpButton` inside `RapidCupTournamentExtras` (renders for any Rapid Cup league, not gated behind having played a fixture yet), reusing the existing `waLink`/`WHATSAPP_GREEN` helpers and the site's one `SUPPORT_WHATSAPP_NUMBER` (now exported from App.jsx for this). Prefilled message includes "Rapid Cup", the player's username (threaded down as a new `myUsername` prop on `RapidCupTournamentExtras`), and a direct `?league=<id>` link back into the tournament.
++  - **Home banner mount:** `RapidCupBanner` is now imported and rendered in `Home`, directly under the Quick Actions tile row and above the League Ladder section, per Section 12. `onOpenLeague` reuses the same `onOpen` handler every other league card on Home already uses; there's no dedicated lobby page yet, so `onOpenLobby` (tapping the banner body before it's full/live) is just a toast nudge toward the Join button rather than real navigation.
++  - Verified with a clean `npm run build` (1583 modules, no errors) — the `LeagueDetail`/`RapidCupPrizeCollection` lazy chunk importing `waLink`/`SUPPORT_WHATSAPP_NUMBER` from `App.jsx` bundles fine, same pattern `LeagueLadderDetail.jsx` already uses.
++  - **Not done (deliberately out of scope for this pass):** no dedicated "Rapid Cup" badge/label on `LeagueCard` or a bespoke completed-Rapid-Cup summary (pool size, per-player fees) in `CompletedLeaguesPage` — the plan's own Section 9 wording ("same pattern as CompletedLeaguesPage") reads as "reuse the existing generic display", and the generic knockout-format card already shows team count, played/fixtures, and the leader without erroring on Rapid Cup's null `members.entry_fee`. Worth a follow-up if you want Rapid Cup to look visually distinct in the archive rather than just another knockout league.
+ - ⬜ Phase 8 — not started
+ - ⬜ Phase 9 — not started
+diff --git a/src/App.jsx b/src/App.jsx
+index 92ba771..357db13 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -14,6 +14,7 @@ import { creditNets, debitNets, formatNets } from "./nets.js";
+ import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN_FEE_NETS, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS } from "./economy.js";
+ import { computeStandings as computeLeagueLadderStandings, classifyLadderZones } from "./formats/leagueLadder.js";
+ import { getLadderTierTheme } from "./ladderTierThemes.js";
++import RapidCupBanner from "./RapidCupBanner.jsx";
+ // Lazy-loaded rather than imported directly: Shop.jsx alone is well over a
+ // thousand lines, and neither it nor the Terms page is needed for the
+ // initial render — bundling them in eagerly meant every single visitor
+@@ -2333,8 +2334,11 @@ export function avatarColor(seed) {
+ export const WHATSAPP_GREEN = "#25D366";
+ 
+ // The one support line for the whole site — shown as a floating button on
+-// every screen (signed in or not) so anyone can reach a human fast.
+-const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
++// every screen (signed in or not) so anyone can reach a human fast. Exported
++// so a specific screen (e.g. RapidCupTournamentExtras' Help button) can build
++// its own richer prefilled message against the same number, rather than only
++// getting the generic SupportWhatsAppButton context string.
++export const SUPPORT_WHATSAPP_NUMBER = "+27694362789";
+ 
+ // How long a member's row stays highlighted red after an admin taps their
+ // WhatsApp icon (see markWaReminder / isWaReminderActive below). Simple
+@@ -11089,6 +11093,22 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
+             ))}
+           </div>
+         )}
++        {/* Rapid Cup — horizontal banner right under Quick Actions (see
++            RAPID-CUP-BUILD-PLAN.md Section 12). Self-contained: it polls
++            for the current open/filling/live lobby itself and renders
++            nothing when there isn't one, so it never pushes the rest of
++            Home down when Rapid Cup is quiet. onOpenLeague reuses the
++            same "open a league by id" handler every other card on this
++            page already uses; there's no separate lobby page yet, so
++            onOpenLobby (tapping the banner before it's live/full) is just
++            a light nudge toward the Join button rather than a real
++            navigation. */}
++        <RapidCupBanner
++          onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
++          onOpenLeague={onOpen}
++          showToast={showToast}
++          c={c}
++        />
+         {/* League Ladder section — moved up to sit directly below the Quick
+             actions row per request (was further down inside
+             LeagueListsSection, after the plain Leagues grid). Replaces the
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index c19f5bb..eb99b9c 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -2056,7 +2056,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
+           <FindYourself league={league} stageFixtures={stageFixtures} inGroupStage={inGroupStage} inKnockoutBracket={inKnockoutBracket}
+             groupStageFixtures={groupStageFixtures} canSeePhones={canSeePhones} c={c} />
+           {joined && myTeam && (
+-            <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} showToast={showToast} c={c} />
++            <RapidCupTournamentExtras league={league} session={session} myTeam={myTeam} myUsername={myUsername} showToast={showToast} c={c} />
+           )}
+           {(joined || canManage) && (
+             <OpponentFinder teams={league.teams} fixtures={stageFixtures} totalRounds={totalRounds} canManage={canManage} joined={joined}
+diff --git a/src/RapidCupPrizeCollection.jsx b/src/RapidCupPrizeCollection.jsx
+index b352c06..00ad97f 100644
+--- a/src/RapidCupPrizeCollection.jsx
++++ b/src/RapidCupPrizeCollection.jsx
+@@ -1,5 +1,7 @@
+ import React, { useState, useEffect, useCallback } from "react";
++import { MessageCircle } from "lucide-react";
+ import { supabase } from "./supabaseClient";
++import { waLink, WHATSAPP_GREEN, SUPPORT_WHATSAPP_NUMBER } from "./App.jsx";
+ 
+ // Rapid Cup — Phase 6: Winbox / Cup box tap-to-collect (Section 8).
+ //
+@@ -153,7 +155,7 @@ export function RapidCupCupbox({ lobbyId, myUserId, showToast, c }) {
+ // through every caller, this queries rapid_cup_lobbies for the league id
+ // itself and renders nothing if no lobby points at it — a normal league
+ // gets nothing extra here, a Rapid Cup league gets its boxes automatically.
+-export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c }) {
++export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, showToast, c }) {
+   const [lobby, setLobby] = useState(null); // null = loading; false = not a Rapid Cup league
+ 
+   useEffect(() => {
+@@ -183,11 +185,12 @@ export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c
+     ? (league.fixtures || []).filter((f) => f.played && (f.home_team_id === myTeamId || f.away_team_id === myTeamId))
+     : [];
+ 
+-  if (!myPlayedFixtures.length && lobby.status !== "completed") return null;
++  const showBoxes = myPlayedFixtures.length > 0 || lobby.status === "completed";
+ 
+   return (
+     <div className="space-y-2">
+-      {myPlayedFixtures.map((f) => (
++      <RapidCupHelpButton league={league} myUsername={myUsername} c={c} />
++      {showBoxes && myPlayedFixtures.map((f) => (
+         <RapidCupWinbox key={f.id} fixtureId={f.id} myUserId={myUserId} myTeamId={myTeamId} fixture={f} showToast={showToast} c={c} />
+       ))}
+       {lobby.status === "completed" && (
+@@ -196,3 +199,25 @@ export function RapidCupTournamentExtras({ league, session, myTeam, showToast, c
+     </div>
+   );
+ }
++
++// Rapid Cup Help button (Section 11) — reuses the same wa.me link builder
++// and support number every other WhatsApp entry point in the app uses
++// (see WhatsAppLink/SupportWhatsAppButton in App.jsx), but with a richer
++// prefilled message than the generic floating support button: which
++// tournament this is, who's asking, and a direct link straight back into
++// this league so the admin doesn't have to go hunting for it.
++function RapidCupHelpButton({ league, myUsername, c }) {
++  const leagueUrl = typeof window !== "undefined"
++    ? `${window.location.origin}${window.location.pathname}?league=${league.id}`
++    : "";
++  const text = `Hi, I need help with my Rapid Cup${myUsername ? ` (${myUsername})` : ""}: ${league.name}. ${leagueUrl}`;
++  const href = waLink(SUPPORT_WHATSAPP_NUMBER, text);
++  if (!href) return null;
++  return (
++    <a href={href} target="_blank" rel="noopener noreferrer" title="Get help with this Rapid Cup on WhatsApp"
++      className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full"
++      style={{ background: "rgba(37,211,102,0.14)", color: WHATSAPP_GREEN }}>
++      <MessageCircle size={12} /> Help — WhatsApp
++    </a>
++  );
++}
