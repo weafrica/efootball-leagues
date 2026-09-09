@@ -25,7 +25,11 @@ update rapid_cup_lobbies l set cup_number = n.rn
 from numbered n
 where n.id = l.id;
 
-select setval('rapid_cup_number_seq', coalesce((select max(cup_number) from rapid_cup_lobbies), 0));
+select setval(
+  'rapid_cup_number_seq',
+  coalesce((select max(cup_number) from rapid_cup_lobbies), 1),
+  exists (select 1 from rapid_cup_lobbies)
+);
 
 alter table rapid_cup_lobbies alter column cup_number set default nextval('rapid_cup_number_seq');
 alter table rapid_cup_lobbies alter column cup_number set not null;
