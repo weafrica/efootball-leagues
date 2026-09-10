@@ -1,0 +1,15 @@
+echo "pre-push: resetting local db and running pgTAP suite..."
+
+supabase db reset
+if [ $? -ne 0 ]; then
+  echo "supabase db reset failed - migrations do not apply cleanly. Push blocked."
+  exit 1
+fi
+
+supabase test db
+if [ $? -ne 0 ]; then
+  echo "pgTAP tests failed. Push blocked."
+  exit 1
+fi
+
+echo "db reset + tests passed. Pushing."
