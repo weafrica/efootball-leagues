@@ -1568,7 +1568,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                     THIS specific match doesn't have to scroll back up to find
                     it. Opens the identical leagueLadder RulesModal (shared
                     rulesOpen state), not a separate instance per row. */}
-                <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} />
+                <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} bright />
               </div>
 
               {(f.status === "played" || f.status === "forfeited") && (correctingId === f.id ? (
@@ -1893,7 +1893,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
           <ArrowLeft size={14} /> Back
         </button>
         <div className="flex items-center gap-2 shrink-0">
-          <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} />
+          <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} bright />
           {tier != null && (
             <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
               style={{ color: c.accentText, background: c.accent }}>

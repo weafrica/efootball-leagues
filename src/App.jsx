@@ -3549,9 +3549,15 @@ export function VoiceNotePlayer({ url, duration, c, compact = false }) {
 // Small pill button that opens a RulesModal — dropped in wherever a player
 // might want a quick reminder of how something works without leaving the
 // screen: on a league page, next to the ladder, and in the challenges hub.
-export function RulesButton({ label, onClick, c }) {
+// bright (optional, default false) — swaps the default muted surface/
+// textDim styling for the theme's accent color instead. Opt-in per call
+// site rather than a global restyle, so League Ladder's Help buttons can
+// stand out without changing how League Rules/Challenge Rules look
+// everywhere else they're already used.
+export function RulesButton({ label, onClick, c, bright = false }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surface, color: c.textDim }}>
+    <button onClick={onClick} className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded-full shrink-0"
+      style={bright ? { background: c.accent, color: c.accentText } : { background: c.surface, color: c.textDim }}>
       <Info size={11} /> {label}
     </button>
   );
