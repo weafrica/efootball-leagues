@@ -1559,8 +1559,16 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   const renderFixtureRow = (f) => (
             <div key={f.id} className="rounded-lg border p-3 flex flex-col gap-1.5" style={{ borderColor: c.border }}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="font-mono text-xs" style={{ color: c.text }}>
-                {nameFor(f.home_user_id)} <span style={{ color: c.textFaint }}>vs</span> {nameFor(f.away_user_id)}
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="font-mono text-xs" style={{ color: c.text }}>
+                  {nameFor(f.home_user_id)} <span style={{ color: c.textFaint }}>vs</span> {nameFor(f.away_user_id)}
+                </div>
+                {/* Same Help button/content as the screen header's — repeated
+                    per-fixture so a player mid-arrangement or mid-dispute on
+                    THIS specific match doesn't have to scroll back up to find
+                    it. Opens the identical leagueLadder RulesModal (shared
+                    rulesOpen state), not a separate instance per row. */}
+                <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} />
               </div>
 
               {(f.status === "played" || f.status === "forfeited") && (correctingId === f.id ? (
@@ -1885,7 +1893,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
           <ArrowLeft size={14} /> Back
         </button>
         <div className="flex items-center gap-2 shrink-0">
-          <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+          <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} />
           {tier != null && (
             <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
               style={{ color: c.accentText, background: c.accent }}>
@@ -1897,7 +1905,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
 
       {rulesOpen && (
         <Suspense fallback={null}>
-          <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />
+          <RulesModal type="leagueLadder" onClose={() => setRulesOpen(false)} c={c} />
         </Suspense>
       )}
 

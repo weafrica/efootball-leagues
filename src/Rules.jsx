@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Info, Pause, Play, Search, Square, Swords, Target, Trophy, Volume2, X } from "lucide-react";
+import { Info, Layers, Pause, Play, Search, Square, Swords, Target, Trophy, Volume2, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { pickBestVoice } from "./utils/pickBestVoice";
 
@@ -80,6 +80,58 @@ const RULES_CONTENT = {
         "🤔 Otherwise it looks like you don't want to play.",
         "📅 If you're busy, set and confirm the date.",
         "✅ Can't make it? Give your opponent the win.",
+      ]},
+    ],
+  },
+  // leagueLadder — the 6-player tiered ladder (League 1, League 2, ...)
+  // with promotion/relegation and live bidding, LeagueLadderDetail.jsx.
+  // NOT the same system as `ladder` above (that's the older, single
+  // permanent-ranking Survival/Ladder Battles system, Ladder.jsx) — kept
+  // as its own category rather than merged in, since the mechanics don't
+  // overlap at all. Content sourced from the actual engine this screen
+  // runs on (formats/leagueLadder.js, economy.js's League Ladder pricing
+  // section, and the ladder_fixture_result_submissions/bidding
+  // migrations) rather than the community RULES.md this file otherwise
+  // mirrors, since League Ladder predates that doc.
+  leagueLadder: {
+    icon: Layers,
+    title: "League Ladder Rules",
+    sections: [
+      { heading: "How it works", items: [
+        "6 players per league. Double round-robin — you play everyone home and away, 10 fixtures a week.",
+        "Win = 3 points, draw = 1, loss = 0. Ties broken by goal difference, then goals scored.",
+        "Rank 1 auto-promotes to the league above — except League 1, the top tier, which has nowhere higher to go.",
+        "Bottom 2 are relegated, every league, every week — including League 1.",
+      ]},
+      { heading: "Zones", items: [
+        "🟢 Elite Safety — the leader is 6+ points clear of 2nd place.",
+        "🟡 Checkpoint Safety — the rank just above the drop zone is 6+ points clear of it.",
+        "🔴 Danger Zone — bottom 2, currently heading for relegation.",
+      ]},
+      { heading: "Fixtures & deadlines", items: [
+        "Each round releases on a staggered schedule through the week, Monday to Saturday.",
+        "Once released, you have 24 hours to play it before it's forfeited.",
+        "A missed fixture is a 4-0 loss for both sides — no goals scored, no points, no reward.",
+        "The week closes Sunday 23:59 UTC.",
+      ]},
+      { heading: "Submitting a result", items: [
+        "A photo of the final scoreboard is required, same as everywhere else.",
+        "Your opponent has 30 minutes to confirm or dispute it.",
+        "No response, or this fixture's 2nd rejected attempt, sends it to an admin — auto-approved after 1 hour if nobody acts.",
+      ]},
+      { heading: "Nets & rewards", items: [
+        "Entry fee and Match Reward scale with how close your league is to the current top tier — closer to the top, higher stakes.",
+        "First-leg fixtures (the first half of the week's schedule) earn an Early Bonus on top of the normal Match Reward.",
+        "2+ wins in a row earns a Streak Bonus — an extra 10% of your league's current Match Reward.",
+      ]},
+      { heading: "Live bidding", items: [
+        "Bottom-2 (relegation zone) players, plus non-promoting risers from the league below, can bid for a seat one tier up.",
+        "Highest bid by Sunday wins the seat. Getting outbid refunds you instantly, live — no waiting for Sunday.",
+        "Minimum bid is that tier's current entry fee.",
+        "An auto-promoting rank-1 player isn't in the bidding pool — they don't need to buy their way in.",
+      ]},
+      { heading: "Wall of Fame", items: [
+        "League 1's #1 player at Sunday's cutoff earns a permanent Wall of Fame title.",
       ]},
     ],
   },
