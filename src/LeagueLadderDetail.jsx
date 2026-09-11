@@ -785,7 +785,6 @@ function buildOpponentChaseMessage(name, countdownText, theirLocation = null, my
 // ─────────────────────────────────────────────────────────────────────────
 const RESULT_CONFIRM_WINDOW_MINUTES = 30;
 const DISPUTE_ESCALATION_THRESHOLD = 2;
-const ADMIN_AUTO_APPROVE_WINDOW_MINUTES = 60;
 
 function confirmDeadline(submission) {
   return new Date(new Date(submission.created_at).getTime() + RESULT_CONFIRM_WINDOW_MINUTES * 60 * 1000);
@@ -815,23 +814,6 @@ function resultEscalationReason(fixtureSubmissions, submission) {
   if (priorRejectedCount(fixtureSubmissions, submission) >= DISPUTE_ESCALATION_THRESHOLD) return "dispute-cap";
   if (confirmExpired(submission)) return "timeout";
   return null;
-}
-
-// When a submission actually ENTERED the admin queue — needed to know
-// when its 1-hour auto-approve window (the sweep job, 20260891) runs out.
-// Dispute-cap escalations are queue-eligible from the moment they're
-// created; timeout escalations only become queue-eligible once the
-// 30-minute opponent window lapses. Mirrors the sweep's own SQL exactly.
-function escalatedAt(fixtureSubmissions, submission) {
-  if (priorRejectedCount(fixtureSubmissions, submission) >= DISPUTE_ESCALATION_THRESHOLD) {
-    return new Date(submission.created_at);
-  }
-  return confirmDeadline(submission);
-}
-function autoApproveMinutesLeft(fixtureSubmissions, submission) {
-  const deadline = new Date(escalatedAt(fixtureSubmissions, submission).getTime() + ADMIN_AUTO_APPROVE_WINDOW_MINUTES * 60 * 1000);
-  const ms = deadline.getTime() - Date.now();
-  return ms <= 0 ? 0 : Math.ceil(ms / (60 * 1000));
 }
 
 // JoinLadderLeagueBanner — the missing "join flow" LeagueLadderDetail's own
@@ -1833,7 +1815,6 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                 // awaiting the admin, plus how long until the 1-hour
                 // auto-approve sweep would resolve it on its own.
                 if (pending && escalation) {
-                  const autoApproveMins = autoApproveMinutesLeft(submissionsFor(f), pending);
                   if (isAdmin) {
                     return (
                       <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
@@ -1848,7 +1829,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                           </button>
                         )}
                         <span className="font-mono text-[10px] uppercase" style={{ color: c.red }}>
-                          {escalation === "dispute-cap" ? "disputed twice" : "timed out"} · auto-approves in {autoApproveMins}m
+                          {escalation === "dispute-cap" ? "disputed twice" : "timed out"} · awaiting admin approval
                         </span>
                         <button onClick={() => adminApprove(pending.id)} disabled={adminActingId === pending.id}
                           className="font-mono text-[10px] uppercase px-2 py-1 rounded"
@@ -1865,7 +1846,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                   }
                   return (
                     <span className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
-                      Awaiting admin review (auto-approves in {autoApproveMins}m)
+                      Awaiting admin review — an admin will approve it.
                     </span>
                   );
                 }
