@@ -117,7 +117,7 @@ const RULES_CONTENT = {
       { heading: "Submitting a result", items: [
         "A photo of the final scoreboard is required, same as everywhere else.",
         "Your opponent has 30 minutes to confirm or dispute it.",
-        "No response, or this fixture's 2nd rejected attempt, sends it to an admin — auto-approved after 1 hour if nobody acts.",
+        "No response, or this fixture's 2nd rejected attempt, sends it to an admin, who will approve it.",
       ]},
       { heading: "Nets & rewards", items: [
         "Entry fee and Match Reward scale with how close your league is to the current top tier — closer to the top, higher stakes.",
