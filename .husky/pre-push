@@ -1,15 +1,12 @@
+echo "pre-push: checking for local container runtime..."
+
+if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+  echo "No Docker or Podman found - skipping local db reset + pgTAP suite."
+  echo "Relying on CI to validate this push instead."
+  exit 0
+fi
+
 echo "pre-push: resetting local db and running pgTAP suite..."
-
-supabase db reset
-if [ $? -ne 0 ]; then
-  echo "supabase db reset failed - migrations do not apply cleanly. Push blocked."
-  exit 1
-fi
-
-supabase test db
-if [ $? -ne 0 ]; then
-  echo "pgTAP tests failed. Push blocked."
-  exit 1
-fi
-
+supabase db reset || { echo "supabase db reset failed. Push blocked."; exit 1; }
+supabase test db || { echo "pgTAP tests failed. Push blocked."; exit 1; }
 echo "db reset + tests passed. Pushing."
