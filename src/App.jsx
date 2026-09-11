@@ -2206,6 +2206,32 @@ export function weekendGroupStageCutoffUTC(startsAt) {
   return new Date(new Date(startsAt).getTime() + ONE_DAY_MS);
 }
 
+// MONTH-END LEAGUE — the monthly cash counterpart to the Weekend League
+// above. Same "format === groups_knockout required" reasoning as
+// isWeekendLeague (otherwise some unrelated admin-created cash league
+// whose starts_at happens to land in the current calendar month would get
+// counted as THE Month-End League) plus league_type === "cash" as the
+// extra distinguishing check Month-End League needs that Weekend League
+// doesn't (Weekend League is always 'fun' — see 20260938_month_end_league_
+// auto_cycle.sql's header). "Current calendar month" is a plain UTC
+// calendar-month check (this league runs on UTC clock times throughout,
+// same convention as the Weekend League's own Sep-2026 move off SAST —
+// see 20260902111822_weekend_league_utc_timing_and_auto_knockout.sql).
+export function isMonthEndLeague(league, now = new Date()) {
+  if (!league || !league.created_by_admin || !league.starts_at || league.format !== "groups_knockout" || league.league_type !== "cash") return false;
+  const startsAtDate = new Date(league.starts_at);
+  return startsAtDate.getUTCFullYear() === now.getUTCFullYear() && startsAtDate.getUTCMonth() === now.getUTCMonth();
+}
+
+// Group stage runs 10 days from kickoff (vs. the Weekend League's 24h) —
+// see 20260938_month_end_league_auto_cycle.sql for the server-side half
+// (the actual auto-advance-to-knockout sweep) that this mirrors on the
+// client, exactly the same "+duration from startsAt" shape as
+// weekendGroupStageCutoffUTC above.
+export function monthEndGroupStageCutoffUTC(startsAt) {
+  return new Date(new Date(startsAt).getTime() + 10 * ONE_DAY_MS);
+}
+
 // The league runs on SAST (see fmtDate above), so the nightly pause is a SAST
 // wall-clock window too — not whatever timezone the visitor's device happens
 // to be in. South Africa doesn't observe DST, so SAST is a fixed UTC+2.
@@ -6069,9 +6095,12 @@ export default function App() {
       // and the knockout bracket auto-generates right at that moment (see
       // 20260925_weekend_league_group_stage_auto_advance.sql), instead of
       // an admin having to set this manually the way every other
-      // groups_knockout league still does.
+      // groups_knockout league still does. Month-End League gets the same
+      // treatment, 10 days out instead of 24h (see
+      // 20260938_month_end_league_auto_cycle.sql).
       const groupStageUpdate = { groups_count: groupsCount };
       if (isWeekendLeague(league)) groupStageUpdate.group_stage_due_at = weekendGroupStageCutoffUTC(league.starts_at).toISOString();
+      else if (isMonthEndLeague(league)) groupStageUpdate.group_stage_due_at = monthEndGroupStageCutoffUTC(league.starts_at).toISOString();
       await supabase.from("leagues").update(groupStageUpdate).eq("id", league.id);
     }
     const ok = await insertChunked("fixtures", fixtureRows, showToast);
