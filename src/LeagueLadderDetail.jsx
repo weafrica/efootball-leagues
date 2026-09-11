@@ -22,7 +22,7 @@
 // system entirely.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays } from "lucide-react";
+import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Target } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
@@ -929,13 +929,16 @@ function OpponentTimezoneInfo({ theirLocation, myTimezone, c }) {
   );
 }
 
-// WIDGET_TABS — the four lazy-loaded widgets shown below the Standings
-// table (Results, Bids, Fixtures, Comments). Module-level (not per-render)
+// WIDGET_TABS — the three lazy-loaded widgets shown below the Standings
+// table (Results, Fixtures, Comments). Module-level (not per-render)
 // since it's static; the tab bar just maps over it and only the active
-// one's content actually mounts (see activeWidget below).
+// one's content actually mounts (see activeWidget below). Bids used to be
+// its own fourth tab here, but the bidding war is really about THIS
+// week's fixtures, so it's now folded into the top of the Fixtures tab
+// (see the Tactics Board block rendered there) instead of hidden a tap
+// away on its own.
 const WIDGET_TABS = [
   { id: "results", label: "Results", Icon: ListChecks },
-  { id: "bids", label: "Bids", Icon: Gavel },
   { id: "fixtures", label: "Fixtures", Icon: CalendarDays },
   { id: "comments", label: "Comments", Icon: MessageCircle },
 ];
@@ -1239,12 +1242,16 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
     const draft = scoreDrafts[fixtureId];
     // An untouched side is treated as 0 rather than forcing the player to
     // type it explicitly — a 3-0 result only needs the "3" entered, and a
-    // 0-0 result doesn't need either box touched at all. Still bail out
-    // entirely if BOTH sides were left blank (draft never opened, or
-    // cleared back out) — that's "nothing entered", not "0-0 entered".
-    if (!draft || (draft.home === "" && draft.away === "")) return;
-    const homeScore = draft.home === "" ? 0 : Number(draft.home);
-    const awayScore = draft.away === "" ? 0 : Number(draft.away);
+    // 0-0 result doesn't need either box touched at all. Note draft.home/
+    // draft.away can be `undefined` (that side's input was never typed
+    // into at all, so its key was never set on the draft object) as well
+    // as `""` (typed into, then cleared) — both mean "nothing entered",
+    // and both must fall back to 0 here. Using `||` (not a `=== ""`
+    // check) catches both; Number(undefined) is NaN, which is what was
+    // silently reaching the server as an invalid score before this fix.
+    if (!draft || (!draft.home && !draft.away)) return;
+    const homeScore = draft.home ? Number(draft.home) : 0;
+    const awayScore = draft.away ? Number(draft.away) : 0;
     const file = proofFiles[fixtureId];
     if (!file) { showToast("Attach a photo of the final scoreboard before submitting."); return; }
 
@@ -2039,7 +2046,15 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
           </div>
         )}
 
-        {activeWidget === "bids" && (
+        {activeWidget === "fixtures" && (() => {
+          // tacticsBoardContent — the old standalone Bids tab, folded into
+          // the top of Fixtures instead of hidden a tap away on its own
+          // (per the redesign request). Kept as an IIFE-scoped const so
+          // the huge pre-existing bidding-eligibility JSX below didn't
+          // need to be re-indented or split out of this component's
+          // closure (it still reads cycle/displayWeek/isMember/etc.
+          // straight from render scope, same as before).
+          const tacticsBoardContent = (
           <div className="flex flex-col gap-3">
       {/* PromotionBidBanner + embedded ticker — this league's OWN bid
           ticker (right below) is for bidding on THIS league's spot from
@@ -2141,10 +2156,51 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
               </div>
             )}
           </div>
-        )}
+          );
 
-        {activeWidget === "fixtures" && (
+          // Only actually worth showing the Tactics Board at all when
+          // there's something happening — either bidding's live this
+          // week, or the player is sitting in the Danger Zone (the one
+          // banner that renders even with bidding closed). Otherwise it'd
+          // just be a big empty pitch above the fixture list every week
+          // bidding's shut.
+          const hasBidActivity = (cycle?.bidding_open && displayWeek === cycle?.current_week) || myZone === "danger_zone";
+
+          return (
           <div className="flex flex-col gap-3">
+            {hasBidActivity && (
+              // "Tactics Board" — a chalkboard-style pitch backdrop
+              // (turf-stripe gradient + a faint center-circle/halfway-line
+              // SVG) behind the same bidding content that used to live on
+              // its own Bids tab, now surfaced right above this week's
+              // fixtures instead of a tap away.
+              <div className="relative overflow-hidden rounded-2xl p-4"
+                style={{
+                  border: `2px dashed ${c.accent}88`,
+                  background: `repeating-linear-gradient(135deg, ${c.surface} 0px, ${c.surface} 26px, ${c.surfaceHover} 26px, ${c.surfaceHover} 52px)`,
+                }}>
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 400 200" preserveAspectRatio="none" style={{ opacity: 0.16 }}>
+                  <line x1="200" y1="0" x2="200" y2="200" stroke={c.accent} strokeWidth="1.5" />
+                  <circle cx="200" cy="100" r="34" fill="none" stroke={c.accent} strokeWidth="1.5" />
+                  <circle cx="200" cy="100" r="2.5" fill={c.accent} />
+                  <rect x="0" y="55" width="28" height="90" fill="none" stroke={c.accent} strokeWidth="1.5" />
+                  <rect x="372" y="55" width="28" height="90" fill="none" stroke={c.accent} strokeWidth="1.5" />
+                </svg>
+                <div className="relative flex items-center gap-2 mb-3">
+                  <div className="flex items-center justify-center rounded-lg p-1.5" style={{ background: c.accent }}>
+                    <Target size={13} style={{ color: c.accentText }} />
+                  </div>
+                  <span className="font-mono text-[10px] uppercase tracking-widest font-bold" style={{ color: c.accent }}>
+                    Tactics Board · Live Bidding
+                  </span>
+                  <Gavel size={12} style={{ color: c.accent, opacity: 0.6 }} className="ml-auto" />
+                </div>
+                <div className="relative">
+                  {tacticsBoardContent}
+                </div>
+              </div>
+            )}
+
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: c.textFaint }} />
               <input type="text" value={opponentQuery} onChange={(e) => setOpponentQuery(e.target.value)}
@@ -2161,7 +2217,8 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {activeWidget === "comments" && (
           <LadderLeagueComments leagueId={leagueId} session={session} isAdmin={isAdmin} isMember={isMember} nameFor={nameFor} showToast={showToast} c={c} />
