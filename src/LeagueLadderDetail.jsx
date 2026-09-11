@@ -21,13 +21,20 @@
 // unrelated Survival Ladder Cup format — same "ladder" word, different
 // system entirely.
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
 import { ladderEntryFeeForTier } from "./economy.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
+import { RulesButton, timeAgo } from "./App.jsx";
+
+// Same lazy-loaded rules reference the home-screen Ladder Battles card
+// uses (App.jsx line ~11878) — reused here rather than duplicated, so this
+// screen's "Ladder Rules" button opens the exact same, single source of
+// truth content instead of a second copy that can drift out of sync.
+const RulesModal = lazy(() => import("./Rules.jsx"));
 import { NetsAmount } from "./NetCoinIcon";
 import CountdownBadge from "./CountdownBadge.jsx";
 import { FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
@@ -943,6 +950,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   // most commonly-needed widget (this week's matchups) — rather than
   // nothing, so the screen isn't empty on first open.
   const [activeWidget, setActiveWidget] = useState("fixtures");
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [cycle, setCycle] = useState(null); // { current_week, fixtures_locked, bidding_open }
   // displayWeek — the week whose fixtures this screen actually shows.
   // NOT the same thing as cycle.current_week: join_ladder_league() always
@@ -1600,6 +1608,11 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
               ) : (
                 <div className="flex items-center gap-2">
                   <div className="font-mono text-sm font-bold" style={{ color: c.text }}>{f.home_score} - {f.away_score}</div>
+                  {f.played_at && (
+                    <span className="font-mono text-[9px]" style={{ color: c.textFaint }} title={new Date(f.played_at).toLocaleString()}>
+                      {timeAgo(f.played_at)}
+                    </span>
+                  )}
                   {f.status === "forfeited" && (
                     <span className="font-mono text-[9px] uppercase" style={{ color: c.red }}>{forfeitedLabelForWeek()}</span>
                   )}
@@ -1864,13 +1877,22 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
         <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
           <ArrowLeft size={14} /> Back
         </button>
-        {tier != null && (
-          <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
-            style={{ color: c.accentText, background: c.accent }}>
-            League {tier} · {c.name}
-          </span>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          <RulesButton label="Ladder Rules" onClick={() => setRulesOpen(true)} c={c} />
+          {tier != null && (
+            <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-full"
+              style={{ color: c.accentText, background: c.accent }}>
+              League {tier} · {c.name}
+            </span>
+          )}
+        </div>
       </div>
+
+      {rulesOpen && (
+        <Suspense fallback={null}>
+          <RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={c} />
+        </Suspense>
+      )}
 
       {!isMember && (
         <JoinLadderLeagueBanner tier={tier} maxTier={maxTier} joining={joining} joinError={joinError} onJoin={joinLadderLeague} c={c} />
