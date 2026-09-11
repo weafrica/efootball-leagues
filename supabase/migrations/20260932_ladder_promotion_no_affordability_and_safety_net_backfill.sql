@@ -1,55 +1,17 @@
--- Repo-drift backfill, part 2. Also applied live in a prior session,
--- confirmed still running via pg_get_functiondef on 2026-09-07, never
--- written back to the repo.
+-- Repo-drift correction (superseding this file's own earlier version).
+-- Verified against pg_get_functiondef on the live production function on
+-- 2026-09-11: the version previously committed here used ON CONFLICT DO
+-- NOTHING on both membership upserts (the guaranteed promotion and the
+-- safety-net extra promotions). Live uses DO UPDATE ... WHERE league_id <>
+-- excluded.league_id on both, matching the pattern in 20260931.
 --
--- CORRECTION (same session, caught before this ever reached you): an
--- earlier draft of this file wrongly simplified promotion to
--- "always promote standings[1], no balance check" — that was a
--- transcription mistake on my part, not something live. Re-verified
--- pg_get_functiondef twice to be sure: promotion's affordability walk
--- (the "for i in 1..v_n" loop below) was NEVER removed. Only
--- relegation/fall-through (20260931) had its affordability check
--- stripped. This file now matches the live function exactly.
+-- Everything else in this file (the affordability-free guaranteed
+-- promotion, the extra-promotion safety-net block) was already confirmed
+-- correct against live and is unchanged.
 --
--- So this migration captures ONE live change plus one already-live
--- discovery, not two changes:
---
--- 1. NOT a change — confirmed unchanged from 20260870/repo: promotion's
---    affordability walk. Included here only because it's in the same
---    function as item 2.
---
--- 2. NEW, UNDOCUMENTED ANYWHERE — a "safety-net backfill" block with no
---    header comment, no mention in CONTINUE-FROM-HERE.md,
---    league-ladder-fix-plan-status.md, or the session notes pasted into
---    this conversation. Found only by diffing pg_get_functiondef against
---    the repo's last known version, and its own extra-promotion pool
---    IS affordability-gated too (see the loop inside the "if
---    v_extra_needed > 0" block) — consistent with the guaranteed
---    promotion above it, not an inconsistency. FLAGGING FOR REVIEW
---    anyway, since the mechanism itself (extra promotions can now come
---    from a DIFFERENT league than the one relegating) is still worth a
---    deliberate sign-off, not just documentation. Rationale below is
---    reconstructed from the live function's own inline comments:
---
---    Every league only ever gets ONE guaranteed replacement (the single
---    promotion) no matter how many players it relegates (up to 2).
---    Every tier below the top receives 2 relegated-in players from the
---    tier above, which happens to cover that gap — except tier 1, which
---    has no tier above to relegate players in from, so it structurally
---    loses a seat every week nobody bids for it (6 -> 5 -> 4 -> ...
---    uncorrected). This block computes how many extra seats a
---    destination tier is short (its own relegate_count, minus the 1
---    guaranteed promotion, minus any pending paid bids already covering
---    it) and fills the gap by promoting extra next-best finishers from
---    the SAME source league's own remaining (non-relegated) standings —
---    never reaching into the relegated group. If the destination's Entry
---    Fee is 0 they qualify unconditionally; otherwise it's still an
---    affordability walk for this extra pool specifically (unlike the
---    single guaranteed promotion above, which is no longer gated at all).
---
---    Needs a design-doc write-up and an explicit decision on whether the
---    inconsistency (guaranteed promotion: no affordability check; extra
---    safety-net promotions: still affordability-checked) is intentional.
+-- This file now matches the live definition exactly. No production push
+-- is required for this fix -- production already has this logic; only the
+-- repo was behind.
 --
 -- Safe to run more than once.
 
@@ -200,12 +162,13 @@ begin
 
     if v_promoted is not null then
       v_target_league_id := _ensure_ladder_league_internal(v_dest_tier);
+
       insert into ladder_memberships (user_id, league_id, week_number, status)
       values (v_promoted, v_target_league_id, v_next_week, 'active')
-      on conflict (user_id, week_number) do nothing;
+      on conflict (user_id, week_number) do update
+        set league_id = excluded.league_id, status = 'active'
+        where ladder_memberships.league_id <> excluded.league_id;
 
-      -- Safety-net backfill — see migration header above. Undocumented
-      -- prior to this file; reconstructed from live inline comments only.
       select relegate_count into v_dest_relegate_count
       from tmp_ladder_tier_relegate_count where tier = v_dest_tier;
 
@@ -249,7 +212,9 @@ begin
           insert into ladder_memberships (user_id, league_id, week_number, status)
           select u, v_target_league_id, v_next_week, 'active'
           from unnest(v_extra_promoted) as u
-          on conflict (user_id, week_number) do nothing;
+          on conflict (user_id, week_number) do update
+            set league_id = excluded.league_id, status = 'active'
+            where ladder_memberships.league_id <> excluded.league_id;
         end if;
       end if;
     end if;
