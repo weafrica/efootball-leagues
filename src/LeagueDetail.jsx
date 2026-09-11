@@ -9,7 +9,7 @@ import { toProxiedUrl } from "./utils/mediaUrl";
 import { countryCodeToFlagEmoji, countryName, formatLocalTimeNow, suggestPlayTime } from "./utils/timezone";
 import { formatCountdown } from "./utils/formatCountdown.js";
 import { FacebookHighlightsPrompt, FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
-import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, winScaledFee, LADDER_CUP_RULES } from "./formats/ladderCup.js";
+import { rankLadderCupStandings, getOpponentPool, ladderCupOpponentTimerState, poolSightingDeadline, winScaledFee, rebirthScaledFee, LADDER_CUP_RULES } from "./formats/ladderCup.js";
 import { entryFeeForLeagueFormat, LADDER_CUP_REBIRTH_FEE_NETS, LADDER_CUP_BASE_VISIBLE_OPPONENTS, LADDER_CUP_OPPONENT_SLOT_FEE_NETS, LADDER_CUP_MAX_VISIBLE_OPPONENTS } from "./economy.js";
 import { NetsAmount } from "./NetCoinIcon";
 import { RapidCupTournamentExtras } from "./RapidCupPrizeCollection.jsx";
@@ -847,14 +847,15 @@ function LadderCupSecondLifeOffer({ entryRow, onAccept, c }) {
 // just a life-by-life checkpoint log now, not separate totals to add on
 // top of the live row.
 //
-// The fee shown here is a display estimate only (winScaledFee off
-// entryRow.w) — the actual charge is recomputed server-side, off the same
-// w column, inside rebirth_ladder_cup_entry (see the 20260915 migration),
-// so there's no way to spoof a lower fee from the client.
+// The fee shown here is a display estimate only (rebirthScaledFee off
+// entryRow.w — base 3N, +1N per win) — the actual charge is recomputed
+// server-side, off the same w column, inside rebirth_ladder_cup_entry
+// (see the 20260937 migration), so there's no way to spoof a lower fee
+// from the client.
 function LadderCupFallenCard({ entryRow, clubName, onRejoin, c }) {
   const [busy, setBusy] = useState(false);
   const rebirthCount = entryRow.rebirth_count || 0;
-  const rebirthFee = winScaledFee(LADDER_CUP_REBIRTH_FEE_NETS, entryRow.w);
+  const rebirthFee = rebirthScaledFee(LADDER_CUP_REBIRTH_FEE_NETS, entryRow.w);
 
   const act = async () => {
     setBusy(true);

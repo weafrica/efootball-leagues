@@ -6618,11 +6618,12 @@ export default function App() {
   // or its first offer declined/expired) never stopped showing on the
   // standings table — it just dropped out of matchmaking, same as any
   // other "eliminated" row. This is the missing other half: let that club
-  // choose to rejoin — now for a flat LADDER_CUP_REBIRTH_FEE_NETS (6N)
-  // "buy your life back" fee, charged atomically with the reset inside
-  // rebirth_ladder_cup_entry() itself (see
-  // supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) — nothing to
-  // debit client-side here. reborn() (formats/ladderCup.js) archives the
+  // choose to rejoin — now for a LADDER_CUP_REBIRTH_FEE_NETS (3N) base
+  // "buy your life back" fee that climbs +1N per win the club is carrying
+  // (rebirthScaledFee, formats/ladderCup.js), charged atomically with the
+  // reset inside rebirth_ladder_cup_entry() itself (see
+  // supabase/migrations/20260937_ladder_cup_rebirth_fee_linear_scaling.sql)
+  // — nothing to debit client-side here. reborn() (formats/ladderCup.js) archives the
   // finished life and resets live stats to a fresh day-one run; the RPC
   // is what actually persists it — same RLS-safe pattern as every other
   // ladder_cup_entries write, self-serve only (no admin path; reviving

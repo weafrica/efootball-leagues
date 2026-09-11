@@ -120,13 +120,16 @@ export const ENTRY_FEES_NETS = {
 // sync with that migration's v_fee constant if it ever changes.
 export const LADDER_JOIN_FEE_NETS = 5;
 
-// Fee to "buy your life back" — rejoin (rebirth) a fully eliminated
+// Base fee to "buy your life back" — rejoin (rebirth) a fully eliminated
 // Survival Ladder Cup club, after both the original life and the one
-// second-life offer are gone. Charged and the entry reset together by the
+// second-life offer are gone. This is the wins=0 price only — the real
+// charge scales up +1N per win the club is carrying (rebirthScaledFee,
+// src/formats/ladderCup.js). Charged and the entry reset together by the
 // rebirth_ladder_cup_entry() RPC (see
-// supabase/migrations/20260897_ladder_cup_rebirth_fee.sql) — keep this in
-// sync with that migration's v_fee constant if it ever changes.
-export const LADDER_CUP_REBIRTH_FEE_NETS = 6;
+// supabase/migrations/20260937_ladder_cup_rebirth_fee_linear_scaling.sql)
+// — keep this in sync with that migration's v_base_fee constant if it
+// ever changes.
+export const LADDER_CUP_REBIRTH_FEE_NETS = 3;
 
 // How many opponents a Survival Ladder Cup club sees for free on its
 // challenge board, and the cost to reveal one more beyond that (up to

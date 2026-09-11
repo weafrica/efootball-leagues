@@ -366,6 +366,22 @@ export function winScaledFee(baseFee, wins) {
 }
 
 /**
+ * Rebirth-only pricing (20260937): linear, not compounding — the fee
+ * goes up a flat +1N per win the club is carrying, off the same w this
+ * format already tracks. wins = 0 returns baseFee unchanged (LADDER_CUP_
+ * REBIRTH_FEE_NETS, src/economy.js, now 3). Deliberately split out from
+ * winScaledFee (still 10%-per-win, still what gates the second-life pts
+ * deduction) since the two "buy your life back" prices no longer share a
+ * formula — rebirth is Nets, second life is pts, and only rebirth moved
+ * to a flat per-win step. Computed live off the entry's current w every
+ * time this is called, same convention as winScaledFee, so it's never
+ * snapshotted onto anything.
+ */
+export function rebirthScaledFee(baseFee, wins) {
+  return baseFee + (wins || 0);
+}
+
+/**
  * Accepting the second-life offer: pts drop by winScaledFee(SECOND_LIFE_
  * DEDUCTION, entry.w) — the base 6, scaled up for every win this club
  * already has — floored at 0. Streak already 0, life consumed.
