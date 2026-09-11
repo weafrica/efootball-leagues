@@ -816,6 +816,97 @@ function resultEscalationReason(fixtureSubmissions, submission) {
   return null;
 }
 
+// stringSeedIndex — same small string-hash-to-int trick App.jsx's
+// avatarColor uses to pick a stable-but-varied value from a seed, reused
+// here so a given submission always shows the same awaiting-admin
+// message/style pair (no flicker on re-render) while different
+// submissions naturally land on different ones. Deliberately NOT
+// component state (useState) — this fires from inside renderFixtureRow,
+// a plain function called per-row from .map(), not a component of its
+// own, so it can't hold its own hooks the way KIT_ROOM_MESSAGES'
+// kitRoomMsgIndex does up in the parent.
+function stringSeedIndex(seed, mod) {
+  let hash = 0;
+  const s = String(seed || "");
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(hash) % mod;
+}
+
+// AWAITING_ADMIN_MESSAGES — 50 short, varied ways to say "an admin's
+// reviewing this," so a player watching a few escalated fixtures at once
+// doesn't see the exact same line repeated down the list. Deliberately
+// never states a time window or the word "auto" — see the earlier
+// cleanup that removed the auto-approve countdown from this same status.
+const AWAITING_ADMIN_MESSAGES = [
+  "🧑‍⚖️ Admin's reviewing — sit tight.",
+  "📋 In the admin's hands now.",
+  "🔍 An admin's taking a closer look.",
+  "🚦 Holding for admin sign-off.",
+  "📞 Admin's been called in.",
+  "🧾 On the admin's desk now.",
+  "🕵️ Admin's investigating this one.",
+  "✅ Admin will confirm this shortly.",
+  "🎙️ VAR check — admin reviewing.",
+  "🛡️ Admin's got this one covered.",
+  "📣 Admin's stepping in to settle it.",
+  "🧑‍⚖️ The referee's booth — admin reviewing.",
+  "🔎 Admin eyes are on this result.",
+  "📥 Landed in the admin's queue.",
+  "🧠 Admin's weighing this one up.",
+  "🏁 Final call coming from an admin.",
+  "🎯 Admin's zeroing in on this.",
+  "📌 Pinned for admin review.",
+  "🧾 Admin's double-checking the scoreline.",
+  "🚨 Flagged for an admin's verdict.",
+  "🧑‍⚖️ Justice is being served — by an admin.",
+  "🔔 Admin's been notified — hang tight.",
+  "📊 Admin's cross-checking this result.",
+  "🎬 Cut to the admin — reviewing now.",
+  "🧑‍💻 Admin's got eyes on it.",
+  "🕰️ Sitting with an admin for review.",
+  "🧑‍⚖️ Court's in session — admin presiding.",
+  "🛎️ Admin's on the way to settle this.",
+  "📋 Admin's clipboard says: reviewing.",
+  "🔍 A closer look, courtesy of an admin.",
+  "🧑‍⚖️ The verdict's with an admin now.",
+  "🎟️ Ticket's in — admin's on it.",
+  "📮 Delivered to admin review.",
+  "🧑‍⚖️ Admin's calling the shots on this one.",
+  "🔦 Spotlight's on — admin reviewing.",
+  "🧑‍✈️ Admin's steering this one home.",
+  "🎮 Match paused for admin review.",
+  "🧑‍⚖️ Fair play check — admin's on it.",
+  "📡 Signal sent — admin's tuning in.",
+  "🧑‍⚖️ Admin's got the final whistle.",
+  "🗂️ Filed for admin approval.",
+  "🧑‍⚖️ Admin's making the call.",
+  "🎥 Replay booth: admin reviewing.",
+  "🧑‍⚖️ Admin's weighing the evidence.",
+  "🧭 Admin's charting the outcome.",
+  "🧑‍⚖️ Trusted to an admin's judgement.",
+  "📶 On admin's radar now.",
+  "🧑‍⚖️ Admin's got the gavel on this.",
+  "🎊 Almost there — admin's finishing up.",
+  "🧑‍⚖️ Admin review in progress.",
+];
+
+// AWAITING_ADMIN_STYLES — font/weight/case/color treatments cycled
+// alongside the message copy above, picked via a second, independent
+// stringSeedIndex call so the same submission always renders the same
+// look but the look itself varies row to row too, not just the words.
+// Every entry stays within colors the theme (`c`) already defines, so
+// this works across every ladder tier theme without hardcoding a hex.
+const AWAITING_ADMIN_STYLES = [
+  (c) => ({ className: "font-mono text-[10px] uppercase tracking-widest font-bold", color: c.textFaint }),
+  (c) => ({ className: "font-body text-xs italic", color: c.accent }),
+  (c) => ({ className: "font-mono text-[10px] uppercase tracking-wide", color: c.text }),
+  (c) => ({ className: "font-body text-xs font-semibold", color: c.textDim }),
+  (c) => ({ className: "font-mono text-[10px] tracking-wider", color: c.accent }),
+  (c) => ({ className: "font-body text-xs italic font-semibold", color: c.text }),
+  (c) => ({ className: "font-mono text-[10px] uppercase tracking-widest", color: c.accent }),
+  (c) => ({ className: "font-body text-xs", color: c.textFaint }),
+];
+
 // JoinLadderLeagueBanner — the missing "join flow" LeagueLadderDetail's own
 // header comment used to call out. Only ever offered for the league this
 // screen is currently showing, which is fine in practice: join_ladder_league()
@@ -1811,9 +1902,10 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
 
                 // Sub-state 3: escalated — the opponent either disputed
                 // twice or let the 30-minute window lapse. Admins get
-                // Approve/Reject here; everyone else just sees it's
-                // awaiting the admin, plus how long until the 1-hour
-                // auto-approve sweep would resolve it on its own.
+                // Approve/Reject here; everyone else just sees a
+                // rotating "an admin's reviewing this" status (see
+                // AWAITING_ADMIN_MESSAGES/AWAITING_ADMIN_STYLES above) —
+                // no time window shown, by design.
                 if (pending && escalation) {
                   if (isAdmin) {
                     return (
@@ -1844,11 +1936,16 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                       </div>
                     );
                   }
-                  return (
-                    <span className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
-                      Awaiting admin review — an admin will approve it.
-                    </span>
-                  );
+                  {
+                    const seed = pending.id || f.id;
+                    const msg = AWAITING_ADMIN_MESSAGES[stringSeedIndex(seed, AWAITING_ADMIN_MESSAGES.length)];
+                    const style = AWAITING_ADMIN_STYLES[stringSeedIndex(`${seed}-style`, AWAITING_ADMIN_STYLES.length)](c);
+                    return (
+                      <span className={style.className} style={{ color: style.color }}>
+                        {msg}
+                      </span>
+                    );
+                  }
                 }
 
                 // Nobody's reported anything and the viewer is neither a
