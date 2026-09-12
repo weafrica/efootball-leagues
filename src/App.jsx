@@ -5904,22 +5904,26 @@ export default function App() {
     const t = myTeam(league);
     return !(t && t.eliminated);
   };
-  // "Entry closed" covers two independent reasons: the admin set a manual
-  // entry_closes_at cutoff (any format other than ladder_cup), or this is a
+  // "Entry closed" covers two independent reasons: for any format other than
+  // ladder_cup, the league's fixtures have already been generated (i.e. the
+  // admin hit "Start League" — see doGenerateFixtures) — or this is a
   // ladder_cup league whose own hard cutoff has already passed. Survival
   // Ladder Cup has no separate entry-close date of its own — clubs can join
-  // right up until the ladder's monthly cutoff — so entry_closes_at is
-  // deliberately ignored for that format even if an old row still has one
-  // set. Extending this single function (rather than adding a parallel
-  // check) means the fix reaches every place that already gates on it: the
-  // Join button's visibility on LeagueCard, Home's isJoinable sort, and
-  // both join handlers below.
-  // ladder_cup_started_at (see startLadderCupLeague below) is a status
-  // marker only — clubs keep registering right up to the cutoff/finalize,
-  // same as before the Start button existed. It intentionally does NOT
-  // factor into entryClosed.
+  // right up until the ladder's monthly cutoff.
+  // Previously this checked the admin-set entry_closes_at cutoff instead of
+  // the league's actual start. That cut new sign-ups off earlier than
+  // necessary and gave already-pending members no way to fix or top up their
+  // payment once entry_closes_at passed. Now the only hard boundary is the
+  // league actually starting — clubs (new or already pending/rejected) can
+  // join or add payment right up to that point. entry_closes_at is still
+  // stored/editable as an informational target date but no longer blocks
+  // anything here. Extending this single function (rather than adding a
+  // parallel check) means the fix reaches every place that already gates on
+  // it: the Join button's visibility on LeagueCard, Home's isJoinable sort,
+  // both join handlers below, and (via notStarted) the pending/rejected
+  // payment resubmit affordance in LeagueDetail.
   const entryClosed = (league) =>
-    (league.format !== "ladder_cup" && league.entry_closes_at && new Date(league.entry_closes_at) < new Date())
+    (league.format !== "ladder_cup" && (league.fixtures || []).length > 0)
     || (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at));
 
   // Admin-created leagues (except Knockout and Survival Ladder Cup itself —
@@ -7026,8 +7030,14 @@ export default function App() {
     return true;
   };
 
-  // Lets a member with a rejected payment upload fresh proof without losing their club.
+  // Lets a member with a pending or rejected payment upload fresh proof (or
+  // top up the amount) without losing their club — usable any time up until
+  // the league actually starts (fixtures generated), same boundary as
+  // entryClosed above. Previously this had no time gate at all and was only
+  // reachable while rejected; pending members had no way to complete or add
+  // to their payment.
   const resubmitCashPayment = async (league, member, fee, rawFile) => {
+    if ((league.fixtures || []).length > 0) { showToast("This league has already started — payment can no longer be changed."); return false; }
     if (!rawFile) { showToast("Attach your proof of payment before submitting."); return false; }
     const file = await compressImage(rawFile, { maxDimension: 1600, quality: 0.85 });
     const feeNum = clampFee(fee);
