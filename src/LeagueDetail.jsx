@@ -1841,8 +1841,8 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
         )}
         {joined && myPaymentStatus === "rejected" && (
           notStarted ? (
-            <button onClick={() => onResubmitPayment(myMembership)} className="btn-rebirth shrink-0 flex items-center gap-2 font-extrabold text-base px-6 py-2.5 rounded-full" style={{ color: "#fff" }}>
-              <XCircle size={16} /> Payment rejected — resubmit
+            <button onClick={() => onResubmitPayment(myMembership)} className="btn-join shrink-0 flex items-center gap-2 font-extrabold text-base px-6 py-2.5 rounded-full" style={{ color: "#1A1206" }}>
+              Resubmit payment
             </button>
           ) : (
             <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded flex items-center gap-1" style={{ background: c.redSoft, color: c.red }}><XCircle size={11} /> Payment rejected</span>

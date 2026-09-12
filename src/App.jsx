@@ -14142,7 +14142,7 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
               )
             ) : paymentStatus === "rejected" ? (
               fixtures.length === 0 ? (
-                <button onClick={(e) => { e.stopPropagation(); onResubmitPayment(l, myMembership); }} className="btn-rebirth w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full" style={{ color: "#fff" }}>Resubmit payment</button>
+                <button onClick={(e) => { e.stopPropagation(); onResubmitPayment(l, myMembership); }} className="btn-join w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full" style={{ color: "#1A1206" }}>Resubmit payment</button>
               ) : (
                 <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Rejected</span>
               )

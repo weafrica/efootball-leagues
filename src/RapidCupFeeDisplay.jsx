@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import { EntryFeeSlider } from "./RapidCupFeeSlider";
+import { getNetsBalance } from "./nets.js";
 
 // Rapid Cup — Phase 2: fee slider join modal + live fee/payout display.
 //
@@ -83,16 +84,20 @@ function usePlayerFees(lobbyId) {
 // the slider stops where the server would actually reject anyway, rather
 // than letting a player drag to 400 and only find out it's too high once
 // they hit Join/Raise.
+// Was reading from `balances`/`amount` — an empty, unused legacy table (the
+// real wallet lives in nets_wallets/balance — see getNetsBalance in
+// nets.js, which every other Nets display in the app already goes
+// through). That meant feeCap was always 0 for literally every player
+// regardless of their real balance, which pins the slider's min and max to
+// the same value (0) and makes it look frozen/unmovable. Routed through
+// getNetsBalance here so it agrees with the balance shown in the header.
 function useMyFeeCap() {
   const [cap, setCap] = useState(400);
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from("balances").select("amount").eq("user_id", user.id).maybeSingle();
+      const balance = await getNetsBalance();
       if (cancelled) return;
-      const balance = data?.amount || 0;
       setCap(Math.max(0, Math.min(400, Math.floor(balance * 0.2))));
     })();
     return () => { cancelled = true; };
