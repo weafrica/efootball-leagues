@@ -2892,7 +2892,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
   };
 
   const submitCard = async () => {
-    if (cardSaving || isResubmit) return;
+    if (cardSaving) return;
     setCardSaving(true);
     await onPayByCard(fee);
     setCardSaving(false);
@@ -2911,7 +2911,7 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>{league.name}</div>
 
         <div className="rounded-lg p-3 mb-3 font-body text-xs" style={{ background: c.surface, color: c.textDim }}>
-          {IKHOKHA_DETAILS.payLink && !isResubmit && (
+          {IKHOKHA_DETAILS.payLink && (
             <>
               <div className="flex items-center gap-2 mb-2">
                 <CreditCard size={14} style={{ color: c.accent }} />
@@ -2926,7 +2926,9 @@ function PaymentModal({ league, member, onCancel, onSubmit, onPayByCard, c }) {
                 <CardBrandsBadge c={c} />
               </div>
               <div className="font-body text-[10px] mt-1.5 mb-3" style={{ color: c.textFaint }}>
-                Opens a secure card checkout page. You'll be joined automatically the moment payment is confirmed — no proof needed.
+                {isResubmit
+                  ? "Opens a secure card checkout page. Your entry updates automatically the moment payment is confirmed — no proof needed."
+                  : "Opens a secure card checkout page. You'll be joined automatically the moment payment is confirmed — no proof needed."}
               </div>
             </>
           )}
@@ -7088,28 +7090,46 @@ export default function App() {
   // straight to "approved" the instant the card payment succeeds.
   const handlePayByCard = async (fee) => {
     if (!paymentModal) return;
-    const { league } = paymentModal;
-    if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
-      showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
-      return;
-    }
-    if (entryClosed(league)) { showToast("Entry to this league has closed."); return; }
-    if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
-
-    const result = await claimOrRegisterTeam(league);
-    if (result.error) return;
-
+    const { league, member } = paymentModal;
     const feeNum = clampFee(fee);
-    const { data: memberRow, error } = await supabase.from("members").insert({
-      league_id: league.id, user_id: session.user.id,
-      display_name: profile.efootball_username, phone: profile.phone,
-      team_id: result.team ? result.team.id : null,
-      entry_fee: feeNum, payment_status: "pending",
-    }).select().single();
+    let memberId;
 
-    if (error) {
-      showToast("Couldn't start registration — you may already be a member.");
-      return;
+    if (member) {
+      // Resubmitting/completing an existing pending or rejected entry by
+      // card instead of proof-upload. create-entry-payment only accepts a
+      // member row whose payment_status is already 'pending' (see its own
+      // check), so a rejected row needs resetting first — same fields
+      // resubmitCashPayment above clears when it resubmits by proof.
+      if ((league.fixtures || []).length > 0) { showToast("This league has already started — payment can no longer be changed."); return; }
+      const { error: updateErr } = await supabase.from("members").update({
+        entry_fee: feeNum, payment_status: "pending",
+        payment_reviewed_at: null, payment_reviewed_by: null,
+      }).eq("id", member.id);
+      if (updateErr) { showToast(`Couldn't update entry: ${updateErr.message}`); return; }
+      memberId = member.id;
+    } else {
+      if (league.format === "ladder_cup" && hasLadderCupCutoffPassed(league.ladder_cup_cutoff_at)) {
+        showToast("This Ladder Cup has already reached its cutoff — no new clubs can join.");
+        return;
+      }
+      if (entryClosed(league)) { showToast("Entry to this league has closed."); return; }
+      if (isMemberOf(league)) { showToast("You've already joined this league."); return; }
+
+      const result = await claimOrRegisterTeam(league);
+      if (result.error) return;
+
+      const { data: memberRow, error } = await supabase.from("members").insert({
+        league_id: league.id, user_id: session.user.id,
+        display_name: profile.efootball_username, phone: profile.phone,
+        team_id: result.team ? result.team.id : null,
+        entry_fee: feeNum, payment_status: "pending",
+      }).select().single();
+
+      if (error) {
+        showToast("Couldn't start registration — you may already be a member.");
+        return;
+      }
+      memberId = memberRow.id;
     }
 
     const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -7121,7 +7141,7 @@ export default function App() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${currentSession.access_token}`,
         },
-        body: JSON.stringify({ member_id: memberRow.id }),
+        body: JSON.stringify({ member_id: memberId }),
       }
     );
 
@@ -7131,7 +7151,7 @@ export default function App() {
       return;
     }
 
-    showToast("Redirecting to secure card checkout — you'll be joined automatically once payment confirms.");
+    showToast(member ? "Redirecting to secure card checkout — your entry updates automatically once payment confirms." : "Redirecting to secure card checkout — you'll be joined automatically once payment confirms.");
     window.location.href = data.paylinkUrl;
   };
 
