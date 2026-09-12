@@ -722,10 +722,26 @@ export function isFinalRoundFixtures(roundFixtures) {
   return !hasBye && ties.size === 1;
 }
 
+// Penalty shootouts only ever make sense for an actual knockout bracket tie
+// — a real "single_round_robin"/"double_round_robin" match, or Survivor's
+// final stage (kind: "round_robin" — see FORMATS), is a league match like
+// any other and a draw is a perfectly normal result worth its own points,
+// no shootout needed. Both formats always sit at fixture.stage === 1 (same
+// as a pure knockout bracket's stage 1 — see fixturesFor above), so stage
+// number alone can't tell them apart; only league.format can. Without this,
+// Survivor's final stage coincidentally looks just like a knockout final to
+// isFinalRoundFixtures once it's down to its last two clubs (or, for a
+// double-round-robin final, its second-leg fixture looks just like a
+// decider leg to isDeciderFixture below) — one tie, no bye — and the
+// result-entry UI would wrongly demand a penalty score to save a draw.
+function isKnockoutBracketFixture(fixture, league) {
+  return league.format === "knockout" || (league.format === "groups_knockout" && fixture.stage === 2);
+}
+
 // Same check, scoped down to whichever tie a single fixture belongs to —
 // used by result-entry UI to decide whether to offer a penalty score field.
 export function isFinalFixture(fixture, league) {
-  if (!fixture || fixture.away_team_id === null) return false;
+  if (!fixture || fixture.away_team_id === null || !isKnockoutBracketFixture(fixture, league)) return false;
   const roundFixtures = (league.fixtures || []).filter((f) => f.stage === fixture.stage && f.round === fixture.round);
   return isFinalRoundFixtures(roundFixtures);
 }
@@ -746,7 +762,7 @@ export function isFinalFixture(fixture, league) {
 // the penalty prompt and advanceKnockout would try to bolt on a decider leg
 // for a league that was configured to never have one.
 export function isDeciderFixture(fixture, league) {
-  if (!fixture || fixture.away_team_id === null) return false;
+  if (!fixture || fixture.away_team_id === null || !isKnockoutBracketFixture(fixture, league)) return false;
   const configuredLegs = league.knockout_legs || 1;
   return configuredLegs === 1 || fixture.leg > configuredLegs;
 }
@@ -8669,6 +8685,7 @@ export default function App() {
             {view === "home" && (
               <Home leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus}
                 canManageLeague={canManageLeague} myTeam={myTeam} session={session} onToggleLeagueReaction={toggleLeagueReaction}
+                onResubmitPayment={openResubmitPayment}
                 challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
@@ -8741,7 +8758,7 @@ export default function App() {
               <CompletedLeaguesPage leagues={(leagues || []).filter(isLeagueCompleted)} isAdmin={isAdmin} isMemberOf={isMemberOf}
                 entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
-                onJoin={startJoin} session={session} onToggleLeagueReaction={toggleLeagueReaction} onBack={goBack} c={c} />
+                onJoin={startJoin} onResubmitPayment={openResubmitPayment} session={session} onToggleLeagueReaction={toggleLeagueReaction} onBack={goBack} c={c} />
             )}
             {view === "ladder" && (
               <Suspense fallback={<Loader c={c} />}>
@@ -10986,7 +11003,7 @@ function LadderMaintenanceModal({ onClose, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, onSuggestNotifications, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, onResubmitPayment, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, onSuggestNotifications, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -11384,7 +11401,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
       )}
 
       <LeagueListsSection leagues={leagues} isAdmin={isAdmin} isMemberOf={isMemberOf} entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague}
-        myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+        myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} onResubmitPayment={onResubmitPayment}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} hideLeagueIds={weekendLeagueIds} onOpenTransferMarket={onOpenTransferMarket} onOpenLadderLeague={onOpenLadderLeague} onOpenCompletedLeagues={onOpenCompletedLeagues} c={c} />
 
     </div>
@@ -13828,7 +13845,7 @@ function LadderFindUserModal({ username, leagueNumber, onChangeUsername, onChang
 // title pattern as ActivityLogPanel/LeaderboardPage) with a plain
 // flex-wrap grid instead of a horizontal scroller, since there's room for
 // one here.
-function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onBack, c }) {
+function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, onResubmitPayment, session, onToggleLeagueReaction, onBack, c }) {
   const [query, setQuery] = useState("");
 
   // Same "still needs the viewer's attention" boost LeagueListsSection
@@ -13877,7 +13894,7 @@ function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, quali
             <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
               blockedByLeague={isMemberOf(l) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, l)}
               qualified={qualifiesForLeague(l)}
-              myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+              myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} onResubmitPayment={onResubmitPayment}
               session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
           ))}
         </div>
@@ -13886,7 +13903,7 @@ function CompletedLeaguesPage({ leagues, isAdmin, isMemberOf, entryClosed, quali
   );
 }
 
-function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, onOpenLadderLeague, onOpenCompletedLeagues, c }) {
+function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, onResubmitPayment, session, onToggleLeagueReaction, onCreate, hideLeagueIds, onOpenTransferMarket, onOpenLadderLeague, onOpenCompletedLeagues, c }) {
   useNow(60000);
   // hideLeagueIds excludes whatever's already shown in the Weekend League
   // spotlight above (see Home) — otherwise a weekend league appeared both
@@ -13950,12 +13967,12 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
   return (
     <>
       <LeagueSection title="Leagues" icon={Gamepad2} leagues={sortLeagues(funLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
-        entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+        entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} onResubmitPayment={onResubmitPayment}
         session={session} onToggleLeagueReaction={onToggleLeagueReaction} onCreate={onCreate} c={c} />
 
       {cashLeagues.length > 0 && (
         <LeagueSection title="Cash leagues" icon={Wallet} leagues={sortLeagues(cashLeagues)} isAdmin={isAdmin} isMemberOf={isMemberOf}
-          entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+          entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} onResubmitPayment={onResubmitPayment}
           session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
       )}
 
@@ -13968,7 +13985,7 @@ function LeagueListsSection({ leagues, isAdmin, isMemberOf, entryClosed, qualifi
   );
 }
 
-function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, onCreate, c }) {
+function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, onOpen, onJoin, onResubmitPayment, session, onToggleLeagueReaction, onCreate, c }) {
   const pendingReviewCount = leagues.filter(canManageLeague).reduce((sum, l) =>
     sum + (l.members || []).filter((m) => m.payment_status === "pending").length, 0);
   const activeFunLeaguesByKindMap = useMemo(() => activeFunLeaguesByKind(leagues, session), [leagues, session]);
@@ -13994,7 +14011,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
           <LeagueCard key={l.id} league={l} isAdmin={isAdmin} joined={isMemberOf(l)} closed={entryClosed(l)}
             blockedByLeague={isMemberOf(l) ? null : blockingLeagueFor(activeFunLeaguesByKindMap, l)}
             qualified={qualifiesForLeague(l)}
-            myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin}
+            myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague} onOpen={onOpen} onJoin={onJoin} onResubmitPayment={onResubmitPayment}
             session={session} onToggleLeagueReaction={onToggleLeagueReaction} c={c} />
         ))}
         {onCreate && (
@@ -14011,7 +14028,7 @@ function LeagueSection({ title, icon: Icon, leagues, isAdmin, isMemberOf, entryC
   );
 }
 
-function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, qualified, myPaymentStatus, canManageLeague, onOpen, onJoin, session, onToggleLeagueReaction, c }) {
+function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, qualified, myPaymentStatus, canManageLeague, onOpen, onJoin, onResubmitPayment, session, onToggleLeagueReaction, c }) {
   // Ladder Cup never writes to `fixtures` — it plays entirely through
   // `ladder_cup_matches` (see ensureLadderCupEntry / initiateLadderCupMatch
   // in App.jsx). Every count below that used to read straight off
@@ -14028,6 +14045,10 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
   const ladderPlayedCount = ladderMatches.filter((m) => m.finalized_at).length;
   const played = isLadderCup ? ladderPlayedCount : fixtures.filter((f) => f.played).length;
   const paymentStatus = l.league_type === "cash" ? myPaymentStatus(l) : null;
+  // Own membership row — needed to resubmit/complete a cash payment right
+  // from the card (see the pending/rejected buttons below), same lookup
+  // LeagueDetail already does for its own resubmit button.
+  const myMembership = session ? (l.members || []).find((m) => m.user_id === session.user.id) : null;
   const isCash = l.league_type === "cash";
   const canSeePool = canManageLeague(l) || paymentStatus === "approved";
   const approvedMembers = isCash ? (l.members || []).filter((m) => m.payment_status === "approved") : [];
@@ -14114,9 +14135,17 @@ function LeagueCard({ league: l, isAdmin, joined, closed, blockedByLeague, quali
         <div className="mt-2">
           {joined ? (
             paymentStatus === "pending" ? (
-              <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>Pending</span>
+              fixtures.length === 0 ? (
+                <button onClick={(e) => { e.stopPropagation(); onResubmitPayment(l, myMembership); }} className="btn-join w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full" style={{ color: "#1A1206" }}>Complete payment</button>
+              ) : (
+                <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>Pending</span>
+              )
             ) : paymentStatus === "rejected" ? (
-              <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Rejected</span>
+              fixtures.length === 0 ? (
+                <button onClick={(e) => { e.stopPropagation(); onResubmitPayment(l, myMembership); }} className="btn-rebirth w-full text-[11px] font-extrabold px-2 py-1.5 rounded-full" style={{ color: "#fff" }}>Resubmit payment</button>
+              ) : (
+                <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.redSoft, color: c.red }}>Rejected</span>
+              )
             ) : (
               <span className="block text-center font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded" style={{ background: c.greenSoft, color: c.greenText }}>Joined</span>
             )

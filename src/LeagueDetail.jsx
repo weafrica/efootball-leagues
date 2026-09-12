@@ -1832,8 +1832,8 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
         {!joined && entryClosed && <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded shrink-0" style={{ background: c.redSoft, color: c.red }}>Entry closed</span>}
         {joined && myPaymentStatus === "pending" && (
           notStarted ? (
-            <button onClick={() => onResubmitPayment(myMembership)} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-xs px-3 py-2 rounded-full" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}>
-              <Clock size={13} /> Payment pending — complete or add
+            <button onClick={() => onResubmitPayment(myMembership)} className="shrink-0 flex items-center gap-2 font-extrabold text-base px-6 py-2.5 rounded-full" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B", border: "2px solid #B8860B" }}>
+              <Clock size={16} /> Payment pending — complete or add
             </button>
           ) : (
             <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded flex items-center gap-1" style={{ background: "rgba(217,164,6,0.18)", color: "#B8860B" }}><Clock size={11} /> Payment pending</span>
@@ -1841,8 +1841,8 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
         )}
         {joined && myPaymentStatus === "rejected" && (
           notStarted ? (
-            <button onClick={() => onResubmitPayment(myMembership)} className="shrink-0 flex items-center gap-1.5 font-body font-semibold text-xs px-3 py-2 rounded-full" style={{ background: c.redSoft, color: c.red }}>
-              <XCircle size={13} /> Payment rejected — resubmit
+            <button onClick={() => onResubmitPayment(myMembership)} className="btn-rebirth shrink-0 flex items-center gap-2 font-extrabold text-base px-6 py-2.5 rounded-full" style={{ color: "#fff" }}>
+              <XCircle size={16} /> Payment rejected — resubmit
             </button>
           ) : (
             <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1.5 rounded flex items-center gap-1" style={{ background: c.redSoft, color: c.red }}><XCircle size={11} /> Payment rejected</span>
