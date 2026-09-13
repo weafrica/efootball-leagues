@@ -82,7 +82,7 @@ const BID_TICKER_MESSAGES = [
   (t) => ({ header: `🥊 Fight For The Seat`, subtext: `Relegated from League ${t}? Buy back in. Rising from below? Buy your way up. Only one wins.` }),
   (t) => ({ header: `🏆 One Spot. Everyone Wants It.`, subtext: `The League ${t} seat goes to the highest bidder — redemption or promotion, your call.` }),
   (t) => ({ header: `🔥 Bidding War: League ${t}`, subtext: `Every Naira counts. Outbid the field or watch someone else take your League ${t} dream.` }),
-  (t) => ({ header: `⏳ Countdown to Promotion`, subtext: `Sunday 23:59 UTC decides who buys their way into League ${t}. Place your bid now.` }),
+  (t) => ({ header: `⏳ Countdown to Promotion`, subtext: `Sunday 23:59 SAST decides who buys their way into League ${t}. Place your bid now.` }),
   (t) => ({ header: `💎 Last Chance Saloon`, subtext: `Relegated players get one shot to buy back into League ${t} before the window shuts.` }),
   (t, b) => ({ header: `📈 Climb Early Or Wait`, subtext: `League ${b}'s best don't have to wait for rank 1 — outbid everyone and jump straight to League ${t}.` }),
   (t) => ({ header: `🎟️ The Ticket Up`, subtext: `Highest bidder wins a golden ticket into League ${t}. Everyone else gets refunded in full.` }),
@@ -123,7 +123,7 @@ const BID_TICKER_MESSAGES = [
   (t) => ({ header: `🏆 The Auction Never Sleeps`, subtext: `Every new bid could flip who's heading into League ${t}. Stay sharp.` }),
   (t) => ({ header: `🔥 Winner Takes The Badge`, subtext: `One League ${t} seat, unlimited ambition — only the top bid gets it.` }),
   (t) => ({ header: `🏆 Prove You Belong`, subtext: `League ${t} isn't given here, it's bought by whoever wants it most.` }),
-  (t) => ({ header: `⚡ Final Call: League ${t}`, subtext: `Last chance to bid before Sunday 23:59 UTC decides the League ${t} seat.` }),
+  (t) => ({ header: `⚡ Final Call: League ${t}`, subtext: `Last chance to bid before Sunday 23:59 SAST decides the League ${t} seat.` }),
 ];
 
 // RANK1_SAFE_MESSAGES — 20 congratulatory variations for rank 1, shown in
@@ -526,7 +526,7 @@ function LadderMemberRow({ leagueId, tier, userId, profile, rank, opponentProfil
 
 // LiveBidTicker — Phase 5's bidding is fully wired server-side (the RPC,
 // the eligibility pool, the bidding_open window that runs through Sunday
-// 23:59 UTC). There's no fixed opening day anymore either — 20260875
+// 21:59 UTC / 23:59 SAST). There's no fixed opening day anymore either — 20260875
 // removed the separate open-week cron, so a league's bidding_open window
 // starts the moment it exists, not on a scheduled weekday (see
 // league-ladder-redesign-build-spec.md's addendum). This component is
@@ -611,7 +611,7 @@ function LiveBidTicker({ leagueId, weekNumber, tier, maxTier, session, c }) {
         {msgSubtext}
       </div>
       <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
-        <span>⏳ Closes Sun 23:59 UTC</span>
+        <span>⏳ Closes Sun 23:59 SAST</span>
         {floor != null && <span>Floor {floor}N</span>}
       </div>
       <div className="flex flex-col gap-1 mb-2">
@@ -1033,7 +1033,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   // schedules a joiner into current_week + 1 (you can't retroactively add
   // someone to a round-robin that's already in progress), and
   // _ladder_sync_fixtures_internal generates that week's fixtures
-  // immediately, well before the Sunday 23:59 UTC cutover ever bumps
+  // immediately, well before the Sunday 21:59 UTC (23:59 SAST) cutover ever bumps
   // current_week to match. Querying by cycle.current_week alone means a
   // just-joined player's own fixtures — which already exist — are
   // invisible until the following week's cutover, showing a false "no
@@ -1533,7 +1533,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
           <JoinedPlayersList members={members} profilesById={profilesById} session={session} c={c} />
         </div>
         <div className="text-center font-mono text-xs" style={{ color: c.textFaint }}>
-          No fixtures yet — there's no fixed start date. Once this league has at least 2 players, matches generate right away and run through the Sunday 23:59 UTC cutoff.
+          No fixtures yet — there's no fixed start date. Once this league has at least 2 players, matches generate right away and run through the Sunday 23:59 SAST cutoff.
         </div>
       </div>
     );

@@ -351,9 +351,9 @@ check("accepts an eligible bid at or above the floor", () => {
 
 console.log("ladderRoundReleaseOffsetsHours");
 
-check("10 rounds (standard 6-player double round-robin league) spreads evenly across the ~143h59m window", () => {
+check("10 rounds (standard 6-player double round-robin league) spreads evenly across the ~141h59m window", () => {
   const offsets = ladderRoundReleaseOffsetsHours(10);
-  const windowHours = 143 + 59 / 60;
+  const windowHours = 141 + 59 / 60;
   const step = windowHours / 9;
   const expected = Array.from({ length: 10 }, (_, i) => i * step);
   offsets.forEach((o, i) => assert.ok(Math.abs(o - expected[i]) < 1e-9, `round ${i}: got ${o}, want ${expected[i]}`));
@@ -460,16 +460,16 @@ check("a fixture with no countdown yet (null) never forfeits", () => {
 
 console.log("nextLadderCloseAt");
 
-check("mid-week rolls forward to the coming Sunday 23:59 UTC", () => {
-  assert.equal(nextLadderCloseAt(new Date("2026-09-09T10:00:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
+check("mid-week rolls forward to the coming Sunday 21:59 UTC (23:59 SAST)", () => {
+  assert.equal(nextLadderCloseAt(new Date("2026-09-09T10:00:00Z")).toISOString(), "2026-09-13T21:59:00.000Z");
 });
 
 check("Sunday just before the cutoff still targets today", () => {
-  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:58:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
+  assert.equal(nextLadderCloseAt(new Date("2026-09-13T21:58:00Z")).toISOString(), "2026-09-13T21:59:00.000Z");
 });
 
 check("Sunday right at/after the cutoff rolls to next week", () => {
-  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:59:30Z")).toISOString(), "2026-09-20T23:59:00.000Z");
+  assert.equal(nextLadderCloseAt(new Date("2026-09-13T21:59:30Z")).toISOString(), "2026-09-20T21:59:00.000Z");
 });
 
 console.log("ladderZoneForRank");

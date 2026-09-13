@@ -20,7 +20,7 @@
 // who's promoted/relegated/stayed). It does NOT write anything to
 // ladder_memberships, generate next week's rows, auto-create a new bottom
 // league, or handle the auction fall-through — those are all orchestration
-// concerns that belong to the Sunday 23:59 UTC resolve job
+// concerns that belong to the Sunday 21:59 UTC (23:59 SAST) resolve job
 // (_ladder_resolve_promotion_relegation_internal, in the Phase 3
 // migration), which reimplements this same classification logic in SQL
 // for the same reason _generate_round_robin_fixtures_internal reimplements
@@ -42,20 +42,19 @@
 const LADDER_ROSTER_SIZE = 6; // players per league — see 20260876's group-size-6 change (was 8)
 
 // ─────────────────────────────────────────────────────────────────────────
-// Phase 6 — fixture countdown stagger (plan §6), window recalculated by
-// 20260876 for the corrected literal-UTC cutoff and the new double
-// round-robin round count. Each round of fixtures (not each individual
-// match — players in the same round release together) gets its own
-// release time, evenly spaced across a ~143h59m window: Monday 00:00 UTC
-// through Saturday 23:59 UTC, so every fixture still gets a full 24-hour
-// play window before the Sunday 23:59 UTC hard cutoff (previously Sunday
-// 10:00 PM SAST, wrongly converted in 20260875 and corrected here — see
-// that migration's header). Generalized to whatever round count a given
-// league actually produces: LADDER_ROSTER_SIZE is fixed at 6, giving 10
-// rounds (double round-robin, 2*(6-1)) in the normal case, but a
-// thin/bye-padded or mid-week-born league can produce a different count.
+// Phase 6 — fixture countdown stagger (plan §6). Each round of fixtures
+// (not each individual match — players in the same round release
+// together) gets its own release time, evenly spaced across a ~141h59m
+// window: Monday 00:00 UTC through Saturday 21:59 UTC, so every fixture
+// still gets a full 24-hour play window before the Sunday 21:59 UTC hard
+// cutoff (= 23:59 SAST, UTC+2, no DST — see migration
+// 20260939_ladder_cutoff_corrected_to_sast_2159_utc). Generalized to
+// whatever round count a given league actually produces: LADDER_ROSTER_SIZE
+// is fixed at 6, giving 10 rounds (double round-robin, 2*(6-1)) in the
+// normal case, but a thin/bye-padded or mid-week-born league can produce a
+// different count.
 // ─────────────────────────────────────────────────────────────────────────
-const LADDER_COUNTDOWN_WINDOW_HOURS = 143 + 59 / 60; // Mon 00:00 UTC -> Sat 23:59 UTC
+const LADDER_COUNTDOWN_WINDOW_HOURS = 141 + 59 / 60; // Mon 00:00 UTC -> Sat 21:59 UTC
 const LADDER_COUNTDOWN_MATCH_WINDOW_HOURS = 24; // each fixture's own play window
 
 // ladderRoundReleaseOffsetsHours(roundCount) → array of hour-offsets from
@@ -258,7 +257,7 @@ export function computeStandings(fixtures) {
 // isWeekComplete — true once every fixture is settled one way or another
 // (played or forfeited), false if anything's still pending. This is the
 // gate Phase 3's resolve job checks before it's safe to finalize a week —
-// it does NOT enforce the Sunday 23:59 UTC cutoff itself (that's the
+// it does NOT enforce the Sunday 21:59 UTC (23:59 SAST) cutoff itself (that's the
 // scheduled 'ladder-close-week-sunday' cron job's job — see 20260876), it
 // just answers "is there anything left unplayed right now."
 // ─────────────────────────────────────────────────────────────────────────
@@ -459,14 +458,15 @@ export function classifyLadderZones(standings) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// nextLadderCloseAt — the next Sunday 23:59 UTC cutoff from `now`, i.e. the
-// exact instant 'ladder-close-week-sunday' (schedule '59 23 * * 0', see
-// migrations 20260856/20260917) next fires. Pure date arithmetic, no
-// Supabase read needed — the cron schedule IS the spec. Used by the
-// homepage's week-close countdown clock so it counts down to the real
-// cutoff without a round trip.
+// nextLadderCloseAt — the next Sunday 21:59 UTC (= 23:59 SAST, UTC+2, no
+// DST) cutoff from `now`, i.e. the exact instant 'ladder-close-week-sunday'
+// (schedule '59 21 * * 0', see migration
+// 20260939_ladder_cutoff_corrected_to_sast_2159_utc) next fires. Pure date
+// arithmetic, no Supabase read needed — the cron schedule IS the spec.
+// Used by the homepage's week-close countdown clock so it counts down to
+// the real cutoff without a round trip.
 //
-// If `now` is already past this Sunday's 23:59 UTC (including the exact
+// If `now` is already past this Sunday's 21:59 UTC (including the exact
 // second — close_week has already run or is running right now), rolls
 // forward to next week's instead, same as the cron just firing again in
 // 7 days.
@@ -474,7 +474,7 @@ export function classifyLadderZones(standings) {
 export function nextLadderCloseAt(now = new Date()) {
   const n = new Date(now);
   const daysUntilSunday = (7 - n.getUTCDay()) % 7; // getUTCDay(): 0 = Sunday
-  let close = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysUntilSunday, 23, 59, 0, 0));
+  let close = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysUntilSunday, 21, 59, 0, 0));
   if (close.getTime() <= n.getTime()) {
     close = new Date(close.getTime() + 7 * 24 * 60 * 60 * 1000);
   }
