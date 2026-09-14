@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Promotion Popup — Demo</title>
+<style>
+  /* ===== Design tokens =====
+     Deep pitch-night backdrop + brass/gold medal accent — a floodlit stadium
+     moment, not a generic SaaS toast. System fonts only: zero font downloads. */
+  :root{
+    --bg-deep:   #07110C;
+    --bg-panel:  #0F2318;
+    --panel-line:#1E3A2A;
+    --gold:      #E8B44C;
+    --gold-hi:   #FFD873;
+    --text:      #F1F5EE;
+    --muted:     #7E9686;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin:0; height:100%;
+    background: var(--bg-deep);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+
+  /* Trigger button — stands in for "app open detects new promotion" */
+  #replay {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-panel); color: var(--muted);
+    border: 1px solid var(--panel-line); padding: 10px 18px;
+    border-radius: 8px; font-size: 13px; cursor: pointer;
+    z-index: 50;
+  }
+  #replay:hover { color: var(--text); border-color: var(--gold); }
+
+  /* ===== Overlay ===== */
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(4,9,6,0.72);
+    backdrop-filter: blur(6px);
+    display:flex; align-items:center; justify-content:center;
+    opacity: 0; pointer-events: none;
+    transition: opacity .25s ease;
+    z-index: 10;
+  }
+  #overlay.show { opacity: 1; pointer-events: auto; }
+
+  /* Camera "zoom punch" flash on the backdrop when the card lands */
+  #overlay.flash::before{
+    content:"";
+    position:absolute; inset:0;
+    background: radial-gradient(circle at 50% 42%, rgba(255,216,115,0.35), transparent 60%);
+    animation: flashPop .5s ease-out forwards;
+  }
+  @keyframes flashPop {
+    0%   { opacity: 0; }
+    30%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Rotating light rays behind the badge — conic-gradient, no image */
+  .rays {
+    position:absolute; width: 520px; height: 520px;
+    background: conic-gradient(
+      from 0deg,
+      rgba(232,180,76,0.16) 0deg 10deg,
+      transparent 10deg 30deg
+    );
+    border-radius: 50%;
+    animation: spin 14s linear infinite;
+    filter: blur(1px);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===== Card ===== */
+  .card {
+    position: relative;
+    width: 340px;
+    background: linear-gradient(180deg, var(--bg-panel), #0A1A12);
+    border: 1px solid var(--panel-line);
+    border-radius: 16px;
+    padding: 36px 28px 28px;
+    text-align: center;
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  #overlay.show .card {
+    animation: cardIn .55s cubic-bezier(.2, 1.4, .4, 1) forwards;
+  }
+  @keyframes cardIn {
+    0%   { transform: scale(0.4); opacity: 0; }
+    60%  { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .eyebrow {
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    margin: 0 0 18px;
+  }
+
+  /* Shield badge — CSS shape, no image asset */
+  .badge {
+    width: 108px; height: 122px;
+    margin: 0 auto 18px;
+    position: relative;
+    clip-path: polygon(50% 0%, 100% 18%, 100% 62%, 50% 100%, 0% 62%, 0% 18%);
+    background: linear-gradient(160deg, var(--gold-hi), var(--gold) 55%, #A9772E);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 0 0 3px rgba(232,180,76,0.15);
+  }
+  /* Shine sweep across the badge, like a metallic emblem catching light */
+  .badge::after{
+    content:"";
+    position:absolute; inset:0;
+    background: linear-gradient(120deg, transparent 40%, rgba(255,255,255,0.55) 50%, transparent 60%);
+    background-size: 250% 250%;
+    background-position: -100% -100%;
+  }
+  #overlay.show .badge::after{
+    animation: shine 1.4s ease-out .5s forwards;
+  }
+  @keyframes shine {
+    to { background-position: 100% 100%; }
+  }
+  .badge span {
+    font-size: 34px; font-weight: 800; color: #241505;
+  }
+
+  h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    color: var(--text);
+  }
+
+  .tier-move {
+    display:flex; align-items:center; justify-content:center; gap: 10px;
+    margin: 14px 0 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .tier-move b { color: var(--text); font-size: 16px; }
+  .tier-move .to b { color: var(--gold-hi); }
+  .arrow { color: var(--gold); font-size: 16px; }
+
+  .rank-line {
+    font-size: 13px; color: var(--muted); margin-bottom: 24px;
+  }
+  .rank-line strong { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  button.cta {
+    width: 100%;
+    background: var(--gold);
+    color: #241505;
+    border: none;
+    padding: 13px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.cta:hover { background: var(--gold-hi); }
+
+  /* ===== Confetti ===== */
+  .confetti {
+    position: fixed; top: -10px;
+    width: 8px; height: 14px;
+    pointer-events: none;
+    z-index: 15;
+    animation-name: fall;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(var(--spin)); opacity: 0.9; }
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div class="rays"></div>
+  <div class="card">
+    <p class="eyebrow">WEEK 4 RESULT</p>
+    <div class="badge"><span>↑</span></div>
+    <h1>Promoted!</h1>
+    <div class="tier-move">
+      <span class="from">Tier <b>15</b></span>
+      <span class="arrow">→</span>
+      <span class="to">Tier <b>14</b></span>
+    </div>
+    <div class="rank-line">New global rank: <strong id="rankNum">0</strong></div>
+    <button class="cta" id="continueBtn">Continue</button>
+  </div>
+</div>
+
+<button id="replay">▶ Replay popup (simulates app open)</button>
+
+<script>
+  const overlay = document.getElementById('overlay');
+  const rankEl = document.getElementById('rankNum');
+  const replayBtn = document.getElementById('replay');
+  const continueBtn = document.getElementById('continueBtn');
+
+  // Confetti: plain divs, randomized inline styles, one shared @keyframes.
+  // No image, no canvas library — cost is a handful of DOM nodes for ~1s.
+  const colors = ['#E8B44C', '#FFD873', '#F1F5EE', '#3E7A52'];
+  function burstConfetti(count = 42) {
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti';
+      const left = Math.random() * 100;
+      const duration = 1.6 + Math.random() * 1.2;
+      const delay = Math.random() * 0.15;
+      const spin = (Math.random() > 0.5 ? 1 : -1) * (360 + Math.random() * 360) + 'deg';
+      el.style.left = left + 'vw';
+      el.style.background = colors[Math.floor(Math.random() * colors.length)];
+      el.style.setProperty('--spin', spin);
+      el.style.animationDuration = duration + 's';
+      el.style.animationDelay = delay + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), (duration + delay) * 1000 + 100);
+    }
+  }
+
+  // Count-up: requestAnimationFrame easing from old rank to new rank.
+  function countUp(el, from, to, ms = 900) {
+    const start = performance.now();
+    function tick(now) {
+      const p = Math.min(1, (now - start) / ms);
+      const eased = 1 - Math.pow(1 - p, 3); // ease-out cubic
+      el.textContent = Math.round(from + (to - from) * eased).toLocaleString();
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function playPromotionPopup() {
+    overlay.classList.add('show', 'flash');
+    setTimeout(() => overlay.classList.remove('flash'), 600);
+    burstConfetti();
+    setTimeout(() => countUp(rankEl, 812, 671), 300);
+  }
+
+  function closePopup() {
+    overlay.classList.remove('show');
+    // In the real app: mark this promotion event as "seen" server-side here,
+    // so it never shows again for this week's result.
+  }
+
+  continueBtn.addEventListener('click', closePopup);
+  replayBtn.addEventListener('click', playPromotionPopup);
+
+  // Real trigger: on app open, compare this week's tier to last week's
+  // (already-fetched data, no new asset), and call playPromotionPopup()
+  // once if it went down (numerically lower tier = promoted).
+  playPromotionPopup();
+</script>
+
+</body>
+</html>
