@@ -243,18 +243,28 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   );
 
   // Countdown notifications at 15/5/1 min remaining — fires once per
-  // threshold per lobby.
+  // threshold per lobby, and ONLY for a viewer who has actually joined
+  // this lobby (myEntry). Previously this fired for anyone looking at
+  // the home screen while any lobby was open, whether or not they'd
+  // joined it — which meant every visitor got repeated "join now!"
+  // countdown toasts for a lobby they had no stake in. Gating on myEntry
+  // matches the mute affordance we already ship elsewhere (a joined
+  // player can stop their own alarm; someone who hasn't joined never
+  // gets one to begin with).
   useEffect(() => {
-    if (msLeft == null || !lobby || lobby.status !== "open") return;
+    if (msLeft == null || !lobby || lobby.status !== "open" || !myEntry) return;
     for (const threshold of NOTIFY_THRESHOLDS_MS) {
       const key = `${lobby.id}:${threshold}`;
       if (msLeft <= threshold && !firedThresholds.current.has(key)) {
         firedThresholds.current.add(key);
         const mins = Math.round(threshold / 60000);
-        showToast?.(`Rapid Cup lobby resets in ${mins} min — join now!`);
+        // Copy changed from "join now!" to "get your match in" — this
+        // viewer has already joined by the time this fires, so "join"
+        // no longer makes sense as the call to action.
+        showToast?.(`Rapid Cup lobby resets in ${mins} min — get your match in!`);
       }
     }
-  }, [msLeft, lobby, showToast]);
+  }, [msLeft, lobby, myEntry, showToast]);
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
   // to the tournament page as soon as league_id is set — but only the
