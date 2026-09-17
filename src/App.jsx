@@ -46,6 +46,7 @@ import { checkAndMarkNewWeek, shouldOfferNotificationOptIn, recordNotificationOp
 // has to fetch and parse before the app is interactive.
 const ShopPage = lazy(() => import("./Shop.jsx"));
 const TransferMarketPage = lazy(() => import("./TransferMarket.jsx"));
+const ChessPage = lazy(() => import("./ChessGame.jsx"));
 const TermsPage = lazy(() => import("./Terms.jsx"));
 // RulesModal carries its own ~500-line static rules text (league/ladder/
 // challenge reference content) that only a fraction of visitors ever open —
@@ -8674,6 +8675,7 @@ export default function App() {
       },
     },
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
+    { icon: Swords, label: "Chess", onClick: () => setView("chess") },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
     { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
@@ -8840,6 +8842,11 @@ export default function App() {
             {view === "transferMarket" && (
               <Suspense fallback={<Loader c={c} />}>
                 <TransferMarketPage c={c} session={session} profile={profile} leagues={leagues} onBack={goBack} showToast={showToast} />
+              </Suspense>
+            )}
+            {view === "chess" && (
+              <Suspense fallback={<Loader c={c} />}>
+                <ChessPage c={c} session={session} onBack={goBack} showToast={showToast} />
               </Suspense>
             )}
             {view === "terms" && (
