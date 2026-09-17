@@ -11401,13 +11401,26 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             onSuggestNotifications={onSuggestNotifications}
             c={c}
           />
-          <RapidLeagueBanner
-            onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
-            onOpenLeague={onOpen}
-            showToast={showToast}
-            onSuggestNotifications={onSuggestNotifications}
-            c={c}
-          />
+          {/* Rapid League, one banner per size (4 / 8 / 16 clubs). Same
+              component three times rather than three forked components:
+              the only thing that differs is which club_count's lobbies it
+              reads and the copy it renders -- the mechanics all live
+              server-side keyed off the lobby row (see the
+              rapid_league_club_count_8_and_16 migration). Each still
+              renders nothing when it has no open/filling/live lobby of
+              its own size, so a quiet 16-club queue just drops out of the
+              row instead of leaving a dead card. */}
+          {[4, 8, 16].map((clubCount) => (
+            <RapidLeagueBanner
+              key={clubCount}
+              clubCount={clubCount}
+              onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
+              onOpenLeague={onOpen}
+              showToast={showToast}
+              onSuggestNotifications={onSuggestNotifications}
+              c={c}
+            />
+          ))}
         </div>
         {/* Ladder banner — pinned above the League Ladder section itself
             (not inside it), the "can't miss it" slot Candy Crush-style
