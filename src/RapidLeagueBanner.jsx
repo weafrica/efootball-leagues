@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
+import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
 
 // RapidLeagueBanner — single-round-robin sibling to RapidCupBanner.
 // Same 4-player lobby/join/fee/countdown/payout mechanics; adapted from
@@ -17,31 +18,34 @@ import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
 //     matches regardless of how the others go — so that entire check
 //     doesn't apply and is left out rather than ported unnecessarily.
 //
-//   - No useCountdownDrumroll / useLeagueStartAlarm from
-//     RapidCupEpicExtras.jsx. Checked that file directly: stopAlarm()
-//     hardcodes an RPC call to stop_rapid_cup_alarm and a Realtime
-//     subscription filtered on the rapid_cup_lobby_players table; the
-//     phone notification hardcodes the tag rapid-cup-alarm-${lobbyId} and
-//     the text "⚡ Rapid Cup". Reusing that hook here wouldn't error, but
-//     the cross-device stop-sync would silently watch the wrong table and
-//     the phone notification would say "Rapid Cup" on a Rapid League
-//     match. Rather than fork a file three other things depend on
-//     (rapidCupAlarmSync.js, sw.js) without visibility into those too,
-//     this is intentionally out of scope for this pass. What's still
-//     here: the in-app "your league has started" auto-redirect (below,
-//     self-contained, always worked this way) and a plain stop_rapid_
-//     league_alarm() call when the viewer taps in, so the DB-side
-//     alarm_stopped_at bookkeeping is still correct even without an
-//     audible alarm attached to it yet.
+//   - useLeagueStartAlarm and useCountdownDrumroll ARE used here now.
+//     useLeagueStartAlarm was generalized in RapidCupEpicExtras.jsx to
+//     take a per-feature config (stopRpc/table/notification copy) instead
+//     of hardcoding Rapid Cup's — see that file's own comment for the
+//     full reasoning. The config passed below points everything at Rapid
+//     League's own RPC/table so the ringing alarm, cross-device stop
+//     sync, and phone notification all work correctly for this format
+//     too, not just Rapid Cup.
 //
 //   - No push notification subscribe/listen (subscribeToRapidCupPush /
 //     listenForPushResubscribe). There's no send-rapid-league-push edge
-//     function deployed — see the migration's own header comment.
+//     function deployed — see the migration's own header comment. The
+//     LOCAL notification (via useLeagueStartAlarm, no server involved)
+//     still works; only actual server-sent push is out of scope.
 //
 // Countdown notifications at 15/5/1 min remaining still fire ONLY for a
 // viewer who has actually joined this lobby (myEntry) — same fix as the
 // one already shipped on RapidCupBanner.
 const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
+
+const LEAGUE_ALARM_CONFIG = {
+  stopRpc: "stop_rapid_league_alarm",
+  table: "rapid_league_lobby_players",
+  notificationTitle: "🔁 Rapid League",
+  notificationBody: "Your round robin has started — tap to enter!",
+  notificationTagPrefix: "rapid-league-alarm",
+  enterActionLabel: "Enter Rapid League",
+};
 
 // sessionStorage-backed for the same reason as RapidCupBanner's identical
 // pattern: has to survive both a Home remount AND a full page refresh.
@@ -201,9 +205,30 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
     }
   }, [msLeft, lobby, myEntry, showToast]);
 
+  // Countdown drumroll — last 10s of this same lobby-reset timer, once per
+  // lobby, only while still "open" (filling). Fully generic, no config
+  // needed — see RapidCupEpicExtras.jsx's own comment on why this one
+  // needed no changes to be safely reused.
+  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
+
+  // League-start alarm, using Rapid League's own RPC/table/copy via
+  // LEAGUE_ALARM_CONFIG (see RapidCupEpicExtras.jsx for the generalized
+  // hook itself). Rings only for a viewer who's actually one of the 4
+  // (myEntry), not for someone browsing the open lobby before joining.
+  const handleNotificationEnter = useCallback(() => {
+    if (myEntry && lobby?.league_id) {
+      onOpenLeague?.(lobby.league_id);
+    } else if (myEntry) {
+      showToast?.("Starting… you'll be taken in automatically in a moment.");
+    }
+  }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
+
+  const { stopAlarm, isRinging } = useLeagueStartAlarm(
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null, LEAGUE_ALARM_CONFIG
+  );
+
   // Auto-redirect once the round robin goes live and this viewer is one
-  // of the 4 — same self-contained pattern as Rapid Cup (no dependency
-  // on the Epic Extras alarm file).
+  // of the 4.
   useEffect(() => {
     if (
       lobby?.status === "live" &&
@@ -212,9 +237,10 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
       !loadAutoOpenedLeagueIds().has(lobby.league_id)
     ) {
       markLeagueAutoOpened(lobby.league_id);
+      stopAlarm(); // they're being taken in automatically — "entering the app"
       onOpenLeague?.(lobby.league_id);
     }
-  }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague]);
+  }, [lobby?.status, lobby?.league_id, myEntry, onOpenLeague, stopAlarm]);
 
   // Fixture generation — as soon as the lobby flips to "filling" (4th
   // player joined) but hasn't got a league_id yet. generate_rapid_league_
@@ -260,11 +286,15 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
 
   const handleBannerClick = () => {
     if (myEntry && lobby.league_id) {
-      supabase.rpc("stop_rapid_league_alarm", { p_lobby_id: lobby.id }).then(() => {});
+      stopAlarm(); // tapping in is exactly the "entering the app" that stops it
       onOpenLeague?.(lobby.league_id);
       return;
     }
     if (myEntry) {
+      // Fixtures still generating (a moment, usually) — stop the ringing
+      // since they've acknowledged it; the auto-redirect effect above
+      // takes them in itself the instant league_id shows up.
+      stopAlarm();
       showToast?.("Starting… you'll be taken in automatically in a moment.");
       return;
     }
@@ -279,14 +309,23 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 16px", borderRadius: 12, cursor: "pointer",
-        background: c?.cardBg || "#1a1a1a",
-        border: `1px solid ${c?.border || "#333"}`,
+        background: isRinging ? "#3a1a1a" : (c?.cardBg || "#1a1a1a"),
+        border: `1px solid ${isRinging ? "#ff4d4d" : (c?.border || "#333")}`,
         marginBottom: 12,
+        animation: isRinging ? "rapidLeagueAlarmPulse 1s ease-in-out infinite" : "none",
       }}
     >
+      {isRinging && (
+        <style>{`
+          @keyframes rapidLeagueAlarmPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0.5); }
+            50% { box-shadow: 0 0 0 8px rgba(255,77,77,0); }
+          }
+        `}</style>
+      )}
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontWeight: 700 }}>🔁 Rapid League</span>
+          <span style={{ fontWeight: 700 }}>{isRinging ? "🔔 Rapid League" : "🔁 Rapid League"}</span>
           <button
             onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
             title="What's Rapid League?" aria-label="What's Rapid League?"
@@ -299,12 +338,14 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
             <Info size={12} />
           </button>
         </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>
-          {lobby.status === "live"
-            ? isMine ? "Your league has started — tap to enter!" : "Round robin live"
-            : isFull
-              ? "Full — next lobby opening"
-              : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
+        <div style={{ fontSize: 13, opacity: isRinging ? 1 : 0.8, fontWeight: isRinging ? 700 : 400 }}>
+          {isRinging
+            ? "Your league has started — tap to enter!"
+            : lobby.status === "live"
+              ? "Round robin live"
+              : isFull
+                ? "Full — next lobby opening"
+                : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
         </div>
       </div>
 
