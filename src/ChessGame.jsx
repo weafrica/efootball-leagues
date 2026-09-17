@@ -1,0 +1,491 @@
+// Chess — 1v1 real-time chess, optional Nets stake per table. New,
+// self-contained top-level screen (same shape as TransferMarket.jsx /
+// Shop.jsx — lazy-loaded from App.jsx, takes { c, session, showToast,
+// onBack }), backed by chess_games (see
+// supabase/migrations/20260940_chess.sql) and the chess.js npm package
+// for move legality/check/checkmate/stalemate detection — reinventing a
+// rules engine in this file (or in SQL) isn't worth it; chess.js is a
+// dependency-free, MIT-licensed library, same "no paid libraries" bar
+// the rest of this app holds itself to.
+//
+// Trust boundary, spelled out once here rather than at every call site:
+// the server (chess_submit_move RPC) only enforces whose turn it is and
+// settles the stake — it does not re-validate that the move itself was
+// legal. Same trust model this app already applies to every other
+// client-reported result (see FINALS-PENALTIES-MIGRATION.md). An
+// admin-override RPC is a natural follow-up if that ever needs closing.
+//
+// Board orientation flips for the black player (row/col rendering
+// order), so each player always sees their own pieces at the bottom.
+
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Chess } from "chess.js";
+import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock } from "lucide-react";
+import { supabase } from "./supabaseClient";
+import { formatNets } from "./nets.js";
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const STAKE_PRESETS = [0, 5, 10, 25, 50];
+
+// Unicode glyphs — no image assets, matches the rest of this app's
+// "CSS/SVG/icon-only, no image or video assets" constraint.
+const PIECE_GLYPH = {
+  wK: "♔", wQ: "♕", wR: "♖", wB: "♗", wN: "♘", wP: "♙",
+  bK: "♚", bQ: "♛", bR: "♜", bB: "♝", bN: "♞", bP: "♟",
+};
+
+function squareId(file, rank) { return `${FILES[file]}${rank}`; }
+
+export default function ChessGame({ c, session, showToast, onBack }) {
+  const [activeGameId, setActiveGameId] = useState(null);
+
+  if (activeGameId) {
+    return (
+      <ChessBoardScreen
+        gameId={activeGameId}
+        session={session}
+        showToast={showToast}
+        onBack={() => setActiveGameId(null)}
+        c={c}
+      />
+    );
+  }
+  return (
+    <ChessLobby session={session} showToast={showToast} onBack={onBack} onOpenGame={setActiveGameId} c={c} />
+  );
+}
+
+// ---------------------------------------------------------------------
+// Lobby — open tables to join, your own in-progress games, create a
+// table with an optional Nets stake.
+
+function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
+  const [openGames, setOpenGames] = useState(null); // null = loading
+  const [myGames, setMyGames] = useState([]);
+  const [myOpenTable, setMyOpenTable] = useState(null); // my own waiting-for-opponent table, if any
+  const [opponentNames, setOpponentNames] = useState({});
+  const [stake, setStake] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    const myId = session?.user?.id;
+    const [{ data: open, error: openError }, { data: mine, error: mineError }] = await Promise.all([
+      supabase.from("chess_games").select("*").eq("status", "open").order("created_at", { ascending: false }).limit(30),
+      myId
+        ? supabase.from("chess_games")
+            .select("*")
+            .or(`white_user_id.eq.${myId},black_user_id.eq.${myId}`)
+            .neq("status", "open")
+            .order("last_move_at", { ascending: false, nullsFirst: false })
+            .limit(20)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (openError) console.error("Couldn't load open chess tables:", openError.message);
+    if (mineError) console.error("Couldn't load your chess games:", mineError.message);
+    setOpenGames((open || []).filter((g) => g.created_by !== myId));
+    setMyOpenTable((open || []).find((g) => g.created_by === myId) || null);
+    setMyGames(mine || []);
+
+    const ids = new Set();
+    (open || []).forEach((g) => ids.add(g.white_user_id));
+    (mine || []).forEach((g) => { ids.add(g.white_user_id); if (g.black_user_id) ids.add(g.black_user_id); });
+    ids.delete(myId);
+    if (ids.size > 0) {
+      const { data: rows } = await supabase.from("profiles").select("user_id, efootball_username").in("user_id", Array.from(ids));
+      const map = {};
+      (rows || []).forEach((r) => { map[r.user_id] = r.efootball_username; });
+      setOpponentNames(map);
+    }
+  }, [session?.user?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Lightweight live refresh — new tables opening/closing, someone
+  // joining one of your own. Not scoped to a single row (the lobby is a
+  // list), so this just re-runs the two queries above on any change.
+  useEffect(() => {
+    const channel = supabase.channel("chess-lobby").on(
+      "postgres_changes", { event: "*", schema: "public", table: "chess_games" }, load
+    ).subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [load]);
+
+  const nameFor = (id) => opponentNames[id] || "Opponent";
+
+  const createGame = async () => {
+    setCreating(true);
+    try {
+      const { data, error } = await supabase.rpc("create_chess_game", { p_stake_nets: stake });
+      if (error) throw error;
+      showToast?.(stake > 0 ? `Table opened — ${formatNets(stake)} staked.` : "Table opened.");
+      onOpenGame(data.id);
+    } catch (err) {
+      showToast?.(`Couldn't open a table: ${err.message}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const joinGame = async (gameId) => {
+    setBusyId(gameId);
+    try {
+      const { error } = await supabase.rpc("join_chess_game", { p_game_id: gameId });
+      if (error) throw error;
+      onOpenGame(gameId);
+    } catch (err) {
+      showToast?.(`Couldn't join: ${err.message}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelGame = async (gameId) => {
+    setBusyId(gameId);
+    try {
+      const { error } = await supabase.rpc("cancel_chess_game", { p_game_id: gameId });
+      if (error) throw error;
+      showToast?.("Table cancelled — stake refunded.");
+      await load();
+    } catch (err) {
+      showToast?.(`Couldn't cancel: ${err.message}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="p-4 flex flex-col gap-6 max-w-2xl mx-auto">
+      <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
+        <ArrowLeft size={14} /> Back
+      </button>
+
+      <div className="flex items-center gap-2">
+        <Swords size={20} style={{ color: c.accent }} />
+        <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Chess</h1>
+      </div>
+
+      {/* Create a table */}
+      <div className="rounded-xl border p-4 flex flex-col gap-3" style={{ borderColor: c.border, background: c.surface }}>
+        <div className="font-mono text-xs uppercase tracking-wide" style={{ color: c.textFaint }}>Open a table</div>
+        <div className="flex flex-wrap gap-2">
+          {STAKE_PRESETS.map((amt) => (
+            <button key={amt} onClick={() => setStake(amt)}
+              className="font-mono text-xs px-3 py-1.5 rounded-full border"
+              style={{
+                borderColor: stake === amt ? c.accent : c.border,
+                background: stake === amt ? c.accent : "transparent",
+                color: stake === amt ? c.accentText : c.text,
+              }}>
+              {amt === 0 ? "No stake" : formatNets(amt)}
+            </button>
+          ))}
+        </div>
+        <button onClick={createGame} disabled={creating}
+          className="self-start flex items-center gap-1.5 font-mono text-xs font-bold uppercase px-4 py-2 rounded-full disabled:opacity-50"
+          style={{ background: c.accent, color: c.accentText }}>
+          {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Open table
+        </button>
+      </div>
+
+      {/* Your own table, still waiting for an opponent */}
+      {myOpenTable && (
+        <div className="rounded-lg border p-3 flex items-center justify-between gap-3" style={{ borderColor: c.accent, background: c.surface }}>
+          <div className="min-w-0">
+            <div className="font-body text-sm font-semibold" style={{ color: c.text }}>Your table — waiting for an opponent</div>
+            <div className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+              {myOpenTable.stake_nets > 0 ? `${formatNets(myOpenTable.stake_nets)} staked` : "No stake"}
+            </div>
+          </div>
+          <button onClick={() => cancelGame(myOpenTable.id)} disabled={busyId === myOpenTable.id}
+            className="font-mono text-[10px] font-bold uppercase px-3 py-1.5 rounded-full disabled:opacity-50"
+            style={{ color: c.red || "#EF4444", border: `1px solid ${c.red || "#EF4444"}55` }}>
+            {busyId === myOpenTable.id ? "…" : "Cancel"}
+          </button>
+        </div>
+      )}
+
+      {/* Your games */}
+      {myGames.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="font-mono text-xs uppercase tracking-wide" style={{ color: c.textFaint }}>Your games</div>
+          {myGames.map((g) => {
+            const iAmWhite = g.white_user_id === session.user.id;
+            const opponentId = iAmWhite ? g.black_user_id : g.white_user_id;
+            const myTurn = g.status === "active" && ((g.turn === "w") === iAmWhite);
+            return (
+              <button key={g.id} onClick={() => onOpenGame(g.id)}
+                className="rounded-lg border p-3 flex items-center justify-between gap-3 text-left"
+                style={{ borderColor: c.border, background: c.surface }}>
+                <div className="min-w-0">
+                  <div className="font-body text-sm font-semibold truncate" style={{ color: c.text }}>
+                    vs {nameFor(opponentId)}
+                  </div>
+                  <div className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+                    {g.status === "active" ? (myTurn ? "Your move" : "Waiting on opponent") : g.status}
+                    {g.stake_nets > 0 ? ` · ${formatNets(g.stake_nets)} staked` : ""}
+                  </div>
+                </div>
+                {g.status === "active" && myTurn && (
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.red || "#EF4444" }} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Open tables */}
+      <div className="flex flex-col gap-2">
+        <div className="font-mono text-xs uppercase tracking-wide" style={{ color: c.textFaint }}>Open tables</div>
+        {openGames === null ? (
+          <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>Loading…</div>
+        ) : openGames.length === 0 ? (
+          <div className="text-center font-mono text-xs p-4" style={{ color: c.textFaint }}>
+            No open tables right now — open one above.
+          </div>
+        ) : (
+          openGames.map((g) => (
+            <div key={g.id} className="rounded-lg border p-3 flex items-center justify-between gap-3"
+              style={{ borderColor: c.border, background: c.surface }}>
+              <div className="min-w-0">
+                <div className="font-body text-sm font-semibold truncate" style={{ color: c.text }}>{nameFor(g.white_user_id)}</div>
+                <div className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+                  {g.stake_nets > 0 ? `${formatNets(g.stake_nets)} stake` : "No stake"}
+                </div>
+              </div>
+              <button onClick={() => joinGame(g.id)} disabled={busyId === g.id}
+                className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-3 py-1.5 rounded-full disabled:opacity-50"
+                style={{ background: c.accent, color: c.accentText }}>
+                {busyId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Users size={12} />} Join
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Board screen — one game, live.
+
+function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
+  const [game, setGame] = useState(null); // the chess_games row
+  const chessRef = useRef(new Chess());
+  const [selected, setSelected] = useState(null); // square id ("e2") or null
+  const [legalTargets, setLegalTargets] = useState([]); // square ids
+  const [submitting, setSubmitting] = useState(false);
+  const [promotionChoice, setPromotionChoice] = useState(null); // { from, to } awaiting a piece pick
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from("chess_games").select("*").eq("id", gameId).maybeSingle();
+    if (error) { showToast?.(`Couldn't load game: ${error.message}`); return; }
+    if (!data) { showToast?.("That game no longer exists."); onBack(); return; }
+    setGame(data);
+    chessRef.current = new Chess(data.fen);
+    setSelected(null);
+    setLegalTargets([]);
+  }, [gameId, onBack, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`chess-game-${gameId}`).on(
+      "postgres_changes", { event: "UPDATE", schema: "public", table: "chess_games", filter: `id=eq.${gameId}` },
+      (payload) => {
+        setGame(payload.new);
+        chessRef.current = new Chess(payload.new.fen);
+        setSelected(null);
+        setLegalTargets([]);
+      }
+    ).subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [gameId]);
+
+  if (!game) {
+    return (
+      <div className="p-8 flex justify-center"><Loader2 className="animate-spin" style={{ color: c.textFaint }} /></div>
+    );
+  }
+
+  const myColor = game.white_user_id === session.user.id ? "w" : game.black_user_id === session.user.id ? "b" : null;
+  const isPlayer = myColor !== null;
+  const myTurn = isPlayer && game.status === "active" && game.turn === myColor;
+  const board = chessRef.current.board(); // 8x8, rank 8 first, chess.js convention
+
+  // finishGame — shared by both the "a move just ended it" path and the
+  // resign button. p_winner_user_id null means a draw.
+  const finishOrContinue = async (moveResult) => {
+    const chess = chessRef.current;
+    const isOver = chess.isGameOver();
+    let status = null, winnerUserId = null, reason = null;
+    if (isOver) {
+      status = "finished";
+      if (chess.isCheckmate()) {
+        reason = "checkmate";
+        winnerUserId = myColor === "w" ? game.white_user_id : game.black_user_id; // mover just delivered mate
+      } else if (chess.isStalemate()) { reason = "stalemate"; winnerUserId = null; }
+      else if (chess.isThreefoldRepetition()) { reason = "threefold"; winnerUserId = null; }
+      else if (chess.isInsufficientMaterial()) { reason = "insufficient_material"; winnerUserId = null; }
+      else { reason = "fifty_move"; winnerUserId = null; }
+    }
+    const { error } = await supabase.rpc("chess_submit_move", {
+      p_game_id: gameId,
+      p_new_fen: chess.fen(),
+      p_new_pgn: chess.pgn(),
+      p_status: status,
+      p_winner_user_id: winnerUserId,
+      p_result_reason: reason,
+    });
+    if (error) {
+      showToast?.(`Move didn't save: ${error.message}`);
+      await load(); // resync — our local board may now disagree with the server
+    }
+  };
+
+  const attemptMove = async (from, to, promotion) => {
+    const chess = chessRef.current;
+    let result;
+    try {
+      result = chess.move({ from, to, promotion: promotion || undefined });
+    } catch {
+      result = null;
+    }
+    if (!result) {
+      setSelected(null);
+      setLegalTargets([]);
+      return;
+    }
+    setSelected(null);
+    setLegalTargets([]);
+    setSubmitting(true);
+    try {
+      await finishOrContinue(result);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onSquareClick = (sq) => {
+    if (!myTurn || submitting) return;
+    const chess = chessRef.current;
+    if (selected) {
+      if (legalTargets.includes(sq)) {
+        // Promotion: a pawn reaching the back rank needs a piece choice —
+        // default to queen unless the destination is a promotion square,
+        // in which case ask first.
+        const piece = chess.get(selected);
+        const isPromotion = piece?.type === "p" && (sq[1] === "8" || sq[1] === "1");
+        if (isPromotion) { setPromotionChoice({ from: selected, to: sq }); return; }
+        attemptMove(selected, sq, null);
+        return;
+      }
+      // Clicking another one of your own pieces re-selects instead of
+      // treating it as an (illegal) move attempt.
+      const piece = chess.get(sq);
+      if (piece && piece.color === myColor) {
+        setSelected(sq);
+        setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
+        return;
+      }
+      setSelected(null);
+      setLegalTargets([]);
+      return;
+    }
+    const piece = chess.get(sq);
+    if (piece && piece.color === myColor) {
+      setSelected(sq);
+      setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
+    }
+  };
+
+  const resign = async () => {
+    if (!window.confirm("Resign this game?")) return;
+    const { error } = await supabase.rpc("resign_chess_game", { p_game_id: gameId });
+    if (error) showToast?.(`Couldn't resign: ${error.message}`);
+  };
+
+  // Board is always rendered rank-8-to-rank-1, file-a-to-file-h internally
+  // (chess.js's own .board() order); flip that render order for the
+  // black player so each side sees their own pieces at the bottom.
+  const displayRanks = myColor === "b" ? [...Array(8).keys()] : [...Array(8).keys()].reverse();
+  const displayFiles = myColor === "b" ? [...Array(8).keys()].reverse() : [...Array(8).keys()];
+
+  const statusText = game.status === "finished"
+    ? (game.winner_user_id
+        ? (game.winner_user_id === session.user.id ? "You won" : "You lost") + ` — ${game.result_reason?.replace("_", " ")}`
+        : `Draw — ${game.result_reason?.replace("_", " ")}`)
+    : game.status === "aborted" ? "Table cancelled"
+    : isPlayer ? (myTurn ? "Your move" : "Waiting on opponent") : "Spectating";
+
+  return (
+    <div className="p-4 flex flex-col gap-4 max-w-lg mx-auto">
+      <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
+        <ArrowLeft size={14} /> Back
+      </button>
+
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-xs uppercase tracking-wide flex items-center gap-1.5" style={{ color: c.textFaint }}>
+          {game.status === "active" && <Clock size={12} />}
+          {statusText}
+        </div>
+        {game.stake_nets > 0 && (
+          <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>
+            <Trophy size={11} /> {formatNets(game.stake_nets * 2)} on the table
+          </div>
+        )}
+      </div>
+
+      {/* 8x8 board */}
+      <div className="grid grid-cols-8 rounded-lg overflow-hidden border" style={{ borderColor: c.border }}>
+        {displayRanks.map((rankIdx) =>
+          displayFiles.map((fileIdx) => {
+            const rank = 8 - rankIdx; // chess.js board()[0] is rank 8
+            const sq = squareId(fileIdx, rank);
+            const cell = board[rankIdx][fileIdx];
+            const isDark = (fileIdx + rankIdx) % 2 === 1;
+            const isSelected = sq === selected;
+            const isTarget = legalTargets.includes(sq);
+            return (
+              <button key={sq} onClick={() => onSquareClick(sq)}
+                className="aspect-square flex items-center justify-center relative select-none"
+                style={{
+                  background: isSelected ? `${c.accent}55` : isDark ? c.surfaceHover : c.surface,
+                  cursor: myTurn ? "pointer" : "default",
+                }}>
+                {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
+                {cell && (
+                  <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint, filter: cell.color === "w" ? "none" : "none" }}>
+                    {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
+                  </span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      {promotionChoice && (
+        <div className="rounded-lg border p-3 flex items-center gap-2 justify-center" style={{ borderColor: c.border, background: c.surface }}>
+          <span className="font-mono text-[10px] uppercase mr-1" style={{ color: c.textFaint }}>Promote to:</span>
+          {["q", "r", "b", "n"].map((p) => (
+            <button key={p} onClick={() => { attemptMove(promotionChoice.from, promotionChoice.to, p); setPromotionChoice(null); }}
+              className="text-2xl px-2 py-1 rounded-lg" style={{ background: c.surfaceHover }}>
+              {PIECE_GLYPH[`${myColor}${p.toUpperCase()}`]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isPlayer && game.status === "active" && (
+        <button onClick={resign}
+          className="self-start flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase px-3 py-1.5 rounded-full"
+          style={{ color: c.red || "#EF4444", border: `1px solid ${c.red || "#EF4444"}55` }}>
+          <Flag size={12} /> Resign
+        </button>
+      )}
+    </div>
+  );
+}
