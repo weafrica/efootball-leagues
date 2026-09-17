@@ -16,6 +16,7 @@ import { computeStandings as computeLeagueLadderStandings, classifyLadderZones, 
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
 import RapidLeagueBanner from "./RapidLeagueBanner.jsx";
+import { RapidChampionsBoard } from "./RapidCupHallOfFame.jsx";
 // LadderMoveBanner's countdown chip + "Xd Xh left" text — same components
 // LeagueLadderDetail.jsx's own fixture rows already use, imported here for
 // the first time now that a homepage banner needs them too.
@@ -1349,6 +1350,17 @@ const TIER_COLOR = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFD700", plat
 // championshipsByUserId (see computeAllLeagueChampionships) attaches which
 // specific league(s) each winner actually won, and when — the badge alone
 // only says "won something," this is what says "won WHAT, and WHEN."
+// Rapid Cup/Rapid League league names both follow a fixed "Format — ..."
+// prefix (see RapidCupBanner.jsx / RapidLeagueBanner.jsx) — used below to
+// keep Rapid wins out of the main trophy-score ranking; they get their own
+// combined earnings board instead (RapidChampionsBoard, in
+// WallOfFameModal) since a Rapid Cup/League can be won in one sitting and
+// would otherwise drown out champions of actual multi-week leagues.
+function isRapidLeagueTitle(t) {
+  const name = t.leagueName || "";
+  return name.startsWith("Rapid Cup — ") || name.startsWith("Rapid League — ");
+}
+
 function computeWallOfFame(allAchievements, profileByUserId, championshipsByUserId, ladderTitlesByUserId) {
   const byUser = {};
   (allAchievements || []).forEach((row) => {
@@ -1377,6 +1389,11 @@ function computeWallOfFame(allAchievements, profileByUserId, championshipsByUser
       ].sort((a, b) => new Date(b.wonAt) - new Date(a.wonAt)),
     }))
     .filter((e) => e.profile)
+    // Exclude anyone whose only known title(s) are Rapid Cup/League wins —
+    // they show up in RapidChampionsBoard's combined earnings board
+    // instead (see isRapidLeagueTitle above). Someone with at least one
+    // non-Rapid title still ranks here as before, Rapid titles and all.
+    .filter((e) => e.titles.length === 0 || e.titles.some((t) => !isRapidLeagueTitle(t)))
     .sort((a, b) => b.score - a.score || b.count - a.count)
     .map((e, i) => ({ ...e, rank: i + 1 }));
 }
@@ -1613,6 +1630,9 @@ function WallOfFameModal({ standings, myUserId, onClose, c }) {
               </div>
             );
           })}
+        </div>
+        <div className="mt-6 pt-5 border-t" style={{ borderColor: c.border }}>
+          <RapidChampionsBoard myUserId={myUserId} c={c} />
         </div>
       </div>
     </div>

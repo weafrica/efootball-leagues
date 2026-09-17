@@ -1673,7 +1673,7 @@ function LadderCupPendingPanel({ league, leagues, allAchievements, canManage, ca
 }
 
 export default function LeagueDetail({ league, leagues, allAchievements, session, isAdmin, joined, canSeePhones, myTeam, entryClosed, myPaymentStatus, blockedByLeague, qualified, myUsername, onBack, onJoin, onResubmitPayment, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, onClearAllWaReminders, onUpdateMemberMessage, onNotifyAllMembers, onRecordResult, onUpdateTeamPhone, onRemoveTeam, onUpdatePhoto, onUpdateDescription, onUpdateCreatorPhone, onUpdateSchedule, onUpdateRoundPeriod, onUpdateGroupStageDueAt, onStartLadderCup, onAdvance, onGenerateFixtures, onDelete, onShare, onLeave, onOpenSubmitResult, onDownloadResultProof, onApproveResult, onRejectResult, onRespondToResultSubmission, onPostComment, onDeleteComment, onEditComment, onEditResult, onCancelResult, onEditLadderCupResult, onToggleReaction, onToggleLeagueReaction, onEnsureLadderCupPoolSighting, onMarkLadderCupPoolContact, onInitiateLadderCupMatch, onCancelLadderCupMatch, onOpenLadderCupResult, onRespondLadderCupMatchResult, onAdminResolveLadderCupMatchResult, onAdminEditLadderCupMatchResult, onRespondLadderCupSecondLife, onRejoinLadderCup, onClaimLadderCupWalkover, onBuyLadderCupOpponentSlot, onApproveLadderCupWalkoverClaim, onRejectLadderCupWalkoverClaim, avatarByTeamId, playerLocations, myTimezone, showToast, c }) {
-  const [tab, setTab] = useState("table");
+  const [tab, setTab] = useState("fixtures");
   const [descOpen, setDescOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const isCreator = session && league.created_by === session.user.id;
@@ -2105,15 +2105,15 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
                 canSeePhones={canSeePhones} onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} leagues={leagues} playerLocations={playerLocations} myTimezone={myTimezone} c={c} />
             )
           )}
+          <CommentsSection league={league} session={session} canComment={joined || canManage}
+            comments={regularComments} heading="Comments" allowCompose
+            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
           {canSeePhones && <TeamContactsPanel teams={league.teams} canManage={canManage} onUpdateTeamPhone={onUpdateTeamPhone} c={c} />}
           {joined && !canSeePhones && (
             <div className="rounded-xl p-4 border font-body text-xs" style={{ borderColor: c.borderStrong, color: c.textFaint }}>
               Player contacts are hidden because your club has been eliminated from this league.
             </div>
           )}
-          <CommentsSection league={league} session={session} canComment={joined || canManage}
-            comments={regularComments} heading="Comments" allowCompose
-            onPost={onPostComment} onDelete={onDeleteComment} onToggleReaction={onToggleReaction} myUsername={myUsername} c={c} />
         </div>
       )}
 
