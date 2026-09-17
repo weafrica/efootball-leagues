@@ -2011,7 +2011,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
         </div>
       )}
 
-      {canManage && inKnockoutBracket && !knockoutChampion && (
+      {canManage && inKnockoutBracket && !knockoutChampion && !isRapidCup && (
         <div className="rounded-xl p-4 mb-5 border flex items-center justify-between gap-3" style={{ background: c.surface, borderColor: c.border }}>
           <div className="font-body text-xs" style={{ color: c.textDim }}>
             {currentRoundDone ? `Round ${totalRounds} complete — ready for the next round.` : `Round ${totalRounds} in progress: ${currentRoundFixtures.filter((f) => f.played || isExpired(f)).length}/${currentRoundFixtures.length} played.`}
