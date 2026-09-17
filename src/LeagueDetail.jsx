@@ -1977,7 +1977,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
                 : " · needs 2+ to start"}.
               {" "}Players who join automatically register their eFootball username as their club — no need to list them upfront.
             </div>
-            {canManage && (
+            {(canManage || joined) && (
               <button disabled={league.teams.length < 2 || (isGroupsKnockout && league.teams.length < 4)} onClick={() => onGenerateFixtures(league)}
                 className="font-body text-sm font-semibold px-4 py-2.5 rounded-full"
                 style={(league.teams.length >= 2 && !(isGroupsKnockout && league.teams.length < 4)) ? { background: c.accent, color: c.accentText } : { background: c.surfaceHover, color: c.textFaint }}>

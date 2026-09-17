@@ -6010,15 +6010,6 @@ export default function App() {
 
   // Persists which group each team landed in. Supabase doesn't support per-row
   // bulk updates with different values in one call, so we fire them in parallel.
-  const persistGroupAssignments = async (groups) => {
-    const updates = groups.flatMap((groupTeamIds, gi) =>
-      groupTeamIds.map((teamId) => supabase.from("teams").update({ group_number: gi }).eq("id", teamId)));
-    const results = await Promise.all(updates);
-    const failed = results.find((r) => r.error);
-    if (failed) { showToast(`Couldn't assign groups: ${failed.error.message}`); return false; }
-    return true;
-  };
-
   const createLeague = async (input) => {
     const { name, teamNames, format, survivor, groups, knockoutLegs, ladderCupCutoffAt, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
     const insertPayload = {
@@ -6139,9 +6130,16 @@ export default function App() {
       showToast("Need at least 4 clubs to form groups."); return;
     }
     const { fixtureRows, startsInFinal, groups: groupAssignments, groupsCount } = generateOpeningFixtures(league, freshTeams.map((t) => t.id), generationDueBase(league));
+
+    // Any joined member can start the league now, not just canManage (same
+    // idea as League Ladder, which never gated fixture generation behind
+    // admin permissions to begin with) — see start_league_by_member. It
+    // does the actual fixtures/teams/leagues writes itself as one
+    // security-definer transaction instead of three separate client
+    // writes, since a joined member's own RLS grants don't (and shouldn't)
+    // cover those tables directly.
+    let groupStageDueAt = null;
     if (groupAssignments) {
-      const ok = await persistGroupAssignments(groupAssignments);
-      if (!ok) return;
       // Weekend League groups_knockout gets its group_stage_due_at set
       // automatically to Saturday 17:00 SAST — the group stage auto-ends
       // and the knockout bracket auto-generates right at that moment (see
@@ -6150,14 +6148,22 @@ export default function App() {
       // groups_knockout league still does. Month-End League gets the same
       // treatment, 10 days out instead of 24h (see
       // 20260938_month_end_league_auto_cycle.sql).
-      const groupStageUpdate = { groups_count: groupsCount };
-      if (isWeekendLeague(league)) groupStageUpdate.group_stage_due_at = weekendGroupStageCutoffUTC(league.starts_at).toISOString();
-      else if (isMonthEndLeague(league)) groupStageUpdate.group_stage_due_at = monthEndGroupStageCutoffUTC(league.starts_at).toISOString();
-      await supabase.from("leagues").update(groupStageUpdate).eq("id", league.id);
+      if (isWeekendLeague(league)) groupStageDueAt = weekendGroupStageCutoffUTC(league.starts_at).toISOString();
+      else if (isMonthEndLeague(league)) groupStageDueAt = monthEndGroupStageCutoffUTC(league.starts_at).toISOString();
     }
-    const ok = await insertChunked("fixtures", fixtureRows, showToast);
-    if (!ok) return;
-    if (startsInFinal) await supabase.from("leagues").update({ final_stage_started: true }).eq("id", league.id);
+    const groupAssignmentRows = groupAssignments
+      ? groupAssignments.flatMap((groupTeamIds, gi) => groupTeamIds.map((teamId) => ({ team_id: teamId, group_number: gi })))
+      : null;
+
+    const { error } = await supabase.rpc("start_league_by_member", {
+      p_league_id: league.id,
+      p_fixtures: fixtureRows,
+      p_group_assignments: groupAssignmentRows,
+      p_groups_count: groupAssignments ? groupsCount : null,
+      p_group_stage_due_at: groupStageDueAt,
+      p_final_stage_started: !!startsInFinal,
+    });
+    if (error) { showToast(error.message || "Couldn't start the league."); return; }
     await refreshLeague(league.id);
     showToast(`League started — ${fixtureRows.length} fixtures generated for ${freshTeams.length} clubs${groupAssignments ? ` across ${groupAssignments.length} groups` : ""}.`);
     } finally {
