@@ -16,7 +16,7 @@ import { RapidCupTournamentExtras } from "./RapidCupPrizeCollection.jsx";
 
 import {
   FORMATS, GroupFixturesList, GroupStageDueLine, GroupTables, KNOCKOUT_TIE_WINDOW_MS, NextOpponentsList,
-  KnockoutFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
+  KnockoutFixturesList, RapidLeagueFixturesList, LADDER_THEME, LeagueDescriptionBlock, LeagueMenu, LeaguePhotoBanner, LeagueReactionBar,
   LeagueScheduleLine, LeagueStatusBanner, MemberAvatar, MemberMessageEditor, MemberPaymentRow, ONE_DAY_MS,
   PendingResultsPanel, PlayerProfileModal, PrizeBreakdownPanel, REACTIONS, REACTION_EMOJI,
   RESULT_CONFIRM_WINDOW_MINUTES, RulesButton, ShareRangeModal, StandingsPanel,
@@ -1692,6 +1692,18 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
       .then(({ data }) => { if (!cancelled) setIsRapidCup(!!data); });
     return () => { cancelled = true; };
   }, [league?.id]);
+  // Same self-detection pattern, for Rapid League's round-robin sibling
+  // (rapid_league_lobbies rather than rapid_cup_lobbies). Also only ever
+  // 4 teams, so it gets the same "no leave button, no opponent search"
+  // treatment below.
+  const [isRapidLeague, setIsRapidLeague] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!league?.id) { setIsRapidLeague(false); return; }
+    supabase.from("rapid_league_lobbies").select("id").eq("league_id", league.id).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsRapidLeague(!!data); });
+    return () => { cancelled = true; };
+  }, [league?.id]);
   // Results (auto-posted scorelines/photo-proof rows) live under the Table
   // tab; everything else stays under Fixtures as regular chat. Both are
   // still just rows in `comments` — this only decides which panel shows them.
@@ -1779,7 +1791,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
           {canManage && (
             <LeagueMenu league={league} onShare={onShare} onDelete={onDelete} c={c} />
           )}
-          {!canManage && joined && (
+          {!canManage && joined && !isRapidCup && !isRapidLeague && (
             <button onClick={() => onLeave(league)} title="Leave league" className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.red }}><LogOut size={14} /></button>
           )}
         </div>
@@ -2078,6 +2090,10 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
               <KnockoutFixturesList league={league} bracketFixtures={stageFixtures} canManage={canManage} joined={joined}
                 getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
                 onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} canSeePhones={canSeePhones} myTeamId={myTeam?.id} c={c} />
+            ) : isRapidLeague ? (
+              <RapidLeagueFixturesList league={league} fixtures={stageFixtures} canManage={canManage} joined={joined}
+                getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
+                onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
             ) : (
               // myTeam + inKnockoutBracket let OpponentFinder auto-resolve
               // straight to "your next match" instead of making a knockout

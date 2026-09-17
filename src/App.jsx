@@ -14607,6 +14607,41 @@ export function GroupFixturesList({ league, groupStageFixtures, canManage, joine
   );
 }
 
+// Rapid League is only ever 4 clubs across 3 matchdays (single round robin —
+// see RapidLeagueBanner.jsx), so — same reasoning as Rapid Cup getting
+// KnockoutFixturesList instead of OpponentFinder below — searching for your
+// own fixture by matchday/club name is pointless friction. List every
+// fixture directly instead.
+export function RapidLeagueFixturesList({ league, fixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
+  const roundsMap = {};
+  fixtures.forEach((f) => { (roundsMap[f.round] ||= []).push(f); });
+  const roundNumbers = Object.keys(roundsMap).map(Number).sort((a, b) => a - b);
+
+  return (
+    <div className="space-y-6">
+      <div className="font-mono text-xs uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>All fixtures</div>
+      <div className="rounded-xl border divide-y" style={{ borderColor: c.border, background: c.surface }}>
+        {roundNumbers.map((r) => (
+          <div key={r} className="px-4 py-2.5">
+            <div className="font-mono text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Matchday {r}</div>
+            <div className="divide-y" style={{ borderColor: c.border }}>
+              {roundsMap[r].map((f) => {
+                const home = league.teams.find((t) => t.id === f.home_team_id);
+                const away = f.away_team_id ? league.teams.find((t) => t.id === f.away_team_id) : null;
+                if (!away) {
+                  return <div key={f.id} className="py-2 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} — bye this round</div>;
+                }
+                return <FixtureScoreRow key={f.id} fixture={f} homeTeam={home} awayTeam={away} canManage={canManage} onSave={onRecordResult}
+                  joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Full listing of every knockout-bracket fixture, organized by round. Legs of the
 // same tie (home & away) are grouped together with an aggregate score shown.
 export function KnockoutFixturesList({ league, bracketFixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, myTeamId, c }) {
