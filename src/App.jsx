@@ -12999,7 +12999,6 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
               Final: you {myScore} – {theirScore} {counterpartUsername}
-              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
             </div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
