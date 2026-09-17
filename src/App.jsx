@@ -15,6 +15,7 @@ import { entryFeeForLeagueFormat, ENTRY_FEES_NETS, computeMatchNets, LADDER_JOIN
 import { computeStandings as computeLeagueLadderStandings, classifyLadderZones, nextLadderCloseAt, ladderZoneForRank } from "./formats/leagueLadder.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
+import RapidLeagueBanner from "./RapidLeagueBanner.jsx";
 // LadderMoveBanner's countdown chip + "Xd Xh left" text — same components
 // LeagueLadderDetail.jsx's own fixture rows already use, imported here for
 // the first time now that a homepage banner needs them too.
@@ -855,6 +856,15 @@ function findNoShowTeamIds(league) {
   // enough of his other group matches to top the group and go on to win
   // knockout round 1 — the exact case this guards against now.
   if (league.format !== "knockout" && league.format !== "groups_knockout") return [];
+  // Rapid Cup reuses the plain "knockout" format but runs its own 24h
+  // per-fixture forfeit + coin-flip bracket-advance server-side (see
+  // 20260942_rapid_cup_league_24h_fixture_forfeit.sql) instead of this
+  // instant "both sides eliminated, nobody advances" client sweep — the
+  // two would otherwise race each other and leave the bracket in a
+  // state neither side expects. Recognized by name since there's no
+  // dedicated flag on the league row itself (same signal FixtureScoreRow
+  // uses below for the countdown badge).
+  if (league.name?.startsWith("Rapid Cup — ")) return [];
   const fixtures = (league.fixtures || [])
     .filter((f) => f.away_team_id !== null)
     .filter((f) => !isGroupStageFixture(f, league));
@@ -11346,23 +11356,33 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             ))}
           </div>
         )}
-        {/* Rapid Cup — horizontal banner right under Quick Actions (see
-            RAPID-CUP-BUILD-PLAN.md Section 12). Self-contained: it polls
-            for the current open/filling/live lobby itself and renders
-            nothing when there isn't one, so it never pushes the rest of
-            Home down when Rapid Cup is quiet. onOpenLeague reuses the
-            same "open a league by id" handler every other card on this
-            page already uses; there's no separate lobby page yet, so
-            onOpenLobby (tapping the banner before it's live/full) is just
-            a light nudge toward the Join button rather than a real
-            navigation. */}
-        <RapidCupBanner
-          onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
-          onOpenLeague={onOpen}
-          showToast={showToast}
-          onSuggestNotifications={onSuggestNotifications}
-          c={c}
-        />
+        {/* Rapid Cup + Rapid League — side by side under Quick Actions (see
+            RAPID-CUP-BUILD-PLAN.md Section 12). Each is self-contained: it
+            polls for its own current open/filling/live lobby and renders
+            nothing when there isn't one, so an empty side never leaves an
+            odd gap next to the other. onOpenLeague reuses the same "open a
+            league by id" handler every other card on this page already
+            uses; there's no separate lobby page yet, so onOpenLobby
+            (tapping the banner before it's live/full) is just a light
+            nudge toward the Join button rather than a real navigation.
+            Stacks to one column on narrow screens (flex-wrap) rather than
+            squeezing both banners' text into half-width forever. */}
+        <div className="flex flex-wrap gap-3 mb-3 [&>*]:flex-1 [&>*]:min-w-[240px] [&>*]:mb-0">
+          <RapidCupBanner
+            onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
+            onOpenLeague={onOpen}
+            showToast={showToast}
+            onSuggestNotifications={onSuggestNotifications}
+            c={c}
+          />
+          <RapidLeagueBanner
+            onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
+            onOpenLeague={onOpen}
+            showToast={showToast}
+            onSuggestNotifications={onSuggestNotifications}
+            c={c}
+          />
+        </div>
         {/* Ladder banner — pinned above the League Ladder section itself
             (not inside it), the "can't miss it" slot Candy Crush-style
             featured events get above the level map: this week's fixture/
@@ -14453,9 +14473,27 @@ function FixtureScoreRow({ fixture, homeTeam, awayTeam, canManage, onSave, legLa
           KnockoutFixturesList) — this column is skipped here via
           hideDueDate, except "Expired" still shows per row since a
           leg-specific played/unplayed state is still worth flagging. */}
-      <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
-        {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : hideDueDate ? "" : fmtDate(fixture.due_at)}
-      </span>
+      {/* Rapid Cup / Rapid League fixtures show the same glowing
+          CountdownBadge League Ladder fixtures use (copied from
+          LeagueLadderDetail.jsx) instead of a plain date, and a
+          "Forfeited" label once the 24h sweep has resolved a no-show
+          (20260942) — matches how those leagues actually settle now:
+          each fixture forfeits on its own timer, the badge is what gives
+          that timer its "sense of emergency" on screen. Recognized by
+          name, same signal findNoShowTeamIds uses above. */}
+      {(league.name?.startsWith("Rapid Cup — ") || league.name?.startsWith("Rapid League — ")) ? (
+        <span className="shrink-0 w-20 flex justify-end">
+          {fixture.forfeited ? (
+            <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>Forfeited</span>
+          ) : !fixture.played && !hideDueDate ? (
+            <CountdownBadge expiresAt={fixture.due_at} />
+          ) : null}
+        </span>
+      ) : (
+        <span className="shrink-0 font-mono text-[10px] w-20 text-right" style={{ color: isFixtureLocked(fixture, league) ? c.red : c.textFaint }}>
+          {fixture.played ? "" : isFixtureLocked(fixture, league) ? "Expired" : hideDueDate ? "" : fmtDate(fixture.due_at)}
+        </span>
+      )}
       {canManage && (
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
