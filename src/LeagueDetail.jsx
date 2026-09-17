@@ -2140,7 +2140,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
             const row = (m) => (
               <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
                 isCash={league.league_type === "cash"} canManage={canManage}
-                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
+                isOwnRow={session && m.user_id === session.user.id} canLeave={!isRapidLeague} onLeave={() => onLeave(league)}
                 onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
             );
             // Only worth splitting into two lists once a custom template

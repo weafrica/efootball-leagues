@@ -15442,7 +15442,7 @@ function useNow(intervalMs = 60000) {
   }, [intervalMs]);
 }
 
-export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, canLeave = true, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
   useNow();
   const reminded = isWaReminderActive(m);
   return (
@@ -15479,7 +15479,7 @@ export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove 
         {!isCash && canManage && allowRemove && t && (
           <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}><X size={14} /></button>
         )}
-        {!canManage && isOwnRow && (
+        {!canManage && isOwnRow && canLeave && (
           <button onClick={onLeave} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title="Leave league"><LogOut size={14} /></button>
         )}
       </div>
