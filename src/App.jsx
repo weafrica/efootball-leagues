@@ -16,6 +16,7 @@ import { computeStandings as computeLeagueLadderStandings, classifyLadderZones, 
 import { getLadderTierTheme } from "./ladderTierThemes.js";
 import RapidCupBanner from "./RapidCupBanner.jsx";
 import RapidLeagueBanner from "./RapidLeagueBanner.jsx";
+import RapidLeagueBanner from "./RapidLeagueBanner.jsx";
 // LadderMoveBanner's countdown chip + "Xd Xh left" text — same components
 // LeagueLadderDetail.jsx's own fixture rows already use, imported here for
 // the first time now that a homepage banner needs them too.
