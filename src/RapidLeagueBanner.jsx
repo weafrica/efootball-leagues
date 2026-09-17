@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
-import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
+import { useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
 
 // RapidLeagueBanner — single-round-robin sibling to RapidCupBanner.
 // Same 4-player lobby/join/fee/countdown/payout mechanics; adapted from
@@ -18,25 +18,16 @@ import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.
 //     matches regardless of how the others go — so that entire check
 //     doesn't apply and is left out rather than ported unnecessarily.
 //
-//   - useLeagueStartAlarm and useCountdownDrumroll ARE used here now.
-//     useLeagueStartAlarm was generalized in RapidCupEpicExtras.jsx to
-//     take a per-feature config (stopRpc/table/notification copy) instead
-//     of hardcoding Rapid Cup's — see that file's own comment for the
-//     full reasoning. The config passed below points everything at Rapid
-//     League's own RPC/table so the ringing alarm, cross-device stop
-//     sync, and phone notification all work correctly for this format
-//     too, not just Rapid Cup.
+//   - useLeagueStartAlarm IS used here now (the ring-when-the-league-
+//     actually-starts alarm, once all seats are full). The 15/5/1 min
+//     lobby-reset countdown toast and the ticking countdown sound have
+//     both been removed — see the removed blocks further down.
 //
 //   - No push notification subscribe/listen (subscribeToRapidCupPush /
 //     listenForPushResubscribe). There's no send-rapid-league-push edge
 //     function deployed — see the migration's own header comment. The
 //     LOCAL notification (via useLeagueStartAlarm, no server involved)
 //     still works; only actual server-sent push is out of scope.
-//
-// Countdown notifications at 15/5/1 min remaining still fire ONLY for a
-// viewer who has actually joined this lobby (myEntry) — same fix as the
-// one already shipped on RapidCupBanner.
-const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
 
 const LEAGUE_ALARM_CONFIG = {
   stopRpc: "stop_rapid_league_alarm",
@@ -182,44 +173,14 @@ export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLe
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const firedThresholds = useRef(new Set());
-  const lastLobbyId = useRef(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    if (lobby?.id !== lastLobbyId.current) {
-      firedThresholds.current = new Set();
-      lastLobbyId.current = lobby?.id ?? null;
-    }
-  }, [lobby?.id]);
-
   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
   const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
-
-  // Countdown notifications at 15/5/1 min remaining — same myEntry gate
-  // as the fixed RapidCupBanner: only fires for a viewer who has actually
-  // joined this lobby, never for someone just browsing.
-  useEffect(() => {
-    if (msLeft == null || !lobby || lobby.status !== "open" || !myEntry) return;
-    for (const threshold of NOTIFY_THRESHOLDS_MS) {
-      const key = `${lobby.id}:${threshold}`;
-      if (msLeft <= threshold && !firedThresholds.current.has(key)) {
-        firedThresholds.current.add(key);
-        const mins = Math.round(threshold / 60000);
-        showToast?.(`Rapid League lobby resets in ${mins} min — get your match in!`);
-      }
-    }
-  }, [msLeft, lobby, myEntry, showToast]);
-
-  // Countdown drumroll — last 10s of this same lobby-reset timer, once per
-  // lobby, only while still "open" (filling). Fully generic, no config
-  // needed — see RapidCupEpicExtras.jsx's own comment on why this one
-  // needed no changes to be safely reused.
-  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
 
   // League-start alarm, using Rapid League's own RPC/table/copy via
   // LEAGUE_ALARM_CONFIG (see RapidCupEpicExtras.jsx for the generalized

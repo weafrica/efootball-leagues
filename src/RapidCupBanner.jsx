@@ -10,10 +10,8 @@ import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPus
 // lobby's fill count and countdown, lets the viewer join, and once
 // their lobby goes live, hands off to the tournament page.
 //
-// Notification thresholds fire once each per lobby — trackedThresholds
-// resets whenever the lobby id changes so a new lobby gets its own
-// 15/5/1 min warnings.
-const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
+// Countdown-toast reminders (15/5/1 min warnings) have been removed —
+// see the removed useEffect further down for why.
 
 // sessionStorage-backed, not component state or a module-level Set — this
 // has to survive two different resets:
@@ -192,8 +190,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const firedThresholds = useRef(new Set());
-  const lastLobbyId = useRef(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -205,14 +201,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   // save it to Supabase. One listener for the life of this banner, not
   // tied to any particular lobby.
   useEffect(() => listenForPushResubscribe(), []);
-
-  // Reset fired-notification tracking whenever we land on a new lobby.
-  useEffect(() => {
-    if (lobby?.id !== lastLobbyId.current) {
-      firedThresholds.current = new Set();
-      lastLobbyId.current = lobby?.id ?? null;
-    }
-  }, [lobby?.id]);
 
   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
   const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
@@ -236,30 +224,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
     lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null
   );
-
-  // Countdown notifications at 15/5/1 min remaining — fires once per
-  // threshold per lobby, and ONLY for a viewer who has actually joined
-  // this lobby (myEntry). Previously this fired for anyone looking at
-  // the home screen while any lobby was open, whether or not they'd
-  // joined it — which meant every visitor got repeated "join now!"
-  // countdown toasts for a lobby they had no stake in. Gating on myEntry
-  // matches the mute affordance we already ship elsewhere (a joined
-  // player can stop their own alarm; someone who hasn't joined never
-  // gets one to begin with).
-  useEffect(() => {
-    if (msLeft == null || !lobby || lobby.status !== "open" || !myEntry) return;
-    for (const threshold of NOTIFY_THRESHOLDS_MS) {
-      const key = `${lobby.id}:${threshold}`;
-      if (msLeft <= threshold && !firedThresholds.current.has(key)) {
-        firedThresholds.current.add(key);
-        const mins = Math.round(threshold / 60000);
-        // Copy changed from "join now!" to "get your match in" — this
-        // viewer has already joined by the time this fires, so "join"
-        // no longer makes sense as the call to action.
-        showToast?.(`Rapid Cup lobby resets in ${mins} min — get your match in!`);
-      }
-    }
-  }, [msLeft, lobby, myEntry, showToast]);
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
   // to the tournament page as soon as league_id is set — but only the
