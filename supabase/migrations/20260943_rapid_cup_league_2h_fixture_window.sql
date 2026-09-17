@@ -1,25 +1,25 @@
--- Shrinks the Rapid Cup / Rapid League fixture window from 24h back down
--- to 2h, per explicit instruction. Touches every place that window was
--- set to 24h (generate_rapid_cup_bracket, _rapid_cup_advance_bracket_internal's
--- final, generate_rapid_league_fixtures), plus fixes a pre-existing
--- inconsistency this surfaces: raise_rapid_cup_entry_fee and
--- raise_rapid_league_entry_fee were still locking fee changes based on a
--- hardcoded 4-hour "cup/league ends at" assumption that never matched
--- either the old 24h window or this new 2h one. Both now derive from the
--- same 2h window so "last 40 minutes locked" actually means the last 40
--- minutes of the real match window, not an arbitrary unrelated figure.
+-- Rapid Cup / Rapid League — shrink the shared fixture window from 4
+-- hours to 2 hours, and fix a mismatch this uncovered: the fee-raise
+-- lock functions independently recompute "when does this end" using a
+-- hardcoded interval '4 hours' rather than reading the fixtures' actual
+-- due_at. If only the window durations were changed, the fee lock would
+-- still open 40 minutes before the OLD (4h) end time — up to ~2 hours
+-- after the cup/league had actually finished.
 --
--- Note: 40 minutes out of a 2-hour window is now a third of the whole
--- match locked to fee changes — proportionally much stricter than against
--- the old 24h window. Flagging in case that ratio wasn't meant to change
--- along with the window itself.
+-- Builds on:
+--   20260903100000_rapid_cup_bracket_generation.sql        (v_due_at)
+--   20260903160000_rapid_cup_lock_fee_raise_last_40min.sql (v_cup_ends_at)
+--   20260918000000_rapid_league_single_round_robin.sql     (v_due_at, v_league_ends_at)
 
-create or replace function public.generate_rapid_cup_bracket(p_lobby_id uuid)
- returns rapid_cup_lobbies
- language plpgsql
- security definer
- set search_path to 'public'
-as $function$
+-- ─────────────────────────────────────────────────────────────────────────
+-- 1. Rapid Cup — round-1 fixtures now due 2h after start, not 4h.
+-- ─────────────────────────────────────────────────────────────────────────
+create or replace function generate_rapid_cup_bracket(p_lobby_id uuid)
+returns rapid_cup_lobbies
+language plpgsql
+security definer
+set search_path = public
+as $$
 declare
   v_lobby rapid_cup_lobbies;
   v_league_id uuid;
@@ -28,7 +28,6 @@ declare
   v_player record;
   v_team_ids uuid[] := '{}';
   v_new_team_id uuid;
-  v_service_key text;
 begin
   select * into v_lobby from rapid_cup_lobbies where id = p_lobby_id for update;
 
@@ -77,82 +76,70 @@ begin
   where id = p_lobby_id
   returning * into v_lobby;
 
-  begin
-    select decrypted_secret into v_service_key
-    from vault.decrypted_secrets
-    where name = 'rapid_cup_push_service_role_key';
-
-    if v_service_key is not null then
-      perform net.http_post(
-        url := 'https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/send-rapid-cup-push',
-        headers := jsonb_build_object(
-          'Content-Type', 'application/json',
-          'Authorization', 'Bearer ' || v_service_key
-        ),
-        body := jsonb_build_object('lobby_id', p_lobby_id)
-      );
-    else
-      raise warning 'generate_rapid_cup_bracket: rapid_cup_push_service_role_key not found in Vault — skipping push for lobby %', p_lobby_id;
-    end if;
-  exception when others then
-    raise warning 'generate_rapid_cup_bracket: push notification failed for lobby % — %', p_lobby_id, sqlerrm;
-  end;
-
   return v_lobby;
 end;
-$function$;
+$$;
 
-create or replace function public._rapid_cup_advance_bracket_internal(p_league_id uuid)
- returns void
- language plpgsql
- security definer
- set search_path to 'public'
-as $function$
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2. Rapid Cup — fee-raise lock now matches the 2h window above, so the
+--    "last 40 minutes" lock opens at the cup's real end time again.
+-- ─────────────────────────────────────────────────────────────────────────
+create or replace function raise_rapid_cup_entry_fee(p_lobby_id uuid, p_new_fee numeric)
+returns rapid_cup_lobby_players
+language plpgsql
+security definer
+set search_path = public
+as $$
 declare
-  v_semis record;
-  v_winners uuid[] := '{}';
-  v_now timestamptz := now();
-  v_final_exists boolean;
+  v_lobby rapid_cup_lobbies;
+  v_row rapid_cup_lobby_players;
+  v_cup_ends_at timestamptz;
 begin
-  perform pg_advisory_xact_lock(hashtext(p_league_id::text)::bigint);
-
-  select exists(select 1 from fixtures where league_id = p_league_id and round = 2 and stage = 1)
-  into v_final_exists;
-
-  if v_final_exists then
-    return;
+  if p_new_fee < 0 or p_new_fee > 400 then
+    raise exception 'Entry fee must be between 0 and 400 Nets';
   end if;
 
-  for v_semis in
-    select home_team_id, away_team_id, played, home_score, away_score, pens_home, pens_away
-    from fixtures
-    where league_id = p_league_id and round = 1 and leg = 1 and stage = 1
-    order by id
-  loop
-    if not v_semis.played then
-      return;
-    end if;
-
-    if v_semis.home_score > v_semis.away_score then
-      v_winners := v_winners || v_semis.home_team_id;
-    elsif v_semis.away_score > v_semis.home_score then
-      v_winners := v_winners || v_semis.away_team_id;
-    elsif v_semis.pens_home is not null and v_semis.pens_away is not null and v_semis.pens_home <> v_semis.pens_away then
-      v_winners := v_winners || (case when v_semis.pens_home > v_semis.pens_away then v_semis.home_team_id else v_semis.away_team_id end);
-    else
-      return;
-    end if;
-  end loop;
-
-  if coalesce(array_length(v_winners, 1), 0) <> 2 then
-    return;
+  select * into v_lobby from rapid_cup_lobbies where id = p_lobby_id;
+  if v_lobby.id is null then
+    raise exception 'Rapid Cup lobby % not found', p_lobby_id;
   end if;
 
-  insert into fixtures (league_id, round, leg, stage, home_team_id, away_team_id, played, home_score, away_score, due_at, starts_at)
-  values (p_league_id, 2, 1, 1, v_winners[1], v_winners[2], false, 0, 0, v_now + interval '2 hours', v_now);
+  select * into v_row
+  from rapid_cup_lobby_players
+  where lobby_id = p_lobby_id and user_id = auth.uid()
+  for update;
+
+  if v_row.id is null then
+    raise exception 'You are not in this Rapid Cup lobby';
+  end if;
+
+  if p_new_fee <= v_row.entry_fee then
+    raise exception 'Entry fee can only be raised — % is not above your current % Nets', p_new_fee, v_row.entry_fee;
+  end if;
+
+  if v_lobby.status not in ('open', 'filling', 'live') then
+    raise exception 'This Rapid Cup lobby is no longer accepting fee changes';
+  end if;
+
+  if v_lobby.status = 'live' then
+    v_cup_ends_at := coalesce(v_lobby.started_at, v_lobby.created_at) + interval '2 hours';
+    if v_cup_ends_at - now() <= interval '40 minutes' then
+      raise exception 'Entry fees are locked in the last 40 minutes of the cup';
+    end if;
+  end if;
+
+  update rapid_cup_lobby_players
+  set entry_fee = p_new_fee
+  where id = v_row.id
+  returning * into v_row;
+
+  return v_row;
 end;
-$function$;
+$$;
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- 3. Rapid League — same fix, single round-robin fixtures.
+-- ─────────────────────────────────────────────────────────────────────────
 create or replace function public.generate_rapid_league_fixtures(p_lobby_id uuid)
  returns rapid_league_lobbies
  language plpgsql
@@ -223,66 +210,9 @@ begin
 end;
 $function$;
 
-create or replace function public.raise_rapid_cup_entry_fee(p_lobby_id uuid, p_new_fee numeric)
- returns rapid_cup_lobby_players
- language plpgsql
- security definer
- set search_path to 'public'
-as $function$
-declare
-  v_lobby rapid_cup_lobbies;
-  v_row rapid_cup_lobby_players;
-  v_cup_ends_at timestamptz;
-  v_balance numeric;
-begin
-  if p_new_fee < 0 or p_new_fee > 400 then
-    raise exception 'Entry fee must be between 0 and 400 Nets';
-  end if;
-
-  select coalesce(balance, 0) into v_balance from nets_wallets where user_id = auth.uid();
-  v_balance := coalesce(v_balance, 0);
-  if p_new_fee > v_balance * 0.20 then
-    raise exception 'Entry fee cannot exceed 20%% of your Nets balance (max %)', floor(v_balance * 0.20);
-  end if;
-
-  select * into v_lobby from rapid_cup_lobbies where id = p_lobby_id;
-  if v_lobby.id is null then
-    raise exception 'Rapid Cup lobby % not found', p_lobby_id;
-  end if;
-
-  select * into v_row
-  from rapid_cup_lobby_players
-  where lobby_id = p_lobby_id and user_id = auth.uid()
-  for update;
-
-  if v_row.id is null then
-    raise exception 'You are not in this Rapid Cup lobby';
-  end if;
-
-  if p_new_fee <= v_row.entry_fee then
-    raise exception 'Entry fee can only be raised — % is not above your current % Nets', p_new_fee, v_row.entry_fee;
-  end if;
-
-  if v_lobby.status not in ('open', 'filling', 'live') then
-    raise exception 'This Rapid Cup lobby is no longer accepting fee changes';
-  end if;
-
-  if v_lobby.status = 'live' then
-    v_cup_ends_at := coalesce(v_lobby.started_at, v_lobby.created_at) + interval '2 hours';
-    if v_cup_ends_at - now() <= interval '40 minutes' then
-      raise exception 'Entry fees are locked in the last 40 minutes of the cup';
-    end if;
-  end if;
-
-  update rapid_cup_lobby_players
-  set entry_fee = p_new_fee
-  where id = v_row.id
-  returning * into v_row;
-
-  return v_row;
-end;
-$function$;
-
+-- ─────────────────────────────────────────────────────────────────────────
+-- 4. Rapid League — fee-raise lock matches the 2h window.
+-- ─────────────────────────────────────────────────────────────────────────
 create or replace function public.raise_rapid_league_entry_fee(p_lobby_id uuid, p_new_fee numeric)
  returns rapid_league_lobby_players
  language plpgsql
