@@ -14650,8 +14650,10 @@ export function GroupFixturesList({ league, groupStageFixtures, canManage, joine
 // see RapidLeagueBanner.jsx), so — same reasoning as Rapid Cup getting
 // KnockoutFixturesList instead of OpponentFinder below — searching for your
 // own fixture by matchday/club name is pointless friction. List every
-// fixture directly instead.
-export function RapidLeagueFixturesList({ league, fixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, c }) {
+// fixture directly instead. Every fixture gets a WhatsApp icon to reach the
+// opponent directly (via FixtureScoreRow's showContact), same contact
+// pattern Rapid Cup already gets via KnockoutFixturesList below.
+export function RapidLeagueFixturesList({ league, fixtures, canManage, joined, getSubmission, onOpenSubmitResult, onRecordResult, canSeePhones, myTeamId, c }) {
   const roundsMap = {};
   fixtures.forEach((f) => { (roundsMap[f.round] ||= []).push(f); });
   const roundNumbers = Object.keys(roundsMap).map(Number).sort((a, b) => a - b);
@@ -14671,6 +14673,7 @@ export function RapidLeagueFixturesList({ league, fixtures, canManage, joined, g
                   return <div key={f.id} className="py-2 font-body text-xs" style={{ color: c.textFaint }}>{home?.name} — bye this round</div>;
                 }
                 return <FixtureScoreRow key={f.id} fixture={f} homeTeam={home} awayTeam={away} canManage={canManage} onSave={onRecordResult}
+                  showContact={canSeePhones} myTeamId={myTeamId}
                   joined={joined} submission={getSubmission?.(f.id)} onOpenSubmitResult={onOpenSubmitResult} league={league} c={c} />;
               })}
             </div>

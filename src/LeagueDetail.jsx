@@ -2176,7 +2176,7 @@ export default function LeagueDetail({ league, leagues, allAchievements, session
             ) : isRapidLeague ? (
               <RapidLeagueFixturesList league={league} fixtures={stageFixtures} canManage={canManage} joined={joined}
                 getSubmission={submissionForFixture} onOpenSubmitResult={onOpenSubmitResult}
-                onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} c={c} />
+                onRecordResult={(fixture, h, a, file) => onRecordResult(league, fixture, h, a, file)} canSeePhones={canSeePhones} myTeamId={myTeam?.id} c={c} />
             ) : (
               // myTeam + inKnockoutBracket let OpponentFinder auto-resolve
               // straight to "your next match" instead of making a knockout
