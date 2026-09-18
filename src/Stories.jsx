@@ -1,7 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Play, Globe, RotateCcw } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import PlayerCharacter from "./PlayerCharacter.jsx";
+
+// Pre-generated narration (Piper TTS, synthesized offline — see
+// synthesize_story.py / upload_story_audio.py) lives as plain files in
+// the public story-audio bucket. A node with no audio yet (script hasn't
+// been run against it) simply plays nothing — text-only is always a
+// valid, complete experience, narration is an enhancement on top.
+const AUDIO_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-audio";
+const NARRATION_PREF_KEY = "storyGame:narrationOn";
 
 // Stories — a data-light, code-only branching text "game" under Quick
 // Actions. Deliberately NOT a game engine: it's a generic state machine
@@ -47,6 +55,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const [nodeId, setNodeId] = useState(null);
   const [progressByStory, setProgressByStory] = useState({}); // story_id -> progress row
   const [loadingContent, setLoadingContent] = useState(false);
+  const [narrationOn, setNarrationOn] = useState(() => localStorage.getItem(NARRATION_PREF_KEY) !== "off");
+  const audioRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +132,27 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     }));
   }, [session.user.id]);
 
+  // Plays the current node's pre-generated narration, if any exists yet.
+  // A 404 (audio not synthesized for this node) is expected and silent —
+  // text is always the complete experience on its own.
+  useEffect(() => {
+    if (!narrationOn || !activeStory || !nodeId) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = `${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}.wav`;
+    audio.play().catch(() => { /* missing file or autoplay blocked — fine, stay silent */ });
+    return () => { audio.pause(); };
+  }, [narrationOn, activeStory, language, nodeId]);
+
+  const toggleNarration = () => {
+    setNarrationOn((prev) => {
+      const next = !prev;
+      localStorage.setItem(NARRATION_PREF_KEY, next ? "on" : "off");
+      if (!next) audioRef.current?.pause();
+      return next;
+    });
+  };
+
   const choose = (goto) => {
     const node = content.graph.nodes[goto];
     setNodeId(goto);
@@ -171,9 +202,16 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     const isEnding = !!node.ending;
     return (
       <div className="max-w-md mx-auto pt-6">
-        <button onClick={backToList} className="flex items-center gap-1.5 text-sm font-semibold mb-4" style={{ color: c.textDim }}>
-          <ArrowLeft size={15} /> Stories
-        </button>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={backToList} className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: c.textDim }}>
+            <ArrowLeft size={15} /> Stories
+          </button>
+          <button onClick={toggleNarration} aria-label={narrationOn ? "Mute narration" : "Unmute narration"}
+            className="flex items-center justify-center w-8 h-8 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+            {narrationOn ? <Volume2 size={15} style={{ color: c.accent }} /> : <VolumeX size={15} style={{ color: c.textFaint }} />}
+          </button>
+        </div>
+        <audio ref={audioRef} className="hidden" />
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
           {content.title} · {languageLabel(language)}
         </div>
