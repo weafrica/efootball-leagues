@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Info, X } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
-import { useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
+import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
 import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
 
 // RapidCupBanner — horizontal banner for the home screen, sits under
@@ -10,8 +10,18 @@ import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPus
 // lobby's fill count and countdown, lets the viewer join, and once
 // their lobby goes live, hands off to the tournament page.
 //
-// Countdown-toast reminders (15/5/1 min warnings) have been removed —
-// see the removed useEffect further down for why.
+// Notification thresholds fire once each per lobby — trackedThresholds
+// resets whenever the lobby id changes so a new lobby gets its own
+// 15/5/1 min warnings.
+const NOTIFY_THRESHOLDS_MS = [15 * 60 * 1000, 5 * 60 * 1000, 60 * 1000];
+
+// Matches lobby.reset_at's own 2h default (see the
+// rapid_cup_league_lobby_2h_match_24h migration) — used only to keep the
+// DISPLAYED countdown looping smoothly instead of freezing at 00:00. Real
+// behavior (the toasts below, the drumroll) still runs off the actual
+// clamped-at-zero remaining time, never the looped value — see msLeft vs
+// displayMsLeft further down.
+const RESET_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 // sessionStorage-backed, not component state or a module-level Set — this
 // has to survive two different resets:
@@ -56,7 +66,6 @@ function useOpenRapidCupLobby() {
   const [lobby, setLobby] = useState(null);
   const [playerCount, setPlayerCount] = useState(0);
   const [myEntry, setMyEntry] = useState(null); // this viewer's row in the current lobby, if joined
-  const [leagueName, setLeagueName] = useState(null); // only once league_id is set (filling/live) — see fetch below
 
   const load = useCallback(async () => {
     const { data: { user } = {} } = await supabase.auth.getUser();
@@ -140,20 +149,6 @@ function useOpenRapidCupLobby() {
     setLobby(lobbyRow);
     setPlayerCount(players?.length || 0);
     setMyEntry((players || []).find((p) => p.user_id === user?.id) || null);
-
-    // League name for the ready alarm's title/link (see showLeagueStartNotification
-    // in RapidCupEpicExtras.jsx) — only fetched once there's actually a league_id
-    // to name (lobby has gone "filling"/"live"), not on every open-lobby poll.
-    if (lobbyRow.league_id) {
-      const { data: leagueRow } = await supabase
-        .from("leagues")
-        .select("name")
-        .eq("id", lobbyRow.league_id)
-        .maybeSingle();
-      setLeagueName(leagueRow?.name ?? null);
-    } else {
-      setLeagueName(null);
-    }
   }, []);
 
   useEffect(() => {
@@ -165,7 +160,7 @@ function useOpenRapidCupLobby() {
     return () => clearInterval(interval);
   }, [load]);
 
-  return { lobby, playerCount, myEntry, leagueName, reload: load };
+  return { lobby, playerCount, myEntry, reload: load };
 }
 
 // Short "what is this" explainer, opened from the (?) button on the banner.
@@ -200,11 +195,13 @@ function RapidCupHelpModal({ open, onClose, c }) {
 }
 
 export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
-  const { lobby, playerCount, myEntry, leagueName, reload } = useOpenRapidCupLobby();
+  const { lobby, playerCount, myEntry, reload } = useOpenRapidCupLobby();
   const [now, setNow] = useState(() => Date.now());
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const firedThresholds = useRef(new Set());
+  const lastLobbyId = useRef(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -217,8 +214,36 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   // tied to any particular lobby.
   useEffect(() => listenForPushResubscribe(), []);
 
+  // Reset fired-notification tracking whenever we land on a new lobby.
+  useEffect(() => {
+    if (lobby?.id !== lastLobbyId.current) {
+      firedThresholds.current = new Set();
+      lastLobbyId.current = lobby?.id ?? null;
+    }
+  }, [lobby?.id]);
+
   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
-  const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
+  const rawMsLeft = resetAtMs == null ? null : resetAtMs - now;
+  // Drives real behavior below (the 15/5/1 min toasts, the drumroll) —
+  // stays clamped at 0 exactly as it always did. This must reflect the
+  // ACTUAL remaining time, never the looped display value, or those
+  // would misfire every time the loop below wraps back around.
+  const msLeft = rawMsLeft == null ? null : Math.max(0, rawMsLeft);
+  // What the banner text actually shows. Loops back to a fresh countdown
+  // instead of freezing at 00:00 once the real deadline passes — the
+  // backend's expire cron only runs once a minute and this banner only
+  // polls every 5s, so there's a real (usually brief) gap between hitting
+  // zero and actually getting a fresh lobby row with a new reset_at. The
+  // positive-modulo trick below keeps the display moving through that
+  // gap instead of visibly stalling; once the poll returns a genuinely
+  // new lobby, this re-syncs to the real remaining time on its own.
+  const displayMsLeft = rawMsLeft == null ? null : ((rawMsLeft % RESET_WINDOW_MS) + RESET_WINDOW_MS) % RESET_WINDOW_MS;
+
+  // Countdown drumroll (Section 13, Phase 9) — last 10s of this same
+  // lobby-reset timer, once per lobby. Only while the lobby is still
+  // "open" (filling), same gating as the 15/5/1 min toasts below. Uses
+  // the real msLeft, not the looped display value.
+  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
 
   // League-start alarm — rings on a loop once this lobby hits 4 players
   // and starts, for this viewer only if they're actually one of the 4
@@ -237,9 +262,35 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null,
-    null, lobby?.league_id ?? null, leagueName
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null
   );
+
+  // Countdown notifications at 15/5/1 min remaining — fires once per
+  // threshold per lobby, and ONLY for a viewer who has actually joined
+  // this lobby (myEntry). Previously this fired for anyone looking at
+  // the home screen while any lobby was open, whether or not they'd
+  // joined it — which meant every visitor got repeated "join now!"
+  // countdown toasts for a lobby they had no stake in. Gating on myEntry
+  // matches the mute affordance we already ship elsewhere (a joined
+  // player can stop their own alarm; someone who hasn't joined never
+  // gets one to begin with). Uses the real msLeft, not the looped display
+  // value — the firedThresholds guard already stops these from re-firing
+  // per lobby, but computing "did we cross 15/5/1 min" against a looping
+  // number would still be semantically wrong even with that guard.
+  useEffect(() => {
+    if (msLeft == null || !lobby || lobby.status !== "open" || !myEntry) return;
+    for (const threshold of NOTIFY_THRESHOLDS_MS) {
+      const key = `${lobby.id}:${threshold}`;
+      if (msLeft <= threshold && !firedThresholds.current.has(key)) {
+        firedThresholds.current.add(key);
+        const mins = Math.round(threshold / 60000);
+        // Copy changed from "join now!" to "get your match in" — this
+        // viewer has already joined by the time this fires, so "join"
+        // no longer makes sense as the call to action.
+        showToast?.(`Rapid Cup lobby resets in ${mins} min — get your match in!`);
+      }
+    }
+  }, [msLeft, lobby, myEntry, showToast]);
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
   // to the tournament page as soon as league_id is set — but only the
@@ -389,7 +440,7 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
               ? "Tournament live"
               : isFull
                 ? "Full — next lobby opening"
-                : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
+                : `${playerCount}/4 joined${displayMsLeft != null ? ` — resets in ${fmtCountdown(displayMsLeft)}` : ""}`}
         </div>
       </div>
 

@@ -38,6 +38,15 @@ const LEAGUE_ALARM_CONFIG = {
   enterActionLabel: "Enter Rapid League",
 };
 
+// Matches lobby.reset_at's own 2h default (see the
+// rapid_cup_league_lobby_2h_match_24h migration) — used only to keep the
+// displayed countdown looping smoothly instead of freezing at 00:00 once
+// the real deadline passes. There's no other logic in this file watching
+// msLeft (unlike RapidCupBanner, which still fires toasts/a drumroll off
+// it), so it's safe to compute the looped value as the one and only
+// msLeft here rather than needing a separate real-vs-display split.
+const RESET_WINDOW_MS = 2 * 60 * 60 * 1000;
+
 // sessionStorage-backed for the same reason as RapidCupBanner's identical
 // pattern: has to survive both a Home remount AND a full page refresh.
 // Separate storage key from Rapid Cup's so the two features don't collide.
@@ -73,7 +82,7 @@ function useOpenRapidLeagueLobby(clubCount) {
 
     // Same "prefer a lobby I'm actually in" preference as Rapid Cup, for
     // the same reason: once a lobby fills, join_rapid_league_lobby
-    // immediately opens a fresh empty one to chain into, and that fresh
+    // immediately opens a fresh empty one to chain into — that fresh
     // one has a later created_at — ordering by created_at desc alone
     // would show the players who just filled it an empty lobby that
     // isn't theirs.
@@ -194,8 +203,15 @@ export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLe
     return () => clearInterval(t);
   }, []);
 
+  // Loops instead of freezing at 00:00: the backend's expire_rapid_
+  // league_lobbies cron only runs once a minute, so there's a real
+  // (usually brief) gap between this hitting zero and the frontend's 5s
+  // poll actually getting a fresh lobby row with a new reset_at. The
+  // positive-modulo trick keeps the display moving through that gap
+  // instead of visibly stalling; once a genuinely new lobby comes back
+  // from the poll, this re-syncs to the real remaining time on its own.
   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
-  const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
+  const msLeft = resetAtMs == null ? null : (((resetAtMs - now) % RESET_WINDOW_MS) + RESET_WINDOW_MS) % RESET_WINDOW_MS;
 
   // League-start alarm, using Rapid League's own RPC/table/copy via
   // LEAGUE_ALARM_CONFIG (see RapidCupEpicExtras.jsx for the generalized
