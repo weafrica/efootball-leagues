@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Play, Globe, RotateCcw } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import PlayerCharacter from "./PlayerCharacter.jsx";
 
 // Stories — a data-light, code-only branching text "game" under Quick
 // Actions. Deliberately NOT a game engine: it's a generic state machine
@@ -177,7 +178,11 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           {content.title} · {languageLabel(language)}
         </div>
         <div className="rounded-2xl p-5 mb-4" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-          <p className="text-base leading-relaxed">{node.text}</p>
+          {/* scene.pose is optional per node — authors can skip it entirely
+              and the character just stays idle. Keeps writing a story a
+              purely-text task; animation is opt-in set dressing on top. */}
+          <PlayerCharacter pose={node.scene?.pose} kitColor={c.accent} />
+          <p className="text-base leading-relaxed text-center mt-3">{node.text}</p>
         </div>
         {isEnding ? (
           <div className="flex flex-col gap-2">
