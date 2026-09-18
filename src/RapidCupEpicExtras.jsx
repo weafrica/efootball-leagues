@@ -230,7 +230,7 @@ const NOTIFICATION_ACTIONS = [
   { action: "stop", title: "Stop alarm" },
 ];
 
-async function showLeagueStartNotification(lobbyId) {
+async function showLeagueStartNotification(lobbyId, leagueId, leagueName) {
   if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
   try {
     if (Notification.permission === "default") {
@@ -238,12 +238,19 @@ async function showLeagueStartNotification(lobbyId) {
     }
     if (Notification.permission !== "granted") return; // denied, or the prompt was dismissed — the in-page alarm still covers them
     const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification("⚡ Rapid Cup", {
-      body: "Your league has started — tap to enter!",
+    // Deep link to the specific league — same ?league=<id> shareLeague()
+    // already uses (App.jsx) — so a cold tap (no open tab, see sw.js's
+    // notificationclick "no clients" branch) lands directly on it instead
+    // of the bare homepage. Included in the body text too, not just
+    // `data`, so the link is visible even where tapping can't carry it
+    // (e.g. a notification list on another device).
+    const url = leagueId ? `${window.location.origin}${window.location.pathname}?league=${leagueId}` : null;
+    await reg.showNotification(leagueName ? `⚡ ${leagueName}` : "⚡ Rapid Cup", {
+      body: `Your league is ready — tap to enter!${url ? ` ${url}` : ""}`,
       tag: `rapid-cup-alarm-${lobbyId}`, // re-showing replaces the same one instead of piling up
       requireInteraction: true, // stays put until acted on, where the browser supports it (e.g. Android Chrome); harmlessly ignored elsewhere (e.g. iOS Safari)
       actions: NOTIFICATION_ACTIONS,
-      data: { lobbyId },
+      data: { lobbyId, leagueId },
     });
   } catch {
     // Purely additive — the in-page audio alarm and banner work either way.
@@ -261,7 +268,7 @@ async function closeLeagueStartNotification(lobbyId) {
   }
 }
 
-export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
+export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, config, leagueId, leagueName) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
   const phaseTimerRef = useRef(null); // pending "pause after 1min" or "resume after 5min" timeout
@@ -418,7 +425,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
     // it only delays the notification (which can't be tapped before it
     // exists anyway) by however long the save itself takes — normally a
     // few milliseconds.
-    saveAlarmSyncCredentials(lobbyId).then(() => showLeagueStartNotification(lobbyId));
+    saveAlarmSyncCredentials(lobbyId).then(() => showLeagueStartNotification(lobbyId, leagueId, leagueName));
 
     startActivePhase();
 
@@ -434,7 +441,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
       if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     };
-  }, [status, lobbyId, enabled]);
+  }, [status, lobbyId, enabled, leagueId, leagueName]);
 
   return { stopAlarm, isRinging };
 }

@@ -48,12 +48,12 @@ self.addEventListener("pushsubscriptionchange", (event) => {
 
 // Rapid Cup Push Alarm — Step 5: handles an actual server-sent push
 // arriving while nothing else may be running. send-rapid-cup-push (Step 3)
-// sends { title, body, data: { lobbyId } } — same shape the already-shipped
-// local notification uses (RapidCupEpicExtras.jsx showLeagueStartNotification),
-// same `tag`/`actions`/`requireInteraction`, so a push and a local
-// notification for the same lobby collapse into one instead of stacking,
-// and the existing notificationclick handler below already handles taps
-// on either kind with no changes needed.
+// sends { title, body, data: { lobbyId, leagueId } } — same shape the
+// already-shipped local notification uses (RapidCupEpicExtras.jsx
+// showLeagueStartNotification), same `tag`/`actions`/`requireInteraction`,
+// so a push and a local notification for the same lobby collapse into one
+// instead of stacking, and the existing notificationclick handler below
+// already handles taps on either kind with no changes needed.
 const PUSH_NOTIFICATION_ACTIONS = [
   { action: "enter", title: "Enter Rapid Cup" },
   { action: "stop", title: "Stop alarm" },
@@ -90,8 +90,9 @@ self.addEventListener("push", (event) => {
   }
 
   const title = payload.title || "⚡ Rapid Cup";
-  const body = payload.body || "Your league has started — tap to enter!";
+  const body = payload.body || "Your league is ready — tap to enter!";
   const lobbyId = payload.data?.lobbyId ?? null;
+  const leagueId = payload.data?.leagueId ?? null;
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -99,7 +100,7 @@ self.addEventListener("push", (event) => {
       tag: lobbyId ? `rapid-cup-alarm-${lobbyId}` : "rapid-cup-alarm",
       requireInteraction: true,
       actions: PUSH_NOTIFICATION_ACTIONS,
-      data: { lobbyId },
+      data: { lobbyId, leagueId },
     })
   );
 });
@@ -185,6 +186,7 @@ self.addEventListener("notificationclick", (event) => {
 
   const action = event.action || "enter"; // tapping the body (no action) behaves like "enter"
   const lobbyId = event.notification?.data?.lobbyId ?? null;
+  const leagueId = event.notification?.data?.leagueId ?? null;
   event.notification.close();
 
   event.waitUntil(
@@ -205,7 +207,10 @@ self.addEventListener("notificationclick", (event) => {
         // sound (that would defeat the point of a one-tap Stop).
         return stopAlarmDirectly(lobbyId);
       }
-      return self.clients.openWindow("/");
+      // Cold start (no tab open at all) — land straight on the league
+      // itself (same ?league=<id> deep link shareLeague() uses in
+      // App.jsx) instead of the bare homepage.
+      return self.clients.openWindow(leagueId ? `/?league=${leagueId}` : "/");
     })
   );
 });

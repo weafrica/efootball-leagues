@@ -66,6 +66,7 @@ function useOpenRapidLeagueLobby(clubCount) {
   const [lobby, setLobby] = useState(null);
   const [playerCount, setPlayerCount] = useState(0);
   const [myEntry, setMyEntry] = useState(null);
+  const [leagueName, setLeagueName] = useState(null); // only once league_id is set (filling/live) — see fetch below
 
   const load = useCallback(async () => {
     const { data: { user } = {} } = await supabase.auth.getUser();
@@ -127,6 +128,20 @@ function useOpenRapidLeagueLobby(clubCount) {
     setLobby(lobbyRow);
     setPlayerCount(players?.length || 0);
     setMyEntry((players || []).find((p) => p.user_id === user?.id) || null);
+
+    // League name for the ready alarm's title/link (see showLeagueStartNotification
+    // in RapidCupEpicExtras.jsx, shared with Rapid Cup) — only fetched once
+    // there's actually a league_id to name.
+    if (lobbyRow.league_id) {
+      const { data: leagueRow } = await supabase
+        .from("leagues")
+        .select("name")
+        .eq("id", lobbyRow.league_id)
+        .maybeSingle();
+      setLeagueName(leagueRow?.name ?? null);
+    } else {
+      setLeagueName(null);
+    }
   }, [clubCount]);
 
   useEffect(() => {
@@ -135,7 +150,7 @@ function useOpenRapidLeagueLobby(clubCount) {
     return () => clearInterval(interval);
   }, [load]);
 
-  return { lobby, playerCount, myEntry, reload: load };
+  return { lobby, playerCount, myEntry, leagueName, reload: load };
 }
 
 function RapidLeagueHelpModal({ open, onClose, c, clubCount }) {
@@ -168,7 +183,7 @@ function RapidLeagueHelpModal({ open, onClose, c, clubCount }) {
 }
 
 export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
-  const { lobby, playerCount, myEntry, reload } = useOpenRapidLeagueLobby(clubCount);
+  const { lobby, playerCount, myEntry, leagueName, reload } = useOpenRapidLeagueLobby(clubCount);
   const [now, setNow] = useState(() => Date.now());
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -195,7 +210,8 @@ export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLe
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null, LEAGUE_ALARM_CONFIG
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null, LEAGUE_ALARM_CONFIG,
+    lobby?.league_id ?? null, leagueName
   );
 
   // Auto-redirect once the round robin goes live and this viewer is one

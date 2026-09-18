@@ -56,6 +56,7 @@ function useOpenRapidCupLobby() {
   const [lobby, setLobby] = useState(null);
   const [playerCount, setPlayerCount] = useState(0);
   const [myEntry, setMyEntry] = useState(null); // this viewer's row in the current lobby, if joined
+  const [leagueName, setLeagueName] = useState(null); // only once league_id is set (filling/live) — see fetch below
 
   const load = useCallback(async () => {
     const { data: { user } = {} } = await supabase.auth.getUser();
@@ -139,6 +140,20 @@ function useOpenRapidCupLobby() {
     setLobby(lobbyRow);
     setPlayerCount(players?.length || 0);
     setMyEntry((players || []).find((p) => p.user_id === user?.id) || null);
+
+    // League name for the ready alarm's title/link (see showLeagueStartNotification
+    // in RapidCupEpicExtras.jsx) — only fetched once there's actually a league_id
+    // to name (lobby has gone "filling"/"live"), not on every open-lobby poll.
+    if (lobbyRow.league_id) {
+      const { data: leagueRow } = await supabase
+        .from("leagues")
+        .select("name")
+        .eq("id", lobbyRow.league_id)
+        .maybeSingle();
+      setLeagueName(leagueRow?.name ?? null);
+    } else {
+      setLeagueName(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -150,7 +165,7 @@ function useOpenRapidCupLobby() {
     return () => clearInterval(interval);
   }, [load]);
 
-  return { lobby, playerCount, myEntry, reload: load };
+  return { lobby, playerCount, myEntry, leagueName, reload: load };
 }
 
 // Short "what is this" explainer, opened from the (?) button on the banner.
@@ -185,7 +200,7 @@ function RapidCupHelpModal({ open, onClose, c }) {
 }
 
 export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
-  const { lobby, playerCount, myEntry, reload } = useOpenRapidCupLobby();
+  const { lobby, playerCount, myEntry, leagueName, reload } = useOpenRapidCupLobby();
   const [now, setNow] = useState(() => Date.now());
   const [joining, setJoining] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -222,7 +237,8 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null,
+    null, lobby?.league_id ?? null, leagueName
   );
 
   // Once the lobby goes live and this viewer is one of the 4, hand off
