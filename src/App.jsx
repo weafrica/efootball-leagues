@@ -85,6 +85,7 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 // needs it; ShareRangeModal stays behind and is exported since StandingsPanel
 // also needs it.)
 const LadderPage = lazy(() => import("./Ladder.jsx"));
+const StoriesPage = lazy(() => import("./Stories.jsx"));
 import { pickBestVoice } from "./utils/pickBestVoice";
 // Step 9 (opponent slate + challenge flow) is the first place App.jsx
 // itself needs the pure engine. Home/away assignment now
@@ -8681,6 +8682,7 @@ export default function App() {
     { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
+    { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),
     ...(isAdmin ? [{ icon: History, label: "Activity log", onClick: () => { setView("activity"); loadActivityLog(); } }] : []),
@@ -8817,6 +8819,11 @@ export default function App() {
                 entryClosed={entryClosed} qualifiesForLeague={qualifiesForLeague} myPaymentStatus={myPaymentStatus} canManageLeague={canManageLeague}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onJoin={startJoin} onResubmitPayment={openResubmitPayment} session={session} onToggleLeagueReaction={toggleLeagueReaction} onBack={goBack} c={c} />
+            )}
+            {view === "stories" && (
+              <Suspense fallback={<Loader c={c} />}>
+                <StoriesPage session={session} showToast={showToast} onBack={goBack} c={c} />
+              </Suspense>
             )}
             {view === "ladder" && (
               <Suspense fallback={<Loader c={c} />}>
