@@ -46,7 +46,6 @@ import { checkAndMarkNewWeek, shouldOfferNotificationOptIn, recordNotificationOp
 // has to fetch and parse before the app is interactive.
 const ShopPage = lazy(() => import("./Shop.jsx"));
 const TransferMarketPage = lazy(() => import("./TransferMarket.jsx"));
-const ChessPage = lazy(() => import("./ChessGame.jsx"));
 const TermsPage = lazy(() => import("./Terms.jsx"));
 // RulesModal carries its own ~500-line static rules text (league/ladder/
 // challenge reference content) that only a fraction of visitors ever open —
@@ -78,6 +77,7 @@ const CreateLeague = lazy(() => import("./CreateLeague.jsx"));
 // StandingsPanel and the home screen's LeaderboardStrip preview also need
 // them.)
 const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
+const LudoPage = lazy(() => import("./Ludo.jsx"));
 // Ladder (the platform-wide permanent ladder) is only opened by a signed-in
 // user tapping into it from the header or the home screen's LadderStrip
 // preview - never on first load. Lazy-loaded the same way. (LADDER_THEME
@@ -85,7 +85,6 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 // needs it; ShareRangeModal stays behind and is exported since StandingsPanel
 // also needs it.)
 const LadderPage = lazy(() => import("./Ladder.jsx"));
-const StoriesPage = lazy(() => import("./Stories.jsx"));
 import { pickBestVoice } from "./utils/pickBestVoice";
 // Step 9 (opponent slate + challenge flow) is the first place App.jsx
 // itself needs the pure engine. Home/away assignment now
@@ -8676,13 +8675,12 @@ export default function App() {
       },
     },
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
-    { icon: Swords, label: "Chess", onClick: () => setView("chess") },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
     { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
+    { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
-    { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),
     ...(isAdmin ? [{ icon: History, label: "Activity log", onClick: () => { setView("activity"); loadActivityLog(); } }] : []),
@@ -8820,11 +8818,6 @@ export default function App() {
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onJoin={startJoin} onResubmitPayment={openResubmitPayment} session={session} onToggleLeagueReaction={toggleLeagueReaction} onBack={goBack} c={c} />
             )}
-            {view === "stories" && (
-              <Suspense fallback={<Loader c={c} />}>
-                <StoriesPage session={session} showToast={showToast} onBack={goBack} c={c} />
-              </Suspense>
-            )}
             {view === "ladder" && (
               <Suspense fallback={<Loader c={c} />}>
               <LadderPage ladder={ladder} myLadderRank={myLadderRank} targets={ladderTargets} session={session}
@@ -8851,9 +8844,9 @@ export default function App() {
                 <TransferMarketPage c={c} session={session} profile={profile} leagues={leagues} onBack={goBack} showToast={showToast} />
               </Suspense>
             )}
-            {view === "chess" && (
+            {view === "ludo" && (
               <Suspense fallback={<Loader c={c} />}>
-                <ChessPage c={c} session={session} onBack={goBack} showToast={showToast} />
+                <LudoPage onBack={goBack} c={c} />
               </Suspense>
             )}
             {view === "terms" && (
@@ -13013,6 +13006,7 @@ export function ChallengeRow({ challenge: ch, myId, myUsername, onAccept, onDecl
           {ch.status === "accepted" && ch.result_status === "confirmed" && (
             <div className="font-mono text-[10px] uppercase tracking-wide flex items-center gap-1" style={{ color: c.greenText }}>
               Final: you {myScore} – {theirScore} {counterpartUsername}
+              {ch.auto_verified && <span title="Screenshot verified automatically">· auto-approved</span>}
             </div>
           )}
           {ch.status === "accepted" && ch.result_status === "pending" && iReported && !challengeResultConfirmExpired(ch) && (
