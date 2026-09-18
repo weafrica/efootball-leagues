@@ -20,9 +20,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Chess } from "chess.js";
-import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock } from "lucide-react";
+import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
+import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS } from "./chessAi.js";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -155,6 +156,20 @@ function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
     }
   };
 
+  const [startingAi, setStartingAi] = useState(null); // difficulty currently starting, or null
+  const startAiGame = async (difficulty) => {
+    setStartingAi(difficulty);
+    try {
+      const { data, error } = await supabase.rpc("create_ai_chess_game", { p_difficulty: difficulty });
+      if (error) throw error;
+      onOpenGame(data.id);
+    } catch (err) {
+      showToast?.(`Couldn't start a game: ${err.message}`);
+    } finally {
+      setStartingAi(null);
+    }
+  };
+
   return (
     <div className="p-4 flex flex-col gap-6 max-w-2xl mx-auto">
       <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
@@ -164,6 +179,26 @@ function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
       <div className="flex items-center gap-2">
         <Swords size={20} style={{ color: c.accent }} />
         <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Chess</h1>
+      </div>
+
+      {/* Play vs AI — instant, solo, Nets reward for winning */}
+      <div className="rounded-xl border p-4 flex flex-col gap-3" style={{ borderColor: c.border, background: c.surface }}>
+        <div className="font-mono text-xs uppercase tracking-wide flex items-center gap-1.5" style={{ color: c.textFaint }}>
+          <Bot size={14} /> Play vs bot
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {AI_DIFFICULTIES.map((d) => (
+            <button key={d} onClick={() => startAiGame(d)} disabled={startingAi !== null}
+              className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase px-3 py-2 rounded-full border disabled:opacity-50"
+              style={{ borderColor: c.border, background: "transparent", color: c.text }}>
+              {startingAi === d ? <Loader2 size={13} className="animate-spin" /> : null}
+              {d} · win +{formatNets(AI_REWARD_NETS[d])}
+            </button>
+          ))}
+        </div>
+        <div className="font-mono text-[10px]" style={{ color: c.textFaint }}>
+          Instant start, no waiting for an opponent. Reward only pays out on a genuine win (capped per day).
+        </div>
       </div>
 
       {/* Create a table */}
@@ -219,12 +254,13 @@ function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
                 className="rounded-lg border p-3 flex items-center justify-between gap-3 text-left"
                 style={{ borderColor: c.border, background: c.surface }}>
                 <div className="min-w-0">
-                  <div className="font-body text-sm font-semibold truncate" style={{ color: c.text }}>
-                    vs {nameFor(opponentId)}
+                  <div className="font-body text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: c.text }}>
+                    {g.is_vs_ai ? (<><Bot size={13} /> vs {g.ai_difficulty} bot</>) : `vs ${nameFor(opponentId)}`}
                   </div>
                   <div className="font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
                     {g.status === "active" ? (myTurn ? "Your move" : "Waiting on opponent") : g.status}
-                    {g.stake_nets > 0 ? ` · ${formatNets(g.stake_nets)} staked` : ""}
+                    {!g.is_vs_ai && g.stake_nets > 0 ? ` · ${formatNets(g.stake_nets)} staked` : ""}
+                    {g.is_vs_ai && g.status === "finished" && g.ai_reward_paid ? ` · +${formatNets(g.ai_reward_nets)}` : ""}
                   </div>
                 </div>
                 {g.status === "active" && myTurn && (
@@ -278,6 +314,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const [legalTargets, setLegalTargets] = useState([]); // square ids
   const [submitting, setSubmitting] = useState(false);
   const [promotionChoice, setPromotionChoice] = useState(null); // { from, to } awaiting a piece pick
+  const [aiThinking, setAiThinking] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("chess_games").select("*").eq("id", gameId).maybeSingle();
@@ -304,6 +341,64 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     return () => supabase.removeChannel(channel);
   }, [gameId]);
 
+  // submitAiTurn — used both for the bot's own reply and (indirectly, via
+  // attemptMove below) for the human's move in a vs-AI game. Separate
+  // from finishOrContinue/chess_submit_move: outcomes here are
+  // human_win/ai_win/draw rather than a winner_user_id, and payout is a
+  // flat reward rather than a stake split (see chess_submit_ai_move).
+  const submitAiTurn = async (chess) => {
+    const isOver = chess.isGameOver();
+    let status = null, outcome = null, reason = null;
+    if (isOver) {
+      status = "finished";
+      if (chess.isCheckmate()) {
+        reason = "checkmate";
+        // Whoever just moved delivered mate; turn has already flipped to
+        // the loser's color by this point.
+        outcome = chess.turn() === "b" ? "human_win" : "ai_win";
+      } else if (chess.isStalemate()) { reason = "stalemate"; outcome = "draw"; }
+      else if (chess.isThreefoldRepetition()) { reason = "threefold"; outcome = "draw"; }
+      else if (chess.isInsufficientMaterial()) { reason = "insufficient_material"; outcome = "draw"; }
+      else { reason = "fifty_move"; outcome = "draw"; }
+    }
+    const { error } = await supabase.rpc("chess_submit_ai_move", {
+      p_game_id: gameId,
+      p_new_fen: chess.fen(),
+      p_new_pgn: chess.pgn(),
+      p_status: status,
+      p_outcome: outcome,
+      p_result_reason: reason,
+    });
+    if (error) {
+      showToast?.(`Move didn't save: ${error.message}`);
+      await load();
+    }
+  };
+
+  // Drives the bot's own moves. Fires whenever the loaded/synced game
+  // state says it's black's turn in an active AI game; the human's move
+  // already flipped `turn` to "b" server-side by the time this runs, so
+  // there's no local-vs-server race to reconcile — this only ever acts
+  // on a confirmed position. Guards internally on `game` since this hook
+  // must run unconditionally (before the `!game` early return below).
+  useEffect(() => {
+    if (!game || !game.is_vs_ai || game.status !== "active" || game.turn !== "b") return;
+    let cancelled = false;
+    setAiThinking(true);
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      const chess = chessRef.current;
+      const move = pickAiMove(chess, game.ai_difficulty);
+      if (!move) { setAiThinking(false); return; }
+      let result;
+      try { result = chess.move(move); } catch { result = null; }
+      if (result) await submitAiTurn(chess);
+      if (!cancelled) setAiThinking(false);
+    }, 500 + Math.random() * 500); // small delay reads as "thinking" rather than instant/robotic
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.fen, game?.is_vs_ai, game?.status, game?.turn]);
+
   if (!game) {
     return (
       <div className="p-8 flex justify-center"><Loader2 className="animate-spin" style={{ color: c.textFaint }} /></div>
@@ -315,8 +410,8 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const myTurn = isPlayer && game.status === "active" && game.turn === myColor;
   const board = chessRef.current.board(); // 8x8, rank 8 first, chess.js convention
 
-  // finishGame — shared by both the "a move just ended it" path and the
-  // resign button. p_winner_user_id null means a draw.
+  // finishOrContinue — PvP path only (stake settlement via
+  // chess_submit_move). p_winner_user_id null means a draw.
   const finishOrContinue = async (moveResult) => {
     const chess = chessRef.current;
     const isOver = chess.isGameOver();
@@ -362,14 +457,15 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     setLegalTargets([]);
     setSubmitting(true);
     try {
-      await finishOrContinue(result);
+      if (game.is_vs_ai) await submitAiTurn(chess);
+      else await finishOrContinue(result);
     } finally {
       setSubmitting(false);
     }
   };
 
   const onSquareClick = (sq) => {
-    if (!myTurn || submitting) return;
+    if (!myTurn || submitting || aiThinking) return;
     const chess = chessRef.current;
     if (selected) {
       if (legalTargets.includes(sq)) {
@@ -403,7 +499,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
 
   const resign = async () => {
     if (!window.confirm("Resign this game?")) return;
-    const { error } = await supabase.rpc("resign_chess_game", { p_game_id: gameId });
+    const { error } = await supabase.rpc(game.is_vs_ai ? "resign_ai_chess_game" : "resign_chess_game", { p_game_id: gameId });
     if (error) showToast?.(`Couldn't resign: ${error.message}`);
   };
 
@@ -414,10 +510,17 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const displayFiles = myColor === "b" ? [...Array(8).keys()].reverse() : [...Array(8).keys()];
 
   const statusText = game.status === "finished"
-    ? (game.winner_user_id
-        ? (game.winner_user_id === session.user.id ? "You won" : "You lost") + ` — ${game.result_reason?.replace("_", " ")}`
-        : `Draw — ${game.result_reason?.replace("_", " ")}`)
+    ? (game.is_vs_ai
+        ? (game.ai_won
+            ? `You lost — ${game.result_reason?.replace("_", " ")}`
+            : game.winner_user_id
+              ? `You won — ${game.result_reason?.replace("_", " ")}${game.ai_reward_paid ? ` (+${formatNets(game.ai_reward_nets)})` : " (daily reward cap reached)"}`
+              : `Draw — ${game.result_reason?.replace("_", " ")}`)
+        : (game.winner_user_id
+            ? (game.winner_user_id === session.user.id ? "You won" : "You lost") + ` — ${game.result_reason?.replace("_", " ")}`
+            : `Draw — ${game.result_reason?.replace("_", " ")}`))
     : game.status === "aborted" ? "Table cancelled"
+    : aiThinking ? "Bot is thinking…"
     : isPlayer ? (myTurn ? "Your move" : "Waiting on opponent") : "Spectating";
 
   return (
@@ -428,10 +531,14 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
 
       <div className="flex items-center justify-between">
         <div className="font-mono text-xs uppercase tracking-wide flex items-center gap-1.5" style={{ color: c.textFaint }}>
-          {game.status === "active" && <Clock size={12} />}
+          {game.status === "active" && (aiThinking ? <Loader2 size={12} className="animate-spin" /> : <Clock size={12} />)}
           {statusText}
         </div>
-        {game.stake_nets > 0 && (
+        {game.is_vs_ai ? (
+          <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>
+            <Bot size={11} /> {game.ai_difficulty} bot{game.status === "active" ? ` · win +${formatNets(game.ai_reward_nets)}` : ""}
+          </div>
+        ) : game.stake_nets > 0 && (
           <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>
             <Trophy size={11} /> {formatNets(game.stake_nets * 2)} on the table
           </div>
