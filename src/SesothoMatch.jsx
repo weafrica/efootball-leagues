@@ -1,29 +1,40 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { ArrowLeft, RotateCcw, Star, Lock, Check, Trophy } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { ArrowLeft, RotateCcw, Lock, Check, Trophy, Wind, Lightbulb, BookOpen, Star } from "lucide-react";
 import PlayerCharacter from "./PlayerCharacter.jsx";
 
-// Sesotho Match — a local, code-only match-3 puzzle (like Ludo/Chess: no
-// Supabase, no Nets, no network cost beyond the page load itself). Every
-// tile is drawn with plain SVG shapes and CSS — zero images, zero audio,
-// zero external assets — so it costs almost nothing on a slow connection
-// and works offline once the app shell has loaded once.
+// Sesotho Match — a local, code-only match-3 (like Ludo/Chess: no Supabase,
+// no Nets, no network cost beyond the page load). Every tile is plain SVG
+// shapes and CSS — zero images, zero audio — so it's genuinely free and
+// works offline once loaded.
 //
-// The vocabulary below is copied verbatim from the book's own chapters
-// (Chapter 2 greetings, Chapter 8 numbers, the glossary's animals/food/
-// family/home/nature/people entries) — nothing here is invented or
-// auto-translated; every Sesotho/Shona/isiZulu word is exactly what the
-// uploaded book already said. Matching 3+ tiles reveals that word in all
-// four languages, so the "candy" is doing double duty as a flash card.
+// STORY (shown once, and replayable from the map's book button):
+// Long ago every elder in the village could speak four tongues, and every
+// word was kept safe in one great book. One stormy night, the Moya oa
+// Lebala — the Wind of Forgetting — tore through the village and scattered
+// every page across the land. Without its words, the village fell silent.
+// Now it's up to you: match the tiles, recover each page, and outrun the
+// Wind before it swallows the last word forever.
 //
-// The level map borrows Ludo's "walk a path, one stepping stone per
-// level" shape (instead of a literal dice-and-track board, which has no
-// natural fit for a linear campaign) — each stone is one vocabulary
-// category, and finishing a level's puzzle steps your token to the next
-// stone, same visual idea as a board-game piece advancing round a track.
+// Vocabulary is copied verbatim from the book's own chapters (greetings,
+// numbers, glossary entries) — nothing invented or auto-translated.
+//
+// Borrowed, on purpose:
+//  - Candy Crush: glossy candy-shell tiles, match-4 stripes a row/column,
+//    match-5+ wraps a 3x3 blast, combo hype text, 1-3 star level rating.
+//  - Duolingo: word-reveal toast on every match, mastery stars per "page".
+//  - Ludo (already in this app): walk-the-path world map between levels.
+
+const STORY_INTRO = [
+  "Long ago, every elder in the village could speak four tongues, and every word was kept safe in one great book.",
+  "One stormy night, the Moya oa Lebala — the Wind of Forgetting — tore through the village and scattered every page across the land.",
+  "Without its words, the village fell silent...",
+  "Now it's up to you. Match the tiles, recover each page, and outrun the Wind before it swallows the last word forever.",
+];
 
 const LEVELS = [
   {
     id: "numbers", title: "Numbers", target: 400, moves: 18,
+    blurb: "The Wind scattered the counting-page first — the village can't even count its own children. Recover it.",
     words: [
       { id: "ngoe", sesotho: "ngoe", english: "one", shona: "potsi", isizulu: "kunye" },
       { id: "peli", sesotho: "peli", english: "two", shona: "piri", isizulu: "kubili" },
@@ -35,6 +46,7 @@ const LEVELS = [
   },
   {
     id: "greetings", title: "Greetings", target: 450, moves: 18,
+    blurb: "Nobody in the village can even say hello anymore. This page has to come back.",
     words: [
       { id: "e", sesotho: "e", english: "yes", shona: "hongu", isizulu: "yebo" },
       { id: "che", sesotho: "che", english: "no", shona: "kwete", isizulu: "cha" },
@@ -46,6 +58,7 @@ const LEVELS = [
   },
   {
     id: "animals", title: "Animals", target: 500, moves: 20,
+    blurb: "The herders lost the names of their own animals. Chase this page down before the Wind buries it in the veld.",
     words: [
       { id: "ntja", sesotho: "ntja", english: "dog", shona: "imbwa", isizulu: "inja" },
       { id: "katse", sesotho: "katse", english: "cat", shona: "katsi", isizulu: "ikati" },
@@ -57,6 +70,7 @@ const LEVELS = [
   },
   {
     id: "food", title: "Food & Drink", target: 500, moves: 20,
+    blurb: "The cooking-page is gone, and dinner's getting cold. Bring it home.",
     words: [
       { id: "bohobe", sesotho: "bohobe", english: "bread", shona: "chingwa", isizulu: "isinkwa" },
       { id: "lebese", sesotho: "lebese", english: "milk", shona: "mukaka", isizulu: "ubisi" },
@@ -68,6 +82,7 @@ const LEVELS = [
   },
   {
     id: "family", title: "Family & Friends", target: 550, moves: 20,
+    blurb: "Children in the village can't even name their own mother and father. This one matters most.",
     words: [
       { id: "me", sesotho: "'mè", english: "mother", shona: "mai", isizulu: "umama" },
       { id: "ntate", sesotho: "ntate", english: "father", shona: "baba", isizulu: "ubaba" },
@@ -79,6 +94,7 @@ const LEVELS = [
   },
   {
     id: "home", title: "Home & Things", target: 550, moves: 20,
+    blurb: "Half the village can't name the door they're standing in front of. Bring this page back before dark.",
     words: [
       { id: "ntlo", sesotho: "ntlo", english: "house", shona: "imba", isizulu: "indlu" },
       { id: "lemati", sesotho: "lemati", english: "door", shona: "gonhi", isizulu: "umnyango" },
@@ -90,6 +106,7 @@ const LEVELS = [
   },
   {
     id: "nature", title: "Nature & Time", target: 600, moves: 22,
+    blurb: "The Wind is strongest out here — it took this page furthest. One more push.",
     words: [
       { id: "naleli", sesotho: "naleli", english: "star", shona: "nyeredzi", isizulu: "inkanyezi" },
       { id: "pula", sesotho: "pula", english: "rain", shona: "mvura", isizulu: "imvula" },
@@ -100,7 +117,8 @@ const LEVELS = [
     ],
   },
   {
-    id: "people", title: "People", target: 600, moves: 22,
+    id: "people", title: "People", target: 650, moves: 22,
+    blurb: "The final page. Every role in the village — chief, teacher, healer — is nameless without it. Finish what you started.",
     words: [
       { id: "morena", sesotho: "morena", english: "chief", shona: "ishe", isizulu: "inkosi" },
       { id: "tichere", sesotho: "tichere", english: "teacher", shona: "mudzidzisi", isizulu: "uthisha" },
@@ -117,25 +135,33 @@ const CAT_COLORS = {
   family: "#C6538C", home: "#7D5BA6", nature: "#2FA8A0", people: "#E0433D",
 };
 
+const COMBO_HYPE = ["Nice!", "Sweet!", "Great!", "Tasty!", "Awesome!", "Incredible!"];
+
 const GRID = 7;
-const PROGRESS_KEY = "sesothoMatch:progress:v1";
+const PROGRESS_KEY = "sesothoMatch:progress:v2";
+const STORY_SEEN_KEY = "sesothoMatch:storySeen:v1";
 
 function loadProgress() {
   try {
     const raw = localStorage.getItem(PROGRESS_KEY);
-    if (!raw) return { unlocked: 0, bestScore: {} };
-    const parsed = JSON.parse(raw);
-    return { unlocked: parsed.unlocked || 0, bestScore: parsed.bestScore || {} };
-  } catch { return { unlocked: 0, bestScore: {} }; }
+    if (!raw) return { unlocked: 0, bestScore: {}, stars: {} };
+    const p = JSON.parse(raw);
+    return { unlocked: p.unlocked || 0, bestScore: p.bestScore || {}, stars: p.stars || {} };
+  } catch { return { unlocked: 0, bestScore: {}, stars: {} }; }
 }
 function saveProgress(p) {
   try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(p)); } catch { /* storage unavailable — game still works, just won't remember progress */ }
 }
+function starsFor(score, target) {
+  if (score >= target * 1.5) return 3;
+  if (score >= target * 1.2) return 2;
+  return 1;
+}
 
 // ---------------------------------------------------------------------
-// Tile art — every icon is plain SVG shapes, procedurally composed from a
-// small set of reusable primitives so 48 words don't mean 48 hand-drawn
-// pictures. `hue` picks the fill/accent color for that word's tile.
+// Tile art — plain SVG shapes, procedurally composed so 48 words don't
+// mean 48 hand-drawn pictures. Wrapped in a glossy "candy shell" so the
+// board actually reads as a candy-style board, not flat icons on a grid.
 // ---------------------------------------------------------------------
 
 function Ears({ kind, color }) {
@@ -243,64 +269,89 @@ function GreetingIcon({ word, color }) {
   return null;
 }
 
-function TileArt({ level, word, size = 44 }) {
+function TileIcon({ level, word }) {
   const color = CAT_COLORS[level] || "#888";
-  let inner = null;
   if (level === "numbers") {
     const n = { ngoe: 1, peli: 2, tharo: 3, ne: 4, hlano: 5, tselela: 6 }[word];
-    inner = (<><circle cx="60" cy="60" r="46" fill={color} /><text x="60" y="78" fontSize="56" textAnchor="middle" fill="#fff" fontWeight="bold" fontFamily="sans-serif">{n}</text></>);
-  } else if (level === "greetings") inner = <GreetingIcon word={word} color={color} />;
-  else if (level === "animals") inner = <AnimalFace word={word} color={color} />;
-  else if (level === "food") inner = <FoodIcon word={word} color={color} />;
-  else if (level === "family") inner = <FamilyIcon word={word} color={color} />;
-  else if (level === "home") inner = <HomeIcon word={word} color={color} />;
-  else if (level === "nature") inner = <NatureIcon word={word} color={color} />;
-  else if (level === "people") inner = <PeopleIcon word={word} color={color} />;
+    return (<><circle cx="60" cy="60" r="46" fill={color} /><text x="60" y="78" fontSize="56" textAnchor="middle" fill="#fff" fontWeight="bold" fontFamily="sans-serif">{n}</text></>);
+  }
+  if (level === "greetings") return <GreetingIcon word={word} color={color} />;
+  if (level === "animals") return <AnimalFace word={word} color={color} />;
+  if (level === "food") return <FoodIcon word={word} color={color} />;
+  if (level === "family") return <FamilyIcon word={word} color={color} />;
+  if (level === "home") return <HomeIcon word={word} color={color} />;
+  if (level === "nature") return <NatureIcon word={word} color={color} />;
+  if (level === "people") return <PeopleIcon word={word} color={color} />;
+  return null;
+}
 
+// The "candy shell" — a glossy rounded-square backdrop behind every icon,
+// exactly the piece of visual language that makes a board read as
+// "Candy Crush" rather than "icons in a grid": a saturated rounded square,
+// a soft drop shadow, and a diagonal highlight streak for shine. Special
+// candies (striped/wrapped, from 4- and 5-matches) get an extra marking.
+function CandyTile({ level, word, special, size = 44, dim = false }) {
+  const color = CAT_COLORS[level] || "#888";
   return (
-    <svg viewBox="0 0 120 120" width={size} height={size} style={{ overflow: "visible" }}>
-      {inner}
+    <svg viewBox="0 0 120 120" width={size} height={size} style={{ overflow: "visible", opacity: dim ? 0.35 : 1 }}>
+      <rect x="6" y="8" width="108" height="108" rx="26" fill="rgba(0,0,0,0.18)" />
+      <rect x="4" y="4" width="108" height="108" rx="26" fill={color} opacity="0.16" />
+      <rect x="4" y="4" width="108" height="108" rx="26" fill="none" stroke={color} strokeWidth="4" opacity="0.55" />
+      <path d="M16 44 Q30 14 60 12 Q40 20 30 50 Z" fill="#fff" opacity="0.35" />
+      <g transform="translate(14,14) scale(0.78)">
+        <TileIcon level={level} word={word} />
+      </g>
+      {special === "stripedH" && <rect x="10" y="52" width="100" height="16" rx="8" fill="#fff" opacity="0.85" />}
+      {special === "stripedV" && <rect x="52" y="10" width="16" height="100" rx="8" fill="#fff" opacity="0.85" />}
+      {special === "wrapped" && <rect x="14" y="14" width="92" height="92" rx="20" fill="none" stroke="#fff" strokeWidth="6" strokeDasharray="10 8" opacity="0.9" />}
     </svg>
   );
 }
 
 // ---------------------------------------------------------------------
-// Match-3 engine — a plain 2D array of word-indexes (0..5), tap-select +
-// tap-adjacent to swap (no drag, so it works the same on any screen size
-// the way Ludo's tap-to-move does), then standard match-3 clear/gravity/
-// refill/cascade.
+// Match-3 engine — cells are {type, special}. Tap-select + tap-adjacent
+// to swap (no drag). Match 4 in a line creates a striped candy (clears
+// the perpendicular row/column when it's later cleared); match 5+
+// creates a wrapped candy (clears a surrounding 3x3 when cleared).
 // ---------------------------------------------------------------------
 
 function randType(n) { return Math.floor(Math.random() * n); }
+function cell(type, special = null) { return { type, special }; }
 
 function makeBoard(n) {
   let board;
-  // Avoid pre-existing matches so the board doesn't start half-solved.
   do {
-    board = Array.from({ length: GRID }, () => Array.from({ length: GRID }, () => randType(n)));
-  } while (findMatches(board).size > 0);
+    board = Array.from({ length: GRID }, () => Array.from({ length: GRID }, () => cell(randType(n))));
+  } while (findRuns(board).length > 0);
   return board;
 }
 
-function findMatches(board) {
-  const matched = new Set();
+// All straight runs of length >= 3, both directions.
+function findRuns(board) {
+  const runs = [];
   for (let r = 0; r < GRID; r++) {
-    let runStart = 0;
+    let start = 0;
     for (let cc = 1; cc <= GRID; cc++) {
-      if (cc < GRID && board[r][cc] === board[r][runStart]) continue;
-      if (cc - runStart >= 3) for (let k = runStart; k < cc; k++) matched.add(`${r},${k}`);
-      runStart = cc;
+      if (cc < GRID && board[r][cc].type === board[r][start].type) continue;
+      if (cc - start >= 3) {
+        const cells = []; for (let k = start; k < cc; k++) cells.push({ r, c: k });
+        runs.push({ cells, dir: "h", type: board[r][start].type });
+      }
+      start = cc;
     }
   }
   for (let cc = 0; cc < GRID; cc++) {
-    let runStart = 0;
+    let start = 0;
     for (let r = 1; r <= GRID; r++) {
-      if (r < GRID && board[r][cc] === board[runStart][cc]) continue;
-      if (r - runStart >= 3) for (let k = runStart; k < r; k++) matched.add(`${k},${cc}`);
-      runStart = r;
+      if (r < GRID && board[r][cc].type === board[start][cc].type) continue;
+      if (r - start >= 3) {
+        const cells = []; for (let k = start; k < r; k++) cells.push({ r: k, c: cc });
+        runs.push({ cells, dir: "v", type: board[start][cc].type });
+      }
+      start = r;
     }
   }
-  return matched;
+  return runs;
 }
 
 function applyGravity(board, n) {
@@ -310,16 +361,100 @@ function applyGravity(board, n) {
     for (let r = GRID - 1; r >= 0; r--) {
       if (next[r][cc] !== null) { next[write][cc] = next[r][cc]; if (write !== r) next[r][cc] = null; write--; }
     }
-    for (let r = write; r >= 0; r--) next[r][cc] = randType(n);
+    for (let r = write; r >= 0; r--) next[r][cc] = cell(randType(n));
   }
   return next;
 }
 
 function areAdjacent(a, b) { return (a.r === b.r && Math.abs(a.c - b.c) === 1) || (a.c === b.c && Math.abs(a.r - b.r) === 1); }
 
+// One full resolve pass: find runs -> decide specials -> clear (expanding
+// for any special that gets swept up) -> gravity -> repeat until settled.
+function resolveCascade(startBoard, n, swapOrigin) {
+  let board = startBoard;
+  let gained = 0;
+  let firstMatchType = null;
+  let bestRunLen = 0;
+  let passes = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const runs = findRuns(board);
+    if (runs.length === 0) break;
+    passes += 1;
+    const toClear = new Set();
+    const upgrades = []; // {r,c,special}
+    for (const run of runs) {
+      bestRunLen = Math.max(bestRunLen, run.cells.length);
+      if (firstMatchType === null) firstMatchType = run.type;
+      run.cells.forEach(({ r, c: cc }) => toClear.add(`${r},${cc}`));
+      if (run.cells.length >= 4) {
+        // Special is born where the player's swap landed, if it's part of
+        // this run; otherwise the middle of the run (matches Candy Crush's
+        // own convention closely enough for our purposes).
+        let origin = run.cells.find((p) => swapOrigin && p.r === swapOrigin.r && p.c === swapOrigin.c);
+        if (!origin) origin = run.cells[Math.floor(run.cells.length / 2)];
+        const special = run.cells.length >= 5 ? "wrapped" : (run.dir === "h" ? "stripedV" : "stripedH");
+        upgrades.push({ r: origin.r, c: origin.c, special });
+      }
+    }
+    // Detonate any special candy that's about to be cleared.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const key of Array.from(toClear)) {
+        const [r, cc] = key.split(",").map(Number);
+        const isUpgradeSite = upgrades.some((u) => u.r === r && u.c === cc);
+        if (isUpgradeSite) continue; // this cell survives as the new special, not cleared
+        const sp = board[r][cc]?.special;
+        if (!sp) continue;
+        let added = [];
+        if (sp === "stripedH") added = Array.from({ length: GRID }, (_, k) => `${r},${k}`);
+        else if (sp === "stripedV") added = Array.from({ length: GRID }, (_, k) => `${k},${cc}`);
+        else if (sp === "wrapped") {
+          for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+            const nr = r + dr, nc = cc + dc;
+            if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) added.push(`${nr},${nc}`);
+          }
+        }
+        for (const a of added) if (!toClear.has(a)) { toClear.add(a); changed = true; }
+      }
+    }
+    gained += toClear.size * 10 + Math.max(0, toClear.size - 3) * 15;
+    const cleared = board.map((row) => row.slice());
+    toClear.forEach((key) => {
+      const [r, cc] = key.split(",").map(Number);
+      const isUpgradeSite = upgrades.find((u) => u.r === r && u.c === cc);
+      cleared[r][cc] = isUpgradeSite ? null : null; // clear now, re-place upgrades after gravity so they don't fall
+    });
+    board = applyGravity(cleared, n);
+    // Re-place upgraded specials at their original spot (gravity already
+    // pulled everything above them down by one, so this keeps the special
+    // sitting where the match happened rather than getting shuffled away).
+    upgrades.forEach((u) => { board[u.r][u.c] = cell(u.type ?? board[u.r][u.c].type, u.special); });
+    swapOrigin = null; // only the very first pass gets the "landed here" bonus
+  }
+  return { board, gained, firstMatchType, bestRunLen, passes };
+}
+
+function findHint(board, n) {
+  for (let r = 0; r < GRID; r++) {
+    for (let cc = 0; cc < GRID; cc++) {
+      for (const [dr, dc] of [[0, 1], [1, 0]]) {
+        const nr = r + dr, nc = cc + dc;
+        if (nr >= GRID || nc >= GRID) continue;
+        const test = board.map((row) => row.slice());
+        const tmp = test[r][cc]; test[r][cc] = test[nr][nc]; test[nr][nc] = tmp;
+        if (findRuns(test).length > 0) return [{ r, c: cc }, { r: nr, c: nc }];
+      }
+    }
+  }
+  return null;
+}
+
 export default function SesothoMatchPage({ onBack, c }) {
   const [progress, setProgress] = useState(loadProgress);
-  const [screen, setScreen] = useState("map"); // map | play | levelComplete
+  const [screen, setScreen] = useState(() => (localStorage.getItem(STORY_SEEN_KEY) ? "map" : "story"));
+  const [storyStep, setStoryStep] = useState(0);
   const [levelIdx, setLevelIdx] = useState(0);
   const [board, setBoard] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -327,16 +462,29 @@ export default function SesothoMatchPage({ onBack, c }) {
   const [movesLeft, setMovesLeft] = useState(0);
   const [busy, setBusy] = useState(false);
   const [wordToast, setWordToast] = useState(null);
-  const [outcome, setOutcome] = useState(null); // "won" | "lost" | null
-  const [walkTo, setWalkTo] = useState(null); // animate token to this level index on map
+  const [hypeToast, setHypeToast] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+  const [walkTo, setWalkTo] = useState(null);
+  const [hint, setHint] = useState(null);
+  const [preLevel, setPreLevel] = useState(null); // level index awaiting its "page" intro
   const toastTimer = useRef(null);
+  const hypeTimer = useRef(null);
+  const hintTimer = useRef(null);
 
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    if (hypeTimer.current) clearTimeout(hypeTimer.current);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+  }, []);
 
   const level = LEVELS[levelIdx];
 
-  const openLevel = (idx) => {
-    if (idx > progress.unlocked) return;
+  const finishStory = () => {
+    try { localStorage.setItem(STORY_SEEN_KEY, "1"); } catch { /* fine, will just show again next time */ }
+    setScreen("map");
+  };
+
+  const startLevel = (idx) => {
     const lv = LEVELS[idx];
     setLevelIdx(idx);
     setBoard(makeBoard(lv.words.length));
@@ -345,7 +493,13 @@ export default function SesothoMatchPage({ onBack, c }) {
     setSelected(null);
     setOutcome(null);
     setBusy(false);
+    setHint(null);
     setScreen("play");
+  };
+
+  const openLevel = (idx) => {
+    if (idx > progress.unlocked) return;
+    setPreLevel(idx); // show the "page" blurb first, for the suspense beat
   };
 
   const showWord = (w) => {
@@ -353,37 +507,24 @@ export default function SesothoMatchPage({ onBack, c }) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setWordToast(null), 1800);
   };
-
-  const resolveCascade = useCallback((startBoard, wordsForLevel) => {
-    let cur = startBoard;
-    let gained = 0;
-    let firstMatchWord = null;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const matched = findMatches(cur);
-      if (matched.size === 0) break;
-      gained += matched.size * 10 + (matched.size > 3 ? (matched.size - 3) * 15 : 0);
-      if (!firstMatchWord) {
-        const [r, cIdx] = matched.values().next().value.split(",").map(Number);
-        firstMatchWord = wordsForLevel[cur[r][cIdx]];
-      }
-      const cleared = cur.map((row) => row.slice());
-      matched.forEach((key) => { const [r, cIdx] = key.split(",").map(Number); cleared[r][cIdx] = null; });
-      cur = applyGravity(cleared, wordsForLevel.length);
-    }
-    return { board: cur, gained, firstMatchWord };
-  }, []);
+  const showHype = (text) => {
+    setHypeToast(text);
+    if (hypeTimer.current) clearTimeout(hypeTimer.current);
+    hypeTimer.current = setTimeout(() => setHypeToast(null), 900);
+  };
 
   const trySwap = (a, b) => {
     if (busy || movesLeft <= 0 || outcome) return;
+    setHint(null);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
     if (!areAdjacent(a, b)) { setSelected({ r: b.r, c: b.c }); return; }
     setBusy(true);
     const swapped = board.map((row) => row.slice());
     const tmp = swapped[a.r][a.c]; swapped[a.r][a.c] = swapped[b.r][b.c]; swapped[b.r][b.c] = tmp;
-    const matched = findMatches(swapped);
-    if (matched.size === 0) {
-      // Invalid swap — snap back, still costs nothing (no move spent),
-      // matching how Ludo doesn't penalize an accidental tap.
+    const runs = findRuns(swapped);
+    if (runs.length === 0) {
+      // Invalid swap — snap back, no move spent (same forgiving feel Ludo
+      // uses for a mistaken tap).
       setSelected(null);
       setBusy(false);
       return;
@@ -392,24 +533,21 @@ export default function SesothoMatchPage({ onBack, c }) {
     setSelected(null);
     setMovesLeft((m) => m - 1);
     setTimeout(() => {
-      const { board: finalBoard, gained, firstMatchWord } = resolveCascade(swapped, level.words);
+      const { board: finalBoard, gained, firstMatchType, bestRunLen, passes } = resolveCascade(swapped, level.words.length, b);
       setBoard(finalBoard);
       setScore((s) => {
         const next = s + gained;
         if (next >= level.target && !outcome) setOutcome("won");
         return next;
       });
-      if (firstMatchWord) showWord(firstMatchWord);
+      if (firstMatchType != null) showWord(level.words[firstMatchType]);
+      const hypeIdx = Math.min(COMBO_HYPE.length - 1, (bestRunLen - 3) + (passes - 1) * 2);
+      if (hypeIdx > 0 || passes > 1) showHype(COMBO_HYPE[Math.max(0, hypeIdx)]);
       setBusy(false);
     }, 220);
   };
 
   useEffect(() => {
-    // Gate on !busy so a final move that both wins and empties the move
-    // counter always resolves as a win first — busy only clears after the
-    // cascade has fully settled and score has been updated, so checking
-    // the loss condition while busy is still true would race ahead of a
-    // last-move win and show "out of moves" incorrectly.
     if (screen === "play" && !busy && movesLeft <= 0 && score < level.target && !outcome) {
       setOutcome("lost");
     }
@@ -417,11 +555,16 @@ export default function SesothoMatchPage({ onBack, c }) {
 
   useEffect(() => {
     if (outcome === "won") {
-      const next = { ...progress };
-      next.unlocked = Math.max(next.unlocked, Math.min(levelIdx + 1, LEVELS.length - 1));
-      next.bestScore = { ...next.bestScore, [level.id]: Math.max(next.bestScore[level.id] || 0, score) };
-      setProgress(next);
-      saveProgress(next);
+      const earned = starsFor(score, level.target);
+      setProgress((prev) => {
+        const next = {
+          unlocked: Math.max(prev.unlocked, Math.min(levelIdx + 1, LEVELS.length - 1)),
+          bestScore: { ...prev.bestScore, [level.id]: Math.max(prev.bestScore[level.id] || 0, score) },
+          stars: { ...prev.stars, [level.id]: Math.max(prev.stars[level.id] || 0, earned) },
+        };
+        saveProgress(next);
+        return next;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outcome]);
@@ -430,6 +573,14 @@ export default function SesothoMatchPage({ onBack, c }) {
     if (!selected) { setSelected({ r, c: cIdx }); return; }
     if (selected.r === r && selected.c === cIdx) { setSelected(null); return; }
     trySwap(selected, { r, c: cIdx });
+  };
+
+  const useHint = () => {
+    if (busy || outcome || !board) return;
+    const found = findHint(board, level.words.length);
+    setHint(found);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setHint(null), 2500);
   };
 
   const backToMap = () => {
@@ -445,23 +596,79 @@ export default function SesothoMatchPage({ onBack, c }) {
   }, [screen, walkTo]);
 
   const tokenAt = walkTo != null ? walkTo : progress.unlocked;
+  const dangerLevel = level ? 1 - movesLeft / level.moves : 0; // 0 = safe, 1 = Wind about to catch you
+
+  // ---- Story screen ----
+  if (screen === "story") {
+    return (
+      <div className="max-w-md mx-auto px-4 pt-10 pb-16 flex flex-col items-center text-center min-h-[70vh] justify-center">
+        <Wind size={40} style={{ color: c.textDim }} className="mb-4" />
+        <div className="font-display text-2xl mb-5" style={{ color: c.text }}>The Wind of Forgetting</div>
+        <div className="font-body text-base leading-relaxed mb-8" style={{ color: c.textDim, minHeight: 110 }}>
+          {STORY_INTRO[storyStep]}
+        </div>
+        <div className="flex gap-1.5 mb-8">
+          {STORY_INTRO.map((_, i) => (
+            <span key={i} style={{ width: 7, height: 7, borderRadius: 999, background: i === storyStep ? c.accent : c.border }} />
+          ))}
+        </div>
+        <button
+          onClick={() => (storyStep < STORY_INTRO.length - 1 ? setStoryStep((s) => s + 1) : finishStory())}
+          className="rounded-xl px-8 py-3 font-display text-base w-full max-w-[220px]"
+          style={{ background: c.accent, color: c.accentText || "#fff" }}>
+          {storyStep < STORY_INTRO.length - 1 ? "Continue" : "Begin"}
+        </button>
+        {storyStep < STORY_INTRO.length - 1 && (
+          <button onClick={finishStory} className="mt-3 font-body text-xs" style={{ color: c.textFaint }}>Skip</button>
+        )}
+      </div>
+    );
+  }
+
+  // ---- Pre-level "page" intro (the suspense beat before each puzzle) ----
+  if (preLevel != null) {
+    const lv = LEVELS[preLevel];
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.72)" }}>
+        <div className="rounded-2xl p-6 text-center max-w-xs w-full" style={{ background: c.surface, border: `2px solid ${CAT_COLORS[lv.id]}` }}>
+          <BookOpen size={30} style={{ color: CAT_COLORS[lv.id] }} className="mx-auto mb-3" />
+          <div className="font-body text-xs uppercase tracking-wide mb-1" style={{ color: c.textFaint }}>Page {preLevel + 1} of {LEVELS.length}</div>
+          <div className="font-display text-xl mb-3" style={{ color: c.text }}>{lv.title}</div>
+          <div className="font-body text-sm mb-6" style={{ color: c.textDim }}>{lv.blurb}</div>
+          <div className="flex flex-col gap-2">
+            <button onClick={() => { setPreLevel(null); startLevel(preLevel); }} className="w-full rounded-xl py-3 font-display text-base" style={{ background: CAT_COLORS[lv.id], color: "#fff" }}>
+              Chase the page
+            </button>
+            <button onClick={() => setPreLevel(null)} className="rounded-xl py-3 font-semibold" style={{ background: c.surfaceHover || c.surface, border: `1px solid ${c.border}` }}>
+              Not yet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ---- Map screen ----
   if (screen === "map") {
     return (
       <div className="max-w-md mx-auto px-4 pt-6 pb-16">
-        <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm mb-5" style={{ color: c.textDim }}>
-          <ArrowLeft size={15} /> Back
-        </button>
+        <div className="flex items-center justify-between mb-5">
+          <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
+            <ArrowLeft size={15} /> Back
+          </button>
+          <button onClick={() => { setStoryStep(0); setScreen("story"); }} className="flex items-center gap-1.5 font-body text-xs" style={{ color: c.textFaint }}>
+            <BookOpen size={13} /> The story
+          </button>
+        </div>
         <div className="mb-1 font-display text-2xl" style={{ color: c.text }}>Sesotho Match</div>
         <div className="mb-6 font-body text-sm" style={{ color: c.textDim }}>
-          Match 3 to learn a word — Sesotho, English, Shona &amp; isiZulu.
+          Recover the scattered pages before the Wind of Forgetting does.
         </div>
 
         <div className="relative">
           {LEVELS.map((lv, i) => {
             const locked = i > progress.unlocked;
-            const done = progress.bestScore[lv.id] != null;
+            const earnedStars = progress.stars[lv.id] || 0;
             const isToken = i === tokenAt;
             const align = i % 2 === 0 ? "flex-start" : "flex-end";
             return (
@@ -482,11 +689,11 @@ export default function SesothoMatchPage({ onBack, c }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     opacity: locked ? 0.55 : 1, cursor: locked ? "default" : "pointer",
                   }}>
-                  {locked ? <Lock size={22} style={{ color: c.textFaint }} /> : <TileArt level={lv.id} word={lv.words[0].id} size={40} />}
-                  {done && (
-                    <span style={{ position: "absolute", top: -6, right: -6, background: "#2FA84F", borderRadius: 999, width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <Check size={12} color="#fff" />
-                    </span>
+                  {locked ? <Lock size={22} style={{ color: c.textFaint }} /> : <CandyTile level={lv.id} word={lv.words[0].id} size={40} />}
+                  {earnedStars > 0 && (
+                    <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 1 }}>
+                      {[0, 1, 2].map((s) => <Star key={s} size={11} fill={s < earnedStars ? "#E8B923" : "none"} color={s < earnedStars ? "#E8B923" : c.border} />)}
+                    </div>
                   )}
                   {isToken && (
                     <div style={{ position: "absolute", bottom: -30, transition: "all 0.6s ease" }}>
@@ -515,7 +722,7 @@ export default function SesothoMatchPage({ onBack, c }) {
         <ArrowLeft size={15} /> Map
       </button>
 
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <div className="font-display text-lg" style={{ color: c.text }}>{level.title}</div>
           <div className="font-body text-xs" style={{ color: c.textFaint }}>Target {level.target} pts</div>
@@ -526,8 +733,19 @@ export default function SesothoMatchPage({ onBack, c }) {
         </div>
       </div>
 
-      <div className="w-full h-2 rounded-full mb-4 overflow-hidden" style={{ background: c.border }}>
+      <div className="w-full h-2 rounded-full mb-2 overflow-hidden" style={{ background: c.border }}>
         <div style={{ width: `${Math.min(100, (score / level.target) * 100)}%`, height: "100%", background: CAT_COLORS[level.id], transition: "width 0.3s" }} />
+      </div>
+
+      {/* The Wind of Forgetting closing in as moves run out — tension bar, not just a countdown. */}
+      <div className="flex items-center gap-2 mb-4">
+        <Wind size={13} style={{ color: dangerLevel > 0.6 ? "#E0433D" : c.textFaint }} />
+        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.border }}>
+          <div style={{ width: `${dangerLevel * 100}%`, height: "100%", background: dangerLevel > 0.6 ? "#E0433D" : "#8a8a8a", transition: "width 0.3s" }} />
+        </div>
+        <button onClick={useHint} className="flex items-center gap-1 font-body text-xs" style={{ color: c.accent }}>
+          <Lightbulb size={13} /> Hint
+        </button>
       </div>
 
       <div style={{
@@ -536,16 +754,18 @@ export default function SesothoMatchPage({ onBack, c }) {
       }}>
         {board && board.map((row, r) => row.map((t, cIdx) => {
           const isSel = selected && selected.r === r && selected.c === cIdx;
-          const w = level.words[t];
+          const isHint = hint && hint.some((h) => h.r === r && h.c === cIdx);
+          const w = level.words[t.type];
           return (
             <button key={`${r}-${cIdx}`} onClick={() => onTapCell(r, cIdx)}
               style={{
                 aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
-                borderRadius: 10, background: isSel ? CAT_COLORS[level.id] + "33" : "transparent",
-                border: isSel ? `2px solid ${CAT_COLORS[level.id]}` : "2px solid transparent",
+                borderRadius: 10,
+                background: isSel ? CAT_COLORS[level.id] + "33" : isHint ? "#E8B92333" : "transparent",
+                border: isSel ? `2px solid ${CAT_COLORS[level.id]}` : isHint ? "2px solid #E8B923" : "2px solid transparent",
                 transition: "transform 0.15s", transform: isSel ? "scale(1.08)" : "scale(1)",
               }}>
-              <TileArt level={level.id} word={w.id} size={30} />
+              <CandyTile level={level.id} word={w.id} special={t.special} size={32} />
             </button>
           );
         }))}
@@ -559,20 +779,30 @@ export default function SesothoMatchPage({ onBack, c }) {
         </div>
       )}
 
+      {hypeToast && (
+        <div className="fixed left-1/2 top-24 z-40 font-display text-2xl pointer-events-none"
+          style={{ transform: "translateX(-50%)", color: CAT_COLORS[level.id], textShadow: "0 2px 8px rgba(0,0,0,0.35)" }}>
+          {hypeToast}
+        </div>
+      )}
+
       {outcome && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.6)" }}>
           <div className="rounded-2xl p-6 text-center max-w-xs w-full" style={{ background: c.surface, border: `2px solid ${outcome === "won" ? "#2FA84F" : c.border}` }}>
             {outcome === "won" ? (
               <>
+                <div className="flex justify-center gap-1 mb-2">
+                  {[0, 1, 2].map((s) => <Star key={s} size={26} fill={s < starsFor(score, level.target) ? "#E8B923" : "none"} color={s < starsFor(score, level.target) ? "#E8B923" : c.border} />)}
+                </div>
                 <PlayerCharacter pose="celebrate" kitColor={CAT_COLORS[level.id]} size={90} />
-                <div className="font-display text-xl mt-2 mb-1" style={{ color: c.text }}>Level complete!</div>
+                <div className="font-display text-xl mt-2 mb-1" style={{ color: c.text }}>Page recovered!</div>
                 <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>{score} points</div>
               </>
             ) : (
               <>
-                <PlayerCharacter pose="disappointed" kitColor={c.accent} size={90} />
-                <div className="font-display text-xl mt-2 mb-1" style={{ color: c.text }}>Out of moves</div>
-                <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>{score} / {level.target} points</div>
+                <Wind size={40} style={{ color: "#E0433D" }} className="mx-auto mb-2" />
+                <div className="font-display text-xl mt-2 mb-1" style={{ color: c.text }}>The Wind got there first</div>
+                <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>{score} / {level.target} points — try again?</div>
               </>
             )}
             <div className="flex flex-col gap-2">
@@ -582,7 +812,7 @@ export default function SesothoMatchPage({ onBack, c }) {
                 </button>
               ) : (
                 <>
-                  <button onClick={() => openLevel(levelIdx)} className="w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-base" style={{ background: c.accent, color: c.accentText || "#fff" }}>
+                  <button onClick={() => startLevel(levelIdx)} className="w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-base" style={{ background: c.accent, color: c.accentText || "#fff" }}>
                     <RotateCcw size={16} /> Try again
                   </button>
                   <button onClick={backToMap} className="rounded-xl py-3 font-semibold" style={{ background: c.surfaceHover || c.surface, border: `1px solid ${c.border}` }}>
