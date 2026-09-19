@@ -8865,6 +8865,11 @@ export default function App() {
                 <ChessPage c={c} session={session} onBack={goBack} showToast={showToast} />
               </Suspense>
             )}
+            {view === "sesothoMatch" && (
+              <Suspense fallback={<Loader c={c} />}>
+                <SesothoMatchPage onBack={goBack} c={c} />
+              </Suspense>
+            )}
             {view === "terms" && (
               <Suspense fallback={<Loader c={c} />}>
                 <TermsPage c={c} onBack={goBack} />
