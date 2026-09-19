@@ -5,6 +5,8 @@
 // moves are submitted through chess_submit_ai_move exactly like a human's
 // would be (see supabase/migrations/20260941_chess_ai.sql).
 
+import { Chess } from "chess.js";
+
 const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
 
 // Tiny piece-square tables (white's perspective; mirrored for black) so
@@ -125,3 +127,89 @@ export function pickAiMove(chess, difficulty) {
 
 export const AI_DIFFICULTIES = ["easy", "medium", "hard"];
 export const AI_REWARD_NETS = { easy: 3, medium: 7, hard: 15 };
+
+// ---------------------------------------------------------------------
+// Move commentary — praise/criticism for the human's moves and a plain-
+// English reason for the bot's own moves. Deliberately runs AFTER a move
+// has already been committed to the server (see ChessGame.jsx: this is
+// called once the RPC round-trip resolves) — it's a courtesy caption,
+// never a hint, undo, or anything that could change the outcome of the
+// game it's commenting on.
+
+const PIECE_NAME = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+
+// classifyMove — compares the eval after the move that was actually
+// played against the eval after the best move available at that point
+// (same shallow search pickAiMove already uses, so this stays fast).
+// Returns { tag, lossCp } from the mover's own perspective — lossCp is
+// how many centipawns worse the played move was than the best one, 0 or
+// negative meaning it basically *was* the best move.
+export function classifyMove(fenBeforeMove, playedMove, depth = 2) {
+  const chess = new Chess(fenBeforeMove);
+  const moverIsWhite = chess.turn() === "w";
+  const legal = chess.moves({ verbose: true });
+  if (legal.length === 0) return { tag: "Only move", lossCp: 0 };
+
+  let bestScore = -Infinity;
+  let playedScore = null;
+  for (const m of legal) {
+    chess.move(m);
+    const score = minimax(chess, depth - 1, -Infinity, Infinity, !moverIsWhite);
+    const fromMoverPerspective = moverIsWhite ? score : -score;
+    chess.undo();
+    if (fromMoverPerspective > bestScore) bestScore = fromMoverPerspective;
+    if (m.from === playedMove.from && m.to === playedMove.to && (m.promotion || null) === (playedMove.promotion || null)) {
+      playedScore = fromMoverPerspective;
+    }
+  }
+  if (playedScore === null) return { tag: "Move played", lossCp: 0 }; // shouldn't happen, defensive fallback
+
+  const lossCp = Math.max(0, Math.round(bestScore - playedScore));
+  let tag;
+  if (lossCp === 0) tag = "Best move";
+  else if (lossCp < 20) tag = "Excellent";
+  else if (lossCp < 50) tag = "Good";
+  else if (lossCp < 150) tag = "Inaccuracy";
+  else if (lossCp < 300) tag = "Mistake";
+  else tag = "Blunder";
+  return { tag, lossCp };
+}
+
+const ENCOURAGING = {
+  "Best move": ["That's the strongest move on the board.", "Engine agrees — best move available.", "Couldn't have played that better myself."],
+  "Excellent": ["Excellent choice.", "Very strong — barely a hair off the best move.", "Sharp play."],
+  "Good": ["Good move — keeps you in a solid spot.", "Solid, sensible choice."],
+};
+const CRITICAL = {
+  "Inaccuracy": ["A slightly stronger move was available.", "Not the sharpest — worth a second look next time."],
+  "Mistake": ["That gives your opponent a real opening.", "A stronger move was on the board there."],
+  "Blunder": ["That one hands over a significant advantage.", "Ouch — that loses ground fast."],
+};
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// commentOnHumanMove — the "praise/criticize" side. moveSan is the SAN
+// of the move that was actually played (for referencing it by name).
+export function commentOnHumanMove(fenBeforeMove, playedMove, moveSan) {
+  const { tag, lossCp } = classifyMove(fenBeforeMove, playedMove);
+  if (tag === "Best move" || tag === "Excellent" || tag === "Good") {
+    return `${tag}: ${pick(ENCOURAGING[tag] || ENCOURAGING["Good"])}`;
+  }
+  if (tag === "Only move" || tag === "Move played") return null; // nothing useful to say
+  return `${tag} (${moveSan}): ${pick(CRITICAL[tag])} (~${lossCp}cp)`;
+}
+
+// explainAiMove — the "how I made my brilliant move" side. Template-based
+// on the move's own tactical shape (capture/check/castle/promotion)
+// rather than free-form generation — keeps it fast, accurate, and never
+// makes claims about the position it can't back up.
+export function explainAiMove(chessAfterMove, moveResult) {
+  const bits = [];
+  if (moveResult.captured) bits.push(`wins your ${PIECE_NAME[moveResult.captured] || "piece"}`);
+  if (moveResult.flags?.includes("k") || moveResult.flags?.includes("q")) bits.push("castles its king to safety");
+  if (moveResult.promotion) bits.push(`promotes to a ${PIECE_NAME[moveResult.promotion]}`);
+  if (chessAfterMove.isCheckmate()) bits.push("that's checkmate");
+  else if (chessAfterMove.inCheck?.() || moveResult.san.includes("+")) bits.push("puts your king in check");
+  if (bits.length === 0) bits.push("improves its position and piece activity");
+  return `${moveResult.san} — ${bits.join(", ")}.`;
+}

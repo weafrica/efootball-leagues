@@ -23,7 +23,7 @@ import { Chess } from "chess.js";
 import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
-import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS } from "./chessAi.js";
+import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove } from "./chessAi.js";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -315,6 +315,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const [submitting, setSubmitting] = useState(false);
   const [promotionChoice, setPromotionChoice] = useState(null); // { from, to } awaiting a piece pick
   const [aiThinking, setAiThinking] = useState(false);
+  const [commentary, setCommentary] = useState([]); // vs-AI only: [{ from: "you"|"bot", text }] — most recent last
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("chess_games").select("*").eq("id", gameId).maybeSingle();
@@ -346,7 +347,13 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   // from finishOrContinue/chess_submit_move: outcomes here are
   // human_win/ai_win/draw rather than a winner_user_id, and payout is a
   // flat reward rather than a stake split (see chess_submit_ai_move).
-  const submitAiTurn = async (chess) => {
+  //
+  // moveContext (optional) — { fenBeforeMove, moveResult, mover: "human"
+  // | "ai" } — when given, commentary is generated and shown ONLY after
+  // the RPC below has already succeeded, i.e. only once the move is
+  // durably committed and can no longer be changed. This is a courtesy
+  // caption, never a hint: it can't affect the game it's describing.
+  const submitAiTurn = async (chess, moveContext) => {
     const isOver = chess.isGameOver();
     let status = null, outcome = null, reason = null;
     if (isOver) {
@@ -372,6 +379,15 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     if (error) {
       showToast?.(`Move didn't save: ${error.message}`);
       await load();
+      return;
+    }
+    // Only past this point is the move locked in — safe to comment on it.
+    if (moveContext) {
+      const { fenBeforeMove, moveResult, mover } = moveContext;
+      const text = mover === "human"
+        ? commentOnHumanMove(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion }, moveResult.san)
+        : explainAiMove(chess, moveResult);
+      if (text) setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text }]);
     }
   };
 
@@ -388,11 +404,12 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     const timer = setTimeout(async () => {
       if (cancelled) return;
       const chess = chessRef.current;
+      const fenBeforeMove = chess.fen();
       const move = pickAiMove(chess, game.ai_difficulty);
       if (!move) { setAiThinking(false); return; }
       let result;
       try { result = chess.move(move); } catch { result = null; }
-      if (result) await submitAiTurn(chess);
+      if (result) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" });
       if (!cancelled) setAiThinking(false);
     }, 500 + Math.random() * 500); // small delay reads as "thinking" rather than instant/robotic
     return () => { cancelled = true; clearTimeout(timer); };
@@ -442,6 +459,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
 
   const attemptMove = async (from, to, promotion) => {
     const chess = chessRef.current;
+    const fenBeforeMove = chess.fen();
     let result;
     try {
       result = chess.move({ from, to, promotion: promotion || undefined });
@@ -457,7 +475,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     setLegalTargets([]);
     setSubmitting(true);
     try {
-      if (game.is_vs_ai) await submitAiTurn(chess);
+      if (game.is_vs_ai) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "human" });
       else await finishOrContinue(result);
     } finally {
       setSubmitting(false);
@@ -582,6 +600,22 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
               className="text-2xl px-2 py-1 rounded-lg" style={{ background: c.surfaceHover }}>
               {PIECE_GLYPH[`${myColor}${p.toUpperCase()}`]}
             </button>
+          ))}
+        </div>
+      )}
+
+      {/* Move commentary — vs-AI only, and only ever about moves already
+          committed (see submitAiTurn). Never shown for PvP: it would be
+          an unfair one-sided assist against a real opponent. */}
+      {game.is_vs_ai && commentary.length > 0 && (
+        <div className="rounded-lg border p-3 flex flex-col gap-1.5" style={{ borderColor: c.border, background: c.surface }}>
+          {commentary.map((line, i) => (
+            <div key={i} className="font-body text-xs flex items-start gap-1.5" style={{ color: line.from === "bot" ? c.accent : c.text, opacity: i === commentary.length - 1 ? 1 : 0.55 }}>
+              <span className="font-mono text-[9px] uppercase shrink-0 mt-0.5" style={{ color: c.textFaint }}>
+                {line.from === "bot" ? "Bot" : "You"}
+              </span>
+              <span>{line.text}</span>
+            </div>
           ))}
         </div>
       )}
