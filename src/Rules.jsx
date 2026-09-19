@@ -156,6 +156,37 @@ const RULES_CONTENT = {
       ]},
     ],
   },
+  chess: {
+    icon: Swords,
+    title: "Chess Rules",
+    sections: [
+      { heading: "How each piece moves", items: [
+        "Pawn — one square forward (two on its very first move), captures one square diagonally forward. Reaching the far end promotes it to a queen, rook, bishop, or knight.",
+        "Knight — moves in an L: two squares one way, then one square sideways. The only piece that can jump clean over others.",
+        "Bishop — any number of squares diagonally. Stays on the same color square its whole life.",
+        "Rook — any number of squares in a straight line, horizontal or vertical.",
+        "Queen — the most powerful piece: any number of squares in any straight line, horizontal, vertical, or diagonal.",
+        "King — one square in any direction. Protect it at all costs — losing it loses the game.",
+      ]},
+      { heading: "Special moves", items: [
+        "Castling — king and rook move together, once each per game, if neither has moved yet and nothing's between them: the king slides two squares toward the rook, the rook hops to the other side.",
+        "En passant — if an opponent's pawn just moved two squares and landed beside yours, you can capture it as if it had only moved one, but only on your very next move.",
+        "Promotion — a pawn reaching the last rank instantly becomes a queen, rook, bishop, or knight, your choice.",
+      ]},
+      { heading: "Check, checkmate, draws", items: [
+        "Check — your king is under direct attack. You must get out of it immediately: move the king, block the attack, or capture the attacker.",
+        "Checkmate — check with no way out. Game over, you lose.",
+        "Stalemate — the player to move has no legal move and isn't in check. The game is a draw — nobody wins.",
+        "Other draws — the same position occurring three times, 50 moves without a pawn move or capture, or too little material left for either side to ever force checkmate.",
+      ]},
+      { heading: "Playing Chess here", items: [
+        "Open a table with an optional Nets stake and wait for an opponent, or play instantly against the bot.",
+        "PvP: win the whole pot (both stakes) on checkmate or resignation; a draw refunds both players.",
+        "Vs bot: no stake needed — beat it for a flat Nets reward instead (bigger reward on harder difficulty), capped per day.",
+        "After every move you make in a bot game, it tells you how strong that move was; after its own move, it explains its reasoning — only once the move's already locked in, never as a hint beforehand.",
+      ]},
+    ],
+  },
 };
 
 // Highlights the matched substring of `text` for the given (lowercased)

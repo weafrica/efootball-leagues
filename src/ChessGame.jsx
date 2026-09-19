@@ -18,12 +18,14 @@
 // Board orientation flips for the black player (row/col rendering
 // order), so each player always sees their own pieces at the bottom.
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
 import { Chess } from "chess.js";
-import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot } from "lucide-react";
+import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
-import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove } from "./chessAi.js";
+import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative } from "./chessAi.js";
+
+const RulesModal = lazy(() => import("./Rules.jsx"));
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -40,6 +42,7 @@ function squareId(file, rank) { return `${FILES[file]}${rank}`; }
 
 export default function ChessGame({ c, session, showToast, onBack }) {
   const [activeGameId, setActiveGameId] = useState(null);
+  const [practiceOpen, setPracticeOpen] = useState(false);
 
   if (activeGameId) {
     return (
@@ -52,8 +55,12 @@ export default function ChessGame({ c, session, showToast, onBack }) {
       />
     );
   }
+  if (practiceOpen) {
+    return <ChessPracticeBoard onBack={() => setPracticeOpen(false)} c={c} />;
+  }
   return (
-    <ChessLobby session={session} showToast={showToast} onBack={onBack} onOpenGame={setActiveGameId} c={c} />
+    <ChessLobby session={session} showToast={showToast} onBack={onBack} onOpenGame={setActiveGameId}
+      onOpenPractice={() => setPracticeOpen(true)} c={c} />
   );
 }
 
@@ -61,7 +68,8 @@ export default function ChessGame({ c, session, showToast, onBack }) {
 // Lobby — open tables to join, your own in-progress games, create a
 // table with an optional Nets stake.
 
-function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
+function ChessLobby({ session, showToast, onBack, onOpenGame, onOpenPractice, c }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [openGames, setOpenGames] = useState(null); // null = loading
   const [myGames, setMyGames] = useState([]);
   const [myOpenTable, setMyOpenTable] = useState(null); // my own waiting-for-opponent table, if any
@@ -176,10 +184,29 @@ function ChessLobby({ session, showToast, onBack, onOpenGame, c }) {
         <ArrowLeft size={14} /> Back
       </button>
 
-      <div className="flex items-center gap-2">
-        <Swords size={20} style={{ color: c.accent }} />
-        <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Chess</h1>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Swords size={20} style={{ color: c.accent }} />
+          <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Chess</h1>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={onOpenPractice}
+            className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
+            style={{ borderColor: c.border, color: c.text }}>
+            <GraduationCap size={12} /> Learn
+          </button>
+          <button onClick={() => setRulesOpen(true)}
+            className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
+            style={{ borderColor: c.border, color: c.text }}>
+            <BookOpen size={12} /> Rules
+          </button>
+        </div>
       </div>
+      {rulesOpen && (
+        <Suspense fallback={null}>
+          <RulesModal type="chess" onClose={() => setRulesOpen(false)} c={c} />
+        </Suspense>
+      )}
 
       {/* Play vs AI — instant, solo, Nets reward for winning */}
       <div className="rounded-xl border p-4 flex flex-col gap-3" style={{ borderColor: c.border, background: c.surface }}>
@@ -384,9 +411,11 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     // Only past this point is the move locked in — safe to comment on it.
     if (moveContext) {
       const { fenBeforeMove, moveResult, mover } = moveContext;
-      const text = mover === "human"
+      const qualityOrExplain = mover === "human"
         ? commentOnHumanMove(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion }, moveResult.san)
         : explainAiMove(chess, moveResult);
+      const narrative = describeCaptureNarrative(chess, moveResult);
+      const text = [qualityOrExplain, narrative].filter(Boolean).join(" ");
       if (text) setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text }]);
     }
   };
@@ -454,7 +483,13 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     if (error) {
       showToast?.(`Move didn't save: ${error.message}`);
       await load(); // resync — our local board may now disagree with the server
+      return;
     }
+    // Flavor-only, no evaluation — safe to show in PvP (unlike commentOnHumanMove's
+    // numeric analysis, which stays vs-AI-only so it's never a one-sided edge
+    // over a real opponent). Only ever runs after the move is already committed.
+    const narrative = describeCaptureNarrative(chess, moveResult);
+    if (narrative) setCommentary((prev) => [...prev.slice(-4), { from: "narrator", text: narrative }]);
   };
 
   const attemptMove = async (from, to, promotion) => {
@@ -604,15 +639,17 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
         </div>
       )}
 
-      {/* Move commentary — vs-AI only, and only ever about moves already
-          committed (see submitAiTurn). Never shown for PvP: it would be
-          an unfair one-sided assist against a real opponent. */}
-      {game.is_vs_ai && commentary.length > 0 && (
+      {/* Move commentary/narrative feed — vs-AI games get full move-quality
+          analysis (commentOnHumanMove/explainAiMove); PvP only ever gets
+          capture flavor text (describeCaptureNarrative — no evaluation,
+          so it's never a one-sided edge over a real opponent). Either
+          way, only ever about moves already committed. */}
+      {commentary.length > 0 && (
         <div className="rounded-lg border p-3 flex flex-col gap-1.5" style={{ borderColor: c.border, background: c.surface }}>
           {commentary.map((line, i) => (
             <div key={i} className="font-body text-xs flex items-start gap-1.5" style={{ color: line.from === "bot" ? c.accent : c.text, opacity: i === commentary.length - 1 ? 1 : 0.55 }}>
               <span className="font-mono text-[9px] uppercase shrink-0 mt-0.5" style={{ color: c.textFaint }}>
-                {line.from === "bot" ? "Bot" : "You"}
+                {line.from === "bot" ? "Bot" : line.from === "narrator" ? "•" : "You"}
               </span>
               <span>{line.text}</span>
             </div>
@@ -627,6 +664,147 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
           <Flag size={12} /> Resign
         </button>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Practice/Learn board — the tutorial's "see possible moves" sandbox.
+// No account, no game row, no AI, no stakes: pure local chess.js state.
+// Both colors move normally (turns alternate) so it still teaches real
+// play, but nothing here is ever saved or affects a real game.
+
+const PIECE_TIP = {
+  p: "Pawns push straight, capture diagonally, and can promote if they reach the far end.",
+  n: "Knights leap in an L-shape — the only piece that can jump clean over others.",
+  b: "Bishops glide diagonally, forever, and never leave their starting color square.",
+  r: "Rooks command straight lines — any distance, horizontal or vertical.",
+  q: "Queens combine rook and bishop power — the strongest piece on the board.",
+  k: "Kings move one square any direction. Keep this one safe above all else.",
+};
+
+function ChessPracticeBoard({ onBack, c }) {
+  const [, forceRender] = useState(0);
+  const chessRef = useRef(new Chess());
+  const [selected, setSelected] = useState(null);
+  const [legalTargets, setLegalTargets] = useState([]);
+  const [promotionChoice, setPromotionChoice] = useState(null);
+  const [tip, setTip] = useState("Tap any piece to see everywhere it can legally go.");
+
+  const chess = chessRef.current;
+  const board = chess.board();
+
+  const resetBoard = () => {
+    chessRef.current = new Chess();
+    setSelected(null);
+    setLegalTargets([]);
+    setTip("Fresh board — tap a piece to explore its moves.");
+    forceRender((n) => n + 1);
+  };
+
+  const applyMove = (from, to, promotion) => {
+    let result;
+    try { result = chess.move({ from, to, promotion: promotion || undefined }); } catch { result = null; }
+    setSelected(null);
+    setLegalTargets([]);
+    if (!result) return;
+    if (chess.isCheckmate()) setTip(`Checkmate! ${result.san} ends it.`);
+    else if (chess.isStalemate()) setTip("Stalemate — no legal moves, and no check. That's a draw.");
+    else if (chess.isCheck()) setTip(`${result.san} — check! The king has to get out of it immediately.`);
+    else setTip(`${result.san} played. Tap another piece to keep exploring.`);
+    forceRender((n) => n + 1);
+  };
+
+  const onSquareClick = (sq) => {
+    if (selected) {
+      if (legalTargets.includes(sq)) {
+        const piece = chess.get(selected);
+        const isPromotion = piece?.type === "p" && (sq[1] === "8" || sq[1] === "1");
+        if (isPromotion) { setPromotionChoice({ from: selected, to: sq }); return; }
+        applyMove(selected, sq, null);
+        return;
+      }
+      const piece = chess.get(sq);
+      if (piece) {
+        setSelected(sq);
+        setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
+        setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
+        return;
+      }
+      setSelected(null);
+      setLegalTargets([]);
+      return;
+    }
+    const piece = chess.get(sq);
+    if (piece) {
+      setSelected(sq);
+      setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
+      setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
+    }
+  };
+
+  return (
+    <div className="p-4 flex flex-col gap-4 max-w-lg mx-auto">
+      <button onClick={onBack} className="flex items-center gap-1 font-mono text-xs" style={{ color: c.textFaint }}>
+        <ArrowLeft size={14} /> Back
+      </button>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <GraduationCap size={20} style={{ color: c.accent }} />
+          <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Learn — practice board</h1>
+        </div>
+        <button onClick={resetBoard}
+          className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
+          style={{ borderColor: c.border, color: c.text }}>
+          <RotateCcw size={12} /> Reset
+        </button>
+      </div>
+
+      <div className="rounded-lg border p-2.5 font-body text-xs" style={{ borderColor: c.border, background: c.surface, color: c.text }}>
+        {tip}
+      </div>
+
+      <div className="grid grid-cols-8 rounded-lg overflow-hidden border" style={{ borderColor: c.border }}>
+        {[...Array(8).keys()].map((rankIdx) =>
+          [...Array(8).keys()].map((fileIdx) => {
+            const rank = 8 - rankIdx;
+            const sq = squareId(fileIdx, rank);
+            const cell = board[rankIdx][fileIdx];
+            const isDark = (fileIdx + rankIdx) % 2 === 1;
+            const isSelected = sq === selected;
+            const isTarget = legalTargets.includes(sq);
+            return (
+              <button key={sq} onClick={() => onSquareClick(sq)}
+                className="aspect-square flex items-center justify-center relative select-none"
+                style={{ background: isSelected ? `${c.accent}55` : isDark ? c.surfaceHover : c.surface, cursor: "pointer" }}>
+                {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
+                {cell && (
+                  <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint }}>
+                    {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
+                  </span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      {promotionChoice && (
+        <div className="rounded-lg border p-3 flex items-center gap-2 justify-center" style={{ borderColor: c.border, background: c.surface }}>
+          <span className="font-mono text-[10px] uppercase mr-1" style={{ color: c.textFaint }}>Promote to:</span>
+          {["q", "r", "b", "n"].map((p) => (
+            <button key={p} onClick={() => { applyMove(promotionChoice.from, promotionChoice.to, p); setPromotionChoice(null); }}
+              className="text-2xl px-2 py-1 rounded-lg" style={{ background: c.surfaceHover }}>
+              {PIECE_GLYPH[`${chess.get(promotionChoice.from)?.color || "w"}${p.toUpperCase()}`]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="font-mono text-[10px] uppercase text-center" style={{ color: c.textFaint }}>
+        No account needed, nothing saved — this is just for exploring how the pieces move.
+      </div>
     </div>
   );
 }

@@ -213,3 +213,32 @@ export function explainAiMove(chessAfterMove, moveResult) {
   if (bits.length === 0) bits.push("improves its position and piece activity");
   return `${moveResult.san} — ${bits.join(", ")}.`;
 }
+
+// ---------------------------------------------------------------------
+// Piece "purpose" gamification — every capture gets a one-line story
+// instead of just updating the board silently. Flavor only, no numeric
+// evaluation in here (that's classifyMove's job, kept vs-AI-only for
+// fairness) — so this is safe to show in PvP too, real opponent or not.
+export function describeCaptureNarrative(chessAfterMove, moveResult) {
+  if (!moveResult.captured) return null;
+  const capturedVal = PIECE_VALUE[moveResult.captured];
+  const capturerVal = PIECE_VALUE[moveResult.piece];
+  const capturedName = PIECE_NAME[moveResult.captured];
+  const capturerName = PIECE_NAME[moveResult.piece];
+  // Can the side that just lost the piece immediately take back on the
+  // same square? Cheap one-ply check, not a full tactical read — good
+  // enough for flavor text, not meant to be engine-accurate.
+  const canAvenge = chessAfterMove.moves({ verbose: true }).some((m) => m.to === moveResult.to);
+
+  if (capturedVal > capturerVal) {
+    return canAvenge
+      ? `The ${capturedName} falls a hero — traded down to a mere ${capturerName}, but it can be avenged right back on ${moveResult.to}.`
+      : `The ${capturedName} falls a hero, taking a bite out of the position on its way down — and nothing can answer for it.`;
+  }
+  if (capturedVal < capturerVal) {
+    return `The ${capturedName} gave itself up for nothing more than a ${capturerName} — a quiet death, but it did its job drawing that piece in.`;
+  }
+  return canAvenge
+    ? `A straight trade — ${capturedName} for ${capturerName}, evens out, and it's answerable immediately.`
+    : `A clean, even trade — ${capturedName} for ${capturerName}.`;
+}
