@@ -79,6 +79,7 @@ const CreateLeague = lazy(() => import("./CreateLeague.jsx"));
 const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 const LudoPage = lazy(() => import("./Ludo.jsx"));
 const ChessPage = lazy(() => import("./ChessGame.jsx"));
+const SesothoMatchPage = lazy(() => import("./SesothoMatch.jsx"));
 // Ladder (the platform-wide permanent ladder) is only opened by a signed-in
 // user tapping into it from the header or the home screen's LadderStrip
 // preview - never on first load. Lazy-loaded the same way. (LADDER_THEME
@@ -102,7 +103,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal,
+  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal, BookOpen,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles, Coins,
   Zap, Repeat, Rocket, CreditCard, Tag, Handshake, Bell, GraduationCap, Wrench,
 } from "lucide-react";
@@ -8683,6 +8684,7 @@ export default function App() {
     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
     { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: Swords, label: "Chess", onClick: () => setView("chess") },
+    { icon: BookOpen, label: "Sesotho Match", onClick: () => setView("sesothoMatch") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
     { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
