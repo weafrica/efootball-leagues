@@ -68,99 +68,20 @@ export function AllInTag() {
 // tick inside the same 10-second window must not restart the roll.
 // ─────────────────────────────────────────────────────────────────────────
 export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
-  const firedForLobby = useRef(null);
-
-  useEffect(() => {
-    if (!enabled || msLeft == null || lobbyId == null) return;
-    if (msLeft > 10000) return; // only the final 10s
-    if (firedForLobby.current === lobbyId) return;
-    firedForLobby.current = lobbyId;
-
-    let ctx;
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      ctx = new AudioCtx();
-    } catch {
-      return; // no Web Audio support — silently skip, this is pure polish
-    }
-
-    // Accelerating snare-roll: short white-noise bursts, gaps shrinking
-    // from 220ms down to ~40ms over the 10s window, finishing on one
-    // longer "hit" right as the lobby resets/starts.
-    const start = ctx.currentTime + 0.05;
-    let t = start;
-    let gap = 0.22;
-    while (t - start < 9.5) {
-      const dur = 0.05;
-      const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * dur));
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
-
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const gainNode = ctx.createGain();
-      gainNode.gain.setValueAtTime(0.35, t);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      noise.connect(gainNode).connect(ctx.destination);
-      noise.start(t);
-      noise.stop(t + dur);
-
-      t += gap;
-      gap = Math.max(0.04, gap * 0.9);
-    }
-
-    // Closing hit — louder, longer decay.
-    const hitBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.3), ctx.sampleRate);
-    const hitData = hitBuffer.getChannelData(0);
-    for (let i = 0; i < hitData.length; i++) hitData[i] = (Math.random() * 2 - 1) * 0.8;
-    const hit = ctx.createBufferSource();
-    hit.buffer = hitBuffer;
-    const hitGain = ctx.createGain();
-    hitGain.gain.setValueAtTime(0.6, t);
-    hitGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    hit.connect(hitGain).connect(ctx.destination);
-    hit.start(t);
-    hit.stop(t + 0.3);
-
-    // Tear the context down well after the last scheduled sound finishes —
-    // but if this component unmounts first (viewer navigates away mid-
-    // countdown), the cleanup below closes it immediately instead. Web
-    // Audio scheduling runs independently of React: without this, leaving
-    // the page didn't stop the already-scheduled noise bursts, so the
-    // drumroll kept playing in the background and the context was never
-    // released.
-    const cleanupMs = (t + 0.4 - ctx.currentTime) * 1000;
-    const cleanupTimer = setTimeout(() => { ctx.close?.(); }, Math.max(0, cleanupMs));
-    return () => { clearTimeout(cleanupTimer); ctx.close?.(); };
-  }, [msLeft, lobbyId, enabled]);
+  // Silenced — this used to synthesize an accelerating snare-roll via the
+  // Web Audio API in the lobby countdown's last 10 seconds; reported as
+  // annoying, so the sound itself is switched off here. Left as a no-op
+  // (rather than deleting the hook and its call site in RapidCupBanner.jsx)
+  // so a future "bring back a gentler version" ask doesn't need to rebuild
+  // the timing/lobby-id-tracking plumbing from scratch.
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // League-start alarm — rings on a loop once a lobby reaches 4 players and
-// the league is starting, until the player taps into the page (the banner
-// calls the returned stopAlarm() the moment they do). Fires for players
-// actually in that lobby, not spectators browsing an open one.
-//
-// GENERALIZED for Rapid League reuse — the RPC name, table, and
-// notification branding all come from the `config` param below and
-// default to exactly Rapid Cup's own values, so Rapid Cup's own call site
-// needs no changes.
-//
-// This was accidentally reverted back to hardcoding Rapid Cup everywhere
-// at some point after the deep-link notification feature (leagueId/
-// leagueName below) was added — that revert is why a Rapid League alarm
-// couldn't actually be stopped: stopAlarm() was calling stop_rapid_cup_
-// alarm (no matching row for a Rapid League lobby id, so nothing happened)
-// and the cross-device sync below was subscribed to rapid_cup_lobby_
-// players (never fires for a Rapid League lobby id either). With nothing
-// durable ever recording "this alarm was stopped," sessionStorage's
-// "stopped" memory being wiped on every fresh app session meant the alarm
-// re-armed and rang again on every single app open for as long as that
-// Rapid League match stayed live — this restores the config-driven
-// version while keeping the deep-link feature that was added alongside
-// the revert.
+// the league is starting, until the player taps into the Rapid Cup page
+// (the banner below calls the returned stopAlarm() the moment they do).
+// Fires for players actually in that lobby, not spectators browsing an
+// open one.
 //
 // "Stopped" has to survive a remount the same way "already alarmed" did
 // in the earlier one-shot version — RapidCupBanner.jsx's own comment
@@ -169,7 +90,7 @@ export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
 // RESUME ringing (that's the point — it rings until they come back and
 // enter), so sessionStorage only needs to remember "stopped," never
 // "already rang."
-const STOPPED_ALARM_STORAGE_KEY = "rapidAlarm:stoppedAlarmLobbyIds";
+const STOPPED_ALARM_STORAGE_KEY = "rapidCup:stoppedAlarmLobbyIds";
 
 function loadStoppedAlarmLobbyIds() {
   try {
@@ -215,24 +136,12 @@ const VOLUME_FULL = 1; // ...up to full volume, reached with time to spare befor
 const MAX_TOTAL_RING_MS = 60 * 60_000;
 
 function playAlarmCycle(ctx, masterGain) {
-  const start = ctx.currentTime + 0.02;
-  const pulseDur = 0.25;
-  const gapDur = 0.12;
-  let t = start;
-  for (let i = 0; i < 6; i++) {
-    const osc = ctx.createOscillator();
-    osc.type = "square";
-    osc.frequency.value = i % 2 === 0 ? 880 : 660;
-    const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(0.0001, t);
-    gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
-    gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
-    osc.connect(gainNode).connect(masterGain); // through the per-attempt fade-in, not straight to destination
-    osc.start(t);
-    osc.stop(t + pulseDur);
-    t += pulseDur + gapDur;
-  }
+  // Silenced — reported as annoying (rings on a loop for up to an hour
+  // once a lobby fills). No-op rather than removing the alarm outright: the
+  // ringing on/off timing, the "Stop" flow, the push notification, and the
+  // cross-device stop-sync above all still work unchanged — this just
+  // stops it from actually making noise, same approach as the drumroll
+  // above.
 }
 
 // Local (no-push) notification — Option 2: only reaches this device
@@ -242,11 +151,13 @@ function playAlarmCycle(ctx, masterGain) {
 // action buttons — showNotification() with `actions` only works via a
 // ServiceWorkerRegistration, not the plain `new Notification()`
 // constructor. sw.js's own notificationclick listener is what makes the
-// "Stop alarm" / "Enter <feature>" buttons do anything. The action label
-// and tag prefix are feature-specific (see cfg below) so a Rapid League
-// notification says "Enter Rapid League" and gets its own tag namespace,
-// not Rapid Cup's.
-async function showLeagueStartNotification(lobbyId, leagueId, leagueName, cfg) {
+// "Stop alarm" / "Enter Rapid Cup" buttons do anything.
+const NOTIFICATION_ACTIONS = [
+  { action: "enter", title: "Enter Rapid Cup" },
+  { action: "stop", title: "Stop alarm" },
+];
+
+async function showLeagueStartNotification(lobbyId) {
   if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
   try {
     if (Notification.permission === "default") {
@@ -254,56 +165,30 @@ async function showLeagueStartNotification(lobbyId, leagueId, leagueName, cfg) {
     }
     if (Notification.permission !== "granted") return; // denied, or the prompt was dismissed — the in-page alarm still covers them
     const reg = await navigator.serviceWorker.ready;
-    // Deep link to the specific league — same ?league=<id> shareLeague()
-    // already uses (App.jsx) — so a cold tap (no open tab, see sw.js's
-    // notificationclick "no clients" branch) lands directly on it instead
-    // of the bare homepage. Included in the body text too, not just
-    // `data`, so the link is visible even where tapping can't carry it
-    // (e.g. a notification list on another device).
-    const url = leagueId ? `${window.location.origin}${window.location.pathname}?league=${leagueId}` : null;
-    await reg.showNotification(leagueName ? `${cfg.featureEmoji} ${leagueName}` : `${cfg.featureEmoji} ${cfg.featureLabel}`, {
-      body: `Your league is ready — tap to enter!${url ? ` ${url}` : ""}`,
-      tag: `${cfg.tagPrefix}-${lobbyId}`, // re-showing replaces the same one instead of piling up
+    await reg.showNotification("⚡ Rapid Cup", {
+      body: "Your league has started — tap to enter!",
+      tag: `rapid-cup-alarm-${lobbyId}`, // re-showing replaces the same one instead of piling up
       requireInteraction: true, // stays put until acted on, where the browser supports it (e.g. Android Chrome); harmlessly ignored elsewhere (e.g. iOS Safari)
-      actions: [
-        { action: "enter", title: `Enter ${cfg.featureLabel}` },
-        { action: "stop", title: "Stop alarm" },
-      ],
-      data: { lobbyId, leagueId },
+      actions: NOTIFICATION_ACTIONS,
+      data: { lobbyId },
     });
   } catch {
     // Purely additive — the in-page audio alarm and banner work either way.
   }
 }
 
-async function closeLeagueStartNotification(lobbyId, tagPrefix) {
+async function closeLeagueStartNotification(lobbyId) {
   if (!("serviceWorker" in navigator) || lobbyId == null) return;
   try {
     const reg = await navigator.serviceWorker.ready;
-    const notifications = await reg.getNotifications({ tag: `${tagPrefix}-${lobbyId}` });
+    const notifications = await reg.getNotifications({ tag: `rapid-cup-alarm-${lobbyId}` });
     notifications.forEach((n) => n.close());
   } catch {
     // Same "purely additive" reasoning — nothing to fall back to here.
   }
 }
 
-const DEFAULT_ALARM_CONFIG = {
-  stopRpc: "stop_rapid_cup_alarm",
-  table: "rapid_cup_lobby_players",
-  tagPrefix: "rapid-cup-alarm",
-  featureEmoji: "⚡",
-  featureLabel: "Rapid Cup",
-};
-
-export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, config = {}, leagueId, leagueName) {
-  const cfg = { ...DEFAULT_ALARM_CONFIG, ...config };
-  // Ref, not used directly in dependency arrays below — a caller passing a
-  // plain object literal for `config` (both banners do) gets a new object
-  // identity every render, which would otherwise force every effect that
-  // reads it to keep tearing down and resubscribing for no real reason.
-  const cfgRef = useRef(cfg);
-  useEffect(() => { cfgRef.current = cfg; });
-
+export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
   const phaseTimerRef = useRef(null); // pending "pause after 1min" or "resume after 5min" timeout
@@ -320,20 +205,20 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, c
   // call is only reacting to a Realtime row-change that ALREADY happened in
   // the database (another of this player's own devices stopped it first).
   // Guards against writing straight back what we just read — not a
-  // correctness issue (the stop RPC is idempotent either way), just avoids
-  // a pointless round-trip on every remote-triggered stop.
+  // correctness issue (stop_rapid_cup_alarm is idempotent either way), just
+  // avoids a pointless round-trip on every remote-triggered stop.
   const fromRemoteRef = useRef(false);
 
   const stopAlarm = useCallback(() => {
     if (lobbyId != null) {
       markAlarmStopped(lobbyId);
-      closeLeagueStartNotification(lobbyId, cfgRef.current.tagPrefix);
+      closeLeagueStartNotification(lobbyId);
       if (!fromRemoteRef.current && userId != null) {
         // Fire-and-forget — every other of this player's own open tabs/
         // devices picks this up via the Realtime subscription below, and a
         // failed write here just means this one device stays locally
         // stopped while others might still ring, not a broken feature.
-        supabase.rpc(cfgRef.current.stopRpc, { p_lobby_id: lobbyId }).then(() => {});
+        supabase.rpc("stop_rapid_cup_alarm", { p_lobby_id: lobbyId }).then(() => {});
       }
       clearAlarmSyncCredentials();
     }
@@ -357,10 +242,10 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, c
   useEffect(() => {
     if (lobbyId == null || userId == null) return;
     const channel = supabase
-      .channel(`${cfg.tagPrefix}-stop-${lobbyId}-${userId}`)
+      .channel(`rapid-cup-alarm-stop-${lobbyId}-${userId}`)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: cfg.table, filter: `lobby_id=eq.${lobbyId}` },
+        { event: "UPDATE", schema: "public", table: "rapid_cup_lobby_players", filter: `lobby_id=eq.${lobbyId}` },
         (payload) => {
           if (payload.new?.user_id === userId && payload.new?.alarm_stopped_at) {
             fromRemoteRef.current = true;
@@ -370,8 +255,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, c
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cfg.table/tagPrefix are config, not per-render state; stopAlarm already depends on the parts of cfg that change behavior.
-  }, [lobbyId, userId, stopAlarm, cfg.table, cfg.tagPrefix]);
+  }, [lobbyId, userId, stopAlarm]);
 
   // Taps on the phone notification arrive here as a postMessage from
   // sw.js's notificationclick listener (a service worker can't call
@@ -460,11 +344,8 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, c
     // Sequencing them like this doesn't delay the audio alarm below at all,
     // it only delays the notification (which can't be tapped before it
     // exists anyway) by however long the save itself takes — normally a
-    // few milliseconds. stopRpc travels with the saved credentials so
-    // sw.js's zero-tab path knows which RPC to call for THIS feature.
-    saveAlarmSyncCredentials(lobbyId, cfgRef.current.stopRpc).then(() =>
-      showLeagueStartNotification(lobbyId, leagueId, leagueName, cfgRef.current)
-    );
+    // few milliseconds.
+    saveAlarmSyncCredentials(lobbyId).then(() => showLeagueStartNotification(lobbyId));
 
     startActivePhase();
 
@@ -480,7 +361,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, c
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
       if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     };
-  }, [status, lobbyId, enabled, leagueId, leagueName]);
+  }, [status, lobbyId, enabled]);
 
   return { stopAlarm, isRinging };
 }
@@ -613,4 +494,3 @@ export function RapidCupMvpCard({ winnerName, opponentName, myScore, opponentSco
     </div>
   );
 }
-
