@@ -175,17 +175,17 @@ const LUDO_RULES_SECTIONS = [
   { heading: "Rolling", items: [
     "You roll two dice every turn, not one.",
     "A token only leaves the yard on an actual 6, on either die — nothing else counts, no house rules.",
-    "Each die can move a different token. Or combine both dice to move one token their total (combining never brings a token out of the yard, only a lone 6 does that).",
+    "Tap one die to move a token by just that number, or tap both dice to combine them and move one token by the total (combining never brings a token out of the yard — only a lone 6 does that).",
     "You can't overshoot your home square — the exact number is needed to finish a token.",
   ]},
   { heading: "Capturing", items: [
     "Land exactly on a square an opponent occupies and their token is sent straight back to their yard.",
     "Starting squares and the star squares are safe — no captures ever happen there.",
-    "A capture earns you another roll, on top of anything from doubles.",
+    "A capture earns you another roll, on top of anything from 6-6.",
   ]},
   { heading: "Extra rolls & forfeits", items: [
-    "Rolling doubles (both dice the same) gives you another roll after you finish using this pair.",
-    "Three doubles in a row forfeits your turn — no moves from that third pair.",
+    "Roll 6 and 6 together (12 total) and you get another roll after you finish using this pair — any other matching pair (2-2, 3-3, etc) does not.",
+    "Three 6-6 rolls in a row forfeits your turn — no moves from that third pair.",
   ]},
   { heading: "Home stretch", items: [
     "Each color has its own private run-in near the center — opponents can never land there, and there's nothing to capture.",
@@ -261,8 +261,8 @@ export default function LudoPage({ onBack, c }) {
   const [dice, setDice] = useState(null);
   const [diceUsed, setDiceUsed] = useState([false, false]);
   const [rolling, setRolling] = useState(false);
-  const [armed, setArmed] = useState(null); // {type:'die', index} | {type:'combine'}
-  const [doubleStreak, setDoubleStreak] = useState(0);
+  const [selectedDice, setSelectedDice] = useState([]); // indices of dice the player has tapped, in tap order (max 2)
+  const [rollAgainStreak, setRollAgainStreak] = useState(0);
   const [turnCaptures, setTurnCaptures] = useState(0);
   const [message, setMessage] = useState("");
   const [log, setLog] = useState([]);
@@ -308,8 +308,8 @@ export default function LudoPage({ onBack, c }) {
     setTurnIdx(0);
     setDice(null);
     setDiceUsed([false, false]);
-    setArmed(null);
-    setDoubleStreak(0);
+    setSelectedDice([]);
+    setRollAgainStreak(0);
     setTurnCaptures(0);
     setWinner(null);
     setLog([]);
@@ -331,8 +331,8 @@ export default function LudoPage({ onBack, c }) {
     epochRef.current += 1;
     setDice(null);
     setDiceUsed([false, false]);
-    setArmed(null);
-    setDoubleStreak(0);
+    setSelectedDice([]);
+    setRollAgainStreak(0);
     setTurnCaptures(0);
     setTurnIdx((i) => {
       const next = (i + 1) % active.length;
@@ -341,21 +341,23 @@ export default function LudoPage({ onBack, c }) {
     });
   }, [active]);
 
+  // Only an actual 12 (which on two six-sided dice can only ever be 6+6)
+  // earns another roll — not any other matching pair (2+2, 3+3, etc).
   const resolveEndOfDice = useCallback((finalDice) => {
     const d = finalDice;
-    if (d[0] === d[1]) {
-      setDoubleStreak((s) => {
+    if (d[0] + d[1] === 12) {
+      setRollAgainStreak((s) => {
         const next = s + 1;
         if (next >= 3) {
-          pushLog(`${COLORS[turnColor].name} rolled three doubles — turn forfeited.`);
-          setMessage("Three doubles in a row — turn forfeited!");
+          pushLog(`${COLORS[turnColor].name} rolled three 6-6s in a row — turn forfeited.`);
+          setMessage("Three 6-6 rolls in a row — turn forfeited!");
           setTimeout(() => reallyAdvanceTurn(), 700);
           return 0;
         }
         setDice(null);
         setDiceUsed([false, false]);
-        setArmed(null);
-        setMessage(`Doubles! ${COLORS[turnColor].name} rolls again.`);
+        setSelectedDice([]);
+        setMessage(`6 and 6! ${COLORS[turnColor].name} rolls again.`);
         return next;
       });
     } else {
@@ -389,12 +391,12 @@ export default function LudoPage({ onBack, c }) {
       setWinner(color);
       setPhase("won");
       setDice(null);
-      setArmed(null);
+      setSelectedDice([]);
       return { done: true, newUsed, nextTokens };
     }
 
     setDiceUsed(newUsed);
-    setArmed(null);
+    setSelectedDice([]);
 
     if (newUsed[0] && newUsed[1]) {
       resolveEndOfDice(snapshotDice);
@@ -430,6 +432,7 @@ export default function LudoPage({ onBack, c }) {
         setDice(d);
         setRolling(false);
         setDiceUsed([false, false]);
+        setSelectedDice([]);
 
         const actions = computeActions(turnColor, d, [false, false], tokens);
         if (actions.length === 0) {
@@ -448,21 +451,36 @@ export default function LudoPage({ onBack, c }) {
     return computeActions(turnColor, dice, diceUsed, tokens);
   }, [dice, diceUsed, tokens, turnColor, phase]);
 
+  // Selecting one die highlights the tokens that die alone can move.
+  // Selecting both (tap the second die too) switches to combine mode —
+  // one token moved by the total of both dice — the friendlier way to
+  // reach combine than a separate button: just tap both dice.
   const armedActions = useMemo(() => {
-    if (!armed) return [];
-    return currentActions.filter((a) => {
-      if (armed.type === "die") return (a.kind === "exit" || a.kind === "move") && a.die === armed.index;
-      if (armed.type === "combine") return a.kind === "combine";
-      return false;
-    });
-  }, [armed, currentActions]);
+    if (selectedDice.length === 1) {
+      const i = selectedDice[0];
+      return currentActions.filter((a) => (a.kind === "exit" || a.kind === "move") && a.die === i);
+    }
+    if (selectedDice.length === 2) {
+      return currentActions.filter((a) => a.kind === "combine");
+    }
+    return [];
+  }, [selectedDice, currentActions]);
   const movable = armedActions.map((a) => a.tokenId);
 
   const dieHasActions = (i) => currentActions.some((a) => (a.kind === "exit" || a.kind === "move") && a.die === i);
   const combineHasActions = currentActions.some((a) => a.kind === "combine");
 
-  const armDie = (i) => { if (dieHasActions(i)) setArmed((a) => a && a.type === "die" && a.index === i ? null : { type: "die", index: i }); };
-  const armCombine = () => { if (combineHasActions) setArmed((a) => a && a.type === "combine" ? null : { type: "combine" }); };
+  const tapDie = (i) => {
+    if (roles[turnColor] === "ai" || diceUsed[i]) return;
+    setSelectedDice((sel) => {
+      if (sel.includes(i)) return sel.filter((x) => x !== i); // tap again to deselect
+      if (sel.length >= 2) return [i]; // start a fresh selection rather than stack a 3rd
+      const usableAlone = dieHasActions(i);
+      const usableForCombo = combineHasActions && !diceUsed[1 - i];
+      if (!usableAlone && !usableForCombo) return sel; // nothing this die can contribute
+      return [...sel, i];
+    });
+  };
 
   const onTokenTap = (tokenId) => {
     if (roles[turnColor] === "ai" || aiBusy) return;
@@ -648,16 +666,18 @@ export default function LudoPage({ onBack, c }) {
 
   const renderDie = (val, i) => {
     const Icon = DICE_ICONS[(val || 1) - 1];
-    const usable = dice != null && !diceUsed[i] && dieHasActions(i);
-    const isArmed = armed && armed.type === "die" && armed.index === i;
+    // Usable if it can move something alone, OR it's needed to complete a
+    // combine (the other die still unused and combine is on the table).
+    const usable = dice != null && !diceUsed[i] && (dieHasActions(i) || (combineHasActions && !diceUsed[1 - i]));
+    const isSelected = selectedDice.includes(i);
     return (
-      <button key={i} onClick={() => armDie(i)} disabled={!usable || roles[turnColor] === "ai"}
+      <button key={i} onClick={() => tapDie(i)} disabled={!usable || roles[turnColor] === "ai"}
         className="flex items-center justify-center rounded-xl transition-all" style={{
-          width: 44, height: 44, background: isArmed ? COLORS[turnColor]?.hex : c.surface,
-          border: `2px solid ${isArmed ? COLORS[turnColor]?.hex : c.border}`,
+          width: 44, height: 44, background: isSelected ? COLORS[turnColor]?.hex : c.surface,
+          border: `2px solid ${isSelected ? COLORS[turnColor]?.hex : c.border}`,
           opacity: diceUsed[i] ? 0.3 : usable ? 1 : 0.55, cursor: usable && roles[turnColor] !== "ai" ? "pointer" : "default",
         }}>
-        <Icon size={24} style={{ color: isArmed ? "#fff" : c.text }} />
+        <Icon size={24} style={{ color: isSelected ? "#fff" : c.text }} />
       </button>
     );
   };
@@ -745,13 +765,18 @@ export default function LudoPage({ onBack, c }) {
               </button>
             </div>
             {dice != null && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {renderDie(dice[0], 0)}
-                {renderDie(dice[1], 1)}
-                {combineHasActions && roles[turnColor] !== "ai" && (
-                  <button onClick={armCombine} className="flex items-center gap-1.5 rounded-xl px-3 h-11 font-body text-xs" style={{ background: armed?.type === "combine" ? COLORS[turnColor].hex : c.bg, color: armed?.type === "combine" ? "#fff" : c.textDim, border: `2px solid ${armed?.type === "combine" ? COLORS[turnColor].hex : c.border}` }}>
-                    <Combine size={14} /> {dice[0]}+{dice[1]}
-                  </button>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {renderDie(dice[0], 0)}
+                  {renderDie(dice[1], 1)}
+                  {selectedDice.length === 2 && (
+                    <span className="flex items-center gap-1.5 rounded-xl px-3 h-11 font-body text-xs" style={{ background: COLORS[turnColor].dim, color: COLORS[turnColor].hex, border: `2px solid ${COLORS[turnColor].hex}` }}>
+                      <Combine size={14} /> {dice[0]}+{dice[1]} = {dice[0] + dice[1]}
+                    </span>
+                  )}
+                </div>
+                {combineHasActions && roles[turnColor] !== "ai" && selectedDice.length === 0 && (
+                  <div className="font-body text-[11px] mt-1.5" style={{ color: c.textFaint }}>Tap one die to move a single token, or tap both to combine them into one bigger move.</div>
                 )}
               </div>
             )}
