@@ -56,6 +56,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const [progressByStory, setProgressByStory] = useState({}); // story_id -> progress row
   const [loadingContent, setLoadingContent] = useState(false);
   const [narrationOn, setNarrationOn] = useState(() => localStorage.getItem(NARRATION_PREF_KEY) !== "off");
+  const [winBanner, setWinBanner] = useState(null);
   const audioRef = useRef(null);
 
   useEffect(() => {
@@ -115,8 +116,9 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     setScreen("play");
   }, [progressByStory, showToast]);
 
-  const saveProgress = useCallback(async (story, lang, id, node) => {
+  const saveProgress = useCallback(async (story, lang, id, node, existingFlags) => {
     const isEnding = !!node.ending;
+    const flags = node.win ? { ...existingFlags, [node.win.flag]: true } : existingFlags;
     await supabase.from("game_story_progress").upsert({
       user_id: session.user.id,
       story_id: story.id,
@@ -124,12 +126,14 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       current_node_id: id,
       completed: isEnding,
       ending_id: isEnding ? node.ending : null,
+      flags,
       updated_at: new Date().toISOString(),
     });
     setProgressByStory((prev) => ({
       ...prev,
-      [story.id]: { story_id: story.id, language: lang, current_node_id: id, completed: isEnding, ending_id: isEnding ? node.ending : null },
+      [story.id]: { story_id: story.id, language: lang, current_node_id: id, completed: isEnding, ending_id: isEnding ? node.ending : null, flags },
     }));
+    return flags;
   }, [session.user.id]);
 
   // Plays the current node's pre-generated narration, if any exists yet.
@@ -153,16 +157,30 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     });
   };
 
+  // Shows a brief small-win banner whenever the current node carries one —
+  // fires on choice clicks and on resume, so a win earned in a past
+  // session still gets its own moment when reached, not just on first hit.
+  useEffect(() => {
+    if (!content || !nodeId) return;
+    const node = content.graph.nodes[nodeId];
+    if (!node?.win) return;
+    setWinBanner(node.win.label);
+    const t = setTimeout(() => setWinBanner(null), 3200);
+    return () => clearTimeout(t);
+  }, [content, nodeId]);
+
+  const currentFlags = () => progressByStory[activeStory?.id]?.flags || {};
+
   const choose = (goto) => {
     const node = content.graph.nodes[goto];
     setNodeId(goto);
-    saveProgress(activeStory, language, goto, node);
+    saveProgress(activeStory, language, goto, node, currentFlags());
   };
 
   const restart = () => {
     const startId = content.graph.startNode;
     setNodeId(startId);
-    saveProgress(activeStory, language, startId, content.graph.nodes[startId]);
+    saveProgress(activeStory, language, startId, content.graph.nodes[startId], {});
   };
 
   const backToList = () => {
@@ -212,6 +230,12 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           </button>
         </div>
         <audio ref={audioRef} className="hidden" />
+        {winBanner && (
+          <div className="rounded-xl px-4 py-2.5 mb-3 text-sm font-semibold text-center animate-pulse"
+            style={{ background: c.accent, color: c.accentText }}>
+            ✨ {winBanner}
+          </div>
+        )}
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
           {content.title} · {languageLabel(language)}
         </div>
@@ -224,9 +248,20 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
         </div>
         {isEnding ? (
           <div className="flex flex-col gap-2">
-            <div className="text-sm font-bold uppercase tracking-wide mb-1" style={{ color: node.ending === "success" ? c.green : c.textDim }}>
-              {node.ending === "success" ? "Task accomplished" : "Ending reached"}
-            </div>
+            {node.ending === "cliffhanger" ? (
+              <div className="text-center mb-1">
+                <div className="text-sm font-extrabold uppercase tracking-[0.15em]" style={{ color: c.accent }}>
+                  To be continued
+                </div>
+                {node.nextEpisode && (
+                  <div className="text-xs mt-1" style={{ color: c.textFaint }}>Next: {node.nextEpisode}</div>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm font-bold uppercase tracking-wide mb-1" style={{ color: node.ending === "success" ? c.green : c.textDim }}>
+                {node.ending === "success" ? "Task accomplished" : "Ending reached"}
+              </div>
+            )}
             <button onClick={restart} className="flex items-center justify-center gap-2 rounded-xl py-3 font-bold"
               style={{ background: c.accent, color: c.accentText }}>
               <RotateCcw size={15} /> Play again
