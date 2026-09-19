@@ -16,6 +16,20 @@ const SHELL_URLS = ["/", "/manifest.webmanifest", "/splash.jpg"];
 // this listener just handles what happens when the person taps the
 // notification or one of its action buttons, since that has to happen
 // here in the service worker, not in the page.
+//
+// GENERALIZED for Rapid League reuse (see src/RapidCupEpicExtras.jsx and
+// src/rapidCupAlarmSync.js for the page-side half): stopAlarmDirectly
+// below now calls whichever RPC was saved alongside the credentials
+// (creds.stopRpc), instead of always calling Rapid Cup's. Falls back to
+// Rapid Cup's RPC name if stopRpc is missing, which only happens for
+// credentials written by an older, pre-generalization build of the page
+// that's still cached on someone's device — so an in-flight alarm from
+// right before this deploy still stops correctly instead of erroring.
+//
+// This file was accidentally reverted back to Rapid-Cup-only at some
+// point after this generalization first shipped — see RapidCupEpicExtras.jsx's
+// own comment on that regression for the full explanation of what broke.
+//
 // Rapid Cup Push Alarm — Step 2: browsers occasionally rotate a
 // subscription's endpoint on their own (expiry, key rotation, etc.). This
 // service worker has no Supabase session to save the new one with directly
@@ -54,6 +68,12 @@ self.addEventListener("pushsubscriptionchange", (event) => {
 // so a push and a local notification for the same lobby collapse into one
 // instead of stacking, and the existing notificationclick handler below
 // already handles taps on either kind with no changes needed.
+//
+// Still Rapid-Cup-only: there is no send-rapid-league-push edge function
+// deployed, so this path is never hit for a Rapid League lobby. If that
+// ships later, this title/tag/actions block needs the same per-feature
+// treatment the local notification already got (title/body/tag carried in
+// the push payload itself, same as data.lobbyId/leagueId already are).
 const PUSH_NOTIFICATION_ACTIONS = [
   { action: "enter", title: "Enter Rapid Cup" },
   { action: "stop", title: "Stop alarm" },
@@ -146,16 +166,19 @@ function readAlarmSyncCredentials() {
 // The actual zero-open-tab case Step 6 exists for: a player has the app
 // ringing on a laptop tab, gets the push on their phone with the app fully
 // closed there, and taps "Stop" on the phone notification. There's no open
-// tab on the phone to postMessage, so this calls stop_rapid_cup_alarm
-// directly — same RPC the page-side stopAlarm() calls, using the access
-// token saved by saveAlarmSyncCredentials right as the alarm started
-// ringing. The laptop tab picks up the resulting row change over Realtime
-// (RapidCupEpicExtras.jsx's useLeagueStartAlarm) and stops itself too.
+// tab on the phone to postMessage, so this calls the stop RPC directly —
+// same RPC the page-side stopAlarm() calls for whichever feature this
+// alarm belongs to (creds.stopRpc — saved by saveAlarmSyncCredentials
+// right as the alarm started ringing), falling back to Rapid Cup's own RPC
+// name if an older cached page saved credentials before stopRpc existed.
+// The other open tab(s) pick up the resulting row change over Realtime
+// (RapidCupEpicExtras.jsx's useLeagueStartAlarm) and stop themselves too.
 async function stopAlarmDirectly(lobbyId) {
   const creds = await readAlarmSyncCredentials();
   if (!creds || !creds.accessToken || creds.lobbyId !== lobbyId) return;
+  const rpcName = creds.stopRpc || "stop_rapid_cup_alarm";
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/rpc/stop_rapid_cup_alarm`, {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/${rpcName}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -192,6 +215,12 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
+        // Message type stays a single shared constant across features —
+        // lobbyId is what actually scopes this (a Rapid Cup lobby id and
+        // a Rapid League lobby id are different UUID spaces), and each
+        // page-side useLeagueStartAlarm listener already filters on its
+        // own lobbyId, so there's no cross-feature ambiguity to resolve
+        // here.
         client.postMessage({ type: "rapid-cup-alarm-action", action, lobbyId });
       }
       if (clients.length) {

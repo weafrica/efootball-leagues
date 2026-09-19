@@ -7,9 +7,18 @@ import { supabase } from "./supabaseClient";
 // This module is the bridge: the page writes its current lobby + access
 // token here right as the alarm starts ringing, so that if the player taps
 // "Stop" on the phone notification with ZERO tabs open, sw.js can still
-// read these back and make an authenticated call to stop_rapid_cup_alarm
-// itself (see the write-through logic in sw.js's notificationclick
+// read these back and make an authenticated call to the right stop-alarm
+// RPC itself (see the write-through logic in sw.js's notificationclick
 // handler) — not just postMessage a tab that might not exist.
+//
+// GENERALIZED for Rapid League reuse: also stores which RPC name to call
+// (stopRpc), since Rapid Cup and Rapid League each stop their own alarm
+// through a different function on a different table. Defaults to Rapid
+// Cup's own RPC so a caller that omits it needs no changes.
+//
+// This file was accidentally reverted back to Rapid-Cup-only at some
+// point — see RapidCupEpicExtras.jsx's own comment on that same
+// regression for the full explanation of what broke because of it.
 
 const DB_NAME = "rapid-cup-alarm-sync";
 const STORE_NAME = "credentials";
@@ -31,7 +40,7 @@ function openDb() {
 // moment a notification could actually be tapped. Best-effort — IndexedDB
 // being unavailable (rare, e.g. some private-browsing modes) must never
 // block the alarm itself from ringing.
-export async function saveAlarmSyncCredentials(lobbyId) {
+export async function saveAlarmSyncCredentials(lobbyId, stopRpc = "stop_rapid_cup_alarm") {
   if (typeof indexedDB === "undefined" || lobbyId == null) return;
   try {
     const { data: { session } = {} } = await supabase.auth.getSession();
@@ -42,7 +51,7 @@ export async function saveAlarmSyncCredentials(lobbyId) {
     const db = await openDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).put({ lobbyId, userId, accessToken }, KEY);
+      tx.objectStore(STORE_NAME).put({ lobbyId, userId, accessToken, stopRpc }, KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

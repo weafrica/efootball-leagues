@@ -32,10 +32,9 @@ import { useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
 const LEAGUE_ALARM_CONFIG = {
   stopRpc: "stop_rapid_league_alarm",
   table: "rapid_league_lobby_players",
-  notificationTitle: "🔁 Rapid League",
-  notificationBody: "Your round robin has started — tap to enter!",
-  notificationTagPrefix: "rapid-league-alarm",
-  enterActionLabel: "Enter Rapid League",
+  tagPrefix: "rapid-league-alarm",
+  featureEmoji: "🔁",
+  featureLabel: "Rapid League",
 };
 
 // Matches lobby.reset_at's own 2h default (see the
