@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabaseClient";
+import { isUnderdog, isAllIn, UnderdogTag, AllInTag } from "./RapidCupEpicExtras.jsx";
 
 // Rapid Cup — Phase 8: Spectator Investment (Section 7).
 //
@@ -134,6 +135,8 @@ export function RapidCupInvestorPanel({ lobbyId, myUserId, isSpectator, showToas
               <div>
                 {isMe ? "You" : (p.display_name || `Player ${p.user_id.slice(0, 6)}`)}
                 {totalStake === maxStake && totalStake > 0 && <span style={{ opacity: 0.6 }}> · highest stake</span>}
+                {isUnderdog(stakes, totalStake) && <UnderdogTag />}
+                {isAllIn(p.entry_fee) && <AllInTag />}
               </div>
               <div style={{ textAlign: "right" }}>
                 <div>{totalStake} Nets total{investedTotal > 0 ? ` (${p.entry_fee} own + ${investedTotal} backed)` : ""}</div>

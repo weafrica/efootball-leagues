@@ -20,6 +20,12 @@ import { saveAlarmSyncCredentials, clearAlarmSyncCredentials } from "./rapidCupA
 //     specific needed adding.
 //   - Hall of Fame leaderboard: see RapidCupHallOfFame.jsx + the new
 //     get_rapid_cup_hall_of_fame() RPC (20260905_rapid_cup_hall_of_fame.sql).
+//
+// isUnderdog/isAllIn/UnderdogTag/AllInTag below were written as part of
+// this file but sat unused — nothing imported them, so the tags never
+// actually rendered anywhere despite the helpers existing. Now wired into
+// RapidCupInvestorPanel (RapidCupInvestment.jsx), next to the existing
+// "highest stake" tag they were designed to sit alongside.
 
 const ALL_IN_FEE = 400; // Section 3's fee slider cap.
 
