@@ -1,6 +1,71 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, RotateCcw, Lock, Check, Trophy, Wind, Lightbulb, BookOpen, Star } from "lucide-react";
+import { ArrowLeft, RotateCcw, Lock, Check, Trophy, Wind, Lightbulb, BookOpen, Star, Volume2, VolumeX } from "lucide-react";
 import PlayerCharacter from "./PlayerCharacter.jsx";
+
+// ---------------------------------------------------------------------
+// Sound — every effect is synthesized live with the Web Audio API, not a
+// sound file. Real Candy Crush audio is copyrighted and can't be used
+// here anyway; this keeps the "free and low-data" promise (zero bytes
+// downloaded) while still giving matches a satisfying pop/chime/fanfare.
+// ---------------------------------------------------------------------
+let _audioCtx = null;
+function getAudioCtx() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!_audioCtx) _audioCtx = new AC();
+  if (_audioCtx.state === "suspended") _audioCtx.resume();
+  return _audioCtx;
+}
+function tone(freq, duration, type = "sine", delay = 0, peak = 0.16) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + delay;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(peak, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+const SFX = {
+  select: () => tone(520, 0.05, "sine", 0, 0.06),
+  pop: (comboStep = 0) => tone(700 + comboStep * 90, 0.12, "triangle", 0, 0.14),
+  special: () => { tone(660, 0.09, "square", 0, 0.12); tone(990, 0.11, "square", 0.07, 0.12); },
+  boom: () => { tone(150, 0.28, "sawtooth", 0, 0.18); tone(1300, 0.16, "sine", 0.05, 0.1); },
+  win: () => { tone(523, 0.13, "triangle", 0); tone(659, 0.13, "triangle", 0.13); tone(784, 0.24, "triangle", 0.26); },
+  lose: () => { tone(300, 0.2, "sine", 0); tone(220, 0.32, "sine", 0.18); },
+};
+function loadSoundPref() { try { return localStorage.getItem("sesothoMatch:sound") !== "off"; } catch { return true; } }
+function saveSoundPref(on) { try { localStorage.setItem("sesothoMatch:sound", on ? "on" : "off"); } catch { /* fine, just won't persist */ } }
+
+// Glow keyframes shared by selected/hint/special tiles - defined once as
+// real CSS since inline React styles can't declare @keyframes themselves.
+function GameStyles() {
+  return (
+    <style>{`
+      @keyframes candyPulseGlow {
+        0%, 100% { filter: drop-shadow(0 0 2px rgba(255,255,255,0.55)); }
+        50% { filter: drop-shadow(0 0 10px rgba(255,255,255,0.95)); }
+      }
+      @keyframes candySelectGlow {
+        0%, 100% { filter: drop-shadow(0 0 4px var(--glow, gold)); }
+        50% { filter: drop-shadow(0 0 14px var(--glow, gold)); }
+      }
+      .candy-special { animation: candyPulseGlow 1.1s ease-in-out infinite; }
+      .candy-selected { animation: candySelectGlow 0.9s ease-in-out infinite; }
+    `}</style>
+  );
+}
+
+// Classic candy-crush-style palette - one fixed color per word position
+// (0-5) within a level, so e.g. the number "one" is always the same red
+// wherever it appears, and the six tiles in a level read apart at a
+// glance instead of all sharing one category tint.
+const CANDY_PALETTE = ["#E0433D", "#E8942A", "#E8D023", "#4CAF50", "#3B7FE0", "#9B59B6"];
 
 // Sesotho Match — a local, code-only match-3 (like Ludo/Chess: no Supabase,
 // no Nets, no network cost beyond the page load). Every tile is plain SVG
@@ -269,8 +334,7 @@ function GreetingIcon({ word, color }) {
   return null;
 }
 
-function TileIcon({ level, word }) {
-  const color = CAT_COLORS[level] || "#888";
+function TileIcon({ level, word, color }) {
   if (level === "numbers") {
     const n = { ngoe: 1, peli: 2, tharo: 3, ne: 4, hlano: 5, tselela: 6 }[word];
     return (<><circle cx="60" cy="60" r="46" fill={color} /><text x="60" y="78" fontSize="56" textAnchor="middle" fill="#fff" fontWeight="bold" fontFamily="sans-serif">{n}</text></>);
@@ -290,16 +354,17 @@ function TileIcon({ level, word }) {
 // "Candy Crush" rather than "icons in a grid": a saturated rounded square,
 // a soft drop shadow, and a diagonal highlight streak for shine. Special
 // candies (striped/wrapped, from 4- and 5-matches) get an extra marking.
-function CandyTile({ level, word, special, size = 44, dim = false }) {
-  const color = CAT_COLORS[level] || "#888";
+function CandyTile({ level, word, colorIndex = 0, special, size = 44, dim = false, className = "" }) {
+  const color = CANDY_PALETTE[colorIndex % CANDY_PALETTE.length];
   return (
-    <svg viewBox="0 0 120 120" width={size} height={size} style={{ overflow: "visible", opacity: dim ? 0.35 : 1 }}>
+    <svg viewBox="0 0 120 120" width={size} height={size} className={className}
+      style={{ overflow: "visible", opacity: dim ? 0.35 : 1, "--glow": color }}>
       <rect x="6" y="8" width="108" height="108" rx="26" fill="rgba(0,0,0,0.18)" />
-      <rect x="4" y="4" width="108" height="108" rx="26" fill={color} opacity="0.16" />
-      <rect x="4" y="4" width="108" height="108" rx="26" fill="none" stroke={color} strokeWidth="4" opacity="0.55" />
+      <rect x="4" y="4" width="108" height="108" rx="26" fill={color} opacity="0.22" />
+      <rect x="4" y="4" width="108" height="108" rx="26" fill="none" stroke={color} strokeWidth="4" opacity="0.65" />
       <path d="M16 44 Q30 14 60 12 Q40 20 30 50 Z" fill="#fff" opacity="0.35" />
       <g transform="translate(14,14) scale(0.78)">
-        <TileIcon level={level} word={word} />
+        <TileIcon level={level} word={word} color={color} />
       </g>
       {special === "stripedH" && <rect x="10" y="52" width="100" height="16" rx="8" fill="#fff" opacity="0.85" />}
       {special === "stripedV" && <rect x="52" y="10" width="16" height="100" rx="8" fill="#fff" opacity="0.85" />}
@@ -376,6 +441,8 @@ function resolveCascade(startBoard, n, swapOrigin) {
   let firstMatchType = null;
   let bestRunLen = 0;
   let passes = 0;
+  let createdSpecial = false;
+  let detonated = false;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const runs = findRuns(board);
@@ -416,9 +483,10 @@ function resolveCascade(startBoard, n, swapOrigin) {
             if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) added.push(`${nr},${nc}`);
           }
         }
-        for (const a of added) if (!toClear.has(a)) { toClear.add(a); changed = true; }
+        for (const a of added) if (!toClear.has(a)) { toClear.add(a); changed = true; detonated = true; }
       }
     }
+    if (upgrades.length > 0) createdSpecial = true;
     gained += toClear.size * 10 + Math.max(0, toClear.size - 3) * 15;
     const cleared = board.map((row) => row.slice());
     toClear.forEach((key) => {
@@ -433,7 +501,7 @@ function resolveCascade(startBoard, n, swapOrigin) {
     upgrades.forEach((u) => { board[u.r][u.c] = cell(u.type ?? board[u.r][u.c].type, u.special); });
     swapOrigin = null; // only the very first pass gets the "landed here" bonus
   }
-  return { board, gained, firstMatchType, bestRunLen, passes };
+  return { board, gained, firstMatchType, bestRunLen, passes, createdSpecial, detonated };
 }
 
 function findHint(board, n) {
@@ -452,6 +520,9 @@ function findHint(board, n) {
 }
 
 export default function SesothoMatchPage({ onBack, c }) {
+  const [soundOn, setSoundOn] = useState(loadSoundPref);
+  const toggleSound = () => setSoundOn((v) => { saveSoundPref(!v); return !v; });
+  const play = (fn, ...args) => { if (soundOn) fn(...args); };
   const [progress, setProgress] = useState(loadProgress);
   const [screen, setScreen] = useState(() => (localStorage.getItem(STORY_SEEN_KEY) ? "map" : "story"));
   const [storyStep, setStoryStep] = useState(0);
@@ -533,7 +604,7 @@ export default function SesothoMatchPage({ onBack, c }) {
     setSelected(null);
     setMovesLeft((m) => m - 1);
     setTimeout(() => {
-      const { board: finalBoard, gained, firstMatchType, bestRunLen, passes } = resolveCascade(swapped, level.words.length, b);
+      const { board: finalBoard, gained, firstMatchType, bestRunLen, passes, createdSpecial, detonated } = resolveCascade(swapped, level.words.length, b);
       setBoard(finalBoard);
       setScore((s) => {
         const next = s + gained;
@@ -543,6 +614,12 @@ export default function SesothoMatchPage({ onBack, c }) {
       if (firstMatchType != null) showWord(level.words[firstMatchType]);
       const hypeIdx = Math.min(COMBO_HYPE.length - 1, (bestRunLen - 3) + (passes - 1) * 2);
       if (hypeIdx > 0 || passes > 1) showHype(COMBO_HYPE[Math.max(0, hypeIdx)]);
+      // Layer the sound to match what actually happened - a plain match
+      // gets a pop (pitched up slightly per cascade step), a 4/5-match
+      // adds a chime, and an actual special detonation adds a boom.
+      play(SFX.pop, Math.min(passes - 1, 4));
+      if (createdSpecial) play(SFX.special);
+      if (detonated) play(SFX.boom);
       setBusy(false);
     }, 220);
   };
@@ -550,11 +627,13 @@ export default function SesothoMatchPage({ onBack, c }) {
   useEffect(() => {
     if (screen === "play" && !busy && movesLeft <= 0 && score < level.target && !outcome) {
       setOutcome("lost");
+      play(SFX.lose);
     }
   }, [movesLeft, score, level, outcome, screen, busy]);
 
   useEffect(() => {
     if (outcome === "won") {
+      play(SFX.win);
       const earned = starsFor(score, level.target);
       setProgress((prev) => {
         const next = {
@@ -570,7 +649,7 @@ export default function SesothoMatchPage({ onBack, c }) {
   }, [outcome]);
 
   const onTapCell = (r, cIdx) => {
-    if (!selected) { setSelected({ r, c: cIdx }); return; }
+    if (!selected) { play(SFX.select); setSelected({ r, c: cIdx }); return; }
     if (selected.r === r && selected.c === cIdx) { setSelected(null); return; }
     trySwap(selected, { r, c: cIdx });
   };
@@ -602,6 +681,7 @@ export default function SesothoMatchPage({ onBack, c }) {
   if (screen === "story") {
     return (
       <div className="max-w-md mx-auto px-4 pt-10 pb-16 flex flex-col items-center text-center min-h-[70vh] justify-center">
+        <GameStyles />
         <Wind size={40} style={{ color: c.textDim }} className="mb-4" />
         <div className="font-display text-2xl mb-5" style={{ color: c.text }}>The Wind of Forgetting</div>
         <div className="font-body text-base leading-relaxed mb-8" style={{ color: c.textDim, minHeight: 110 }}>
@@ -652,13 +732,19 @@ export default function SesothoMatchPage({ onBack, c }) {
   if (screen === "map") {
     return (
       <div className="max-w-md mx-auto px-4 pt-6 pb-16">
+        <GameStyles />
         <div className="flex items-center justify-between mb-5">
           <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
             <ArrowLeft size={15} /> Back
           </button>
-          <button onClick={() => { setStoryStep(0); setScreen("story"); }} className="flex items-center gap-1.5 font-body text-xs" style={{ color: c.textFaint }}>
-            <BookOpen size={13} /> The story
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={toggleSound} style={{ color: c.textFaint }} aria-label="Toggle sound">
+              {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
+            </button>
+            <button onClick={() => { setStoryStep(0); setScreen("story"); }} className="flex items-center gap-1.5 font-body text-xs" style={{ color: c.textFaint }}>
+              <BookOpen size={13} /> The story
+            </button>
+          </div>
         </div>
         <div className="mb-1 font-display text-2xl" style={{ color: c.text }}>Sesotho Match</div>
         <div className="mb-6 font-body text-sm" style={{ color: c.textDim }}>
@@ -689,7 +775,7 @@ export default function SesothoMatchPage({ onBack, c }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     opacity: locked ? 0.55 : 1, cursor: locked ? "default" : "pointer",
                   }}>
-                  {locked ? <Lock size={22} style={{ color: c.textFaint }} /> : <CandyTile level={lv.id} word={lv.words[0].id} size={40} />}
+                  {locked ? <Lock size={22} style={{ color: c.textFaint }} /> : <CandyTile level={lv.id} word={lv.words[0].id} colorIndex={0} size={40} />}
                   {earnedStars > 0 && (
                     <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 1 }}>
                       {[0, 1, 2].map((s) => <Star key={s} size={11} fill={s < earnedStars ? "#E8B923" : "none"} color={s < earnedStars ? "#E8B923" : c.border} />)}
@@ -718,9 +804,15 @@ export default function SesothoMatchPage({ onBack, c }) {
   // ---- Play screen ----
   return (
     <div className="max-w-md mx-auto px-4 pt-6 pb-16">
-      <button onClick={() => setScreen("map")} className="flex items-center gap-1.5 font-body text-sm mb-4" style={{ color: c.textDim }}>
-        <ArrowLeft size={15} /> Map
-      </button>
+      <GameStyles />
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={() => setScreen("map")} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
+          <ArrowLeft size={15} /> Map
+        </button>
+        <button onClick={toggleSound} style={{ color: c.textFaint }} aria-label="Toggle sound">
+          {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
+        </button>
+      </div>
 
       <div className="flex items-center justify-between mb-2">
         <div>
@@ -756,16 +848,17 @@ export default function SesothoMatchPage({ onBack, c }) {
           const isSel = selected && selected.r === r && selected.c === cIdx;
           const isHint = hint && hint.some((h) => h.r === r && h.c === cIdx);
           const w = level.words[t.type];
+          const glowClass = isSel ? "candy-selected" : t.special ? "candy-special" : "";
           return (
             <button key={`${r}-${cIdx}`} onClick={() => onTapCell(r, cIdx)}
               style={{
                 aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
                 borderRadius: 10,
-                background: isSel ? CAT_COLORS[level.id] + "33" : isHint ? "#E8B92333" : "transparent",
-                border: isSel ? `2px solid ${CAT_COLORS[level.id]}` : isHint ? "2px solid #E8B923" : "2px solid transparent",
+                background: isSel ? CANDY_PALETTE[t.type] + "33" : isHint ? "#E8B92333" : "transparent",
+                border: isSel ? `2px solid ${CANDY_PALETTE[t.type]}` : isHint ? "2px solid #E8B923" : "2px solid transparent",
                 transition: "transform 0.15s", transform: isSel ? "scale(1.08)" : "scale(1)",
               }}>
-              <CandyTile level={level.id} word={w.id} special={t.special} size={32} />
+              <CandyTile level={level.id} word={w.id} colorIndex={t.type} special={t.special} size={32} className={glowClass} />
             </button>
           );
         }))}
