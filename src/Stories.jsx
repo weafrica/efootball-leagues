@@ -244,7 +244,9 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
               and the character just stays idle. Keeps writing a story a
               purely-text task; animation is opt-in set dressing on top. */}
           <PlayerCharacter pose={node.scene?.pose} kitColor={c.accent} />
-          <p className="text-base leading-relaxed text-center mt-3">{node.text}</p>
+          <p className="text-base leading-relaxed text-center mt-3">
+            {node.lines ? node.lines.map((l) => l.text).join(" ") : node.text}
+          </p>
         </div>
         {isEnding ? (
           <div className="flex flex-col gap-2">
