@@ -20,10 +20,12 @@
 
 import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
 import { Chess } from "chess.js";
-import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw } from "lucide-react";
+import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
 import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative } from "./chessAi.js";
+import { chessSpeech, dramatizeSquare } from "./chessVoice.js";
+import { getVoiceTier, setVoiceTierOverride, isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
 const RulesModal = lazy(() => import("./Rules.jsx"));
 
@@ -690,11 +692,50 @@ function ChessPracticeBoard({ onBack, c }) {
   const [legalTargets, setLegalTargets] = useState([]);
   const [promotionChoice, setPromotionChoice] = useState(null);
   const [tip, setTip] = useState("Tap any piece to see everywhere it can legally go.");
+  const [learningMode, setLearningMode] = useState(true);
+  const [speakingSquare, setSpeakingSquare] = useState(chessSpeech.speakingId);
+  const [hdEnabled, setHdEnabled] = useState(isHdVoiceEnabled());
+  const [hdTier, setHdTier] = useState(getVoiceTier()); // "hd" | "lite" — auto-detected, overridable
+  const [hdLoading, setHdLoading] = useState(false);
+  const [hdProgress, setHdProgress] = useState(0);
+  const [hdReady, setHdReady] = useState(neuralVoiceReady());
+  const [hdError, setHdError] = useState(null);
+
+  const enableHdVoice = async () => {
+    setHdEnabled(true);
+    setHdVoiceEnabled(true);
+    if (hdReady) return;
+    setHdLoading(true);
+    setHdError(null);
+    try {
+      await loadNeuralVoice((frac) => setHdProgress(frac));
+      setHdReady(true);
+    } catch (err) {
+      setHdError("Couldn't download the HD voice — check your connection and try again.");
+      setHdEnabled(false);
+      setHdVoiceEnabled(false);
+    } finally {
+      setHdLoading(false);
+    }
+  };
+  const disableHdVoice = () => { setHdEnabled(false); setHdVoiceEnabled(false); };
+  const changeTier = (tier) => { setVoiceTierOverride(tier); setHdTier(getVoiceTier()); };
+
+  useEffect(() => chessSpeech.subscribe(setSpeakingSquare), []);
+  useEffect(() => () => chessSpeech.stop(), []); // stop talking if the player leaves this screen
 
   const chess = chessRef.current;
   const board = chess.board();
 
+  const selectSquare = (sq, piece) => {
+    setSelected(sq);
+    setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
+    setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
+    if (learningMode) chessSpeech.speak(sq, dramatizeSquare(chess, sq));
+  };
+
   const resetBoard = () => {
+    chessSpeech.stop();
     chessRef.current = new Chess();
     setSelected(null);
     setLegalTargets([]);
@@ -703,6 +744,7 @@ function ChessPracticeBoard({ onBack, c }) {
   };
 
   const applyMove = (from, to, promotion) => {
+    chessSpeech.stop();
     let result;
     try { result = chess.move({ from, to, promotion: promotion || undefined }); } catch { result = null; }
     setSelected(null);
@@ -725,22 +767,13 @@ function ChessPracticeBoard({ onBack, c }) {
         return;
       }
       const piece = chess.get(sq);
-      if (piece) {
-        setSelected(sq);
-        setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
-        setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
-        return;
-      }
+      if (piece) { selectSquare(sq, piece); return; }
       setSelected(null);
       setLegalTargets([]);
       return;
     }
     const piece = chess.get(sq);
-    if (piece) {
-      setSelected(sq);
-      setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
-      setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
-    }
+    if (piece) selectSquare(sq, piece);
   };
 
   return (
@@ -754,11 +787,53 @@ function ChessPracticeBoard({ onBack, c }) {
           <GraduationCap size={20} style={{ color: c.accent }} />
           <h1 className="font-extrabold uppercase tracking-tight text-xl" style={{ color: c.text }}>Learn — practice board</h1>
         </div>
-        <button onClick={resetBoard}
-          className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
-          style={{ borderColor: c.border, color: c.text }}>
-          <RotateCcw size={12} /> Reset
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => { if (!learningMode) chessSpeech.stop(); setLearningMode((v) => !v); }}
+            aria-label={learningMode ? "Mute piece narration" : "Unmute piece narration"}
+            className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
+            style={{ borderColor: learningMode ? c.accent : c.border, background: learningMode ? c.accent : "transparent", color: learningMode ? c.accentText : c.text }}>
+            {learningMode ? <Volume2 size={12} /> : <VolumeX size={12} />} Talk
+          </button>
+          <button onClick={resetBoard}
+            className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1.5 rounded-full border"
+            style={{ borderColor: c.border, color: c.text }}>
+            <RotateCcw size={12} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {/* HD voice — strictly opt-in, real multi-MB download, never
+          automatic. Tier (Piper vs Kokoro) is auto-picked from rough
+          device capability, overridable below. */}
+      <div className="rounded-lg border p-3 flex flex-col gap-2" style={{ borderColor: c.border, background: c.surface }}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+            <Sparkles size={12} /> HD voice ({hdTier === "hd" ? "best quality, ~86MB" : "light, ~20-60MB"})
+          </div>
+          {hdEnabled ? (
+            <button onClick={disableHdVoice}
+              className="font-mono text-[10px] font-bold uppercase px-2.5 py-1 rounded-full border"
+              style={{ borderColor: c.border, color: c.text }}>
+              Turn off
+            </button>
+          ) : (
+            <button onClick={enableHdVoice} disabled={hdLoading}
+              className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase px-2.5 py-1 rounded-full disabled:opacity-60"
+              style={{ background: c.accent, color: c.accentText }}>
+              {hdLoading ? <Loader2 size={11} className="animate-spin" /> : null}
+              {hdLoading ? `Downloading ${Math.round(hdProgress * 100)}%` : "Enable"}
+            </button>
+          )}
+        </div>
+        {!hdEnabled && !hdLoading && (
+          <div className="font-mono text-[9px] flex items-center gap-2" style={{ color: c.textFaint }}>
+            <span>Picked for your device — want the other one instead?</span>
+            <button onClick={() => changeTier(hdTier === "hd" ? "lite" : "hd")} className="underline">
+              Switch to {hdTier === "hd" ? "light" : "best quality"}
+            </button>
+          </div>
+        )}
+        {hdError && <div className="font-mono text-[9px]" style={{ color: c.red || "#EF4444" }}>{hdError}</div>}
       </div>
 
       <div className="rounded-lg border p-2.5 font-body text-xs" style={{ borderColor: c.border, background: c.surface, color: c.text }}>
