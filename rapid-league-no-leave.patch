@@ -1,0 +1,31 @@
+--- App.orig.jsx	2026-09-17 03:43:48.269378366 +0000
++++ App.jsx	2026-09-17 03:43:22.318681909 +0000
+@@ -15442,7 +15442,7 @@
+   }, [intervalMs]);
+ }
+ 
+-export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
++export function MemberPaymentRow({ m, t, league, isCash, canManage, allowRemove = false, isOwnRow = false, canLeave = true, onRemoveTeam, onLeave, onDownloadProof, onReviewPayment, onMarkWaReminder, onClearWaReminder, c }) {
+   useNow();
+   const reminded = isWaReminderActive(m);
+   return (
+@@ -15479,7 +15479,7 @@
+         {!isCash && canManage && allowRemove && t && (
+           <button onClick={() => onRemoveTeam(t)} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title={`Remove ${t.name}`}><X size={14} /></button>
+         )}
+-        {!canManage && isOwnRow && (
++        {!canManage && isOwnRow && canLeave && (
+           <button onClick={onLeave} className="p-1.5 rounded-full shrink-0" style={{ color: c.textFaint }} title="Leave league"><LogOut size={14} /></button>
+         )}
+       </div>
+--- LeagueDetail.orig.jsx	2026-09-17 03:43:48.327747843 +0000
++++ LeagueDetail.jsx	2026-09-17 03:43:26.773715829 +0000
+@@ -2140,7 +2140,7 @@
+             const row = (m) => (
+               <MemberPaymentRow key={m.id} m={m} t={league.teams.find((t) => t.id === m.team_id)} league={league}
+                 isCash={league.league_type === "cash"} canManage={canManage}
+-                isOwnRow={session && m.user_id === session.user.id} onLeave={() => onLeave(league)}
++                isOwnRow={session && m.user_id === session.user.id} canLeave={!isRapidLeague} onLeave={() => onLeave(league)}
+                 onRemoveTeam={onRemoveTeam} onDownloadProof={onDownloadProof} onReviewPayment={onReviewPayment} onMarkWaReminder={onMarkWaReminder} onClearWaReminder={onClearWaReminder} c={c} />
+             );
+             // Only worth splitting into two lists once a custom template

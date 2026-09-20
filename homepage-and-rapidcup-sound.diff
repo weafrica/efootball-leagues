@@ -1,0 +1,63 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 758a3f3..56cc7a8 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -11401,13 +11401,26 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
+             onSuggestNotifications={onSuggestNotifications}
+             c={c}
+           />
+-          <RapidLeagueBanner
+-            onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
+-            onOpenLeague={onOpen}
+-            showToast={showToast}
+-            onSuggestNotifications={onSuggestNotifications}
+-            c={c}
+-          />
++          {/* Rapid League, one banner per size (4 / 8 / 16 clubs). Same
++              component three times rather than three forked components:
++              the only thing that differs is which club_count's lobbies it
++              reads and the copy it renders -- the mechanics all live
++              server-side keyed off the lobby row (see the
++              rapid_league_club_count_8_and_16 migration). Each still
++              renders nothing when it has no open/filling/live lobby of
++              its own size, so a quiet 16-club queue just drops out of the
++              row instead of leaving a dead card. */}
++          {[4, 8, 16].map((clubCount) => (
++            <RapidLeagueBanner
++              key={clubCount}
++              clubCount={clubCount}
++              onOpenLobby={() => showToast?.("Tap Join to grab a spot in the lobby.")}
++              onOpenLeague={onOpen}
++              showToast={showToast}
++              onSuggestNotifications={onSuggestNotifications}
++              c={c}
++            />
++          ))}
+         </div>
+         {/* Ladder banner — pinned above the League Ladder section itself
+             (not inside it), the "can't miss it" slot Candy Crush-style
+diff --git a/src/RapidCupBanner.jsx b/src/RapidCupBanner.jsx
+index 370e728..0be4d42 100644
+--- a/src/RapidCupBanner.jsx
++++ b/src/RapidCupBanner.jsx
+@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
+ import { Info, X } from "lucide-react";
+ import { supabase } from "./supabaseClient";
+ import { RapidCupJoinModal } from "./RapidCupFeeDisplay";
+-import { useCountdownDrumroll, useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
++import { useLeagueStartAlarm } from "./RapidCupEpicExtras.jsx";
+ import { subscribeToRapidCupPush, listenForPushResubscribe } from "./rapidCupPush.js";
+ 
+ // RapidCupBanner — horizontal banner for the home screen, sits under
+@@ -217,11 +217,6 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
+   const resetAtMs = lobby?.reset_at ? new Date(lobby.reset_at).getTime() : null;
+   const msLeft = resetAtMs ? Math.max(0, resetAtMs - now) : null;
+ 
+-  // Countdown drumroll (Section 13, Phase 9) — last 10s of this same
+-  // lobby-reset timer, once per lobby. Only while the lobby is still
+-  // "open" (filling), same gating as the 15/5/1 min toasts below.
+-  useCountdownDrumroll(msLeft, lobby?.id ?? null, lobby?.status === "open");
+-
+   // League-start alarm — rings on a loop once this lobby hits 4 players
+   // and starts, for this viewer only if they're actually one of the 4
+   // (myEntry), not for someone just browsing the open lobby before

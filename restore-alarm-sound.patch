@@ -1,0 +1,41 @@
+--- RapidCupEpicExtras.jsx
++++ RapidCupEpicExtras.jsx
+@@ -135,13 +135,32 @@
+ // far in the first place.
+ const MAX_TOTAL_RING_MS = 60 * 60_000;
+ 
++// Six-beep alarm cycle, alternating 880/660Hz square-wave pulses. Called
++// once immediately and then on a RING_LOOP_MS interval by the effect
++// below — see stopAlarm() for how this actually goes quiet: it clears
++// that interval (no further cycles get scheduled), cancels the pending
++// "resume in 5 min" timeout, and closes the AudioContext itself, which
++// silences whatever's still mid-pulse right away rather than letting an
++// already-scheduled oscillator finish out its stop() time.
+ function playAlarmCycle(ctx, masterGain) {
+-  // Silenced — reported as annoying (rings on a loop for up to an hour
+-  // once a lobby fills). No-op rather than removing the alarm outright: the
+-  // ringing on/off timing, the "Stop" flow, the push notification, and the
+-  // cross-device stop-sync above all still work unchanged — this just
+-  // stops it from actually making noise, same approach as the drumroll
+-  // above.
++  const start = ctx.currentTime + 0.02;
++  const pulseDur = 0.25;
++  const gapDur = 0.12;
++  let t = start;
++  for (let i = 0; i < 6; i++) {
++    const osc = ctx.createOscillator();
++    osc.type = "square";
++    osc.frequency.value = i % 2 === 0 ? 880 : 660;
++    const gainNode = ctx.createGain();
++    gainNode.gain.setValueAtTime(0.0001, t);
++    gainNode.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
++    gainNode.gain.setValueAtTime(0.3, t + pulseDur - 0.03);
++    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + pulseDur);
++    osc.connect(gainNode).connect(masterGain); // through the per-attempt fade-in, not straight to destination
++    osc.start(t);
++    osc.stop(t + pulseDur);
++    t += pulseDur + gapDur;
++  }
+ }
+ 
+ // Local (no-push) notification — Option 2: only reaches this device

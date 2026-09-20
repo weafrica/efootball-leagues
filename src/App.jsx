@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
+import CashLadder from "./CashLadder";
+import CashLadderAdmin from "./CashLadderAdmin";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
 import { withTimeout } from "./utils/withTimeout";
@@ -8647,6 +8649,8 @@ export default function App() {
     // very first entry (ahead of even the promoted "League N" tile below)
     // so admins reach it without hunting through the rest of the dock.
     ...(isAdmin ? [{ icon: Trophy, label: "League Ladder (Admin)", onClick: openLeagueLadderTestScreen }] : []),
+    { icon: Wallet, label: "Cash Ladder", onClick: () => setView("cashLadder") },
+    ...(isAdmin ? [{ icon: Wallet, label: "Cash Ladder (Admin)", onClick: () => setView("cashLadderAdmin") }] : []),
     // First on the list for everyone else — labeled with the player's actual current tier
     // ("League 3", etc.) once myLeagueLadderMembership has loaded, so it
     // reads as "jump back into your league" rather than a generic entry
@@ -8744,6 +8748,10 @@ export default function App() {
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={goBack} showToast={showToast} c={c} />
           </Suspense>
+        ) : view === "cashLadder" ? (
+          <CashLadder session={session} profile={profile} c={c} onBack={goBack} />
+        ) : view === "cashLadderAdmin" && isAdmin ? (
+          <CashLadderAdmin c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (

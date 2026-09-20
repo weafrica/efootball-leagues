@@ -1,0 +1,99 @@
+--- LeagueDetail.jsx
++++ LeagueDetail.jsx
+@@ -106,6 +106,88 @@
+   );
+ }
+ 
++// Rapid League's own version of LadderCupFinalizedBanner above — same
++// champion-reveal visual (gold glow ring + diagonal sweep), but sourced
++// from rapid_league_payouts/rapid_league_payout_recipients (see
++// finalize_rapid_league_payout / _rapid_league_finish_lobby_internal in
++// 20260918000000_rapid_league_single_round_robin.sql) instead of a column
++// on the league row — the round robin's sweep job writes that payout row
++// itself the moment every fixture is played (or the deadline passes), so
++// this just has to notice it exists and hasn't been seen before. Handles
++// all three outcomes the sweep can produce: a clean 'winner', a 'split'
++// where two-plus players stayed level on both wins and goals, and a
++// 'refund' for a lobby that went live but nobody ever actually played.
++function useRapidLeaguePayout(leagueId) {
++  const [payout, setPayout] = useState(null); // null = loading, false = not finished yet
++  const [recipients, setRecipients] = useState([]);
++  useEffect(() => {
++    let cancelled = false;
++    if (!leagueId) { setPayout(false); return; }
++    supabase.from("rapid_league_payouts").select("*").eq("league_id", leagueId).maybeSingle()
++      .then(async ({ data }) => {
++        if (cancelled) return;
++        if (!data) { setPayout(false); return; }
++        setPayout(data);
++        const { data: recs } = await supabase.from("rapid_league_payout_recipients").select("*").eq("payout_id", data.id);
++        if (!cancelled) setRecipients(recs || []);
++      });
++    return () => { cancelled = true; };
++  }, [leagueId]);
++  return { payout, recipients };
++}
++
++function RapidLeagueChampionBanner({ league, c }) {
++  const { payout, recipients } = useRapidLeaguePayout(league?.id);
++  if (!payout) return null;
++
++  const nameForUser = (userId) => {
++    const m = (league.members || []).find((mm) => mm.user_id === userId);
++    const t = m && (league.teams || []).find((tt) => tt.id === m.team_id);
++    return t?.name || m?.display_name || "A player";
++  };
++
++  if (payout.outcome === "refund") {
++    return (
++      <div className="rounded-lg p-3 mt-3 flex items-center gap-2.5 border" style={{ background: c.surfaceHover, borderColor: c.border }}>
++        <Skull size={16} style={{ color: c.textFaint }} />
++        <div className="font-body text-sm" style={{ color: c.textDim }}>
++          Rapid League ended before a ball was kicked — every entry fee was refunded in full.
++        </div>
++      </div>
++    );
++  }
++
++  // 'split' — two or more players tied on both wins and goals, so the
++  // bonus pool (everything above what each tied player staked) was
++  // divided evenly between them. A recipient counts as a co-champion when
++  // they walked away with more than their own entry fee back.
++  const isSplit = payout.outcome === "split";
++  const coChampions = isSplit ? recipients.filter((r) => Number(r.amount) > Number(r.entry_fee)) : [];
++  const headline = isSplit
++    ? (coChampions.length ? coChampions.map((r) => nameForUser(r.user_id)).join(" & ") : "Dead level")
++    : nameForUser(payout.winner_user_id);
++  const winnerTake = isSplit ? (coChampions[0]?.amount ?? null) : payout.winner_net_total;
++
++  return (
++    <div className="relative overflow-hidden rounded-2xl p-4 mt-3 border text-center" style={{ background: "radial-gradient(circle at 50% 0%, rgba(232,185,35,0.18), transparent 70%)", borderColor: c.accent }}>
++      <div className="absolute inset-0 pointer-events-none animate-ladder-sweep"
++        style={{ backgroundImage: `linear-gradient(135deg, transparent 40%, ${c.accent}40 50%, transparent 60%)`, backgroundSize: "250% 250%" }} />
++      <div className="relative">
++        <div className="w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-2" style={{ background: c.accent, boxShadow: `0 0 0 1px ${c.accent}, 0 0 22px 4px ${c.accent}66` }}>
++          <Trophy size={22} style={{ color: c.accentText }} />
++        </div>
++        <div className="font-mono text-[10px] uppercase tracking-[0.25em] mb-1" style={{ color: c.accent }}>🔁 Rapid League has ended!</div>
++        <div className="font-display font-extrabold text-xl uppercase tracking-wide" style={{ color: c.text }}>{headline}</div>
++        <div className="font-body text-xs mt-1.5" style={{ color: c.textDim }}>
++          {isSplit
++            ? <>What a round robin — level on wins and goals right to the final whistle, so the pool was split between the co-champions. <strong style={{ color: c.text }}>{payout.total_pool} Nets</strong> up for grabs in total.</>
++            : <>What a round robin! Every match counted right to the final whistle, and <strong style={{ color: c.text }}>{headline}</strong> came out on top{winnerTake != null ? <> — walking away with <strong style={{ color: c.text }}>{winnerTake} Nets</strong> from a <strong style={{ color: c.text }}>{payout.total_pool} Nets</strong> pool</> : null}. 🏆⚽</>}
++        </div>
++      </div>
++    </div>
++  );
++}
++
+ // Small icon + count for each nonzero badge counter on a raw
+ // ladder_cup_entries row. Column names come straight from the migration
+ // (badge_heater_tier/giant_slayer/bounty_hunter/walkover are running
+@@ -1870,6 +1952,7 @@
+       )}
+ 
+       {!isLadderCup && <LeagueStatusBanner league={league} notStarted={notStarted} myTeam={myTeam} c={c} />}
++      {isRapidLeague && <RapidLeagueChampionBanner league={league} c={c} />}
+ 
+       {isLadderCup ? (
+         <LadderCupPendingPanel league={league} leagues={leagues} allAchievements={allAchievements} canManage={canManage} canSeePhones={canSeePhones} session={session} myTeam={myTeam} myUsername={myUsername} avatarByTeamId={avatarByTeamId}

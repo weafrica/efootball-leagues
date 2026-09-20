@@ -1,0 +1,136 @@
+diff --git a/src/RapidLeagueBanner.jsx b/src/RapidLeagueBanner.jsx
+index 3b1530b..f842161 100644
+--- a/src/RapidLeagueBanner.jsx
++++ b/src/RapidLeagueBanner.jsx
+@@ -71,7 +71,7 @@ function markLeagueAutoOpened(leagueId) {
+   }
+ }
+ 
+-function useOpenRapidLeagueLobby() {
++function useOpenRapidLeagueLobby(clubCount) {
+   const [lobby, setLobby] = useState(null);
+   const [playerCount, setPlayerCount] = useState(0);
+   const [myEntry, setMyEntry] = useState(null);
+@@ -83,8 +83,14 @@ function useOpenRapidLeagueLobby() {
+     // the same reason: once a lobby fills, join_rapid_league_lobby
+     // immediately opens a fresh empty one to chain into, and that fresh
+     // one has a later created_at — ordering by created_at desc alone
+-    // would show the 4 players who just filled it an empty lobby that
++    // would show the players who just filled it an empty lobby that
+     // isn't theirs.
++    //
++    // Every query below is scoped to this banner's own clubCount (4/8/16
++    // — see the rapid_league_club_count_8_and_16 migration). Without
++    // that filter, all three size banners resolve to whichever lobby is
++    // most recent overall, which is exactly why they all showed the same
++    // "X/4" before this fix: they were all reading the 4-club lobby.
+     let lobbyRow = null;
+     if (user?.id) {
+       const { data: myRows } = await supabase
+@@ -97,6 +103,7 @@ function useOpenRapidLeagueLobby() {
+           .from("rapid_league_lobbies")
+           .select("*")
+           .in("id", myLobbyIds)
++          .eq("club_count", clubCount)
+           .in("status", ["filling", "live"])
+           .order("created_at", { ascending: false })
+           .limit(1)
+@@ -111,6 +118,7 @@ function useOpenRapidLeagueLobby() {
+       const { data: latest } = await supabase
+         .from("rapid_league_lobbies")
+         .select("*")
++        .eq("club_count", clubCount)
+         .in("status", ["open", "filling", "live"])
+         .order("created_at", { ascending: false })
+         .limit(1)
+@@ -128,7 +136,7 @@ function useOpenRapidLeagueLobby() {
+     setLobby(lobbyRow);
+     setPlayerCount(players?.length || 0);
+     setMyEntry((players || []).find((p) => p.user_id === user?.id) || null);
+-  }, []);
++  }, [clubCount]);
+ 
+   useEffect(() => {
+     load();
+@@ -139,8 +147,10 @@ function useOpenRapidLeagueLobby() {
+   return { lobby, playerCount, myEntry, reload: load };
+ }
+ 
+-function RapidLeagueHelpModal({ open, onClose, c }) {
++function RapidLeagueHelpModal({ open, onClose, c, clubCount }) {
+   if (!open) return null;
++  const matchesPerPlayer = clubCount - 1;
++  const totalMatches = (clubCount * matchesPerPlayer) / 2;
+   return (
+     <div
+       onClick={(e) => { e.stopPropagation(); onClose(); }}
+@@ -152,11 +162,11 @@ function RapidLeagueHelpModal({ open, onClose, c }) {
+       <div onClick={(e) => e.stopPropagation()}
+         style={{ background: c?.cardBg || "#1a1a1a", border: `1px solid ${c?.border || "#333"}`, borderRadius: 12, padding: 20, width: 320 }}>
+         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+-          <div style={{ fontWeight: 700 }}>🔁 What's Rapid League?</div>
++          <div style={{ fontWeight: 700 }}>🔁 What's Rapid League {clubCount}?</div>
+           <button onClick={onClose} aria-label="Close" style={{ color: c?.textFaint || "#888" }}><X size={16} /></button>
+         </div>
+         <div style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.85 }}>
+-          A 4-player single round robin — join a lobby, pay your entry fee in Nets, and once it fills everyone plays everyone once (3 matches each). Top of the table when all 6 matches are done takes the pooled bonus.
++          A {clubCount}-player single round robin — join a lobby, pay your entry fee in Nets, and once it fills everyone plays everyone once ({matchesPerPlayer} matches each). Top of the table when all {totalMatches} matches are done takes the pooled bonus.
+         </div>
+         <button onClick={onClose} style={{ width: "100%", marginTop: 16, padding: "8px 0", borderRadius: 8, fontWeight: 600 }}>
+           Got it
+@@ -166,8 +176,8 @@ function RapidLeagueHelpModal({ open, onClose, c }) {
+   );
+ }
+ 
+-export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
+-  const { lobby, playerCount, myEntry, reload } = useOpenRapidLeagueLobby();
++export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLeague, showToast, onSuggestNotifications, c }) {
++  const { lobby, playerCount, myEntry, reload } = useOpenRapidLeagueLobby(clubCount);
+   const [now, setNow] = useState(() => Date.now());
+   const [joining, setJoining] = useState(false);
+   const [showJoinModal, setShowJoinModal] = useState(false);
+@@ -263,7 +273,7 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
+ 
+   const join = async (fee) => {
+     setJoining(true);
+-    const { error } = await supabase.rpc("join_rapid_league_lobby", { p_entry_fee: fee });
++    const { error } = await supabase.rpc("join_rapid_league_lobby", { p_entry_fee: fee, p_club_count: clubCount });
+     setJoining(false);
+     if (error) { showToast?.(error.message || "Couldn't join Rapid League."); return; }
+     setShowJoinModal(false);
+@@ -282,7 +292,7 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
+   };
+ 
+   const isMine = !!myEntry;
+-  const isFull = playerCount >= 4;
++  const isFull = playerCount >= clubCount;
+ 
+   const handleBannerClick = () => {
+     if (myEntry && lobby.league_id) {
+@@ -325,7 +335,7 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
+       )}
+       <div>
+         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+-          <span style={{ fontWeight: 700 }}>{isRinging ? "🔔 Rapid League" : "🔁 Rapid League"}</span>
++          <span style={{ fontWeight: 700 }}>{isRinging ? `🔔 Rapid League ${clubCount}` : `🔁 Rapid League ${clubCount}`}</span>
+           <button
+             onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
+             title="What's Rapid League?" aria-label="What's Rapid League?"
+@@ -345,7 +355,7 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
+               ? "Round robin live"
+               : isFull
+                 ? "Full — next lobby opening"
+-                : `${playerCount}/4 joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
++                : `${playerCount}/${clubCount} joined${msLeft != null ? ` — resets in ${fmtCountdown(msLeft)}` : ""}`}
+         </div>
+       </div>
+ 
+@@ -377,7 +387,7 @@ export default function RapidLeagueBanner({ onOpenLobby, onOpenLeague, showToast
+         c={c}
+       />
+ 
+-      <RapidLeagueHelpModal open={showHelp} onClose={() => setShowHelp(false)} c={c} />
++      <RapidLeagueHelpModal open={showHelp} onClose={() => setShowHelp(false)} c={c} clubCount={clubCount} />
+     </div>
+   );
+ }

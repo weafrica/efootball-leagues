@@ -1,0 +1,301 @@
+diff --git a/scripts/test-league-ladder.mjs b/scripts/test-league-ladder.mjs
+index 584005e..d51ac6f 100644
+--- a/scripts/test-league-ladder.mjs
++++ b/scripts/test-league-ladder.mjs
+@@ -351,9 +351,9 @@ check("accepts an eligible bid at or above the floor", () => {
+ 
+ console.log("ladderRoundReleaseOffsetsHours");
+ 
+-check("10 rounds (standard 6-player double round-robin league) spreads evenly across the ~143h59m window", () => {
++check("10 rounds (standard 6-player double round-robin league) spreads evenly across the ~141h59m window", () => {
+   const offsets = ladderRoundReleaseOffsetsHours(10);
+-  const windowHours = 143 + 59 / 60;
++  const windowHours = 141 + 59 / 60;
+   const step = windowHours / 9;
+   const expected = Array.from({ length: 10 }, (_, i) => i * step);
+   offsets.forEach((o, i) => assert.ok(Math.abs(o - expected[i]) < 1e-9, `round ${i}: got ${o}, want ${expected[i]}`));
+@@ -460,16 +460,16 @@ check("a fixture with no countdown yet (null) never forfeits", () => {
+ 
+ console.log("nextLadderCloseAt");
+ 
+-check("mid-week rolls forward to the coming Sunday 23:59 UTC", () => {
+-  assert.equal(nextLadderCloseAt(new Date("2026-09-09T10:00:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
++check("mid-week rolls forward to the coming Sunday 21:59 UTC (23:59 SAST)", () => {
++  assert.equal(nextLadderCloseAt(new Date("2026-09-09T10:00:00Z")).toISOString(), "2026-09-13T21:59:00.000Z");
+ });
+ 
+ check("Sunday just before the cutoff still targets today", () => {
+-  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:58:00Z")).toISOString(), "2026-09-13T23:59:00.000Z");
++  assert.equal(nextLadderCloseAt(new Date("2026-09-13T21:58:00Z")).toISOString(), "2026-09-13T21:59:00.000Z");
+ });
+ 
+ check("Sunday right at/after the cutoff rolls to next week", () => {
+-  assert.equal(nextLadderCloseAt(new Date("2026-09-13T23:59:30Z")).toISOString(), "2026-09-20T23:59:00.000Z");
++  assert.equal(nextLadderCloseAt(new Date("2026-09-13T21:59:30Z")).toISOString(), "2026-09-20T21:59:00.000Z");
+ });
+ 
+ console.log("ladderZoneForRank");
+diff --git a/src/LeagueLadderDetail.jsx b/src/LeagueLadderDetail.jsx
+index 8e25f95..fb5b4a6 100644
+--- a/src/LeagueLadderDetail.jsx
++++ b/src/LeagueLadderDetail.jsx
+@@ -82,7 +82,7 @@ const BID_TICKER_MESSAGES = [
+   (t) => ({ header: `🥊 Fight For The Seat`, subtext: `Relegated from League ${t}? Buy back in. Rising from below? Buy your way up. Only one wins.` }),
+   (t) => ({ header: `🏆 One Spot. Everyone Wants It.`, subtext: `The League ${t} seat goes to the highest bidder — redemption or promotion, your call.` }),
+   (t) => ({ header: `🔥 Bidding War: League ${t}`, subtext: `Every Naira counts. Outbid the field or watch someone else take your League ${t} dream.` }),
+-  (t) => ({ header: `⏳ Countdown to Promotion`, subtext: `Sunday 23:59 UTC decides who buys their way into League ${t}. Place your bid now.` }),
++  (t) => ({ header: `⏳ Countdown to Promotion`, subtext: `Sunday 23:59 SAST decides who buys their way into League ${t}. Place your bid now.` }),
+   (t) => ({ header: `💎 Last Chance Saloon`, subtext: `Relegated players get one shot to buy back into League ${t} before the window shuts.` }),
+   (t, b) => ({ header: `📈 Climb Early Or Wait`, subtext: `League ${b}'s best don't have to wait for rank 1 — outbid everyone and jump straight to League ${t}.` }),
+   (t) => ({ header: `🎟️ The Ticket Up`, subtext: `Highest bidder wins a golden ticket into League ${t}. Everyone else gets refunded in full.` }),
+@@ -123,7 +123,7 @@ const BID_TICKER_MESSAGES = [
+   (t) => ({ header: `🏆 The Auction Never Sleeps`, subtext: `Every new bid could flip who's heading into League ${t}. Stay sharp.` }),
+   (t) => ({ header: `🔥 Winner Takes The Badge`, subtext: `One League ${t} seat, unlimited ambition — only the top bid gets it.` }),
+   (t) => ({ header: `🏆 Prove You Belong`, subtext: `League ${t} isn't given here, it's bought by whoever wants it most.` }),
+-  (t) => ({ header: `⚡ Final Call: League ${t}`, subtext: `Last chance to bid before Sunday 23:59 UTC decides the League ${t} seat.` }),
++  (t) => ({ header: `⚡ Final Call: League ${t}`, subtext: `Last chance to bid before Sunday 23:59 SAST decides the League ${t} seat.` }),
+ ];
+ 
+ // RANK1_SAFE_MESSAGES — 20 congratulatory variations for rank 1, shown in
+@@ -526,7 +526,7 @@ function LadderMemberRow({ leagueId, tier, userId, profile, rank, opponentProfil
+ 
+ // LiveBidTicker — Phase 5's bidding is fully wired server-side (the RPC,
+ // the eligibility pool, the bidding_open window that runs through Sunday
+-// 23:59 UTC). There's no fixed opening day anymore either — 20260875
++// 21:59 UTC / 23:59 SAST). There's no fixed opening day anymore either — 20260875
+ // removed the separate open-week cron, so a league's bidding_open window
+ // starts the moment it exists, not on a scheduled weekday (see
+ // league-ladder-redesign-build-spec.md's addendum). This component is
+@@ -611,7 +611,7 @@ function LiveBidTicker({ leagueId, weekNumber, tier, maxTier, session, c }) {
+         {msgSubtext}
+       </div>
+       <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase" style={{ color: c.textFaint }}>
+-        <span>⏳ Closes Sun 23:59 UTC</span>
++        <span>⏳ Closes Sun 23:59 SAST</span>
+         {floor != null && <span>Floor {floor}N</span>}
+       </div>
+       <div className="flex flex-col gap-1 mb-2">
+@@ -1033,7 +1033,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
+   // schedules a joiner into current_week + 1 (you can't retroactively add
+   // someone to a round-robin that's already in progress), and
+   // _ladder_sync_fixtures_internal generates that week's fixtures
+-  // immediately, well before the Sunday 23:59 UTC cutover ever bumps
++  // immediately, well before the Sunday 21:59 UTC (23:59 SAST) cutover ever bumps
+   // current_week to match. Querying by cycle.current_week alone means a
+   // just-joined player's own fixtures — which already exist — are
+   // invisible until the following week's cutover, showing a false "no
+@@ -1533,7 +1533,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
+           <JoinedPlayersList members={members} profilesById={profilesById} session={session} c={c} />
+         </div>
+         <div className="text-center font-mono text-xs" style={{ color: c.textFaint }}>
+-          No fixtures yet — there's no fixed start date. Once this league has at least 2 players, matches generate right away and run through the Sunday 23:59 UTC cutoff.
++          No fixtures yet — there's no fixed start date. Once this league has at least 2 players, matches generate right away and run through the Sunday 23:59 SAST cutoff.
+         </div>
+       </div>
+     );
+diff --git a/src/formats/leagueLadder.js b/src/formats/leagueLadder.js
+index c349e2a..eee7efb 100644
+--- a/src/formats/leagueLadder.js
++++ b/src/formats/leagueLadder.js
+@@ -20,7 +20,7 @@
+ // who's promoted/relegated/stayed). It does NOT write anything to
+ // ladder_memberships, generate next week's rows, auto-create a new bottom
+ // league, or handle the auction fall-through — those are all orchestration
+-// concerns that belong to the Sunday 23:59 UTC resolve job
++// concerns that belong to the Sunday 21:59 UTC (23:59 SAST) resolve job
+ // (_ladder_resolve_promotion_relegation_internal, in the Phase 3
+ // migration), which reimplements this same classification logic in SQL
+ // for the same reason _generate_round_robin_fixtures_internal reimplements
+@@ -42,20 +42,19 @@
+ const LADDER_ROSTER_SIZE = 6; // players per league — see 20260876's group-size-6 change (was 8)
+ 
+ // ─────────────────────────────────────────────────────────────────────────
+-// Phase 6 — fixture countdown stagger (plan §6), window recalculated by
+-// 20260876 for the corrected literal-UTC cutoff and the new double
+-// round-robin round count. Each round of fixtures (not each individual
+-// match — players in the same round release together) gets its own
+-// release time, evenly spaced across a ~143h59m window: Monday 00:00 UTC
+-// through Saturday 23:59 UTC, so every fixture still gets a full 24-hour
+-// play window before the Sunday 23:59 UTC hard cutoff (previously Sunday
+-// 10:00 PM SAST, wrongly converted in 20260875 and corrected here — see
+-// that migration's header). Generalized to whatever round count a given
+-// league actually produces: LADDER_ROSTER_SIZE is fixed at 6, giving 10
+-// rounds (double round-robin, 2*(6-1)) in the normal case, but a
+-// thin/bye-padded or mid-week-born league can produce a different count.
++// Phase 6 — fixture countdown stagger (plan §6). Each round of fixtures
++// (not each individual match — players in the same round release
++// together) gets its own release time, evenly spaced across a ~141h59m
++// window: Monday 00:00 UTC through Saturday 21:59 UTC, so every fixture
++// still gets a full 24-hour play window before the Sunday 21:59 UTC hard
++// cutoff (= 23:59 SAST, UTC+2, no DST — see migration
++// 20260939_ladder_cutoff_corrected_to_sast_2159_utc). Generalized to
++// whatever round count a given league actually produces: LADDER_ROSTER_SIZE
++// is fixed at 6, giving 10 rounds (double round-robin, 2*(6-1)) in the
++// normal case, but a thin/bye-padded or mid-week-born league can produce a
++// different count.
+ // ─────────────────────────────────────────────────────────────────────────
+-const LADDER_COUNTDOWN_WINDOW_HOURS = 143 + 59 / 60; // Mon 00:00 UTC -> Sat 23:59 UTC
++const LADDER_COUNTDOWN_WINDOW_HOURS = 141 + 59 / 60; // Mon 00:00 UTC -> Sat 21:59 UTC
+ const LADDER_COUNTDOWN_MATCH_WINDOW_HOURS = 24; // each fixture's own play window
+ 
+ // ladderRoundReleaseOffsetsHours(roundCount) → array of hour-offsets from
+@@ -258,7 +257,7 @@ export function computeStandings(fixtures) {
+ // isWeekComplete — true once every fixture is settled one way or another
+ // (played or forfeited), false if anything's still pending. This is the
+ // gate Phase 3's resolve job checks before it's safe to finalize a week —
+-// it does NOT enforce the Sunday 23:59 UTC cutoff itself (that's the
++// it does NOT enforce the Sunday 21:59 UTC (23:59 SAST) cutoff itself (that's the
+ // scheduled 'ladder-close-week-sunday' cron job's job — see 20260876), it
+ // just answers "is there anything left unplayed right now."
+ // ─────────────────────────────────────────────────────────────────────────
+@@ -459,14 +458,15 @@ export function classifyLadderZones(standings) {
+ }
+ 
+ // ─────────────────────────────────────────────────────────────────────────
+-// nextLadderCloseAt — the next Sunday 23:59 UTC cutoff from `now`, i.e. the
+-// exact instant 'ladder-close-week-sunday' (schedule '59 23 * * 0', see
+-// migrations 20260856/20260917) next fires. Pure date arithmetic, no
+-// Supabase read needed — the cron schedule IS the spec. Used by the
+-// homepage's week-close countdown clock so it counts down to the real
+-// cutoff without a round trip.
++// nextLadderCloseAt — the next Sunday 21:59 UTC (= 23:59 SAST, UTC+2, no
++// DST) cutoff from `now`, i.e. the exact instant 'ladder-close-week-sunday'
++// (schedule '59 21 * * 0', see migration
++// 20260939_ladder_cutoff_corrected_to_sast_2159_utc) next fires. Pure date
++// arithmetic, no Supabase read needed — the cron schedule IS the spec.
++// Used by the homepage's week-close countdown clock so it counts down to
++// the real cutoff without a round trip.
+ //
+-// If `now` is already past this Sunday's 23:59 UTC (including the exact
++// If `now` is already past this Sunday's 21:59 UTC (including the exact
+ // second — close_week has already run or is running right now), rolls
+ // forward to next week's instead, same as the cron just firing again in
+ // 7 days.
+@@ -474,7 +474,7 @@ export function classifyLadderZones(standings) {
+ export function nextLadderCloseAt(now = new Date()) {
+   const n = new Date(now);
+   const daysUntilSunday = (7 - n.getUTCDay()) % 7; // getUTCDay(): 0 = Sunday
+-  let close = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysUntilSunday, 23, 59, 0, 0));
++  let close = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysUntilSunday, 21, 59, 0, 0));
+   if (close.getTime() <= n.getTime()) {
+     close = new Date(close.getTime() + 7 * 24 * 60 * 60 * 1000);
+   }
+diff --git a/supabase/migrations/20260939_ladder_cutoff_corrected_to_sast_2159_utc.sql b/supabase/migrations/20260939_ladder_cutoff_corrected_to_sast_2159_utc.sql
+new file mode 100644
+index 0000000..46b47f9
+--- /dev/null
++++ b/supabase/migrations/20260939_ladder_cutoff_corrected_to_sast_2159_utc.sql
+@@ -0,0 +1,113 @@
++-- The League Ladder's weekly cutoff is meant to be 11:59 PM South African
++-- time (SAST, UTC+2, no DST) — i.e. 21:59 UTC. 20260876 "corrected" this to
++-- a literal 23:59 UTC on the assumption the spec meant UTC directly; that
++-- assumption was wrong. This migration reverts the wall-clock cutoff back
++-- to 21:59 UTC (= 23:59 SAST) without reintroducing the AT TIME ZONE
++-- 'Africa/Johannesburg' conversion 20260876 removed — SAST has no DST, so
++-- a fixed 2-hour offset applied as a literal UTC time is exact and avoids
++-- any timezone-name lookup.
++--
++-- 1. Reschedule the close/open cron job 2 hours earlier.
++select cron.schedule(
++  'ladder-close-week-sunday',
++  '59 21 * * 0', -- 21:59 UTC = 23:59 SAST, Sunday
++  $$select _ladder_close_week_internal();$$
++);
++
++-- 2. Match the fixture-release window math to the same corrected cutoff,
++-- so fixtures still get a full 24h play window ending 2 hours earlier too.
++CREATE OR REPLACE FUNCTION public._generate_round_robin_fixtures_internal(p_league_id uuid, p_week_number integer, p_player_ids uuid[], p_week_start_at timestamp with time zone DEFAULT now())
++ RETURNS integer
++ LANGUAGE plpgsql
++ SECURITY DEFINER
++ SET search_path TO 'public'
++AS $function$
++declare
++  v_ids uuid[] := p_player_ids;
++  v_n integer;
++  v_rounds_single integer;
++  v_rounds_total integer;
++  v_step_hours numeric;
++  v_home uuid;
++  v_away uuid;
++  v_inserted integer := 0;
++  v_r integer;
++  v_i integer;
++  v_last uuid;
++  v_leg2 boolean;
++  v_countdown timestamptz;
++  v_local timestamp;
++  v_dow integer;
++  v_close_at timestamptz;
++  v_window_hours numeric;
++  v_leg integer;
++begin
++  if array_length(v_ids, 1) is null or array_length(v_ids, 1) < 2 then
++    raise exception '_generate_round_robin_fixtures_internal: need at least 2 players';
++  end if;
++
++  delete from ladder_fixtures f
++  where f.league_id = p_league_id and f.week_number = p_week_number and f.status = 'pending'
++    and not exists (select 1 from ladder_reward_ledger r where r.fixture_id = f.id);
++
++  if array_length(v_ids, 1) % 2 <> 0 then
++    v_ids := v_ids || null::uuid; -- bye slot, same as the JS version
++  end if;
++  v_n := array_length(v_ids, 1);
++  v_rounds_single := v_n - 1;
++  v_rounds_total := 2 * v_rounds_single; -- double round robin: home leg + away leg
++
++  v_local := p_week_start_at at time zone 'UTC';
++  v_dow := extract(dow from v_local)::integer; -- 0 = Sunday .. 6 = Saturday
++  -- Cutoff is 21:59 UTC (= 23:59 SAST, UTC+2, no DST) — see this migration.
++  v_close_at := (date_trunc('day', v_local) + (((7 - v_dow) % 7) * interval '1 day') + interval '21 hours 59 minutes')
++                at time zone 'UTC';
++  if v_close_at <= p_week_start_at then
++    v_close_at := v_close_at + interval '7 days';
++  end if;
++  v_window_hours := greatest(0, extract(epoch from (v_close_at - p_week_start_at)) / 3600.0 - 24);
++
++  v_step_hours := case when v_rounds_total > 1 then v_window_hours / (v_rounds_total - 1) else 0 end;
++
++  for v_r in 0 .. v_rounds_total - 1 loop
++    v_countdown := p_week_start_at + ((v_r * v_step_hours) + 24) * interval '1 hour';
++    v_leg2 := v_r >= v_rounds_single;
++    v_leg := case when v_leg2 then 2 else 1 end;
++
++    for v_i in 1 .. v_n / 2 loop
++      if v_leg2 then
++        v_home := v_ids[v_n - v_i + 1];
++        v_away := v_ids[v_i];
++      else
++        v_home := v_ids[v_i];
++        v_away := v_ids[v_n - v_i + 1];
++      end if;
++
++      if v_home is not null and v_away is not null then
++        if not exists (
++          select 1 from ladder_fixtures
++          where league_id = p_league_id and week_number = p_week_number
++            and least(home_user_id, away_user_id) = least(v_home, v_away)
++            and greatest(home_user_id, away_user_id) = greatest(v_home, v_away)
++            and status in ('played', 'forfeited', 'pending')
++            and leg = v_leg
++        ) then
++          insert into ladder_fixtures
++            (league_id, week_number, home_user_id, away_user_id, status, countdown_expires_at, leg)
++          values
++            (p_league_id, p_week_number, v_home, v_away, 'pending', v_countdown, v_leg);
++          v_inserted := v_inserted + 1;
++        end if;
++      end if;
++    end loop;
++
++    v_last := v_ids[v_n];
++    for v_i in reverse v_n .. 3 loop
++      v_ids[v_i] := v_ids[v_i - 1];
++    end loop;
++    v_ids[2] := v_last;
++  end loop;
++
++  return v_inserted;
++end;
++$function$;

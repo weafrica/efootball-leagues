@@ -1,0 +1,218 @@
+--- App.jsx
++++ App.jsx
+@@ -11241,8 +11241,7 @@
+   // on the page — see the compact bars right above "Where you stand" for why
+   // each opens differently. Quick actions now lives in the app-wide floating
+   // dock instead (see App's root return), so it doesn't need state here.
+-  const [resultsToLogOpen, setResultsToLogOpen] = useState(false);
+-  const [upNextOpen, setUpNextOpen] = useState(false);
++  const [nextUpOpen, setNextUpOpen] = useState(false);
+   useEffect(() => {
+     if (!myId || myProgress.played === 0) return;
+     const key = `efootball-level-seen-${myId}`;
+@@ -11337,26 +11336,24 @@
+           special one-tap event, not just another list item. */}
+       <WildcardMatchSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges} c={c} />
+ 
+-      {/* Continue playing — each of these pops out on tap instead of sitting
+-          inline, so the page reads top-to-bottom as: who you are, what needs
+-          you next, right in front of you at a glance, without two scrolling
+-          strips eating the fold. Results to log is urgent and needs a
+-          decision, so it opens as a full modal that grabs attention and
+-          blocks behind it. Up next is just for browsing what's ahead, so it
+-          opens as a lighter sheet you can flick through and dismiss. Quick
+-          actions used to live down here too, but now lives in a floating
+-          dock rendered once at the app level (see App's root return) so
+-          it's reachable from every screen, not just Home. */}
+-      <PendingResultsBar items={pendingResultItems} onOpen={() => setResultsToLogOpen(true)} c={c} />
+-      <UpNextBar fixtures={myUpcomingFixtures} onOpen={() => setUpNextOpen(true)} c={c} />
+-
+-      {resultsToLogOpen && (
+-        <PendingResultsModal items={pendingResultItems} onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen}
+-          onClose={() => setResultsToLogOpen(false)} c={c} />
+-      )}
+-      {upNextOpen && (
+-        <UpNextModal fixtures={myUpcomingFixtures} onOpen={(leagueId, fixtureId) => { setUpNextOpen(false); onOpen(leagueId, fixtureId); }}
+-          onClose={() => setUpNextOpen(false)} c={c} />
++      {/* Continue playing — one merged banner (results to log, then
++          upcoming fixtures) instead of two separate stacked strips, so the
++          page reads top-to-bottom as: who you are, what needs you next,
++          right in front of you at a glance, without two scrolling strips
++          eating the fold. Tapping it opens one combined list; each item in
++          that list still goes to wherever it actually lives — a result
++          opens its log-result flow directly, a fixture navigates to its
++          league page. Quick actions used to live down here too, but now
++          lives in a floating dock rendered once at the app level (see
++          App's root return) so it's reachable from every screen, not just
++          Home. */}
++      <NextUpBar resultItems={pendingResultItems} fixtures={myUpcomingFixtures} onOpen={() => setNextUpOpen(true)} c={c} />
++
++      {nextUpOpen && (
++        <NextUpModal resultItems={pendingResultItems} fixtures={myUpcomingFixtures}
++          onOpenLogResult={onOpenLogResult} onOpenLogResultOpen={onOpenLogResultOpen}
++          onOpen={(leagueId, fixtureId) => { setNextUpOpen(false); onOpen(leagueId, fixtureId); }}
++          onClose={() => setNextUpOpen(false)} c={c} />
+       )}
+ 
+       {/* Where you stand — Leaderboard preview then the Ladder banner, moved
+@@ -11487,49 +11484,73 @@
+   );
+ }
+ 
+-// Compact "Up next" bar — sits inline on Home showing only the soonest
+-// fixture (plus a count of how many more are queued behind it), and pops
+-// the full list open in UpNextModal on tap. Renders nothing for a visitor
+-// with no upcoming fixtures (new signups, or someone only spectating), so
+-// it never leaves an empty band above the Shop banner.
+-function UpNextBar({ fixtures, onOpen, c }) {
+-  if (!fixtures || fixtures.length === 0) return null;
+-  const next = fixtures[0];
+-  const rest = fixtures.length - 1;
++// Merged "Up next" bar — used to be two separate stacked strips
++// (PendingResultsBar above UpNextBar) each popping their own modal; now
++// one banner and one pop-out list covering both. Results to log lead the
++// headline (they need an actual decision — a score to enter — so they're
++// the more urgent of the two) with upcoming fixtures filling in behind
++// them; the badge counts both together. Renders nothing when there's
++// truly nothing waiting, so it never leaves an empty band above the Shop
++// banner.
++function NextUpBar({ resultItems, fixtures, onOpen, c }) {
++  const total = (resultItems?.length || 0) + (fixtures?.length || 0);
++  if (total === 0) return null;
++  const urgent = resultItems.length > 0;
++  const leading = urgent
++    ? { label: resultItems.length > 1 ? "Results to log" : "Result to log", opponent: resultItems[0].opponentUsername, meta: resultItems.length > 1 ? `${resultItems.length} matches waiting` : null }
++    : { label: "Up next", opponent: fixtures[0].opponent.name, meta: fixtures[0].isHome ? "Home" : "Away", due: fixtures[0].due_at };
+   return (
+     <button onClick={onOpen} className="mt-4 w-full flex items-center gap-3 text-left rounded-xl px-3.5 py-3 font-body transition-transform active:scale-[0.98]"
+-      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+-      <span className="font-mono text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: c.textFaint }}>Up next</span>
++      style={{ background: c.surface, border: `1px solid ${urgent ? `${c.red}55` : c.border}` }}>
++      <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: urgent ? c.red : c.textFaint }}>
++        {urgent && <Trophy size={11} />} {leading.label}
++      </span>
+       <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+-        <span className="font-semibold text-sm truncate" style={{ color: c.text }}>vs {next.opponent.name}</span>
+-        <span className="font-mono text-[10px] shrink-0" style={{ color: c.textDim }}>
+-          {next.isHome ? "Home" : "Away"}{next.due_at ? ` · Due ${fmtDate(next.due_at)}` : ""}
++        <span className="font-semibold text-sm truncate" style={{ color: c.text }}>
++          {leading.meta && !urgent ? `vs ${leading.opponent}` : leading.meta || `vs ${leading.opponent}`}
+         </span>
++        {!urgent && leading.due && (
++          <span className="font-mono text-[10px] shrink-0" style={{ color: c.textDim }}>· Due {fmtDate(leading.due)}</span>
++        )}
+       </span>
+-      {rest > 0 && (
+-        <span className="shrink-0 font-mono text-[10px] font-bold rounded-full px-1.5 py-0.5" style={{ background: c.surfaceHover, color: c.textFaint }}>+{rest}</span>
++      {total > 1 && (
++        <span className="shrink-0 font-mono text-[10px] font-bold rounded-full px-1.5 py-0.5" style={{ background: c.surfaceHover, color: c.textFaint }}>+{total - 1}</span>
+       )}
+-      <ChevronRight size={14} style={{ color: c.textFaint }} className="shrink-0" />
++      <ChevronRight size={14} style={{ color: urgent ? c.red : c.textFaint }} className="shrink-0" />
+     </button>
+   );
+ }
+ 
+-// The full "Up next" list, popped out into a light dismissible sheet from
+-// UpNextBar — this one's just for browsing what's ahead (not urgent, no
+-// decision needed), so unlike the results modal below it doesn't need to
+-// grab full attention; a flick-through-and-dismiss overlay fits better.
+-function UpNextModal({ fixtures, onOpen, onClose, c }) {
++// The full merged list, popped out from NextUpBar. Results to log sit
++// first (each opens its own log-result flow directly — a challenge/random
++// match has no separate "page" of its own to send you to) followed by
++// upcoming fixtures (each navigates to the league page that fixture lives
++// on) — every item goes straight to wherever that fixture actually is.
++function NextUpModal({ resultItems, fixtures, onOpenLogResult, onOpenLogResultOpen, onOpen, onClose, c }) {
+   return (
+-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+-      <div className="w-full sm:max-w-sm sm:max-h-[80vh] max-h-[75vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
++    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
++      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+         <div className="flex items-center justify-between mb-4">
+           <div className="font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.accent }}>Up next</div>
+           <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+         </div>
+         <div className="flex flex-col gap-2">
++          {resultItems.map((item) => (
++            <button key={item.id} onClick={() => { onClose(); (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge)); }}
++              className="text-left rounded-xl p-3 font-body transition-transform active:scale-[0.98]"
++              style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
++              <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
++                {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
++              </div>
++              <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>vs {item.opponentUsername}</div>
++              <div className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5" style={{ background: c.accent, color: c.accentText }}>
++                <Trophy size={11} /> Log result
++              </div>
++            </button>
++          ))}
+           {fixtures.map((f) => (
+-            <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => onOpen(f.leagueId, f.fixtureId)}
+-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(f.leagueId, f.fixtureId); }}
++            <div key={f.fixtureId} role="button" tabIndex={0} onClick={() => { onClose(); onOpen(f.leagueId, f.fixtureId); }}
++              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { onClose(); onOpen(f.leagueId, f.fixtureId); } }}
+               className="text-left rounded-xl p-3 font-body cursor-pointer transition-transform active:scale-[0.98]"
+               style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+               <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.accent }}>{f.leagueName}</div>
+@@ -11550,60 +11571,6 @@
+           ))}
+         </div>
+       </div>
+-    </div>
+-  );
+-}
+-
+-// Compact "Results to log" bar — sits inline on Home, right above "Up
+-// next", showing just the count of matches waiting on the signed-in player
+-// to log. Pops the full list open in PendingResultsModal on tap. Renders
+-// nothing when nothing's waiting.
+-function PendingResultsBar({ items, onOpen, c }) {
+-  if (!items || items.length === 0) return null;
+-  return (
+-    <button onClick={onOpen} className="mt-4 w-full flex items-center gap-3 text-left rounded-xl px-3.5 py-3 font-body transition-transform active:scale-[0.98]"
+-      style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
+-      <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: c.red }}>
+-        <Trophy size={11} /> {items.length > 1 ? "Results to log" : "Result to log"}
+-      </span>
+-      <span className="flex-1 min-w-0 font-semibold text-sm truncate" style={{ color: c.text }}>
+-        {items.length === 1 ? `vs ${items[0].opponentUsername}` : `${items.length} matches waiting`}
+-      </span>
+-      <ChevronRight size={14} style={{ color: c.red }} className="shrink-0" />
+-    </button>
+-  );
+-}
+-
+-// The full "Results to log" list, popped out into a full attention-grabbing
+-// modal from PendingResultsBar — unlike Up next, this one always needs an
+-// actual decision (a score to enter), so it opens as a modal that sits in
+-// front of everything else rather than a light dismissible sheet.
+-function PendingResultsModal({ items, onOpenLogResult, onOpenLogResultOpen, onClose, c }) {
+-  return (
+-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+-      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+-        <div className="flex items-center justify-between mb-4">
+-          <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: c.red }}>
+-            <Trophy size={13} /> {items.length > 1 ? "Results to log" : "Result to log"}
+-          </div>
+-          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+-        </div>
+-        <div className="flex flex-col gap-2">
+-          {items.map((item) => (
+-            <button key={item.id} onClick={() => { onClose(); (item.kind === "open" ? onOpenLogResultOpen(item.challenge) : onOpenLogResult(item.challenge)); }}
+-              className="text-left rounded-xl p-3 font-body transition-transform active:scale-[0.98]"
+-              style={{ background: c.surface, border: `1px solid ${c.red}55` }}>
+-              <div className="font-mono text-[9px] uppercase tracking-wider truncate" style={{ color: c.red }}>
+-                {item.kind === "open" ? "Random challenge" : item.isLadder ? "Ladder" : "Challenge"}
+-              </div>
+-              <div className="font-semibold text-sm mt-1 truncate" style={{ color: c.text }}>vs {item.opponentUsername}</div>
+-              <div className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5" style={{ background: c.accent, color: c.accentText }}>
+-                <Trophy size={11} /> Log result
+-              </div>
+-            </button>
+-          ))}
+-        </div>
+-      </div>
+     </div>
+   );
+ }

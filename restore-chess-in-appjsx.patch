@@ -1,0 +1,32 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 3f579ae..198bb01 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -78,6 +78,7 @@ const CreateLeague = lazy(() => import("./CreateLeague.jsx"));
+ // them.)
+ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
+ const LudoPage = lazy(() => import("./Ludo.jsx"));
++const ChessPage = lazy(() => import("./ChessGame.jsx"));
+ // Ladder (the platform-wide permanent ladder) is only opened by a signed-in
+ // user tapping into it from the header or the home screen's LadderStrip
+ // preview - never on first load. Lazy-loaded the same way. (LADDER_THEME
+@@ -8680,6 +8681,7 @@ export default function App() {
+     { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
+     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
+     { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
++    { icon: Swords, label: "Chess", onClick: () => setView("chess") },
+     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
+     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
+     ...(isAdmin ? [{ icon: Shield, label: "All accounts", onClick: () => { setView("accounts"); loadAccounts(); } }] : []),
+@@ -8849,6 +8851,11 @@ export default function App() {
+                 <LudoPage onBack={goBack} c={c} />
+               </Suspense>
+             )}
++            {view === "chess" && (
++              <Suspense fallback={<Loader c={c} />}>
++                <ChessPage c={c} session={session} onBack={goBack} showToast={showToast} />
++              </Suspense>
++            )}
+             {view === "terms" && (
+               <Suspense fallback={<Loader c={c} />}>
+                 <TermsPage c={c} onBack={goBack} />
