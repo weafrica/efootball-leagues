@@ -2,8 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import { supabase, setStaySignedInPreference, clearAllAuthStorage } from "./supabaseClient";
 import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
-import CashLadder from "./CashLadder";
-import CashLadderAdmin from "./CashLadderAdmin";
 import { proxiedSignedUrl, toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
 import { withTimeout } from "./utils/withTimeout";
@@ -105,7 +103,7 @@ import {
   ArrowLeft, Settings2, Moon, Sun, LogOut, Lock, Crown, Layers, Share2, Trash2, Clock, Info,
   Wallet, Upload, Download, CheckCircle2, XCircle, ReceiptText, Shield, Copy, MessageCircle, Search, AlertTriangle,
   MoreVertical, Send, CornerDownRight, Camera, Eye, ThumbsUp, ThumbsDown, Target, ChevronDown, History, Shuffle,
-  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal, BookOpen,
+  TrendingUp, Swords, Volume2, Pause, Play, Square, Mic, Phone, Gamepad2, Medal, BookOpen, Dice5,
   ShoppingBag, ExternalLink, Shirt, Package, Menu, Star, Flame, Award, Sparkles, Coins,
   Zap, Repeat, Rocket, CreditCard, Tag, Handshake, Bell, GraduationCap, Wrench,
 } from "lucide-react";
@@ -8649,8 +8647,6 @@ export default function App() {
     // very first entry (ahead of even the promoted "League N" tile below)
     // so admins reach it without hunting through the rest of the dock.
     ...(isAdmin ? [{ icon: Trophy, label: "League Ladder (Admin)", onClick: openLeagueLadderTestScreen }] : []),
-    { icon: Wallet, label: "Cash Ladder", onClick: () => setView("cashLadder") },
-    ...(isAdmin ? [{ icon: Wallet, label: "Cash Ladder (Admin)", onClick: () => setView("cashLadderAdmin") }] : []),
     // First on the list for everyone else — labeled with the player's actual current tier
     // ("League 3", etc.) once myLeagueLadderMembership has loaded, so it
     // reads as "jump back into your league" rather than a generic entry
@@ -8748,10 +8744,6 @@ export default function App() {
             onSendRandom={sendRandomChallenge} onAcceptOpen={acceptOpenChallenge} onCancelOpen={cancelOpenChallenge} onRemoveOpen={removeOpenChallenge}
             onBack={goBack} showToast={showToast} c={c} />
           </Suspense>
-        ) : view === "cashLadder" ? (
-          <CashLadder session={session} profile={profile} c={c} onBack={goBack} />
-        ) : view === "cashLadderAdmin" && isAdmin ? (
-          <CashLadderAdmin c={c} />
         ) : leagues === null ? <Loader c={c} /> : (
           <>
             {view === "home" && (
@@ -8865,7 +8857,7 @@ export default function App() {
             )}
             {view === "ludo" && (
               <Suspense fallback={<Loader c={c} />}>
-                <LudoPage onBack={goBack} c={c} />
+                <LudoPage onBack={goBack} c={c} loggedIn={true} onFindOpponents={goBack} />
               </Suspense>
             )}
             {view === "chess" && (
@@ -8976,6 +8968,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
+  const [ludoOpen, setLudoOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   // Guest page starts showing only the quick-actions row — no league/ladder
   // content until "Ladder" or "Leagues" is tapped, per request. Local to
@@ -9006,8 +8999,28 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  // Same treatment, own state key, for the guest-playable Ludo page.
+  const guestLudoNavFirstRef = useRef(true);
   useEffect(() => {
-    document.title = shopOpen ? "Department Store" : "Matchday — eFootball Leagues";
+    const state = { guestLudoOpen: true, ludoOpen };
+    const cur = window.history.state;
+    if (cur && cur.guestLudoOpen && cur.ludoOpen === ludoOpen) return;
+    if (guestLudoNavFirstRef.current) { guestLudoNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
+    window.history.pushState(state, "");
+  }, [ludoOpen]);
+
+  useEffect(() => {
+    const onPopState = (e) => {
+      const state = e.state;
+      if (!state || !("ludoOpen" in state) || !state.guestLudoOpen) return;
+      setLudoOpen(!!state.ludoOpen);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    document.title = shopOpen ? "Department Store" : ludoOpen ? "Ludo" : "Matchday — eFootball Leagues";
   }, [shopOpen]);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
@@ -9194,10 +9207,14 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       </header>
 
       <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
-        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); }}>
+        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}-${ludoOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); setLudoOpen(false); }}>
         {shopOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
+          </Suspense>
+        ) : ludoOpen ? (
+          <Suspense fallback={<Loader c={c} />}>
+            <LudoPage c={c} onBack={() => setLudoOpen(false)} loggedIn={false} onRequireAuth={() => onRequireAuth("Sign in to find real Matchday opponents and play together.")} />
           </Suspense>
         ) : termsOpen ? (
           <Suspense fallback={<Loader c={c} />}>
@@ -9212,6 +9229,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         <section className="grid grid-cols-4 gap-2 mt-4">
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
+          <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
         </section>

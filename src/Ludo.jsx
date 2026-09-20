@@ -249,7 +249,7 @@ function LudoHelpModal({ onClose, c }) {
   );
 }
 
-export default function LudoPage({ onBack, c }) {
+export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpponents }) {
   const [phase, setPhase] = useState("setup"); // setup | playing | won
   const [active, setActive] = useState([]);
   const [roles, setRoles] = useState({}); // color -> 'human' | 'ai'
@@ -698,6 +698,22 @@ export default function LudoPage({ onBack, c }) {
 
       {phase === "setup" && (
         <div>
+          {/* This pass-and-play setup below needs no account at all — a
+              guest can play right now. This banner is the only place that
+              cares whether anyone's signed in: it's the "want real
+              opponents instead of the people next to you" upsell, not a
+              gate on the game itself. */}
+          {loggedIn ? (
+            <button onClick={onFindOpponents} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-3 font-body text-sm text-left" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+              <Bot size={16} style={{ color: c.accent }} className="shrink-0" />
+              Looking for real Matchday opponents instead? Head back to Home — the Ludo lobby is waiting there.
+            </button>
+          ) : (
+            <button onClick={onRequireAuth} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-3 font-body text-sm text-left" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+              <User size={16} style={{ color: c.accent }} className="shrink-0" />
+              Playing as a guest — sign in to find real Matchday opponents and play together instead of pass-and-play.
+            </button>
+          )}
           {!Object.keys(roles).length && (
             <button onClick={() => setShowHelp(true)} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-4 font-body text-sm text-left" style={{ background: c.surface, border: `1px dashed ${c.border}`, color: c.textDim }}>
               <HelpCircle size={16} style={{ color: c.accent }} className="shrink-0" />
