@@ -731,7 +731,7 @@ function ChessPracticeBoard({ onBack, c }) {
     setSelected(sq);
     setLegalTargets(chess.moves({ square: sq, verbose: true }).map((m) => m.to));
     setTip(PIECE_TIP[piece.type] || "Tap a highlighted square to move there.");
-    if (learningMode) chessSpeech.speak(sq, dramatizeSquare(chess, sq));
+    if (learningMode) chessSpeech.speak(sq, dramatizeSquare(chess, sq), piece.type);
   };
 
   const resetBoard = () => {

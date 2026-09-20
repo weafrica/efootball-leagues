@@ -14,7 +14,7 @@
 // too instead of sharing App.jsx's.
 
 import { pickBestVoice } from "./utils/pickBestVoice";
-import { isHdVoiceEnabled, loadNeuralVoice } from "./chessVoiceHD.js";
+import { isHdVoiceEnabled, loadNeuralVoice, BROWSER_VOICE_PARAMS_BY_PIECE } from "./chessVoiceHD.js";
 
 const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
@@ -49,7 +49,7 @@ export const chessSpeech = {
   },
   // Tapping the same square again stops it, same convention as
   // commentSpeech's own speaker-icon toggle.
-  async speak(id, text) {
+  async speak(id, text, pieceType) {
     if (this.speakingId === id) { this.stop(); return; }
     this.stop();
     this.speakingId = id;
@@ -59,10 +59,18 @@ export const chessSpeech = {
       try {
         const voiceEngine = await loadNeuralVoice();
         if (this.speakingId !== id) return; // stopped/superseded while the model was loading
-        const blob = await voiceEngine.speak(text);
+        const { blob, playbackRate } = await voiceEngine.speak(text, pieceType);
         if (this.speakingId !== id) return;
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        // Piper's per-piece "voice" — speed changes pitch too when
+        // preservesPitch is off, same trick as a chipmunk/deep-voice
+        // filter. Kokoro doesn't need this (playbackRate stays 1) since
+        // it already has a real distinct voice per piece.
+        audio.preservesPitch = false;
+        audio.mozPreservesPitch = false;
+        audio.webkitPreservesPitch = false;
+        audio.playbackRate = playbackRate || 1;
         this.audioEl = audio;
         audio.onended = () => { URL.revokeObjectURL(url); if (this.speakingId === id) { this.speakingId = null; this.notify(); } };
         audio.onerror = () => { URL.revokeObjectURL(url); if (this.speakingId === id) { this.speakingId = null; this.notify(); } };
@@ -81,7 +89,12 @@ export const chessSpeech = {
     const voice = pickBestVoice(chessVoicesCache);
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
-    utter.rate = 1.05; // a touch quicker than default — reads as energetic, not sluggish
+    // Same single browser voice for everyone, but pitch/rate is a real,
+    // universally-supported property — cheap way to give each piece its
+    // own character without needing a second real voice.
+    const params = BROWSER_VOICE_PARAMS_BY_PIECE[pieceType] || { pitch: 1, rate: 1.05 };
+    utter.pitch = params.pitch;
+    utter.rate = params.rate;
     utter.onend = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
     utter.onerror = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
     window.speechSynthesis.speak(utter);

@@ -50,7 +50,40 @@ export function setHdVoiceEnabled(v) {
 
 const PIPER_VOICE_ID = "en_US-hfc_female-medium";
 const KOKORO_MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
-const KOKORO_VOICE = "af_heart";
+
+// Kokoro ships 54 real, distinct trained voices — enough to give every
+// piece its own actual voice rather than a trick. Picked for a spread of
+// character (deep/authoritative for the King, quick for the Knight,
+// etc.) while staying in Kokoro's better-graded voices (per the model's
+// own voice quality table) rather than its weakest ones.
+const KOKORO_VOICE_BY_PIECE = {
+  k: "am_michael", // King — steady, authoritative male voice
+  q: "af_heart",   // Queen — the model's own best-quality voice, fittingly
+  r: "am_fenrir",  // Rook — solid, unmovable
+  b: "af_nicole",  // Bishop
+  n: "am_puck",    // Knight — quick, playful
+  p: "af_bella",   // Pawn — plain, dependable
+};
+
+// Piper only has ONE downloaded voice (downloading a separate model per
+// piece would multiply the download size six-fold — not worth it), so
+// pieces are told apart with pitch/speed instead of a different voice —
+// the same cheap trick games have used forever for "character voices"
+// out of one recording. Small pieces read faster and higher, big pieces
+// slower and deeper.
+const PIPER_PLAYBACK_BY_PIECE = {
+  p: 1.18, n: 1.08, b: 1.0, r: 0.92, q: 0.97, k: 0.8,
+};
+// Same idea for the free browser voice (chessVoice.js) — pitch is a real,
+// universally-supported SpeechSynthesisUtterance property.
+export const BROWSER_VOICE_PARAMS_BY_PIECE = {
+  p: { pitch: 1.3, rate: 1.15 },
+  n: { pitch: 1.15, rate: 1.08 },
+  b: { pitch: 1.05, rate: 1.0 },
+  r: { pitch: 0.9, rate: 0.95 },
+  q: { pitch: 1.1, rate: 1.0 },
+  k: { pitch: 0.72, rate: 0.85 },
+};
 
 let engine = null; // { tier, speak(text) -> Promise<Blob> }
 let loadPromise = null;
@@ -76,9 +109,10 @@ export function loadNeuralVoice(onProgress) {
       });
       engine = {
         tier,
-        async speak(text) {
-          const raw = await tts.generate(text, { voice: KOKORO_VOICE });
-          return raw.toBlob();
+        async speak(text, pieceType) {
+          const voice = KOKORO_VOICE_BY_PIECE[pieceType] || "af_heart";
+          const raw = await tts.generate(text, { voice });
+          return { blob: await raw.toBlob(), playbackRate: 1 };
         },
       };
     } else {
@@ -88,8 +122,9 @@ export function loadNeuralVoice(onProgress) {
       });
       engine = {
         tier,
-        async speak(text) {
-          return vits.predict({ text, voiceId: PIPER_VOICE_ID });
+        async speak(text, pieceType) {
+          const blob = await vits.predict({ text, voiceId: PIPER_VOICE_ID });
+          return { blob, playbackRate: PIPER_PLAYBACK_BY_PIECE[pieceType] || 1 };
         },
       };
     }
