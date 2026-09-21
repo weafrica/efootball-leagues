@@ -46,21 +46,24 @@ export const ludoSpeech = {
   speakingId: null,
   watchdog: null,
   listeners: new Set(),
+  // Pending {id, text, color} entries waiting their turn — nothing here
+  // ever cancels something already playing; it just waits in line. Only
+  // an explicit stop (re-tapping the line that's currently speaking, or
+  // leaving the page) clears this out.
+  queue: [],
   notify() { this.listeners.forEach((fn) => fn(this.speakingId)); },
   clearWatchdog() { if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; } },
   stop() {
+    this.queue = [];
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
     this.clearWatchdog();
     this.speakingId = null;
     this.notify();
   },
-  // Tapping the same line again stops it — same convention as
-  // commentSpeech's speaker-icon toggle everywhere else in this app.
-  speak(id, text, color) {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    this.clearWatchdog();
-    if (this.speakingId === id) { this.speakingId = null; this.notify(); return; }
+  // Actually speaks one entry. Only ever called when nothing else is
+  // currently playing — either the first request in, or the next one in
+  // line once the previous utterance's onend fires.
+  speakNow(id, text, color) {
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickBestVoice(ludoVoicesCache);
     if (voice) utter.voice = voice;
@@ -68,8 +71,8 @@ export const ludoSpeech = {
     const params = LUDO_VOICE_PARAMS[color] || { pitch: 1, rate: 1.05 };
     utter.pitch = params.pitch;
     utter.rate = params.rate;
-    utter.onend = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
-    utter.onerror = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
+    utter.onend = () => this.advance();
+    utter.onerror = () => this.advance();
     this.speakingId = id;
     this.notify();
     window.speechSynthesis.speak(utter);
@@ -82,6 +85,32 @@ export const ludoSpeech = {
         window.speechSynthesis.resume();
       }, 5000);
     }
+  },
+  // Called when one line finishes (naturally or on error) — clears the
+  // watchdog for the line that just ended, then starts the next queued
+  // one, if any. This is what makes lines play strictly one at a time
+  // even when several get pushed in quick succession (a fast AI turn,
+  // someone tapping around the log while a bot's mid-sentence, etc).
+  advance() {
+    this.clearWatchdog();
+    const next = this.queue.shift();
+    if (!next) { this.speakingId = null; this.notify(); return; }
+    this.speakNow(next.id, next.text, next.color);
+  },
+  // Tapping the line that's currently playing stops everything (and
+  // drops anything still queued) — same convention as commentSpeech's
+  // speaker-icon toggle elsewhere in this app. Tapping a line that's
+  // waiting in the queue pulls it back out instead of starting it early.
+  // Any other tap joins the back of the queue rather than interrupting
+  // whatever's already talking.
+  speak(id, text, color) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (this.speakingId === id) { this.stop(); return; }
+    const queuedIdx = this.queue.findIndex((q) => q.id === id);
+    if (queuedIdx !== -1) { this.queue.splice(queuedIdx, 1); this.notify(); return; }
+    if (this.speakingId == null) { this.speakNow(id, text, color); return; }
+    this.queue.push({ id, text, color });
+    this.notify();
   },
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
 };
