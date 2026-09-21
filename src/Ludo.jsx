@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   ArrowLeft, Trophy, RotateCcw, Dice1, Dice2, Dice3, Dice4, Dice5, Dice6,
   HelpCircle, X, Search, Bot, User, Skull, Shield, Zap, Combine,
+  Volume2, VolumeX, Send, Flame, Rocket,
 } from "lucide-react";
+import { ludoSpeech, useLudoSpeakingId } from "./ludoVoice.js";
 
 // ---------------------------------------------------------------------------
 // BOARD GEOMETRY — unchanged from the first version. See the derivation
@@ -148,17 +150,84 @@ function scoreAction(action, color, tokensByColor, active) {
   return { score, sim };
 }
 
-function explainAction(action, color, sim, dice) {
-  const name = COLORS[color].name;
-  if (sim.captured) return `${name} lands on ${COLORS[sim.capturedColor].name} and sends them back to base!`;
-  if (sim.finished) return `${name} brings a token all the way home!`;
-  if (action.kind === "exit") return `${name} rolled an actual 6 and deploys a new token.`;
-  if (action.kind === "combine") return `${name} combines both dice (${dice[0]}+${dice[1]}=${dice[0] + dice[1]}) to push one token further.`;
-  if (action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep)) return `${name} tucks the token onto a safe square.`;
-  return `${name} advances a token ${action.dist} square${action.dist === 1 ? "" : "s"}.`;
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Each color's a little personality, not just a hex code — spliced onto
+// the end of a line every so often so the same 4 "voices" reading banter
+// all game don't feel identical. Same idea as chessVoice.js's per-piece
+// PIECE_INTRO flavor, just per-color instead of per-piece.
+const PERSONALITY_ASIDE = {
+  red: ["🔥 Typical Red.", "🔥 No chill, as usual.", "🔥 Red doesn't do patience."],
+  green: ["🐍 Sneaky as ever.", "🐍 Green's been planning this.", "🐍 Quietly menacing."],
+  yellow: ["🌀 Pure chaos.", "🌀 Yellow has no plan and it's working.", "🌀 Unhinged, honestly."],
+  blue: ["🧊 Ice cold.", "🧊 Blue calculated that three moves ago.", "🧊 Cold-blooded."],
+};
+function withAside(line, color) {
+  if (Math.random() > 0.35) return line;
+  return `${line} ${pick(PERSONALITY_ASIDE[color] || [""])}`.trim();
 }
 
-const KILLSTREAK_LABEL = { 2: "DOUBLE CAPTURE!", 3: "TRIPLE CAPTURE!", 4: "RAMPAGE!" };
+// The actual bot banter — funny and a little ridiculous on purpose, not
+// dry move notation. Several variants per situation so back-to-back AI
+// turns don't repeat themselves. `me`/`opp` are already-resolved color
+// names.
+const CAPTURE_LINES = [
+  (me, opp) => `${me} sends ${opp} back to the yard. CRUNCH.`,
+  (me, opp) => `${me} just yeeted ${opp}'s token clean off the board!`,
+  (me, opp) => `${me} says "not today" and boots ${opp} home in shame.`,
+  (me, opp) => `${me} obliterates ${opp}. Utterly no survivors.`,
+  (me, opp) => `${me} commits several crimes against ${opp} and feels zero remorse.`,
+  (me, opp) => `${me} ambushes ${opp} out of absolutely nowhere!`,
+  (me, opp) => `${me} sends ${opp} a one-way ticket back to base. Non-refundable.`,
+];
+const FINISH_LINES = [
+  (me) => `${me} strolls a token home like it was nothing at all.`,
+  (me) => `${me} brings one home — safe, sound, and extremely smug about it.`,
+  (me) => `${me} plants the flag. One token, home free!`,
+  (me) => `${me} tucks a token in for the night. Mission accomplished.`,
+];
+const EXIT_LINES = [
+  (me) => `${me} rolls an actual 6 and busts out of the yard!`,
+  (me) => `${me} was NOT waiting one more turn — a token's finally out!`,
+  (me) => `${me} deploys a fresh token. Let the chaos begin.`,
+  (me) => `${me} kicks the yard door open. Showtime.`,
+];
+const COMBINE_LINES = [
+  (me, sum) => `${me} does the math — a ${sum}! — and goes long.`,
+  (me, sum) => `${me} combines both dice for a big ${sum}-square power move.`,
+  (me, sum) => `${me} isn't messing around: full ${sum} squares, one token.`,
+];
+const SAFE_LINES = [
+  (me) => `${me} tucks in on a safe square. Sneaky.`,
+  (me) => `${me} plays it safe. Boring, but smart.`,
+  (me) => `${me} ducks out of harm's way just in time.`,
+];
+const PLAIN_LINES = [
+  (me, n) => `${me} nudges a token forward ${n}.`,
+  (me, n) => `${me} inches ahead ${n} squares, no drama.`,
+  (me, n) => `${me} makes a quiet little ${n}-square move.`,
+  (me, n) => `${me} shuffles ${n} squares closer to victory. Probably.`,
+];
+const NO_MOVE_LINES = [
+  (me) => `${me} has literally nothing to play. Awkward silence.`,
+  (me) => `${me} stares at the dice, does nothing, passes.`,
+  (me) => `${me} is stuck. Truly, deeply stuck.`,
+];
+
+function explainAction(action, color, sim, dice) {
+  const name = COLORS[color].name;
+  let line;
+  if (sim.captured) line = pick(CAPTURE_LINES)(name, COLORS[sim.capturedColor].name);
+  else if (sim.finished) line = pick(FINISH_LINES)(name);
+  else if (action.kind === "exit") line = pick(EXIT_LINES)(name);
+  else if (action.kind === "combine") line = pick(COMBINE_LINES)(name, dice[0] + dice[1]);
+  else if (action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep)) line = pick(SAFE_LINES)(name);
+  else line = pick(PLAIN_LINES)(name, action.dist);
+  return withAside(line, color);
+}
+
+const SINGLE_CAPTURE_LABELS = ["CAPTURED!", "SENT HOME!", "OBLITERATED!", "SMASHED!"];
+const MULTI_CAPTURE_LABEL = { 2: "DOUBLE CAPTURE!", 3: "TRIPLE CAPTURE!", 4: "RAMPAGE!" };
 
 // ---------------------------------------------------------------------------
 // Help modal — same look as the real Rules panel (header/icon/title/X,
@@ -254,6 +323,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const [active, setActive] = useState([]);
   const [roles, setRoles] = useState({}); // color -> 'human' | 'ai'
   const [aiExplain, setAiExplain] = useState(true);
+  const [readAloud, setReadAloud] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
   const [tokens, setTokens] = useState({});
@@ -265,25 +335,51 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const [rollAgainStreak, setRollAgainStreak] = useState(0);
   const [turnCaptures, setTurnCaptures] = useState(0);
   const [message, setMessage] = useState("");
-  const [log, setLog] = useState([]);
+  const [log, setLog] = useState([]); // {id, text, color, speak}[]
   const [celebrate, setCelebrate] = useState(null); // {text} shown as a brief center banner
+  const [shaking, setShaking] = useState(false);
+  const [stats, setStats] = useState({ captures: 0, finishes: 0 });
+  const [commentText, setCommentText] = useState("");
   const [winner, setWinner] = useState(null);
   const [aiBusy, setAiBusy] = useState(false);
 
   const epochRef = useRef(0); // bumped every new turn; AI loop checks it to abort if stale
   const celebrateTimer = useRef(null);
-  useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); }, []);
+  const shakeTimer = useRef(null);
+  const logIdRef = useRef(0);
+  useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); if (shakeTimer.current) clearTimeout(shakeTimer.current); }, []);
+  useEffect(() => () => ludoSpeech.stop(), []); // don't leave a voice talking after leaving the page
+  const speakingId = useLudoSpeakingId();
 
   const turnColor = active[turnIdx];
 
-  const pushLog = useCallback((text, big) => {
-    setLog((l) => [text, ...l].slice(0, 8));
-    if (big) {
-      setCelebrate({ text: big });
+  const shakeBoard = useCallback(() => {
+    setShaking(true);
+    if (shakeTimer.current) clearTimeout(shakeTimer.current);
+    shakeTimer.current = setTimeout(() => setShaking(false), 450);
+  }, []);
+
+  // opts: { big, color, speak } — color/speak pick the read-aloud voice
+  // and whether this line auto-reads when "Read moves aloud" is on;
+  // plain factual system lines (turn passes, etc) pass neither.
+  const pushLog = useCallback((text, opts = {}) => {
+    const id = ++logIdRef.current;
+    setLog((l) => [{ id, text, color: opts.color || null }, ...l].slice(0, 10));
+    if (opts.big) {
+      setCelebrate({ text: opts.big });
       if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
       celebrateTimer.current = setTimeout(() => setCelebrate(null), 1500);
     }
-  }, []);
+    if (readAloud && opts.speak) ludoSpeech.speak(`log-${id}`, text, opts.color);
+    return id;
+  }, [readAloud]);
+
+  const postComment = () => {
+    const text = commentText.trim();
+    if (!text) return;
+    pushLog(`💬 ${text}`, {});
+    setCommentText("");
+  };
 
   // ---- setup ---------------------------------------------------------
   const cycleColor = (color) => {
@@ -298,8 +394,10 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   };
   const anyAI = Object.values(roles).some((r) => r === "ai");
 
-  const startGame = () => {
-    const order = COLOR_ORDER.filter((c2) => roles[c2]);
+  const startGame = (rolesOverride) => {
+    const useRoles = rolesOverride || roles;
+    if (rolesOverride) setRoles(rolesOverride);
+    const order = COLOR_ORDER.filter((c2) => useRoles[c2]);
     const t = {};
     order.forEach((c2) => { t[c2] = freshTokens(); });
     epochRef.current += 1;
@@ -311,14 +409,19 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setSelectedDice([]);
     setRollAgainStreak(0);
     setTurnCaptures(0);
+    setStats({ captures: 0, finishes: 0 });
     setWinner(null);
     setLog([]);
     setMessage(`${COLORS[order[0]].name}'s turn — roll the dice.`);
     setPhase("playing");
   };
 
+  // One tap, straight into a game: you're Red, everyone else is a bot.
+  // The fastest way to actually see the AI banter/read-aloud in action.
+  const quickPlayVsBots = () => startGame({ red: "human", green: "ai", yellow: "ai", blue: "ai" });
   const resetToSetup = () => {
     epochRef.current += 1;
+    ludoSpeech.stop();
     setPhase("setup");
     setActive([]);
     setTokens({});
@@ -349,7 +452,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       setRollAgainStreak((s) => {
         const next = s + 1;
         if (next >= 3) {
-          pushLog(`${COLORS[turnColor].name} rolled three 6-6s in a row — turn forfeited.`);
+          pushLog(`${COLORS[turnColor].name} rolled three 6-6s in a row — turn forfeited.`, { color: turnColor, speak: true });
           setMessage("Three 6-6 rolls in a row — turn forfeited!");
           setTimeout(() => reallyAdvanceTurn(), 700);
           return 0;
@@ -373,15 +476,20 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setTokens(nextTokens);
 
     if (captured) {
+      shakeBoard();
+      setStats((s) => ({ ...s, captures: s.captures + 1 }));
       setTurnCaptures((n) => {
         const next = n + 1;
-        const label = KILLSTREAK_LABEL[next];
-        pushLog(`💥 ${COLORS[color].name} captured ${COLORS[capturedColor].name}!`, label);
+        const label = next === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[next] || "RAMPAGE!");
+        pushLog(`💥 ${COLORS[color].name} captured ${COLORS[capturedColor].name}!`, { big: label, color, speak: true });
         return next;
       });
     }
-    if (finished) pushLog(`🏆 ${COLORS[color].name} got a token home!`);
-    if (explain) pushLog(explain);
+    if (finished) {
+      setStats((s) => ({ ...s, finishes: s.finishes + 1 }));
+      pushLog(`🏆 ${COLORS[color].name} got a token home!`, { color, speak: true });
+    }
+    if (explain) pushLog(explain, { color, speak: true });
 
     const newUsed = [...snapshotUsed];
     diceUsedIdx.forEach((i) => { newUsed[i] = true; });
@@ -415,7 +523,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       }
     }
     return { done: false, newUsed, nextTokens };
-  }, [active, resolveEndOfDice, pushLog]);
+  }, [active, resolveEndOfDice, pushLog, shakeBoard]);
 
   const rollDice = () => {
     if (rolling || dice != null || phase !== "playing" || aiBusy) return;
@@ -527,7 +635,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
         const actions = computeActions(turnColor, d, used, workingTokens);
         if (actions.length === 0) {
-          if (aiExplain) pushLog(`${COLORS[turnColor].name} has no move — passes.`);
+          if (aiExplain) pushLog(`${COLORS[turnColor].name} has no move — passes.`, { color: turnColor, speak: true });
           used = [true, true];
           break;
         }
@@ -686,9 +794,17 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     <div className="max-w-md mx-auto px-4 pt-6 pb-16">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> Back</button>
-        <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-body text-xs" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
-          <HelpCircle size={14} /> Help
-        </button>
+        <div className="flex items-center gap-2">
+          {phase !== "setup" && (
+            <button onClick={() => { setReadAloud((v) => !v); if (readAloud) ludoSpeech.stop(); }} title="Read battle log aloud" aria-label="Toggle read aloud"
+              className="flex items-center justify-center rounded-full w-8 h-8 shrink-0" style={{ background: readAloud ? c.accent : c.surface, border: `1px solid ${readAloud ? c.accent : c.border}`, color: readAloud ? c.accentText : c.textDim }}>
+              {readAloud ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            </button>
+          )}
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-body text-xs" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+            <HelpCircle size={14} /> Help
+          </button>
+        </div>
       </div>
 
       <div className="mb-5">
@@ -739,12 +855,19 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               );
             })}
           </div>
+          <button onClick={quickPlayVsBots} className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 mb-3 font-body text-sm" style={{ background: c.surface, border: `1.5px dashed ${c.accent}`, color: c.accent }}>
+            <Rocket size={15} /> Quick Play — you vs 3 bots
+          </button>
           {anyAI && (
-            <button onClick={() => setAiExplain((v) => !v)} className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 mb-4 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}>
+            <button onClick={() => setAiExplain((v) => !v)} className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 mb-2 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}>
               <span className="flex items-center gap-2"><Bot size={14} style={{ color: c.textFaint }} /> AI explains its moves</span>
               <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: aiExplain ? c.accent : c.border, color: aiExplain ? c.accentText : c.textFaint }}>{aiExplain ? "On" : "Off"}</span>
             </button>
           )}
+          <button onClick={() => setReadAloud((v) => !v)} className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 mb-4 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}>
+            <span className="flex items-center gap-2">{readAloud ? <Volume2 size={14} style={{ color: c.textFaint }} /> : <VolumeX size={14} style={{ color: c.textFaint }} />} Read the battle log aloud</span>
+            <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: readAloud ? c.accent : c.border, color: readAloud ? c.accentText : c.textFaint }}>{readAloud ? "On" : "Off"}</span>
+          </button>
           <button onClick={startGame} disabled={Object.keys(roles).length < 2} className="w-full rounded-xl py-3 font-display text-base disabled:opacity-40" style={{ background: c.accent, color: c.accentText }}>
             {Object.keys(roles).length < 2 ? "Pick at least 2 colors" : `Start (${Object.keys(roles).length} players)`}
           </button>
@@ -753,7 +876,19 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
       {(phase === "playing" || phase === "won") && (
         <div>
-          <div className="aspect-square w-full rounded-2xl overflow-hidden mb-4 relative" style={{ border: `2px solid ${c.border}`, background: c.surface }}>
+          {shaking && (
+            <style>{`
+              @keyframes ludoBoardShake {
+                0%, 100% { transform: translate(0, 0); }
+                20% { transform: translate(-4px, 2px); }
+                40% { transform: translate(4px, -2px); }
+                60% { transform: translate(-3px, -2px); }
+                80% { transform: translate(3px, 2px); }
+              }
+              .ludo-shake { animation: ludoBoardShake 0.45s ease; }
+            `}</style>
+          )}
+          <div className={`aspect-square w-full rounded-2xl overflow-hidden mb-4 relative${shaking ? " ludo-shake" : ""}`} style={{ border: `2px solid ${c.border}`, background: c.surface }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(15, 1fr)", gridTemplateRows: "repeat(15, 1fr)", width: "100%", height: "100%" }}>
               {COLOR_ORDER.map(renderYard)}
               {TRACK.map(([r, cc]) => renderTrackCell(r, cc))}
@@ -768,6 +903,13 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               </div>
             )}
           </div>
+
+          {(stats.captures > 0 || stats.finishes > 0) && (
+            <div className="flex items-center gap-4 px-1 mb-3 font-body text-xs" style={{ color: c.textFaint }}>
+              <span className="flex items-center gap-1"><Flame size={12} /> {stats.captures} capture{stats.captures === 1 ? "" : "s"} this game</span>
+              <span className="flex items-center gap-1"><Trophy size={12} /> {stats.finishes} home</span>
+            </div>
+          )}
 
           <div className="rounded-xl px-4 py-3 mb-3" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
             <div className="flex items-center gap-3 mb-3">
@@ -798,16 +940,35 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
             )}
           </div>
 
-          {log.length > 0 && (
-            <div className="rounded-xl px-3.5 py-2.5 mb-3" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-              <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1.5 flex items-center gap-1.5" style={{ color: c.textFaint }}><Skull size={10} /> Battle log</div>
-              <div className="space-y-1 max-h-28 overflow-y-auto">
-                {log.map((entry, i) => (
-                  <div key={i} className="font-body text-xs" style={{ color: i === 0 ? c.text : c.textFaint }}>{entry}</div>
-                ))}
+          <div className="rounded-xl px-3.5 py-2.5 mb-3" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1.5 flex items-center gap-1.5" style={{ color: c.textFaint }}><Skull size={10} /> Battle log</div>
+            {log.length > 0 ? (
+              <div className="space-y-1 max-h-32 overflow-y-auto mb-2.5">
+                {log.map((entry, i) => {
+                  const isSpeaking = speakingId === `log-${entry.id}`;
+                  return (
+                    <div key={entry.id} className="flex items-center gap-1.5 font-body text-xs" style={{ color: i === 0 ? c.text : c.textFaint }}>
+                      <button onClick={() => ludoSpeech.speak(`log-${entry.id}`, entry.text, entry.color)} className="shrink-0" aria-label="Read aloud" style={{ color: isSpeaking ? c.accent : c.textFaint }}>
+                        {isSpeaking ? <Volume2 size={11} /> : <Volume2 size={11} style={{ opacity: 0.4 }} />}
+                      </button>
+                      <span>{entry.text}</span>
+                    </div>
+                  );
+                })}
               </div>
+            ) : (
+              <div className="font-body text-xs mb-2.5" style={{ color: c.textFaint }}>Nothing yet — roll the dice, or drop a comment below.</div>
+            )}
+            <div className="flex items-center gap-2">
+              <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") postComment(); }}
+                placeholder="Say something…" maxLength={140}
+                className="flex-1 min-w-0 font-body text-xs rounded-lg px-2.5 py-2 outline-none" style={{ background: c.bg, border: `1px solid ${c.border}`, color: c.text }} />
+              <button onClick={postComment} disabled={!commentText.trim()} className="shrink-0 rounded-lg px-2.5 py-2 disabled:opacity-40" style={{ background: c.accent, color: c.accentText }} aria-label="Post comment">
+                <Send size={13} />
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
