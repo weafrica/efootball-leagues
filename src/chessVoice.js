@@ -55,21 +55,46 @@ export const chessSpeech = {
   speakingId: null,
   watchdog: null,
   audioEl: null,
+  queue: [], // [{id, text, pieceType}] — waits its turn instead of cutting off what's already playing
   listeners: new Set(),
   notify() { this.listeners.forEach((fn) => fn(this.speakingId)); },
   clearWatchdog() { if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; } },
+  // Full stop — clears anything queued too, not just what's playing right
+  // now. Used when leaving the screen, or when the player explicitly
+  // taps the same thing again to silence it.
   stop() {
+    this.queue = [];
     if (this.audioEl) { this.audioEl.pause(); this.audioEl.src = ""; this.audioEl = null; }
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
     this.clearWatchdog();
     this.speakingId = null;
     this.notify();
   },
-  // Tapping the same square again stops it, same convention as
-  // commentSpeech's own speaker-icon toggle.
-  async speak(id, text, pieceType) {
+  // Called when whatever was playing genuinely finished (or failed) —
+  // moves on to the next queued line, if any, rather than just going quiet.
+  _advance() {
+    this.speakingId = null;
+    this.clearWatchdog();
+    this.notify();
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      this._playNow(next.id, next.text, next.pieceType);
+    }
+  },
+  // Tapping the same thing again stops it outright — a direct request to
+  // silence it beats waiting politely. Anything else queues behind
+  // whatever's currently talking instead of cutting it off mid-sentence.
+  speak(id, text, pieceType) {
     if (this.speakingId === id) { this.stop(); return; }
-    this.stop();
+    if (this.speakingId !== null) {
+      // Keep the queue short — a pile of ten-move-old commentary queued
+      // up isn't useful, it's just noise arriving late.
+      this.queue = [...this.queue.filter((q) => q.id !== id).slice(-2), { id, text, pieceType }];
+      return;
+    }
+    this._playNow(id, text, pieceType);
+  },
+  async _playNow(id, text, pieceType) {
     this.speakingId = id;
     this.notify();
 
@@ -90,8 +115,8 @@ export const chessSpeech = {
         audio.webkitPreservesPitch = false;
         audio.playbackRate = playbackRate || 1;
         this.audioEl = audio;
-        audio.onended = () => { URL.revokeObjectURL(url); if (this.speakingId === id) { this.speakingId = null; this.notify(); } };
-        audio.onerror = () => { URL.revokeObjectURL(url); if (this.speakingId === id) { this.speakingId = null; this.notify(); } };
+        audio.onended = () => { URL.revokeObjectURL(url); if (this.speakingId === id) this._advance(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); if (this.speakingId === id) this._advance(); };
         await audio.play();
         return;
       } catch (err) {
@@ -102,7 +127,7 @@ export const chessSpeech = {
       }
     }
 
-    if (typeof window === "undefined" || !window.speechSynthesis) { this.speakingId = null; this.notify(); return; }
+    if (typeof window === "undefined" || !window.speechSynthesis) { this._advance(); return; }
     await waitForVoices();
     if (this.speakingId !== id) return; // stopped/superseded while we were waiting on voices
     const utter = new SpeechSynthesisUtterance(text);
@@ -117,10 +142,10 @@ export const chessSpeech = {
     utter.rate = params.rate;
     let started = false;
     utter.onstart = () => { started = true; };
-    utter.onend = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
+    utter.onend = () => { if (this.speakingId === id) this._advance(); };
     utter.onerror = (e) => {
       console.warn("Chess voice: speechSynthesis error", e.error);
-      this.speakingId = null; this.clearWatchdog(); this.notify();
+      if (this.speakingId === id) this._advance();
     };
     window.speechSynthesis.speak(utter);
     // Some browsers (mostly Android WebViews) accept the utterance and
@@ -130,8 +155,7 @@ export const chessSpeech = {
     setTimeout(() => {
       if (!started && this.speakingId === id) {
         console.warn("Chess voice: speech never started — this browser may not support speechSynthesis reliably.");
-        this.speakingId = null;
-        this.notify();
+        this._advance();
       }
     }, 2000);
     if (!isMobileDevice) {
