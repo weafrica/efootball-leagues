@@ -140,18 +140,6 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     return flags;
   }, [session.user.id]);
 
-  // Plays the current node's pre-generated narration, if any exists yet.
-  // A 404 (audio not synthesized for this node) is expected and silent —
-  // text is always the complete experience on its own.
-  useEffect(() => {
-    if (!narrationOn || !activeStory || !nodeId) return;
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.src = `${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}.wav`;
-    audio.play().catch(() => { /* missing file or autoplay blocked — fine, stay silent */ });
-    return () => { audio.pause(); };
-  }, [narrationOn, activeStory, language, nodeId]);
-
   // Ambience: a quiet looping background sound keyed by the node's
   // `ambience` tag (e.g. "stadium_training", "locker_room"). Many nodes
   // share the same tag, so this is a handful of files reused throughout,
@@ -249,6 +237,31 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       window.speechSynthesis.speak(utter);
     });
   };
+
+  // Plays the current node's pre-generated narration, if any exists yet,
+  // then auto-reads the choices via the HD engine once it ends — so a
+  // node fully narrates itself without any tap, the same way an audiobook
+  // would move from scene into "what do you do next?" Falls through to
+  // reading choices immediately if narration is off, missing (404), or
+  // blocked by the browser's autoplay policy, so silence never blocks it.
+  useEffect(() => {
+    if (!activeStory || !nodeId || !content) return;
+    const node = content.graph.nodes[nodeId];
+    const hasChoices = !node?.ending && node?.choices?.length;
+
+    const autoReadChoices = () => {
+      if (hasChoices && hdEnabled) speakChoices(node.choices);
+    };
+
+    if (!narrationOn) { autoReadChoices(); return; }
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = `${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}.wav`;
+    audio.onended = autoReadChoices;
+    audio.onerror = autoReadChoices; // no narration file yet — still auto-read choices
+    audio.play().catch(autoReadChoices); // autoplay blocked — still auto-read choices
+    return () => { audio.pause(); audio.onended = null; audio.onerror = null; };
+  }, [narrationOn, activeStory, language, nodeId, content, hdEnabled]);
 
   const toggleNarration = () => {
     setNarrationOn((prev) => {
