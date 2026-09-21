@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, RotateCcw, Lock, Check, Trophy, Wind, Lightbulb, BookOpen, Star, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, RotateCcw, Lock, Trophy, Wind, Lightbulb, BookOpen, Star, Volume2, VolumeX, Sparkles } from "lucide-react";
 import PlayerCharacter from "./PlayerCharacter.jsx";
+import { pickBestVoice } from "./utils/pickBestVoice";
 
 // ---------------------------------------------------------------------
 // Sound — every effect is synthesized live with the Web Audio API, not a
@@ -38,9 +39,56 @@ const SFX = {
   boom: () => { tone(150, 0.28, "sawtooth", 0, 0.18); tone(1300, 0.16, "sine", 0.05, 0.1); },
   win: () => { tone(523, 0.13, "triangle", 0); tone(659, 0.13, "triangle", 0.13); tone(784, 0.24, "triangle", 0.26); },
   lose: () => { tone(300, 0.2, "sine", 0); tone(220, 0.32, "sine", 0.18); },
+  // A page settling into place — swoosh (frequency sweep) plus a soft
+  // sparkle chime, for the "recovered page" popup.
+  pageFlip: () => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    const t0 = ctx.currentTime;
+    osc.frequency.setValueAtTime(900, t0);
+    osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.35);
+    gain.gain.setValueAtTime(0.001, t0);
+    gain.gain.linearRampToValueAtTime(0.12, t0 + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + 0.42);
+    tone(1500, 0.14, "sine", 0.3, 0.09);
+    tone(1900, 0.12, "sine", 0.38, 0.06);
+  },
 };
 function loadSoundPref() { try { return localStorage.getItem("sesothoMatch:sound") !== "off"; } catch { return true; } }
 function saveSoundPref(on) { try { localStorage.setItem("sesothoMatch:sound", on ? "on" : "off"); } catch { /* fine, just won't persist */ } }
+
+// ---------------------------------------------------------------------
+// Read-aloud — same free approach Chess's "learning mode" uses (live
+// browser speechSynthesis + the app's shared best-voice picker), minus
+// Chess's optional neural-voice tier: that downloads a real voice model,
+// which would break this game's "free and low-data" promise, so this
+// stays on the zero-download, always-free tier only.
+// ---------------------------------------------------------------------
+let _wordVoices = [];
+function refreshWordVoices() { if (typeof window !== "undefined" && window.speechSynthesis) _wordVoices = window.speechSynthesis.getVoices(); }
+if (typeof window !== "undefined" && window.speechSynthesis) {
+  refreshWordVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", refreshWordVoices);
+}
+const wordSpeech = {
+  speak(text) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    const voice = pickBestVoice(_wordVoices);
+    if (voice) utter.voice = voice;
+    utter.lang = voice?.lang || "en-US";
+    utter.rate = 0.92;
+    utter.pitch = 1.05;
+    window.speechSynthesis.speak(utter);
+  },
+  stop() { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); },
+};
 
 // Glow keyframes shared by selected/hint/special tiles - defined once as
 // real CSS since inline React styles can't declare @keyframes themselves.
@@ -57,6 +105,22 @@ function GameStyles() {
       }
       .candy-special { animation: candyPulseGlow 1.1s ease-in-out infinite; }
       .candy-selected { animation: candySelectGlow 0.9s ease-in-out infinite; }
+      @keyframes pageSettleIn {
+        0% { transform: scale(0.6) rotate(-10deg); opacity: 0; }
+        70% { transform: scale(1.04) rotate(1deg); opacity: 1; }
+        100% { transform: scale(1) rotate(-1deg); opacity: 1; }
+      }
+      @keyframes lineRise {
+        from { transform: translateY(10px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes tapPulse {
+        0%, 100% { opacity: 0.55; }
+        50% { opacity: 1; }
+      }
+      .page-card { animation: pageSettleIn 0.45s cubic-bezier(0.2,0.8,0.3,1.1) both; }
+      .page-line { animation: lineRise 0.35s ease both; }
+      .page-tap-hint { animation: tapPulse 1.6s ease-in-out infinite; }
     `}</style>
   );
 }
@@ -194,6 +258,32 @@ const LEVELS = [
     ],
   },
 ];
+
+// Real, verified facts pulled straight from the book's own chapters and
+// glossary (plural forms, the noun-class note in Chapter 8) - nothing
+// invented. Shown once per word on its "recovered page" popup, and again
+// via the replay button.
+const CATEGORY_LESSON = {
+  numbers: "Sesotho numbers 1\u20135 actually change form depending on what you're counting \u2014 the word for \u201cone\u201d isn't the same for people, sheep, or villages. It's one reason many Basotho count in English instead.",
+  greetings: "\u201cKea leboha\u201d (thank you) literally starts with \u201cke\u201d \u2014 I. Many Sesotho phrases are built like tiny sentences, not fixed stock phrases.",
+  animals: "Notice the pattern: most animals here take \u201cli-\u201d to become plural \u2014 poli (goat) becomes lipoli, katse (cat) becomes likatse.",
+  food: "Tee and tsoekere don't even have a plural form in Sesotho \u2014 just like \u201ctea\u201d and \u201csugar\u201d in English, there's simply too much of them to count!",
+  family: "'m\u00e8, ntate, abuti and ausi all take their own special prefix, \u201cbo-\u201d, in the plural \u2014 a family word-shape all their own.",
+  home: "Most everyday objects here take \u201cli-\u201d in the plural too \u2014 the same pattern as the animals. Setulo (chair) becomes litulo.",
+  nature: "naleli, pula and sefate all take \u201cli-\u201d in the plural as well \u2014 linaleli, lipula, lifate.",
+  people: "Most role words here take \u201cba-\u201d in the plural \u2014 moeti (visitor) becomes baeti, molemi (farmer) becomes balemi.",
+};
+const PLURALS = {
+  ntja: "lintja", katse: "likatse", khoho: "likhoho", poli: "lipoli", nku: "linku", nonyana: "linonyana",
+  bohobe: "mahobe", lebese: "mabese", lehe: "mahe", tee: "no plural form", tsoekere: "no plural form", tlhapi: "litlhapi",
+  me: "bo-'m\u00e8", ntate: "bo-ntate", abuti: "bo-abuti", ausi: "bo-ausi", ngoana: "bana", motsoalle: "metsoalle",
+  ntlo: "matlo", lemati: "mamati", setulo: "litulo", tafole: "litafole", buka: "libuka", chelete: "lichelete",
+  naleli: "linaleli", pula: "lipula", sefate: "lifate", bosiu: "masiu",
+  morena: "marena", tichere: "litichere", ngaka: "lingaka", mooki: "baoki", molemi: "balemi", moeti: "baeti",
+};
+const DISCOVERED_KEY = "sesothoMatch:discovered:v1";
+function loadDiscovered() { try { return new Set(JSON.parse(localStorage.getItem(DISCOVERED_KEY) || "[]")); } catch { return new Set(); } }
+function saveDiscovered(set) { try { localStorage.setItem(DISCOVERED_KEY, JSON.stringify(Array.from(set))); } catch { /* fine, just won't remember across sessions */ } }
 
 const CAT_COLORS = {
   numbers: "#3B7FE0", greetings: "#E8B923", animals: "#2FA84F", food: "#E0743D",
@@ -532,18 +622,18 @@ export default function SesothoMatchPage({ onBack, c }) {
   const [score, setScore] = useState(0);
   const [movesLeft, setMovesLeft] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [wordToast, setWordToast] = useState(null);
+  const [lessonWord, setLessonWord] = useState(null); // { word, level } while the "recovered page" popup is open
+  const [discovered, setDiscovered] = useState(loadDiscovered);
   const [hypeToast, setHypeToast] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [walkTo, setWalkTo] = useState(null);
   const [hint, setHint] = useState(null);
   const [preLevel, setPreLevel] = useState(null); // level index awaiting its "page" intro
-  const toastTimer = useRef(null);
   const hypeTimer = useRef(null);
   const hintTimer = useRef(null);
 
   useEffect(() => () => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
+    wordSpeech.stop();
     if (hypeTimer.current) clearTimeout(hypeTimer.current);
     if (hintTimer.current) clearTimeout(hintTimer.current);
   }, []);
@@ -573,10 +663,31 @@ export default function SesothoMatchPage({ onBack, c }) {
     setPreLevel(idx); // show the "page" blurb first, for the suspense beat
   };
 
-  const showWord = (w) => {
-    setWordToast(w);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setWordToast(null), 1800);
+  const openLesson = (levelId, word) => {
+    play(SFX.pageFlip);
+    const isNew = !discovered.has(word.id);
+    setLessonWord({ levelId, word, isNew });
+    if (isNew) {
+      setDiscovered((prev) => {
+        const next = new Set(prev); next.add(word.id);
+        saveDiscovered(next);
+        return next;
+      });
+    }
+    if (soundOn) {
+      const opener = isNew ? "New page recovered!" : "Page recovered!";
+      const lesson = CATEGORY_LESSON[levelId] || "";
+      wordSpeech.speak(`${opener} The word is ${word.sesotho}. In English, that means ${word.english}. ${lesson}`);
+    }
+  };
+  const replayLesson = () => {
+    if (!lessonWord) return;
+    const lesson = CATEGORY_LESSON[lessonWord.levelId] || "";
+    wordSpeech.speak(`The word is ${lessonWord.word.sesotho}. In English, that means ${lessonWord.word.english}. ${lesson}`);
+  };
+  const closeLesson = () => {
+    wordSpeech.stop();
+    setLessonWord(null);
   };
   const showHype = (text) => {
     setHypeToast(text);
@@ -585,7 +696,7 @@ export default function SesothoMatchPage({ onBack, c }) {
   };
 
   const trySwap = (a, b) => {
-    if (busy || movesLeft <= 0 || outcome) return;
+    if (busy || movesLeft <= 0 || outcome || lessonWord) return;
     setHint(null);
     if (hintTimer.current) clearTimeout(hintTimer.current);
     if (!areAdjacent(a, b)) { setSelected({ r: b.r, c: b.c }); return; }
@@ -611,7 +722,7 @@ export default function SesothoMatchPage({ onBack, c }) {
         if (next >= level.target && !outcome) setOutcome("won");
         return next;
       });
-      if (firstMatchType != null) showWord(level.words[firstMatchType]);
+      if (firstMatchType != null) openLesson(level.id, level.words[firstMatchType]);
       const hypeIdx = Math.min(COMBO_HYPE.length - 1, (bestRunLen - 3) + (passes - 1) * 2);
       if (hypeIdx > 0 || passes > 1) showHype(COMBO_HYPE[Math.max(0, hypeIdx)]);
       // Layer the sound to match what actually happened - a plain match
@@ -649,13 +760,14 @@ export default function SesothoMatchPage({ onBack, c }) {
   }, [outcome]);
 
   const onTapCell = (r, cIdx) => {
+    if (lessonWord) return;
     if (!selected) { play(SFX.select); setSelected({ r, c: cIdx }); return; }
     if (selected.r === r && selected.c === cIdx) { setSelected(null); return; }
     trySwap(selected, { r, c: cIdx });
   };
 
   const useHint = () => {
-    if (busy || outcome || !board) return;
+    if (busy || outcome || lessonWord || !board) return;
     const found = findHint(board, level.words.length);
     setHint(found);
     if (hintTimer.current) clearTimeout(hintTimer.current);
@@ -864,11 +976,51 @@ export default function SesothoMatchPage({ onBack, c }) {
         }))}
       </div>
 
-      {wordToast && (
-        <div className="fixed left-1/2 bottom-24 z-40 rounded-xl px-4 py-2.5 text-center"
-          style={{ transform: "translateX(-50%)", background: c.surface, border: `1.5px solid ${CAT_COLORS[level.id]}`, boxShadow: "0 6px 20px rgba(0,0,0,0.25)" }}>
-          <div className="font-display text-base" style={{ color: CAT_COLORS[level.id] }}>{wordToast.sesotho}</div>
-          <div className="font-body text-xs" style={{ color: c.textDim }}>{wordToast.english} · {wordToast.shona} · {wordToast.isizulu}</div>
+      {lessonWord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(20,14,8,0.72)" }} onClick={closeLesson}>
+          <div className="page-card rounded-2xl p-6 max-w-xs w-full relative" onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "linear-gradient(155deg, #F6ECD2 0%, #EFDFB8 100%)",
+              border: "2px solid #A9824F", boxShadow: "0 16px 40px rgba(0,0,0,0.45)", color: "#3C2E1A",
+            }}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-body text-[10px] uppercase tracking-widest" style={{ color: "#8a6f42" }}>
+                Page recovered
+              </span>
+              <button onClick={(e) => { e.stopPropagation(); replayLesson(); }} style={{ color: "#8a6f42" }} aria-label="Read aloud again">
+                <Volume2 size={16} />
+              </button>
+            </div>
+
+            {lessonWord.isNew && (
+              <div className="page-line flex items-center gap-1.5 mb-2 font-body text-xs font-bold" style={{ color: CAT_COLORS[lessonWord.levelId], animationDelay: "0.05s" }}>
+                <Sparkles size={13} /> First time recovering this word!
+              </div>
+            )}
+
+            <div className="page-line font-display text-3xl mb-1" style={{ color: CAT_COLORS[lessonWord.levelId], animationDelay: "0.1s" }}>
+              {lessonWord.word.sesotho}
+            </div>
+            {PLURALS[lessonWord.word.id] && (
+              <div className="page-line font-body text-xs mb-3 italic" style={{ color: "#8a6f42", animationDelay: "0.15s" }}>
+                plural: {PLURALS[lessonWord.word.id]}
+              </div>
+            )}
+
+            <div className="page-line space-y-1 mb-4 font-body text-sm" style={{ animationDelay: "0.2s" }}>
+              <div><span className="font-bold">English</span> — {lessonWord.word.english}</div>
+              <div><span className="font-bold">Shona</span> — {lessonWord.word.shona}</div>
+              <div><span className="font-bold">isiZulu</span> — {lessonWord.word.isizulu}</div>
+            </div>
+
+            <div className="page-line font-body text-xs leading-relaxed pt-3" style={{ borderTop: "1px dashed #A9824F", color: "#5a4a30", animationDelay: "0.3s" }}>
+              {CATEGORY_LESSON[lessonWord.levelId]}
+            </div>
+
+            <div className="page-tap-hint text-center font-body text-[11px] mt-4" style={{ color: "#8a6f42" }}>
+              Tap anywhere to continue
+            </div>
+          </div>
         </div>
       )}
 
