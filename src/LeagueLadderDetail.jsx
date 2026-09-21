@@ -1,5 +1,3 @@
-// src/LeagueLadderDetail.jsx
-//
 // WEAFRICA LEAGUE LADDER SYSTEM — Phase 2 minimal UI, extended in Phase 6
 // with a countdown display for pending fixtures (countdown_expires_at is
 // now populated by generateRoundRobinFixtures/_generate_round_robin_
@@ -1236,12 +1234,51 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
     }
     setCycle(cycleRow);
 
-    const { data: fixtureRows, error } = await supabase.from("ladder_fixtures")
+    const { data: pendingRows, error } = await supabase.from("ladder_fixtures")
       .select(LADDER_FIXTURE_SELECT)
       .eq("league_id", leagueId)
-      .eq("week_number", week);
+      .eq("week_number", week)
+      .eq("status", "pending");
     if (error) { setFixtures([]); setLoading(false); return; }
-    setFixtures(fixtureRows || []);
+
+    // Postgres egress fix (postgres-egress-fix-plan.md Step 3) — PLAYED/
+    // FORFEITED fixtures (everything computeStandings and the Results tab
+    // need) come from the cached /api/ladder-league-results endpoint
+    // instead of a live query, since that data is identical for every
+    // viewer and only changes on a deliberate confirm/correction — see
+    // that endpoint's own header for the 5-minute (not 1hr) cache window
+    // chosen specifically because admin corrections/cancellations need to
+    // show up reasonably promptly. PENDING fixtures stay a live query,
+    // unchanged above — they drive the countdown/confirm/dispute flow,
+    // which genuinely needs to stay fresh.
+    let completedRows = [];
+    let completedFetchOk = false;
+    try {
+      const resultsRes = await fetch(`/api/ladder-league-results?leagueId=${leagueId}&week=${week}`);
+      if (resultsRes.ok) {
+        const json = await resultsRes.json();
+        completedRows = json.fixtures || [];
+        completedFetchOk = true;
+      }
+    } catch {
+      // Network error reaching the cached endpoint — handled by the
+      // fallback below, not treated as "no completed fixtures yet".
+    }
+    if (!completedFetchOk) {
+      // Cached endpoint down/misconfigured — fall back to a direct live
+      // query so completed results still show, just without this one
+      // hit's egress benefit, rather than silently showing an incomplete
+      // fixture list (standings would otherwise look wrong, not just
+      // slow).
+      const { data: fallbackRows } = await supabase.from("ladder_fixtures")
+        .select(LADDER_FIXTURE_SELECT)
+        .eq("league_id", leagueId).eq("week_number", week)
+        .in("status", ["played", "forfeited"]);
+      completedRows = fallbackRows || [];
+    }
+
+    const fixtureRows = [...(pendingRows || []), ...completedRows];
+    setFixtures(fixtureRows);
 
     // Every submission attempt for this week's fixtures — drives the
     // report/confirm-dispute/admin-queue states below. Fetched regardless
