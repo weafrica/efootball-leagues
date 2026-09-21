@@ -34,7 +34,7 @@ export function previewPayout(fees, winnerStake) {
   };
 }
 
-function usePlayerFees(lobbyId) {
+function usePlayerFees(lobbyId, tag) {
   const [players, setPlayers] = useState([]); // [{ user_id, entry_fee, display_name? }]
 
   const load = useCallback(async () => {
@@ -69,11 +69,11 @@ function usePlayerFees(lobbyId) {
     // table (the banner's own 5s poll will still pick changes up eventually
     // via a full reload; this just makes the fee card feel instant).
     const channel = supabase
-      .channel(`rapid_cup_fees_${lobbyId}`)
+      .channel(`rapid_cup_fees_${tag}_${lobbyId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "rapid_cup_lobby_players", filter: `lobby_id=eq.${lobbyId}` }, load)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [lobbyId, load]);
+  }, [lobbyId, load, tag]);
 
   return { players, reload: load };
 }
@@ -154,7 +154,7 @@ export function RapidCupJoinModal({ open, onClose, onConfirm, joining, c }) {
 // is a louder, harder-to-miss entry point into that exact same action, not
 // a second mechanism.
 export function RapidCupEntryFeeNudge({ lobbyId, myUserId, showToast, c }) {
-  const { players, reload } = usePlayerFees(lobbyId);
+  const { players, reload } = usePlayerFees(lobbyId, "nudge");
   const [customizing, setCustomizing] = useState(false);
   const [draftFee, setDraftFee] = useState(20);
   const [raising, setRaising] = useState(false);
@@ -234,7 +234,7 @@ export function RapidCupEntryFeeNudge({ lobbyId, myUserId, showToast, c }) {
 // won right now. myUserId + myLobbyRowId let the viewer raise their own fee
 // inline; everyone else's row is read-only.
 export function RapidCupLiveFees({ lobbyId, myUserId, showToast, c }) {
-  const { players, reload } = usePlayerFees(lobbyId);
+  const { players, reload } = usePlayerFees(lobbyId, "live");
   const [raising, setRaising] = useState(false);
   const [draftFee, setDraftFee] = useState(null);
   const feeCap = useMyFeeCap();
