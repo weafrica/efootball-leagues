@@ -628,6 +628,8 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
             const isDark = (fileIdx + rankIdx) % 2 === 1;
             const isSelected = sq === selected;
             const isTarget = legalTargets.includes(sq);
+            const isLeftEdge = fileIdx === displayFiles[0];
+            const isBottomEdge = rankIdx === displayRanks[displayRanks.length - 1];
             return (
               <button key={sq} onClick={() => onSquareClick(sq)}
                 className="aspect-square flex items-center justify-center relative select-none"
@@ -636,6 +638,12 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
                   cursor: myTurn ? "pointer" : "default",
                 }}>
                 {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
+                {isLeftEdge && (
+                  <span className="absolute top-0.5 left-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{rank}</span>
+                )}
+                {isBottomEdge && (
+                  <span className="absolute bottom-0.5 right-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{FILES[fileIdx]}</span>
+                )}
                 {cell && (
                   <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint, filter: cell.color === "w" ? "none" : "none" }}>
                     {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
@@ -872,6 +880,12 @@ function ChessPracticeBoard({ onBack, c }) {
                 className="aspect-square flex items-center justify-center relative select-none"
                 style={{ background: isSelected ? `${c.accent}55` : isDark ? c.surfaceHover : c.surface, cursor: "pointer" }}>
                 {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
+                {fileIdx === 0 && (
+                  <span className="absolute top-0.5 left-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{rank}</span>
+                )}
+                {rankIdx === 7 && (
+                  <span className="absolute bottom-0.5 right-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{FILES[fileIdx]}</span>
+                )}
                 {cell && (
                   <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint }}>
                     {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
