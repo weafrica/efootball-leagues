@@ -22,13 +22,13 @@
 // system entirely.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Target, Download } from "lucide-react";
+import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Target } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
 import { ladderEntryFeeForTier } from "./economy.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
-import { RulesButton, timeAgo, ShareRangeModal } from "./App.jsx";
+import { RulesButton, timeAgo } from "./App.jsx";
 
 // Same lazy-loaded rules reference the home-screen Ladder Battles card
 // uses (App.jsx line ~11878) — reused here rather than duplicated, so this
@@ -52,6 +52,23 @@ import { compressImage } from "./utils/imageCompress.js";
 import { uploadToR2 } from "./utils/r2Upload.js";
 import { withTimeout } from "./utils/withTimeout.js";
 
+// Postgres egress fix (postgres-egress-fix-plan.md Step 2) — three of this
+// screen's queries used to select("*"). Narrowed to exactly the columns
+// actually used, verified two ways for the fixtures query specifically:
+// every `f.` property access in this file, AND computeStandings' own
+// field usage in formats/leagueLadder.js (home_user_id, away_user_id,
+// status, home_score, away_score) — narrowing it blind without checking
+// that second part could have silently broken the standings table instead
+// of erroring. The ladder_league_comments query (LadderLeagueComments,
+// further down) is deliberately left as select("*") — it feeds a shared
+// component (CommentsSection, imported from LeagueDetail.jsx) whose full
+// field usage isn't visible from this file, so narrowing it blind risks
+// breaking that shared component instead.
+const LADDER_FIXTURE_SELECT = "id, home_user_id, away_user_id, home_score, away_score, status, played_at, countdown_expires_at";
+const LADDER_SUBMISSION_SELECT = "id, fixture_id, status, home_score, away_score, created_at, submitted_by, proof_url";
+const LADDER_CORRECTION_SELECT = "fixture_id, proof_url, created_at";
+const LADDER_CYCLE_SELECT = "current_week, fixtures_locked, bidding_open";
+
 // ZONE_LABEL / ZONE_COLOR_KEY — Elite Safety Zone / Checkpoint Safety /
 // Danger Zone badges (Phase 7). Purely cosmetic on top of
 // classifyLadderZones' classification; see that function's own header for
@@ -61,23 +78,6 @@ const ZONE_LABEL = {
   checkpoint_safe: "Checkpoint Safety",
   danger_zone: "Danger Zone",
 };
-
-// Download-image share card for the Standings table — same ShareRangeModal
-// every normal league's Table tab already uses (App.jsx), same column
-// shape/widths as its SHARE_STANDINGS_COLUMNS, just "Player" instead of
-// "Club" and the zone folded into the name cell (as a suffix, same trick
-// App.jsx's own version uses for "· OUT" / "· AT RISK") rather than a 9th
-// column — the 8 columns below already fill the card's full table width.
-const LADDER_SHARE_COLUMNS = [
-  { key: "rank", label: "#", width: 64, align: "center", isRank: true },
-  { key: "name", label: "Player", width: 456, align: "left", isName: true, get: (r) => r.name + (r.zoneLabel ? ` · ${r.zoneLabel.toUpperCase()}` : "") },
-  { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
-  { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
-  { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
-  { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
-  { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
-  { key: "pts", label: "Pts", width: 96, align: "center", bold: true, get: (r) => String(r.pts) },
-];
 
 // BID_TICKER_MESSAGES — 50 header/subtext variations for the Live Bid
 // Ticker, all leaning into the same true story (see LiveBidTicker's own
@@ -1044,7 +1044,6 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   // nothing, so the screen isn't empty on first open.
   const [activeWidget, setActiveWidget] = useState("fixtures");
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   const [cycle, setCycle] = useState(null); // { current_week, fixtures_locked, bidding_open }
   // displayWeek — the week whose fixtures this screen actually shows.
   // NOT the same thing as cycle.current_week: join_ladder_league() always
@@ -1172,7 +1171,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
       setMembership(memberRow);
     }
 
-    const { data: cycleRow } = await supabase.from("ladder_cycle").select("*").eq("id", true).maybeSingle();
+    const { data: cycleRow } = await supabase.from("ladder_cycle").select(LADDER_CYCLE_SELECT).eq("id", true).maybeSingle();
     const currentWeek = cycleRow?.current_week ?? 0;
 
     // Anchor on the viewer's own active membership for THIS league when
@@ -1220,7 +1219,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
     setCycle(cycleRow);
 
     const { data: fixtureRows, error } = await supabase.from("ladder_fixtures")
-      .select("*")
+      .select(LADDER_FIXTURE_SELECT)
       .eq("league_id", leagueId)
       .eq("week_number", week);
     if (error) { setFixtures([]); setLoading(false); return; }
@@ -1234,17 +1233,16 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
     const fixtureIds = (fixtureRows || []).map((f) => f.id);
     if (fixtureIds.length > 0) {
       const { data: submissionRows } = await supabase.from("ladder_fixture_result_submissions")
-        .select("*")
+        .select(LADDER_SUBMISSION_SELECT)
         .in("fixture_id", fixtureIds)
         .order("created_at", { ascending: false });
       setSubmissions(submissionRows || []);
 
       // Corrections, same shape/order as the submissions query above —
-      // only field we actually need per-fixture is proof_url, but fetching
-      // the full row costs nothing extra and keeps this consistent with
-      // every other "history for these fixtures" query on this screen.
+      // only field we actually need per-fixture is proof_url, plus
+      // fixture_id to filter by and created_at to order by.
       const { data: correctionRows } = await supabase.from("ladder_fixture_corrections")
-        .select("*")
+        .select(LADDER_CORRECTION_SELECT)
         .in("fixture_id", fixtureIds)
         .order("created_at", { ascending: false });
       setCorrections(correctionRows || []);
@@ -2019,25 +2017,10 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
             ? "· scheduled"
             : cycle?.fixtures_locked ? "· locked" : "· in progress"}
         </div>
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2">
-            <Trophy size={16} style={{ color: c.accent }} />
-            <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
-          </div>
-          <button onClick={() => setShareOpen(true)} title="Download image" disabled={standings.length === 0}
-            className="w-7 h-7 flex items-center justify-center rounded-full disabled:opacity-40" style={{ background: c.surfaceHover, color: c.textDim }}>
-            <Download size={13} />
-          </button>
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy size={16} style={{ color: c.accent }} />
+          <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
         </div>
-        {shareOpen && (
-          <ShareRangeModal onClose={() => setShareOpen(false)} kicker="League Ladder" title={`Tier ${tier}`}
-            subtitle={`Week ${displayWeek} · ${standings.filter((r) => r.p > 0).length} of ${standings.length} played`}
-            rows={standings.map((row, i) => ({
-              rank: i + 1, name: nameFor(row.user_id), p: row.p, w: row.w, d: row.d, l: row.l, gd: row.gd, pts: row.pts,
-              zoneLabel: zones[row.user_id] ? ZONE_LABEL[zones[row.user_id]] : null,
-            }))}
-            columns={LADDER_SHARE_COLUMNS} c={c} />
-        )}
         {/* overflow-x-auto (not overflow-hidden) on its own inner wrapper —
             Zone now sits after Pts (per request), so a phone that can't
             fit every column at once scrolls horizontally to reach it
@@ -2373,6 +2356,15 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
 // Ladder results live in their own Results widget, not this comment
 // thread — so nothing beyond league.id (needed to insert new rows) is
 // actually read for this use.
+//
+// Deliberately NOT narrowed to explicit columns (unlike the three queries
+// in `load()` above) — this feeds CommentsSection, a shared component
+// imported from LeagueDetail.jsx whose full field usage across
+// CommentNode/CommentRow isn't visible from this file. Narrowing it
+// without seeing that component's code risks silently breaking comments,
+// reactions, or attachments elsewhere in the app to save a comparatively
+// small amount of egress on a screen most viewers don't even open (this
+// widget only fetches once someone taps the Comments tab).
 function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, showToast, c }) {
   const [comments, setComments] = useState(null); // null = loading
   // deleteArmedId — the one comment a repeat tap of the trash icon within
@@ -2487,4 +2479,3 @@ function LadderLeagueComments({ leagueId, session, isAdmin, isMember, nameFor, s
       myUsername={nameFor(session?.user?.id)} c={c} />
   );
 }
-

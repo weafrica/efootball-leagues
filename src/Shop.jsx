@@ -52,6 +52,12 @@ const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA"
 
 const CART_KEY = "efootball-shop-cart-v1";
 
+// Postgres egress fix (postgres-egress-fix-plan.md Step 2) — the order
+// queries below used to select("*, shop_order_items(*)"). Narrowed to
+// exactly the fields this file reads (verified against every `o.` / `it.`
+// property access in MyOrders and AdminOrders below).
+const SHOP_ORDER_SELECT = "id, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, shop_order_items(id, qty, product_name, unit_price)";
+
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
   if (!digits) return null;
@@ -347,7 +353,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   const loadMyOrders = async () => {
     if (!session) return;
-    const { data, error } = await supabase.from("shop_orders").select("*, shop_order_items(*)")
+    const { data, error } = await supabase.from("shop_orders").select(SHOP_ORDER_SELECT)
       .eq("user_id", session.user.id).order("created_at", { ascending: false });
     if (!error) setMyOrders(data || []);
   };
@@ -1737,7 +1743,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, c }
   const [proofUrls, setProofUrls] = useState({});
 
   const load = async () => {
-    const { data, error } = await supabase.from("shop_orders").select("*, shop_order_items(*)").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("shop_orders").select(SHOP_ORDER_SELECT).order("created_at", { ascending: false });
     if (!error) setOrders(data || []);
   };
   useEffect(() => { load(); }, []);

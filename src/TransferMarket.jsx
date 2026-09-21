@@ -34,6 +34,22 @@ import { KIT_ROOM_COBALT, KIT_ROOM_STEEL } from "./App.jsx";
 // transaction history, no purchasing.
 const formatMoney = formatNets;
 
+// Postgres egress fix (postgrest-egress-fix-plan.md Step 2 /
+// postgres-egress-fix-plan.md Step 2) — every load* function below used
+// to select("*") on its table. Narrowed to exactly the columns this
+// component reads (verified against every property access in this file,
+// not guessed) — same "keep only what's actually used" approach applied
+// to LEAGUE_SUMMARY_SELECT elsewhere. `buyer_id`/`sold_at` exist on the
+// listing tables but aren't read anywhere in this component (accept/
+// decline/cancel go through RPCs, not a re-read of these fields), so
+// they're dropped too.
+const TRANSFER_LISTING_SELECT = "id, league_id, team_id, seller_id, status, asking_price, description, sold_price, created_at";
+const TRANSFER_OFFER_SELECT = "id, listing_id, buyer_id, amount, message, status, created_at";
+const TEAM_SALE_LISTING_SELECT = "id, seller_id, status, title, asking_price, description, photo_urls, sold_price, created_at";
+const TEAM_SALE_OFFER_SELECT = "id, listing_id, buyer_id, amount, message, status, created_at";
+const ITEM_LISTING_SELECT = "id, seller_id, status, item_key, asking_price, description, sold_price, created_at";
+const ITEM_OFFER_SELECT = "id, listing_id, buyer_id, amount, message, status, created_at";
+
 // Items — the third Kit Room market, for the account-level perks/cosmetics
 // below rather than clubs or eFootball teams. Fixed catalog (not free
 // text) since these are known, finite item types — keep this in sync with
@@ -211,20 +227,20 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   };
 
   const loadListings = async () => {
-    const { data, error } = await supabase.from("transfer_listings").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("transfer_listings").select(TRANSFER_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setListings(data || []);
   };
   useEffect(() => { loadListings(); }, []);
 
   const loadMyOffers = async () => {
     if (!myId) return;
-    const { data, error } = await supabase.from("transfer_offers").select("*").eq("buyer_id", myId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("transfer_offers").select(TRANSFER_OFFER_SELECT).eq("buyer_id", myId).order("created_at", { ascending: false });
     if (!error) setMyOffers(data || []);
   };
   useEffect(() => { if (tab === "offers") loadMyOffers(); }, [tab]);
 
   const loadOffersFor = async (listingId) => {
-    const { data, error } = await supabase.from("transfer_offers").select("*").eq("listing_id", listingId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("transfer_offers").select(TRANSFER_OFFER_SELECT).eq("listing_id", listingId).order("created_at", { ascending: false });
     if (!error) setOffersByListing((prev) => ({ ...prev, [listingId]: data || [] }));
   };
 
@@ -305,20 +321,20 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
 
   // ── Team Sales ────────────────────────────────────────────────────────
   const loadTeamListings = async () => {
-    const { data, error } = await supabase.from("team_sale_listings").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("team_sale_listings").select(TEAM_SALE_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setTeamListings(data || []);
   };
   useEffect(() => { if (market === "teams") loadTeamListings(); }, [market]);
 
   const loadMyTeamOffers = async () => {
     if (!myId) return;
-    const { data, error } = await supabase.from("team_sale_offers").select("*").eq("buyer_id", myId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("team_sale_offers").select(TEAM_SALE_OFFER_SELECT).eq("buyer_id", myId).order("created_at", { ascending: false });
     if (!error) setMyTeamOffers(data || []);
   };
   useEffect(() => { if (market === "teams" && teamTab === "offers") loadMyTeamOffers(); }, [market, teamTab]);
 
   const loadTeamOffersFor = async (listingId) => {
-    const { data, error } = await supabase.from("team_sale_offers").select("*").eq("listing_id", listingId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("team_sale_offers").select(TEAM_SALE_OFFER_SELECT).eq("listing_id", listingId).order("created_at", { ascending: false });
     if (!error) setTeamOffersByListing((prev) => ({ ...prev, [listingId]: data || [] }));
   };
 
@@ -379,20 +395,20 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
 
   // ── Items ─────────────────────────────────────────────────────────────
   const loadItemListings = async () => {
-    const { data, error } = await supabase.from("item_listings").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("item_listings").select(ITEM_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setItemListings(data || []);
   };
   useEffect(() => { if (market === "items") loadItemListings(); }, [market]);
 
   const loadMyItemOffers = async () => {
     if (!myId) return;
-    const { data, error } = await supabase.from("item_offers").select("*").eq("buyer_id", myId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("item_offers").select(ITEM_OFFER_SELECT).eq("buyer_id", myId).order("created_at", { ascending: false });
     if (!error) setMyItemOffers(data || []);
   };
   useEffect(() => { if (market === "items" && itemTab === "offers") loadMyItemOffers(); }, [market, itemTab]);
 
   const loadItemOffersFor = async (listingId) => {
-    const { data, error } = await supabase.from("item_offers").select("*").eq("listing_id", listingId).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("item_offers").select(ITEM_OFFER_SELECT).eq("listing_id", listingId).order("created_at", { ascending: false });
     if (!error) setItemOffersByListing((prev) => ({ ...prev, [listingId]: data || [] }));
   };
 
