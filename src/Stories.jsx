@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import PlayerCharacter from "./PlayerCharacter.jsx";
+import { isHdVoiceEnabled, setHdVoiceEnabled, getVoiceTier, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
 // Pre-generated narration (Piper TTS, synthesized offline — see
 // synthesize_story.py / upload_story_audio.py) lives as plain files in
@@ -9,6 +10,7 @@ import PlayerCharacter from "./PlayerCharacter.jsx";
 // been run against it) simply plays nothing — text-only is always a
 // valid, complete experience, narration is an enhancement on top.
 const AUDIO_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-audio";
+const SFX_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-sfx";
 const NARRATION_PREF_KEY = "storyGame:narrationOn";
 
 // Stories — a data-light, code-only branching text "game" under Quick
@@ -58,6 +60,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const [narrationOn, setNarrationOn] = useState(() => localStorage.getItem(NARRATION_PREF_KEY) !== "off");
   const [winBanner, setWinBanner] = useState(null);
   const audioRef = useRef(null);
+  const ambienceRef = useRef(null);
+  const sfxRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,11 +152,109 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     return () => { audio.pause(); };
   }, [narrationOn, activeStory, language, nodeId]);
 
+  // Ambience: a quiet looping background sound keyed by the node's
+  // `ambience` tag (e.g. "stadium_training", "locker_room"). Many nodes
+  // share the same tag, so this is a handful of files reused throughout,
+  // not one per node. Crossfades are skipped for simplicity — it just
+  // swaps when the tag changes, which reads fine since ambience is subtle
+  // by design (low volume, not meant to be a focal point).
+  useEffect(() => {
+    if (!narrationOn || !content || !nodeId) return;
+    const node = content.graph.nodes[nodeId];
+    const ambience = ambienceRef.current;
+    if (!ambience) return;
+    if (!node?.ambience) { ambience.pause(); return; }
+    const src = `${SFX_BASE}/${node.ambience}.mp3`;
+    if (!ambience.src.endsWith(`${node.ambience}.mp3`)) {
+      ambience.src = src;
+      ambience.loop = true;
+      ambience.volume = 0.18;
+    }
+    ambience.play().catch(() => { /* missing sfx file yet — silent, no ambience this node */ });
+  }, [narrationOn, content, nodeId]);
+
+  // One-shot sound effects: a short list of tags per node (footsteps, a
+  // dog bark, a phone buzz), played once when the node is reached. Missing
+  // files fail silently — same principle as narration and ambience,
+  // sound is always an enhancement, never required.
+  useEffect(() => {
+    if (!narrationOn || !content || !nodeId) return;
+    const node = content.graph.nodes[nodeId];
+    if (!node?.sfx?.length) return;
+    node.sfx.forEach((tag, i) => {
+      const el = new Audio(`${SFX_BASE}/${tag}.mp3`);
+      el.volume = 0.5;
+      setTimeout(() => { el.play().catch(() => {}); }, i * 300);
+    });
+  }, [narrationOn, content, nodeId]);
+
+  const [hdEnabled, setHdEnabledState] = useState(() => isHdVoiceEnabled());
+  const [hdLoading, setHdLoading] = useState(false);
+  const [hdProgress, setHdProgress] = useState(0);
+  const [speakingChoices, setSpeakingChoices] = useState(false);
+  const speakingChoicesRef = useRef(false);
+  const choiceAudioRef = useRef(null);
+
+  const stopChoiceSpeech = () => {
+    speakingChoicesRef.current = false;
+    choiceAudioRef.current?.pause();
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    setSpeakingChoices(false);
+  };
+
+  // Reads the current choices aloud. Choice text is player-facing and
+  // grows with every new branch anyone writes — pre-generating audio for
+  // it, the way narration is handled, doesn't scale. This reuses the
+  // same live, in-browser neural voice built for Chess (chessVoiceHD.js):
+  // real quality (Kokoro, ~86MB, or the lighter Piper-in-browser tier),
+  // downloaded once on opt-in and cached, then able to speak ANY text
+  // instantly from then on — no authoring step, ever. Falls back to the
+  // plain built-in browser voice if HD is off or fails to load, same
+  // resilience chess already relies on.
+  const speakChoices = async (choices) => {
+    if (speakingChoices) { stopChoiceSpeech(); return; }
+    speakingChoicesRef.current = true;
+    setSpeakingChoices(true);
+
+    if (isHdVoiceEnabled()) {
+      try {
+        setHdLoading(!neuralVoiceReady());
+        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
+        setHdLoading(false);
+        for (const [i, choice] of choices.entries()) {
+          if (!speakingChoicesRef.current) return; // stopped mid-sequence
+          const { blob } = await engine.speak(`Option ${i + 1}. ${choice.text}`);
+          const audio = new Audio(URL.createObjectURL(blob));
+          choiceAudioRef.current = audio;
+          await new Promise((resolve) => {
+            audio.onended = resolve;
+            audio.onerror = resolve;
+            audio.play().catch(resolve);
+          });
+        }
+        setSpeakingChoices(false);
+        return;
+      } catch (err) {
+        console.warn("HD voice failed for choices, falling back to the built-in voice:", err);
+        setHdLoading(false);
+      }
+    }
+
+    if (!("speechSynthesis" in window)) { setSpeakingChoices(false); return; }
+    window.speechSynthesis.cancel();
+    choices.forEach((choice, i) => {
+      const utter = new SpeechSynthesisUtterance(`Option ${i + 1}: ${choice.text}`);
+      utter.rate = 1.0;
+      if (i === choices.length - 1) utter.onend = () => setSpeakingChoices(false);
+      window.speechSynthesis.speak(utter);
+    });
+  };
+
   const toggleNarration = () => {
     setNarrationOn((prev) => {
       const next = !prev;
       localStorage.setItem(NARRATION_PREF_KEY, next ? "on" : "off");
-      if (!next) audioRef.current?.pause();
+      if (!next) { audioRef.current?.pause(); ambienceRef.current?.pause(); }
       return next;
     });
   };
@@ -224,12 +326,23 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           <button onClick={backToList} className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: c.textDim }}>
             <ArrowLeft size={15} /> Stories
           </button>
-          <button onClick={toggleNarration} aria-label={narrationOn ? "Mute narration" : "Unmute narration"}
-            className="flex items-center justify-center w-8 h-8 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-            {narrationOn ? <Volume2 size={15} style={{ color: c.accent }} /> : <VolumeX size={15} style={{ color: c.textFaint }} />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { const next = !hdEnabled; setHdVoiceEnabled(next); setHdEnabledState(next); }}
+              className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-2 py-1.5 rounded-full"
+              style={{ background: c.surface, border: `1px solid ${c.border}`, color: hdEnabled ? c.accent : c.textFaint }}
+              title={`HD voice for choices (${getVoiceTier() === "hd" ? "~86MB, best quality" : "~20-60MB, lighter"}) — downloads once, opt-in`}
+            >
+              <Sparkles size={11} /> HD
+            </button>
+            <button onClick={toggleNarration} aria-label={narrationOn ? "Mute narration" : "Unmute narration"}
+              className="flex items-center justify-center w-8 h-8 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+              {narrationOn ? <Volume2 size={15} style={{ color: c.accent }} /> : <VolumeX size={15} style={{ color: c.textFaint }} />}
+            </button>
+          </div>
         </div>
         <audio ref={audioRef} className="hidden" />
+        <audio ref={ambienceRef} className="hidden" />
         {winBanner && (
           <div className="rounded-xl px-4 py-2.5 mb-3 text-sm font-semibold text-center animate-pulse"
             style={{ background: c.accent, color: c.accentText }}>
@@ -274,6 +387,11 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
+            <button onClick={() => speakChoices(node.choices)}
+              className="flex items-center justify-center gap-1.5 text-xs font-semibold self-center mb-1" style={{ color: c.textFaint }}>
+              <Volume2 size={12} />
+              {hdLoading ? `Loading HD voice… ${Math.round(hdProgress * 100)}%` : speakingChoices ? "Tap to stop" : "Hear your options"}
+            </button>
             {node.choices.map((choice, i) => (
               <button key={i} onClick={() => choose(choice.goto)}
                 className="text-left rounded-xl px-4 py-3 font-semibold"
