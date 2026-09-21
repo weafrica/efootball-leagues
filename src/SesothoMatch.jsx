@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, RotateCcw, Lock, Trophy, Wind, Lightbulb, BookOpen, Star, Volume2, VolumeX, Sparkles } from "lucide-react";
+import { ArrowLeft, RotateCcw, Lock, Trophy, Wind, Lightbulb, BookOpen, Star, Volume2, VolumeX, Sparkles, Zap, Loader2 } from "lucide-react";
 import PlayerCharacter from "./PlayerCharacter.jsx";
 import { pickBestVoice } from "./utils/pickBestVoice";
+import { isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice } from "./chessVoiceHD.js";
+
+// The Rook's voice in Chess's own HD voice map ("solid, unmovable") is the
+// deepest, most weathered-sounding option available - reused here as-is
+// rather than adding a new voice choice, since it's already exactly the
+// character this game's narrator wants. Passing "r" gets it from both the
+// HD tier (am_fenrir) and the lite tier (its slowest/deepest pitch trick).
+const NARRATOR_VOICE_KEY = "r";
 
 // ---------------------------------------------------------------------
 // Sound — every effect is synthesized live with the Web Audio API, not a
@@ -63,11 +71,12 @@ function loadSoundPref() { try { return localStorage.getItem("sesothoMatch:sound
 function saveSoundPref(on) { try { localStorage.setItem("sesothoMatch:sound", on ? "on" : "off"); } catch { /* fine, just won't persist */ } }
 
 // ---------------------------------------------------------------------
-// Read-aloud — same free approach Chess's "learning mode" uses (live
-// browser speechSynthesis + the app's shared best-voice picker), minus
-// Chess's optional neural-voice tier: that downloads a real voice model,
-// which would break this game's "free and low-data" promise, so this
-// stays on the zero-download, always-free tier only.
+// Read-aloud — free tier is live browser speechSynthesis + the app's
+// shared best-voice picker (same one Chess's free tier uses). HD tier is
+// Chess's actual neural voice engine (Kokoro/Piper) - a real one-time
+// download (20-86MB), so it only ever runs if the player has explicitly
+// turned "HD Voice" on (shared setting with Chess: turning it on in
+// either game unlocks it in both, and costs nothing twice).
 // ---------------------------------------------------------------------
 let _wordVoices = [];
 function refreshWordVoices() { if (typeof window !== "undefined" && window.speechSynthesis) _wordVoices = window.speechSynthesis.getVoices(); }
@@ -75,19 +84,39 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
   refreshWordVoices();
   window.speechSynthesis.addEventListener("voiceschanged", refreshWordVoices);
 }
+let _hdAudio = null;
 const wordSpeech = {
-  speak(text) {
+  async speak(text, { onHdProgress } = {}) {
+    wordSpeech.stop();
+    if (isHdVoiceEnabled()) {
+      try {
+        const engine = await loadNeuralVoice(onHdProgress);
+        onHdProgress?.(null); // download finished (or was already cached) - hide any progress UI
+        const { blob, playbackRate } = await engine.speak(text, NARRATOR_VOICE_KEY);
+        const audio = new Audio(URL.createObjectURL(blob));
+        audio.playbackRate = playbackRate || 1;
+        _hdAudio = audio;
+        audio.play();
+        return;
+      } catch {
+        // HD failed to load/generate (offline, unsupported device, etc.) -
+        // fall through to the always-available free voice below.
+        onHdProgress?.(null);
+      }
+    }
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickBestVoice(_wordVoices);
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
-    utter.rate = 0.92;
-    utter.pitch = 1.05;
+    utter.rate = 0.82;  // slower, deeper-feeling read - fits an old recovered page
+    utter.pitch = 0.75; // not every voice honors pitch (a known Web Speech API limit), but most do
     window.speechSynthesis.speak(utter);
   },
-  stop() { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); },
+  stop() {
+    if (_hdAudio) { _hdAudio.pause(); _hdAudio = null; }
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  },
 };
 
 // Glow keyframes shared by selected/hint/special tiles - defined once as
@@ -613,6 +642,17 @@ export default function SesothoMatchPage({ onBack, c }) {
   const [soundOn, setSoundOn] = useState(loadSoundPref);
   const toggleSound = () => setSoundOn((v) => { saveSoundPref(!v); return !v; });
   const play = (fn, ...args) => { if (soundOn) fn(...args); };
+  const [hdOn, setHdOn] = useState(isHdVoiceEnabled);
+  const [hdLoading, setHdLoading] = useState(null); // null, or 0..1 progress while the model downloads
+  const toggleHd = () => {
+    if (!hdOn) {
+      const ok = window.confirm("HD Voice sounds deeper and more natural, but downloads a one-time voice file (roughly 20\u201386MB depending on your device). It's cached after that. Turn it on?");
+      if (!ok) return;
+    }
+    const next = !hdOn;
+    setHdVoiceEnabled(next);
+    setHdOn(next);
+  };
   const [progress, setProgress] = useState(loadProgress);
   const [screen, setScreen] = useState(() => (localStorage.getItem(STORY_SEEN_KEY) ? "map" : "story"));
   const [storyStep, setStoryStep] = useState(0);
@@ -677,13 +717,13 @@ export default function SesothoMatchPage({ onBack, c }) {
     if (soundOn) {
       const opener = isNew ? "New page recovered!" : "Page recovered!";
       const lesson = CATEGORY_LESSON[levelId] || "";
-      wordSpeech.speak(`${opener} The word is ${word.sesotho}. In English, that means ${word.english}. ${lesson}`);
+      wordSpeech.speak(`${opener} The word is ${word.sesotho}. In English, that means ${word.english}. ${lesson}`, { onHdProgress: setHdLoading });
     }
   };
   const replayLesson = () => {
     if (!lessonWord) return;
     const lesson = CATEGORY_LESSON[lessonWord.levelId] || "";
-    wordSpeech.speak(`The word is ${lessonWord.word.sesotho}. In English, that means ${lessonWord.word.english}. ${lesson}`);
+    wordSpeech.speak(`The word is ${lessonWord.word.sesotho}. In English, that means ${lessonWord.word.english}. ${lesson}`, { onHdProgress: setHdLoading });
   };
   const closeLesson = () => {
     wordSpeech.stop();
@@ -828,7 +868,14 @@ export default function SesothoMatchPage({ onBack, c }) {
           <div className="font-display text-xl mb-3" style={{ color: c.text }}>{lv.title}</div>
           <div className="font-body text-sm mb-6" style={{ color: c.textDim }}>{lv.blurb}</div>
           <div className="flex flex-col gap-2">
-            <button onClick={() => { setPreLevel(null); startLevel(preLevel); }} className="w-full rounded-xl py-3 font-display text-base" style={{ background: CAT_COLORS[lv.id], color: "#fff" }}>
+            <button onClick={() => {
+              // A real tap, right here, is what "unlocks" audio on most
+              // browsers - reading the page's own blurb aloud from this
+              // exact click means every later automatic read during play
+              // (which fires from a timer, not a tap) reliably plays too.
+              if (soundOn) wordSpeech.speak(`Page ${preLevel + 1}. ${lv.title}. ${lv.blurb}`, { onHdProgress: setHdLoading });
+              setPreLevel(null); startLevel(preLevel);
+            }} className="w-full rounded-xl py-3 font-display text-base" style={{ background: CAT_COLORS[lv.id], color: "#fff" }}>
               Chase the page
             </button>
             <button onClick={() => setPreLevel(null)} className="rounded-xl py-3 font-semibold" style={{ background: c.surfaceHover || c.surface, border: `1px solid ${c.border}` }}>
@@ -850,6 +897,10 @@ export default function SesothoMatchPage({ onBack, c }) {
             <ArrowLeft size={15} /> Back
           </button>
           <div className="flex items-center gap-3">
+            <button onClick={toggleHd} className="flex items-center gap-1" style={{ color: hdOn ? c.accent : c.textFaint }} aria-label="Toggle HD voice">
+              <Zap size={14} fill={hdOn ? c.accent : "none"} />
+              <span className="font-body text-[10px] font-bold">HD</span>
+            </button>
             <button onClick={toggleSound} style={{ color: c.textFaint }} aria-label="Toggle sound">
               {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
             </button>
@@ -921,10 +972,22 @@ export default function SesothoMatchPage({ onBack, c }) {
         <button onClick={() => setScreen("map")} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}>
           <ArrowLeft size={15} /> Map
         </button>
-        <button onClick={toggleSound} style={{ color: c.textFaint }} aria-label="Toggle sound">
-          {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={toggleHd} className="flex items-center gap-1" style={{ color: hdOn ? c.accent : c.textFaint }} aria-label="Toggle HD voice">
+            <Zap size={14} fill={hdOn ? c.accent : "none"} />
+            <span className="font-body text-[10px] font-bold">HD</span>
+          </button>
+          <button onClick={toggleSound} style={{ color: c.textFaint }} aria-label="Toggle sound">
+            {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
+          </button>
+        </div>
       </div>
+
+      {hdLoading != null && (
+        <div className="flex items-center gap-2 mb-3 font-body text-xs" style={{ color: c.textFaint }}>
+          <Loader2 size={13} className="animate-spin" /> Downloading HD voice... {Math.round(hdLoading * 100)}%
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-2">
         <div>
