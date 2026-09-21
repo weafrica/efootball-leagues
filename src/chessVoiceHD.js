@@ -16,12 +16,12 @@ const HD_ENABLED_KEY = "chess_voice_hd_enabled";
 function autoDetectTier() {
   // navigator.deviceMemory (RAM in GB, rounded) is Chrome/Edge/Android
   // only — not available on iOS Safari or Firefox. Where it's missing,
-  // fall back to a simple "is this a phone" guess: phones get the
-  // lighter voice, anything else (desktop, most tablets) gets Kokoro.
+  // assume a capable device (4GB+) and go with the best voice — most
+  // phones that don't report this (notably every iPhone) are modern
+  // enough to handle it fine.
   const mem = typeof navigator !== "undefined" ? navigator.deviceMemory : undefined;
   if (typeof mem === "number") return mem >= 4 ? "hd" : "lite";
-  const isPhone = typeof navigator !== "undefined" && /Android|iPhone|iPod/i.test(navigator.userAgent);
-  return isPhone ? "lite" : "hd";
+  return "hd";
 }
 
 export function getVoiceTier() {
