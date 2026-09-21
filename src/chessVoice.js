@@ -19,8 +19,26 @@ import { isHdVoiceEnabled, loadNeuralVoice, BROWSER_VOICE_PARAMS_BY_PIECE } from
 const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
 let chessVoicesCache = [];
+let voiceWaiters = []; // resolved once a real voice list shows up
 function refreshChessVoices() {
-  if (typeof window !== "undefined" && window.speechSynthesis) chessVoicesCache = window.speechSynthesis.getVoices();
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  const list = window.speechSynthesis.getVoices();
+  if (list.length > 0) {
+    chessVoicesCache = list;
+    voiceWaiters.forEach((resolve) => resolve());
+    voiceWaiters = [];
+  }
+}
+// Some Android browsers silently do nothing (no error, no sound) if
+// speak() is called before the voice list has actually loaded — instead
+// of guessing timing, we just wait for a real voice list (or give up
+// after 1.5s and try anyway) before ever calling speak().
+function waitForVoices() {
+  if (chessVoicesCache.length > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    voiceWaiters.push(resolve);
+    setTimeout(resolve, 1500);
+  });
 }
 if (typeof window !== "undefined" && window.speechSynthesis) {
   refreshChessVoices();
@@ -85,6 +103,8 @@ export const chessSpeech = {
     }
 
     if (typeof window === "undefined" || !window.speechSynthesis) { this.speakingId = null; this.notify(); return; }
+    await waitForVoices();
+    if (this.speakingId !== id) return; // stopped/superseded while we were waiting on voices
     const utter = new SpeechSynthesisUtterance(text);
     const voice = pickBestVoice(chessVoicesCache);
     if (voice) utter.voice = voice;
@@ -95,9 +115,25 @@ export const chessSpeech = {
     const params = BROWSER_VOICE_PARAMS_BY_PIECE[pieceType] || { pitch: 1, rate: 1.05 };
     utter.pitch = params.pitch;
     utter.rate = params.rate;
+    let started = false;
+    utter.onstart = () => { started = true; };
     utter.onend = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
-    utter.onerror = () => { this.speakingId = null; this.clearWatchdog(); this.notify(); };
+    utter.onerror = (e) => {
+      console.warn("Chess voice: speechSynthesis error", e.error);
+      this.speakingId = null; this.clearWatchdog(); this.notify();
+    };
     window.speechSynthesis.speak(utter);
+    // Some browsers (mostly Android WebViews) accept the utterance and
+    // then just never speak it, with no onerror — no exception, no
+    // sound. If onstart hasn't fired within 2s, treat it as a silent
+    // failure so it's visible in the console rather than a mystery.
+    setTimeout(() => {
+      if (!started && this.speakingId === id) {
+        console.warn("Chess voice: speech never started — this browser may not support speechSynthesis reliably.");
+        this.speakingId = null;
+        this.notify();
+      }
+    }, 2000);
     if (!isMobileDevice) {
       this.watchdog = setInterval(() => {
         if (!window.speechSynthesis.speaking) { this.clearWatchdog(); return; }
