@@ -345,6 +345,10 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const [promotionChoice, setPromotionChoice] = useState(null); // { from, to } awaiting a piece pick
   const [aiThinking, setAiThinking] = useState(false);
   const [commentary, setCommentary] = useState([]); // vs-AI only: [{ from: "you"|"bot", text }] — most recent last
+  const [autoSpeak, setAutoSpeak] = useState(true); // read the bot's analysis aloud, vs-AI games only
+  const autoSpeakRef = useRef(autoSpeak);
+  useEffect(() => { autoSpeakRef.current = autoSpeak; }, [autoSpeak]);
+  useEffect(() => () => chessSpeech.stop(), []); // stop talking if the player leaves this screen
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("chess_games").select("*").eq("id", gameId).maybeSingle();
@@ -418,7 +422,14 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
         : explainAiMove(chess, moveResult);
       const narrative = describeCaptureNarrative(chess, moveResult);
       const text = [qualityOrExplain, narrative].filter(Boolean).join(" ");
-      if (text) setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text }]);
+      if (text) {
+        setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text }]);
+        // Read the analysis aloud automatically — this is the whole
+        // point of vs-AI commentary (see the "so a player can learn
+        // patterns" reasoning above): hearing why a move was strong or
+        // weak sinks in without having to stop and read a caption.
+        if (autoSpeakRef.current) chessSpeech.speak(`analysis-${gameId}-${Date.now()}`, text, moveResult.piece);
+      }
     }
   };
 
@@ -590,8 +601,15 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
           {statusText}
         </div>
         {game.is_vs_ai ? (
-          <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>
-            <Bot size={11} /> {game.ai_difficulty} bot{game.status === "active" ? ` · win +${formatNets(game.ai_reward_nets)}` : ""}
+          <div className="flex items-center gap-2">
+            <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>
+              <Bot size={11} /> {game.ai_difficulty} bot{game.status === "active" ? ` · win +${formatNets(game.ai_reward_nets)}` : ""}
+            </div>
+            <button onClick={() => { if (autoSpeak) chessSpeech.stop(); setAutoSpeak((v) => !v); }}
+              aria-label={autoSpeak ? "Mute spoken analysis" : "Unmute spoken analysis"}
+              className="p-1 rounded-full" style={{ color: autoSpeak ? c.accent : c.textFaint }}>
+              {autoSpeak ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            </button>
           </div>
         ) : game.stake_nets > 0 && (
           <div className="font-mono text-[10px] uppercase flex items-center gap-1" style={{ color: c.accent }}>

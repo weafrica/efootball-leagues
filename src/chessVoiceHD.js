@@ -72,17 +72,22 @@ const KOKORO_VOICE_BY_PIECE = {
 // out of one recording. Small pieces read faster and higher, big pieces
 // slower and deeper.
 const PIPER_PLAYBACK_BY_PIECE = {
-  p: 1.18, n: 1.08, b: 1.0, r: 0.92, q: 0.97, k: 0.8,
+  p: 1.35, n: 1.18, b: 1.0, r: 0.85, q: 0.92, k: 0.65,
 };
 // Same idea for the free browser voice (chessVoice.js) — pitch is a real,
-// universally-supported SpeechSynthesisUtterance property.
+// universally-supported SpeechSynthesisUtterance property. Note: not
+// every device/voice actually honors pitch changes (some higher-quality
+// "neural" system voices on Android/iOS clamp or ignore it entirely —
+// a real, known limitation of the Web Speech API, not a bug here) — rate
+// is far more reliably respected, so the gap is pushed hard on both to
+// make sure at least one of the two is audible everywhere.
 export const BROWSER_VOICE_PARAMS_BY_PIECE = {
-  p: { pitch: 1.3, rate: 1.15 },
-  n: { pitch: 1.15, rate: 1.08 },
-  b: { pitch: 1.05, rate: 1.0 },
-  r: { pitch: 0.9, rate: 0.95 },
-  q: { pitch: 1.1, rate: 1.0 },
-  k: { pitch: 0.72, rate: 0.85 },
+  p: { pitch: 2.0, rate: 1.35 },
+  n: { pitch: 1.6, rate: 1.18 },
+  b: { pitch: 1.2, rate: 1.0 },
+  r: { pitch: 0.7, rate: 0.85 },
+  q: { pitch: 1.3, rate: 0.95 },
+  k: { pitch: 0.4, rate: 0.65 },
 };
 
 let engine = null; // { tier, speak(text) -> Promise<Blob> }
