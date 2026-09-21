@@ -138,7 +138,7 @@ function useOpenRapidCupLobby() {
 
     const { data: players } = await supabase
       .from("rapid_cup_lobby_players")
-      .select("user_id, entry_fee")
+      .select("user_id, entry_fee, alarm_stopped_at")
       .eq("lobby_id", lobbyRow.id);
 
     setLobby(lobbyRow);
@@ -247,7 +247,8 @@ export default function RapidCupBanner({ onOpenLobby, onOpenLeague, showToast, o
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null,
+    { alarmStoppedAt: myEntry?.alarm_stopped_at ?? null }
   );
 
   // The old 15/5/1 min "lobby resets in X min — get your match in!" toast

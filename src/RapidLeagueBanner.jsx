@@ -130,7 +130,7 @@ function useOpenRapidLeagueLobby(clubCount) {
 
     const { data: players } = await supabase
       .from("rapid_league_lobby_players")
-      .select("user_id, entry_fee")
+      .select("user_id, entry_fee, alarm_stopped_at")
       .eq("lobby_id", lobbyRow.id);
 
     setLobby(lobbyRow);
@@ -225,7 +225,8 @@ export default function RapidLeagueBanner({ clubCount = 4, onOpenLobby, onOpenLe
   }, [myEntry, lobby?.league_id, onOpenLeague, showToast]);
 
   const { stopAlarm, isRinging } = useLeagueStartAlarm(
-    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null, LEAGUE_ALARM_CONFIG,
+    lobby?.status, lobby?.id ?? null, !!myEntry, handleNotificationEnter, myEntry?.user_id ?? null,
+    { ...LEAGUE_ALARM_CONFIG, alarmStoppedAt: myEntry?.alarm_stopped_at ?? null },
     lobby?.league_id ?? null, leagueName
   );
 

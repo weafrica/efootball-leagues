@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { MessageCircle } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { RapidCupLiveFees } from "./RapidCupFeeDisplay.jsx";
+import { RapidCupLiveFees, RapidCupEntryFeeNudge } from "./RapidCupFeeDisplay.jsx";
 import { RapidCupInvestorPanel } from "./RapidCupInvestment.jsx";
 import { getRapidCupTheme } from "./rapidCupThemes.js";
 import { CupboxPackReveal, RapidCupMvpCard } from "./RapidCupEpicExtras.jsx";
@@ -240,6 +240,9 @@ export function RapidCupTournamentExtras({ league, session, myTeam, myUsername, 
 
   return (
     <div className="space-y-2">
+      {myTeamId && lobby.status !== "completed" && (
+        <RapidCupEntryFeeNudge lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
+      )}
       <RapidCupHelpButton league={league} myUsername={myUsername} c={cupTheme} />
       <RapidCupLiveFees lobbyId={lobby.id} myUserId={myUserId} showToast={showToast} c={cupTheme} />
       {(lobby.status === "live" || lobby.status === "completed") && (

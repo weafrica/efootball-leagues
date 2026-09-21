@@ -22,13 +22,13 @@
 // system entirely.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Target } from "lucide-react";
+import { ArrowLeft, Trophy, Gavel, Star, Check, X, ShieldAlert, Pencil, RotateCcw, Camera, Image as ImageIcon, Search, PiggyBank, ChevronRight, Flame, TrendingUp, Users, MessageCircle, ListChecks, CalendarDays, Target, Download } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { computeStandings, classifyLadderZones } from "./formats/leagueLadder.js";
 import { watchLadderBidTicker, placeLadderBidRpc } from "./ladderBidTicker.js";
 import { ladderEntryFeeForTier } from "./economy.js";
 import { getLadderTierTheme } from "./ladderTierThemes.js";
-import { RulesButton, timeAgo } from "./App.jsx";
+import { RulesButton, timeAgo, ShareRangeModal } from "./App.jsx";
 
 // Same lazy-loaded rules reference the home-screen Ladder Battles card
 // uses (App.jsx line ~11878) — reused here rather than duplicated, so this
@@ -78,6 +78,23 @@ const ZONE_LABEL = {
   checkpoint_safe: "Checkpoint Safety",
   danger_zone: "Danger Zone",
 };
+
+// Download-image share card for the Standings table — same ShareRangeModal
+// every normal league's Table tab already uses (App.jsx), same column
+// shape/widths as its SHARE_STANDINGS_COLUMNS, just "Player" instead of
+// "Club" and the zone folded into the name cell (as a suffix, same trick
+// App.jsx's own version uses for "· OUT" / "· AT RISK") rather than a 9th
+// column — the 8 columns below already fill the card's full table width.
+const LADDER_SHARE_COLUMNS = [
+  { key: "rank", label: "#", width: 64, align: "center", isRank: true },
+  { key: "name", label: "Player", width: 456, align: "left", isName: true, get: (r) => r.name + (r.zoneLabel ? ` · ${r.zoneLabel.toUpperCase()}` : "") },
+  { key: "p", label: "P", width: 64, align: "center", get: (r) => String(r.p) },
+  { key: "w", label: "W", width: 64, align: "center", get: (r) => String(r.w) },
+  { key: "d", label: "D", width: 64, align: "center", get: (r) => String(r.d) },
+  { key: "l", label: "L", width: 64, align: "center", get: (r) => String(r.l) },
+  { key: "gd", label: "GD", width: 96, align: "center", get: (r) => (r.gd > 0 ? `+${r.gd}` : String(r.gd)) },
+  { key: "pts", label: "Pts", width: 96, align: "center", bold: true, get: (r) => String(r.pts) },
+];
 
 // BID_TICKER_MESSAGES — 50 header/subtext variations for the Live Bid
 // Ticker, all leaning into the same true story (see LiveBidTicker's own
@@ -1044,6 +1061,7 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   // nothing, so the screen isn't empty on first open.
   const [activeWidget, setActiveWidget] = useState("fixtures");
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [cycle, setCycle] = useState(null); // { current_week, fixtures_locked, bidding_open }
   // displayWeek — the week whose fixtures this screen actually shows.
   // NOT the same thing as cycle.current_week: join_ladder_league() always
@@ -2017,10 +2035,25 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
             ? "· scheduled"
             : cycle?.fixtures_locked ? "· locked" : "· in progress"}
         </div>
-        <div className="flex items-center gap-2 mb-3">
-          <Trophy size={16} style={{ color: c.accent }} />
-          <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Trophy size={16} style={{ color: c.accent }} />
+            <span className="text-sm font-bold" style={{ color: c.text, fontFamily: c.font }}>Standings</span>
+          </div>
+          <button onClick={() => setShareOpen(true)} title="Download image" disabled={standings.length === 0}
+            className="w-7 h-7 flex items-center justify-center rounded-full disabled:opacity-40" style={{ background: c.surfaceHover, color: c.textDim }}>
+            <Download size={13} />
+          </button>
         </div>
+        {shareOpen && (
+          <ShareRangeModal onClose={() => setShareOpen(false)} kicker="League Ladder" title={`Tier ${tier}`}
+            subtitle={`Week ${displayWeek} · ${standings.filter((r) => r.p > 0).length} of ${standings.length} played`}
+            rows={standings.map((row, i) => ({
+              rank: i + 1, name: nameFor(row.user_id), p: row.p, w: row.w, d: row.d, l: row.l, gd: row.gd, pts: row.pts,
+              zoneLabel: zones[row.user_id] ? ZONE_LABEL[zones[row.user_id]] : null,
+            }))}
+            columns={LADDER_SHARE_COLUMNS} c={c} />
+        )}
         {/* overflow-x-auto (not overflow-hidden) on its own inner wrapper —
             Zone now sits after Pts (per request), so a phone that can't
             fit every column at once scrolls horizontally to reach it

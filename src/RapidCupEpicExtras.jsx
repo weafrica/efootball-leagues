@@ -95,7 +95,11 @@ export function useCountdownDrumroll(msLeft, lobbyId, enabled) {
 // The difference here: while NOT yet stopped, a remount should actually
 // RESUME ringing (that's the point — it rings until they come back and
 // enter), so sessionStorage only needs to remember "stopped," never
-// "already rang."
+// "already rang." sessionStorage alone only covers a remount within the
+// SAME tab/session though — a fresh tab, a reopened app, or another
+// device has no local memory of it, so the ringing effect below also
+// checks the caller-supplied alarmStoppedAt (the DB's alarm_stopped_at,
+// which stopAlarm() writes via its RPC) as a second, cross-session gate.
 const STOPPED_ALARM_STORAGE_KEY = "rapidCup:stoppedAlarmLobbyIds";
 
 function loadStoppedAlarmLobbyIds() {
@@ -213,11 +217,23 @@ async function closeLeagueStartNotification(lobbyId) {
   }
 }
 
-export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
+export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId, config = {}) {
   const ctxRef = useRef(null);
   const intervalRef = useRef(null);
   const phaseTimerRef = useRef(null); // pending "pause after 1min" or "resume after 5min" timeout
   const [isRinging, setIsRinging] = useState(false);
+  // The caller's own lobby-player row already carries alarm_stopped_at —
+  // reading it here closes a real gap: sessionStorage-only "already
+  // stopped" tracking (below) only survives a remount within the SAME
+  // browser session/tab. A fresh tab, a reopened app, or a different
+  // device that wasn't open at the moment stopAlarm() ran would have no
+  // sessionStorage entry for this lobby and would ring again despite the
+  // database already recording that this player stopped it. A primitive
+  // (the timestamp string, or null/undefined) rather than the whole
+  // config object, so the effect below only reacts when this value
+  // actually changes — not on every unrelated re-render of the caller
+  // (RapidLeagueBanner builds a fresh config object every render).
+  const alreadyStoppedAt = config.alarmStoppedAt;
 
   // Ref, not a dependency — so a caller passing a fresh onEnter closure
   // every render (RapidCupBanner does, via an inline function) doesn't
@@ -305,7 +321,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
       setIsRinging(false);
       return;
     }
-    if (loadStoppedAlarmLobbyIds().has(lobbyId)) {
+    if (loadStoppedAlarmLobbyIds().has(lobbyId) || alreadyStoppedAt) {
       setIsRinging(false);
       return;
     }
@@ -386,7 +402,7 @@ export function useLeagueStartAlarm(status, lobbyId, enabled, onEnter, userId) {
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
       if (ctxRef.current) { ctxRef.current.close?.(); ctxRef.current = null; }
     };
-  }, [status, lobbyId, enabled]);
+  }, [status, lobbyId, enabled, alreadyStoppedAt]);
 
   return { stopAlarm, isRinging };
 }

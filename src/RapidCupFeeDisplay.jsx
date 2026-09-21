@@ -140,6 +140,95 @@ export function RapidCupJoinModal({ open, onClose, onConfirm, joining, c }) {
   );
 }
 
+// Entry-fee nudge — RapidCupJoinModal's fee slider defaults to 0 Nets (see
+// its own comment above), so nothing stops a player from tapping straight
+// through Join without ever touching it. A 0-fee player still gets 100% of
+// their stake back if they win (Section 4a: baseReturn = winnerStake = 0)
+// but earns no bonus share at all, since the whole bonus pool is split
+// proportional to stake — effectively opting out of the actual prize while
+// still occupying one of the 4 seats. This nudges them to fix that, every
+// time they land back on the tournament page for as long as it's still
+// true, rather than a one-time toast they can miss or dismiss and forget.
+// Reuses the same usePlayerFees/raise_rapid_cup_entry_fee path
+// RapidCupLiveFees's own inline "Raise your fee" already uses below — this
+// is a louder, harder-to-miss entry point into that exact same action, not
+// a second mechanism.
+export function RapidCupEntryFeeNudge({ lobbyId, myUserId, showToast, c }) {
+  const { players, reload } = usePlayerFees(lobbyId);
+  const [customizing, setCustomizing] = useState(false);
+  const [draftFee, setDraftFee] = useState(20);
+  const [raising, setRaising] = useState(false);
+  const feeCap = useMyFeeCap();
+
+  const mine = players.find((p) => p.user_id === myUserId);
+  if (!mine || mine.entry_fee > 0) return null; // already staked something — nothing to nudge about
+
+  const raise = async (newFee) => {
+    if (newFee <= 0) return;
+    setRaising(true);
+    const { error } = await supabase.rpc("raise_rapid_cup_entry_fee", { p_lobby_id: lobbyId, p_new_fee: newFee });
+    setRaising(false);
+    if (error) { showToast?.(error.message || "Couldn't set your entry fee."); return; }
+    setCustomizing(false);
+    await reload();
+  };
+
+  // Quick-tap amounts — capped at whatever this player can actually afford
+  // (feeCap), so a low-balance player never sees a button that would just
+  // bounce off the server's own 20%-of-balance check. Deduplicated in case
+  // feeCap is small enough that two of these round to the same value.
+  const quickAmounts = [...new Set([20, 50, 100].filter((n) => n <= feeCap))];
+
+  return (
+    <div style={{
+      borderRadius: 14, padding: "16px 18px", textAlign: "center",
+      background: "linear-gradient(135deg, #f59e0b, #ef4444)", color: "#fff",
+    }}>
+      <div style={{ fontWeight: 800, fontSize: 15 }}>⚠️ You're playing for free!</div>
+      <div style={{ fontSize: 12.5, opacity: 0.92, marginTop: 4, lineHeight: 1.4 }}>
+        A 0 Nets stake gets your full entry back if you win, but zero share of the bonus
+        pool — set a real stake to actually be in the running.
+      </div>
+
+      {!customizing ? (
+        <>
+          {quickAmounts.length > 0 && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              {quickAmounts.map((amt) => (
+                <button key={amt} onClick={() => raise(amt)} disabled={raising}
+                  style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", background: "rgba(255,255,255,0.92)", color: "#b45309", fontWeight: 800, fontSize: 14 }}>
+                  {raising ? "…" : `${amt}`}
+                </button>
+              ))}
+            </div>
+          )}
+          <button onClick={() => { setDraftFee(Math.min(20, feeCap) || 5); setCustomizing(true); }} disabled={raising}
+            style={{ marginTop: 8, width: "100%", padding: "6px 0", borderRadius: 8, border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", fontSize: 12.5 }}>
+            Set a custom amount
+          </button>
+        </>
+      ) : (
+        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.15)", borderRadius: 10, padding: 12 }}>
+          <EntryFeeSlider value={draftFee} onChange={setDraftFee} min={5} max={Math.max(feeCap, 5)} disabled={raising} />
+          {feeCap < 400 && (
+            <div style={{ fontSize: 11, opacity: 0.85, marginTop: 4 }}>Capped at 20% of your Nets balance ({feeCap} Nets).</div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={() => setCustomizing(false)} disabled={raising}
+              style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff" }}>
+              Back
+            </button>
+            <button onClick={() => raise(draftFee)} disabled={raising || draftFee <= 0}
+              style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: "rgba(255,255,255,0.92)", color: "#b45309", fontWeight: 700 }}>
+              {raising ? "Setting…" : `Set ${draftFee} Nets`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Live fee + expected-payout display for the tournament/lobby page — all 4
 // seats, each player's current fee, max_stake, and what they'd net if they
 // won right now. myUserId + myLobbyRowId let the viewer raise their own fee
