@@ -16,8 +16,6 @@
 import { pickBestVoice } from "./utils/pickBestVoice";
 import { isHdVoiceEnabled, loadNeuralVoice, BROWSER_VOICE_PARAMS_BY_PIECE } from "./chessVoiceHD.js";
 
-const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
 let chessVoicesCache = [];
 let voiceWaiters = []; // resolved once a real voice list shows up
 function refreshChessVoices() {
@@ -53,12 +51,11 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 
 export const chessSpeech = {
   speakingId: null,
-  watchdog: null,
+  speakingStartedAt: 0,
   audioEl: null,
   queue: [], // [{id, text, pieceType}] — waits its turn instead of cutting off what's already playing
   listeners: new Set(),
   notify() { this.listeners.forEach((fn) => fn(this.speakingId)); },
-  clearWatchdog() { if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; } },
   // Full stop — clears anything queued too, not just what's playing right
   // now. Used when leaving the screen, or when the player explicitly
   // taps the same thing again to silence it.
@@ -66,7 +63,6 @@ export const chessSpeech = {
     this.queue = [];
     if (this.audioEl) { this.audioEl.pause(); this.audioEl.src = ""; this.audioEl = null; }
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
-    this.clearWatchdog();
     this.speakingId = null;
     this.notify();
   },
@@ -74,7 +70,6 @@ export const chessSpeech = {
   // moves on to the next queued line, if any, rather than just going quiet.
   _advance() {
     this.speakingId = null;
-    this.clearWatchdog();
     this.notify();
     if (this.queue.length > 0) {
       const next = this.queue.shift();
@@ -82,10 +77,18 @@ export const chessSpeech = {
     }
   },
   // Tapping the same thing again stops it outright — a direct request to
-  // silence it beats waiting politely. Anything else queues behind
-  // whatever's currently talking instead of cutting it off mid-sentence.
+  // silence it beats waiting politely. BUT: a single real tap can fire
+  // its click handler twice on some mobile browsers (a known ghost-tap
+  // quirk), which would otherwise stop a sentence half a second after
+  // it started with no second tap actually happening — so a repeat of
+  // the same id within 400ms of starting is treated as that same
+  // duplicate event and ignored, not as a deliberate stop.
   speak(id, text, pieceType) {
-    if (this.speakingId === id) { this.stop(); return; }
+    if (this.speakingId === id) {
+      if (Date.now() - this.speakingStartedAt < 400) return; // almost certainly a duplicate event, not a real second tap
+      this.stop();
+      return;
+    }
     if (this.speakingId !== null) {
       // Keep the queue short — a pile of ten-move-old commentary queued
       // up isn't useful, it's just noise arriving late.
@@ -96,6 +99,7 @@ export const chessSpeech = {
   },
   async _playNow(id, text, pieceType) {
     this.speakingId = id;
+    this.speakingStartedAt = Date.now();
     this.notify();
 
     if (isHdVoiceEnabled()) {
@@ -158,13 +162,13 @@ export const chessSpeech = {
         this._advance();
       }
     }, 2000);
-    if (!isMobileDevice) {
-      this.watchdog = setInterval(() => {
-        if (!window.speechSynthesis.speaking) { this.clearWatchdog(); return; }
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }, 5000);
-    }
+    // NOTE: earlier versions of this file paused/resumed speechSynthesis
+    // every 5s on desktop to dodge a known Chrome bug where very long
+    // utterances (30s+) get cut off. Chess commentary is always a
+    // sentence or two — nowhere near long enough to hit that bug — and
+    // pause()/resume() is flaky enough across browsers that it looked
+    // like a plausible cause of sentences cutting off with nothing
+    // tapped, so it's removed rather than guessed at.
   },
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
 };
