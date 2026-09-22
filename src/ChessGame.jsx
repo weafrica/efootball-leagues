@@ -23,7 +23,7 @@ import { Chess } from "chess.js";
 import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
-import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative } from "./chessAi.js";
+import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative, maybeFunnyAside } from "./chessAi.js";
 import { chessSpeech, dramatizeSquare } from "./chessVoice.js";
 import { getVoiceTier, setVoiceTierOverride, isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
@@ -350,6 +350,23 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   useEffect(() => { autoSpeakRef.current = autoSpeak; }, [autoSpeak]);
   useEffect(() => () => chessSpeech.stop(), []); // stop talking if the player leaves this screen
 
+  // Capture excitement — a brief on-board flash + a combo counter for
+  // back-to-back captures by the same side. Pure visual flair (CSS only,
+  // no assets), applies to both PvP and vs-AI since it carries no
+  // analysis or advantage, just drama.
+  const [captureFlash, setCaptureFlash] = useState(null); // { text, glyph, combo, key } | null
+  const captureStreakRef = useRef({ color: null, count: 0 });
+  const CAPTURE_WORDS = ["CAPTURED!", "TAKEN DOWN!", "SMASHED!", "CRUSHED!", "OUTPLAYED!", "DESTROYED!"];
+  const flashCapture = (moveResult) => {
+    const streak = captureStreakRef.current;
+    if (streak.color === moveResult.color) streak.count += 1;
+    else { streak.color = moveResult.color; streak.count = 1; }
+    const glyph = PIECE_GLYPH[`${moveResult.color === "w" ? "b" : "w"}${moveResult.captured.toUpperCase()}`];
+    const key = Date.now();
+    setCaptureFlash({ text: CAPTURE_WORDS[Math.floor(Math.random() * CAPTURE_WORDS.length)], glyph, combo: streak.count, key });
+    setTimeout(() => setCaptureFlash((cur) => (cur?.key === key ? null : cur)), 1400);
+  };
+
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("chess_games").select("*").eq("id", gameId).maybeSingle();
     if (error) { showToast?.(`Couldn't load game: ${error.message}`); return; }
@@ -421,15 +438,20 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
         ? commentOnHumanMove(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion }, moveResult.san)
         : explainAiMove(chess, moveResult);
       const narrative = describeCaptureNarrative(chess, moveResult);
-      const text = [qualityOrExplain, narrative].filter(Boolean).join(" ");
-      if (text) {
-        setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text }]);
+      const aside = maybeFunnyAside(qualityOrExplain?.tag, moveResult, chess.isCheckmate(), game?.move_count);
+      const display = [qualityOrExplain?.display, narrative, aside].filter(Boolean).join(" ");
+      const spoken = [qualityOrExplain?.spoken, narrative, aside].filter(Boolean).join(" ");
+      if (display) {
+        setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text: display }]);
         // Read the analysis aloud automatically — this is the whole
         // point of vs-AI commentary (see the "so a player can learn
         // patterns" reasoning above): hearing why a move was strong or
         // weak sinks in without having to stop and read a caption.
-        if (autoSpeakRef.current) chessSpeech.speak(`analysis-${gameId}-${Date.now()}`, text, moveResult.piece);
+        // Uses the queued chessSpeech (see chessVoice.js) so this line
+        // waits for whatever's already talking instead of cutting it off.
+        if (autoSpeakRef.current) chessSpeech.speak(`analysis-${gameId}-${Date.now()}`, spoken, moveResult.piece);
       }
+      if (moveResult.captured) flashCapture(moveResult);
     }
   };
 
@@ -503,6 +525,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     // over a real opponent). Only ever runs after the move is already committed.
     const narrative = describeCaptureNarrative(chess, moveResult);
     if (narrative) setCommentary((prev) => [...prev.slice(-4), { from: "narrator", text: narrative }]);
+    if (moveResult.captured) flashCapture(moveResult);
   };
 
   const attemptMove = async (from, to, promotion) => {
@@ -619,39 +642,57 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       </div>
 
       {/* 8x8 board */}
-      <div className="grid grid-cols-8 rounded-lg overflow-hidden border" style={{ borderColor: c.border }}>
-        {displayRanks.map((rankIdx) =>
-          displayFiles.map((fileIdx) => {
-            const rank = 8 - rankIdx; // chess.js board()[0] is rank 8
-            const sq = squareId(fileIdx, rank);
-            const cell = board[rankIdx][fileIdx];
-            const isDark = (fileIdx + rankIdx) % 2 === 1;
-            const isSelected = sq === selected;
-            const isTarget = legalTargets.includes(sq);
-            const isLeftEdge = fileIdx === displayFiles[0];
-            const isBottomEdge = rankIdx === displayRanks[displayRanks.length - 1];
-            return (
-              <button key={sq} onClick={() => onSquareClick(sq)}
-                className="aspect-square flex items-center justify-center relative select-none"
-                style={{
-                  background: isSelected ? `${c.accent}55` : isDark ? c.surfaceHover : c.surface,
-                  cursor: myTurn ? "pointer" : "default",
-                }}>
-                {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
-                {isLeftEdge && (
-                  <span className="absolute top-0.5 left-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{rank}</span>
-                )}
-                {isBottomEdge && (
-                  <span className="absolute bottom-0.5 right-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{FILES[fileIdx]}</span>
-                )}
-                {cell && (
-                  <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint, filter: cell.color === "w" ? "none" : "none" }}>
-                    {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
-                  </span>
-                )}
-              </button>
-            );
-          })
+      <div className="relative">
+        <div className="grid grid-cols-8 rounded-lg overflow-hidden border" style={{ borderColor: c.border }}>
+          {displayRanks.map((rankIdx) =>
+            displayFiles.map((fileIdx) => {
+              const rank = 8 - rankIdx; // chess.js board()[0] is rank 8
+              const sq = squareId(fileIdx, rank);
+              const cell = board[rankIdx][fileIdx];
+              const isDark = (fileIdx + rankIdx) % 2 === 1;
+              const isSelected = sq === selected;
+              const isTarget = legalTargets.includes(sq);
+              const isLeftEdge = fileIdx === displayFiles[0];
+              const isBottomEdge = rankIdx === displayRanks[displayRanks.length - 1];
+              return (
+                <button key={sq} onClick={() => onSquareClick(sq)}
+                  className="aspect-square flex items-center justify-center relative select-none"
+                  style={{
+                    background: isSelected ? `${c.accent}55` : isDark ? c.surfaceHover : c.surface,
+                    cursor: myTurn ? "pointer" : "default",
+                  }}>
+                  {isTarget && <span className="absolute w-2.5 h-2.5 rounded-full" style={{ background: `${c.accent}99` }} />}
+                  {isLeftEdge && (
+                    <span className="absolute top-0.5 left-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{rank}</span>
+                  )}
+                  {isBottomEdge && (
+                    <span className="absolute bottom-0.5 right-1 font-mono text-[9px] font-bold leading-none" style={{ color: c.textFaint }}>{FILES[fileIdx]}</span>
+                  )}
+                  {cell && (
+                    <span className="text-2xl sm:text-3xl leading-none" style={{ color: cell.color === "w" ? c.text : c.textFaint, filter: cell.color === "w" ? "none" : "none" }}>
+                      {PIECE_GLYPH[`${cell.color}${cell.type.toUpperCase()}`]}
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+        {captureFlash && (
+          <div key={captureFlash.key} className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="flex flex-col items-center gap-1 animate-bounce">
+              <span className="text-5xl drop-shadow-lg" style={{ filter: "grayscale(0.3)" }}>{captureFlash.glyph}</span>
+              <span className="font-extrabold uppercase tracking-wide text-lg px-3 py-1 rounded-full"
+                style={{ background: c.accent, color: c.accentText, boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+                {captureFlash.text}
+              </span>
+              {captureFlash.combo > 1 && (
+                <span className="font-mono text-xs font-bold uppercase" style={{ color: c.accent }}>
+                  {captureFlash.combo}x combo!
+                </span>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

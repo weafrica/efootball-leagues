@@ -188,15 +188,49 @@ const CRITICAL = {
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+const PIECE_FULL_NAME = { K: "King", Q: "Queen", R: "Rook", B: "Bishop", N: "Knight" };
+
+// sanToSpeech — turns algebraic notation into something that reads
+// naturally out loud. "Rd4" -> "Rook d4", "Qxe5" -> "Queen takes e5",
+// "Nbd7" -> "Knight from b to d7", "O-O" -> "castles kingside",
+// "e8=Q" -> "Pawn e8, promotes to Queen", "+"/"#" -> ", check"/", checkmate".
+// Hearing "R D 4" spelled out letter by letter reads badly; the on-screen
+// caption still shows plain SAN (chess players expect that), only the
+// spoken version goes through this.
+export function sanToSpeech(san) {
+  if (!san) return "";
+  if (san.startsWith("O-O-O")) return `castles queenside${san.includes("#") ? ", checkmate" : san.includes("+") ? ", check" : ""}`;
+  if (san.startsWith("O-O")) return `castles kingside${san.includes("#") ? ", checkmate" : san.includes("+") ? ", check" : ""}`;
+
+  const m = san.match(/^([KQRBN])?([a-h])?([1-8])?(x)?([a-h][1-8])(=([QRBN]))?([+#])?$/);
+  if (!m) return san; // unexpected shape — read the raw SAN rather than say nothing
+  const [, piece, fromFile, fromRank, capture, toSquare, , promo, checkMark] = m;
+
+  const pieceName = piece ? PIECE_FULL_NAME[piece] : "Pawn";
+  const hasDisambig = Boolean(fromFile || fromRank);
+  let text = pieceName;
+  if (hasDisambig) text += ` from ${fromFile || ""}${fromRank || ""}`;
+  text += capture ? ` takes ${toSquare}` : (hasDisambig ? ` to ${toSquare}` : ` ${toSquare}`);
+  if (promo) text += `, promotes to ${PIECE_FULL_NAME[promo]}`;
+  if (checkMark === "#") text += ", checkmate";
+  else if (checkMark === "+") text += ", check";
+  return text;
+}
+
 // commentOnHumanMove — the "praise/criticize" side. moveSan is the SAN
 // of the move that was actually played (for referencing it by name).
+// Returns { display, spoken } — the caption keeps standard notation
+// (normal for a chess app), the spoken version expands it to words.
 export function commentOnHumanMove(fenBeforeMove, playedMove, moveSan) {
   const { tag, lossCp } = classifyMove(fenBeforeMove, playedMove);
-  if (tag === "Best move" || tag === "Excellent" || tag === "Good") {
-    return `${tag}: ${pick(ENCOURAGING[tag] || ENCOURAGING["Good"])}`;
-  }
   if (tag === "Only move" || tag === "Move played") return null; // nothing useful to say
-  return `${tag} (${moveSan}): ${pick(CRITICAL[tag])} (~${lossCp}cp)`;
+  const spokenMove = sanToSpeech(moveSan);
+  if (tag === "Best move" || tag === "Excellent" || tag === "Good") {
+    const line = pick(ENCOURAGING[tag] || ENCOURAGING["Good"]);
+    return { display: `${tag}: ${line}`, spoken: `${spokenMove}. ${line}`, tag };
+  }
+  const line = pick(CRITICAL[tag]);
+  return { display: `${tag} (${moveSan}): ${line} (~${lossCp}cp)`, spoken: `${spokenMove}. ${tag}. ${line}`, tag };
 }
 
 // explainAiMove — the "how I made my brilliant move" side. Template-based
@@ -211,7 +245,57 @@ export function explainAiMove(chessAfterMove, moveResult) {
   if (chessAfterMove.isCheckmate()) bits.push("that's checkmate");
   else if (chessAfterMove.inCheck?.() || moveResult.san.includes("+")) bits.push("puts your king in check");
   if (bits.length === 0) bits.push("improves its position and piece activity");
-  return `${moveResult.san} — ${bits.join(", ")}.`;
+  const bitsText = bits.join(", ");
+  return { display: `${moveResult.san} — ${bitsText}.`, spoken: `${sanToSpeech(moveResult.san)}. ${bitsText}.` };
+}
+
+// ---------------------------------------------------------------------
+// Funny/ridiculous asides — pure comic relief, separate from the serious
+// analysis above. Triggered some of the time (not every move — that
+// would get old fast), keyed off things we already know cheaply: the
+// move's quality tag, whether it took the queen, checkmate, or it's
+// still the opening. Never claims anything analytical, just banter.
+const FUNNY_ASIDES = {
+  Blunder: [
+    "Oof. My grandmother castles better than that.",
+    "That one's going in my highlight reel. The bad kind.",
+    "I almost feel bad taking that. Almost.",
+    "Was that on purpose? Be honest.",
+  ],
+  Mistake: [
+    "Bold strategy. Let's see if it pays off. (It won't.)",
+    "Interesting choice. And by interesting I mean questionable.",
+  ],
+  "Best move": [
+    "Okay, show-off.",
+    "Wait, who taught you that?",
+    "I did NOT see that coming.",
+    "Rude. Playing well against me like that.",
+  ],
+  queenTaken: [
+    "YOUR QUEEN. Gone. Anyway, moving on.",
+    "That's going to leave a mark.",
+    "RIP to your queen. She served admirably.",
+  ],
+  checkmate: [
+    "GG. Try not to cry.",
+    "And that's how it's done, folks.",
+    "Good game! Rematch? I'll even give you a head start. Kidding.",
+  ],
+  opening: [
+    "Ah, the classics. Bold choice.",
+    "Textbook opening. I respect it.",
+  ],
+};
+export function maybeFunnyAside(tag, moveResult, isCheckmate, moveCount) {
+  const pool = [];
+  if (tag && FUNNY_ASIDES[tag]) pool.push(...FUNNY_ASIDES[tag]);
+  if (moveResult?.captured === "q") pool.push(...FUNNY_ASIDES.queenTaken);
+  if (isCheckmate) pool.push(...FUNNY_ASIDES.checkmate);
+  if (typeof moveCount === "number" && moveCount <= 2) pool.push(...FUNNY_ASIDES.opening);
+  if (pool.length === 0) return null;
+  if (Math.random() > 0.35 && !isCheckmate) return null; // most moves stay serious; checkmate always gets a line
+  return pick(pool);
 }
 
 // ---------------------------------------------------------------------
