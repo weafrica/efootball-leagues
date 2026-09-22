@@ -12,6 +12,52 @@ import { isHdVoiceEnabled, setHdVoiceEnabled, getVoiceTier, loadNeuralVoice, neu
 const AUDIO_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-audio";
 const SFX_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-sfx";
 const NARRATION_PREF_KEY = "storyGame:narrationOn";
+const AUDIO_CACHE_NAME = "story-audio-cache-v1";
+
+// Persistent, visited-only offline caching: uses the browser's Cache
+// Storage API (the same mechanism a service worker uses, callable
+// directly from a page too) rather than downloading a whole story's
+// branches upfront. A node's narration/ambience/sfx only ever get cached
+// once actually fetched — either because the player reached that node, or
+// because it was prefetched one hop ahead (see the prefetch effect below).
+// Nothing is cached "just in case" beyond that one-hop lookahead, so a big
+// story with dozens of unexplored side-branches doesn't balloon offline
+// storage for content nobody's heard yet.
+async function cachedAudioUrl(url) {
+  if (!("caches" in window)) {
+    // No Cache Storage support (rare) — just use the URL directly, same
+    // as before; browser HTTP cache still helps somewhat, offline won't.
+    return url;
+  }
+  try {
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    let response = await cache.match(url);
+    if (!response) {
+      const fresh = await fetch(url);
+      if (!fresh.ok) return url; // 404 (not synthesized yet) — let the caller's own fallback handle it
+      await cache.put(url, fresh.clone());
+      response = fresh;
+    }
+    return URL.createObjectURL(await response.blob());
+  } catch {
+    return url; // cache storage failed for some reason — fall back to a direct fetch
+  }
+}
+
+// Warms the cache for a URL without needing the audio right now — used
+// for the one-hop-ahead prefetch, so a later cachedAudioUrl() call for the
+// same URL is an instant cache hit instead of a network wait.
+async function warmAudioCache(url) {
+  if (!("caches" in window)) return;
+  try {
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    if (await cache.match(url)) return;
+    const fresh = await fetch(url);
+    if (fresh.ok) await cache.put(url, fresh.clone());
+  } catch {
+    // best-effort only
+  }
+}
 
 // Stories — a data-light, code-only branching text "game" under Quick
 // Actions. Deliberately NOT a game engine: it's a generic state machine
@@ -62,6 +108,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const audioRef = useRef(null);
   const ambienceRef = useRef(null);
   const sfxRef = useRef(null);
+  const currentAmbienceTagRef = useRef(null); // tracks which ambience tag is loaded, since .src becomes a blob URL
 
   useEffect(() => {
     let cancelled = false;
@@ -151,14 +198,22 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     const node = content.graph.nodes[nodeId];
     const ambience = ambienceRef.current;
     if (!ambience) return;
-    if (!node?.ambience) { ambience.pause(); return; }
-    const src = `${SFX_BASE}/${node.ambience}.mp3`;
-    if (!ambience.src.endsWith(`${node.ambience}.mp3`)) {
-      ambience.src = src;
+    if (!node?.ambience) { ambience.pause(); currentAmbienceTagRef.current = null; return; }
+    if (currentAmbienceTagRef.current === node.ambience) {
+      ambience.play().catch(() => {});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const playableUrl = await cachedAudioUrl(`${SFX_BASE}/${node.ambience}.mp3`);
+      if (cancelled) return;
+      currentAmbienceTagRef.current = node.ambience;
+      ambience.src = playableUrl;
       ambience.loop = true;
       ambience.volume = 0.18;
-    }
-    ambience.play().catch(() => { /* missing sfx file yet — silent, no ambience this node */ });
+      ambience.play().catch(() => { /* missing sfx file yet — silent, no ambience this node */ });
+    })();
+    return () => { cancelled = true; };
   }, [narrationOn, content, nodeId]);
 
   // One-shot sound effects: a short list of tags per node (footsteps, a
@@ -169,11 +224,15 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     if (!narrationOn || !content || !nodeId) return;
     const node = content.graph.nodes[nodeId];
     if (!node?.sfx?.length) return;
-    node.sfx.forEach((tag, i) => {
-      const el = new Audio(`${SFX_BASE}/${tag}.mp3`);
+    let cancelled = false;
+    node.sfx.forEach(async (tag, i) => {
+      const playableUrl = await cachedAudioUrl(`${SFX_BASE}/${tag}.mp3`);
+      if (cancelled) return;
+      const el = new Audio(playableUrl);
       el.volume = 0.5;
       setTimeout(() => { el.play().catch(() => {}); }, i * 300);
     });
+    return () => { cancelled = true; };
   }, [narrationOn, content, nodeId]);
 
   const [hdEnabled, setHdEnabledState] = useState(() => isHdVoiceEnabled());
@@ -266,11 +325,19 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     if (!narrationOn) { autoReadChoices(); return; }
     const audio = audioRef.current;
     if (!audio) return;
-    audio.src = `${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}.wav`;
-    audio.onended = autoReadChoices;
-    audio.onerror = autoReadChoices; // no narration file yet — still auto-read choices
-    audio.play().catch(autoReadChoices); // autoplay blocked — still auto-read choices
-    return () => { audio.pause(); audio.onended = null; audio.onerror = null; };
+
+    let cancelled = false;
+    (async () => {
+      const url = `${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}.wav`;
+      const playableUrl = await cachedAudioUrl(url);
+      if (cancelled) return;
+      audio.src = playableUrl;
+      audio.onended = autoReadChoices;
+      audio.onerror = autoReadChoices; // no narration file yet — still auto-read choices
+      audio.play().catch(autoReadChoices); // autoplay blocked — still auto-read choices
+    })();
+
+    return () => { cancelled = true; audio.pause(); audio.onended = null; audio.onerror = null; };
   }, [narrationOn, activeStory, language, nodeId, content, hdEnabled]);
 
   // Starts synthesizing this node's choice audio the moment the node
@@ -302,10 +369,12 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
 
   // Prefetches the narration file for every node this one's choices could
   // lead to, while the player is still reading/listening to THIS node —
-  // "preload the next page before it starts." A plain fetch() is enough:
-  // it just warms the browser's HTTP cache, so when a choice is tapped
-  // and the real <audio> element requests the same URL, it's already
-  // local instead of a fresh network round-trip.
+  // "preload the next page before it starts." Writes into the same
+  // persistent Cache Storage as cachedAudioUrl() above, so it's not just a
+  // fleeting HTTP cache warm-up: whichever branch gets chosen is already
+  // fully offline-available by the time the player taps it, and stays
+  // that way. This is the one deliberate exception to "only cache what's
+  // actually visited" — one hop ahead, not the whole tree.
   useEffect(() => {
     if (!narrationOn || !activeStory || !content || !nodeId) return;
     const node = content.graph.nodes[nodeId];
@@ -314,7 +383,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       const key = `${activeStory.id}/${language}/${choice.goto}`;
       if (prefetchedNarrationRef.current.has(key)) return;
       prefetchedNarrationRef.current.add(key);
-      fetch(`${AUDIO_BASE}/${key}.wav`).catch(() => {});
+      warmAudioCache(`${AUDIO_BASE}/${key}.wav`);
     });
   }, [narrationOn, activeStory, language, content, nodeId]);
 
