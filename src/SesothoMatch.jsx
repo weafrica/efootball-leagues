@@ -4,12 +4,11 @@ import PlayerCharacter from "./PlayerCharacter.jsx";
 import { pickBestVoice } from "./utils/pickBestVoice";
 import { isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice } from "./chessVoiceHD.js";
 
-// The Rook's voice in Chess's own HD voice map ("solid, unmovable") is the
-// deepest, most weathered-sounding option available - reused here as-is
-// rather than adding a new voice choice, since it's already exactly the
-// character this game's narrator wants. Passing "r" gets it from both the
-// HD tier (am_fenrir) and the lite tier (its slowest/deepest pitch trick).
-const NARRATOR_VOICE_KEY = "r";
+// Nkhono voices every reading in this game. Kokoro's Queen voice
+// (af_heart) is the model's own best-quality voice, and we lean the rate
+// slower for a warm, storytelling pace rather than a brisk chess-move
+// read - fitting for an elder telling a story, not calling out moves.
+const NARRATOR_VOICE_KEY = "q";
 
 // ---------------------------------------------------------------------
 // Sound — every effect is synthesized live with the Web Audio API, not a
@@ -109,8 +108,8 @@ const wordSpeech = {
     const voice = pickBestVoice(_wordVoices);
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
-    utter.rate = 0.82;  // slower, deeper-feeling read - fits an old recovered page
-    utter.pitch = 0.75; // not every voice honors pitch (a known Web Speech API limit), but most do
+    utter.rate = 0.82;  // slow, storytelling pace
+    utter.pitch = 0.9;  // warm and a little lower, not the voice's default brightness
     window.speechSynthesis.speak(utter);
   },
   stop() {
@@ -158,6 +157,60 @@ function GameStyles() {
 // (0-5) within a level, so e.g. the number "one" is always the same red
 // wherever it appears, and the six tiles in a level read apart at a
 // glance instead of all sharing one category tint.
+// Nkhono — Sesotho for "grandmother" (confirmed in the book's own
+// glossary: nkhono -> grandmother, plural bo-nkhono). Built entirely from
+// shapes, same paper-cutout style as PlayerCharacter, just a distinct
+// figure: a doek headwrap, a striped blanket over her shoulders (a nod to
+// the region's iconic woven blankets, kept generic rather than copying
+// any specific real pattern), round glasses, and a slight stoop.
+function Nkhono({ size = 100 }) {
+  return (
+    <svg viewBox="0 0 140 180" width={size} height={size * (180 / 140)} style={{ overflow: "visible" }}>
+      {/* cane */}
+      <line x1="100" y1="120" x2="104" y2="176" stroke="#6b4a2a" strokeWidth="4" strokeLinecap="round" />
+      <path d="M96 120 q10 -6 12 4" fill="none" stroke="#6b4a2a" strokeWidth="4" strokeLinecap="round" />
+      {/* skirt */}
+      <path d="M48 118 Q70 108 92 118 L102 176 Q70 186 38 176 Z" fill="#5B4636" />
+      <path d="M48 118 Q70 108 92 118 L96 130 Q70 122 44 130 Z" fill="#6E5744" />
+      {/* torso, slightly hunched */}
+      <path d="M50 74 Q46 100 52 122 L88 122 Q94 100 90 74 Q70 64 50 74Z" fill="#7A6248" />
+      {/* blanket / shawl with simple stripe pattern */}
+      <path d="M42 70 Q70 58 98 70 L94 108 Q70 98 46 108 Z" fill="#B23A2E" />
+      <path d="M46 82 L94 82 L92 90 L48 90 Z" fill="#E8D023" />
+      <path d="M47 96 L93 96 L91 103 L49 103 Z" fill="#2F4C3B" />
+      {/* arm resting on cane */}
+      <path d="M88 84 Q100 96 98 116" fill="none" stroke="#7A6248" strokeWidth="10" strokeLinecap="round" />
+      <circle cx="98" cy="118" r="6" fill="#C89B6E" />
+      {/* other arm, gesturing as if telling a story */}
+      <path d="M52 84 Q36 90 34 78" fill="none" stroke="#7A6248" strokeWidth="10" strokeLinecap="round" />
+      <circle cx="34" cy="76" r="6" fill="#C89B6E" />
+      {/* neck + head */}
+      <rect x="62" y="56" width="16" height="14" fill="#C89B6E" />
+      <circle cx="70" cy="42" r="24" fill="#C89B6E" />
+      {/* doek headwrap */}
+      <path d="M44 34 Q70 8 96 34 Q94 20 70 16 Q46 20 44 34Z" fill="#3B7FE0" />
+      <path d="M44 34 Q70 44 96 34 Q94 26 70 24 Q46 26 44 34Z" fill="#2F5FB0" />
+      <path d="M88 22 Q100 26 96 38" fill="none" stroke="#2F5FB0" strokeWidth="5" strokeLinecap="round" />
+      {/* ears */}
+      <circle cx="47" cy="44" r="4" fill="#C89B6E" />
+      <circle cx="93" cy="44" r="4" fill="#C89B6E" />
+      {/* glasses */}
+      <circle cx="61" cy="43" r="8" fill="none" stroke="#3a3a3a" strokeWidth="2.5" />
+      <circle cx="79" cy="43" r="8" fill="none" stroke="#3a3a3a" strokeWidth="2.5" />
+      <line x1="69" y1="43" x2="71" y2="43" stroke="#3a3a3a" strokeWidth="2.5" />
+      {/* eyes, smile lines, warm smile */}
+      <circle cx="61" cy="43" r="2" fill="#2b2b2b" />
+      <circle cx="79" cy="43" r="2" fill="#2b2b2b" />
+      <path d="M50 50 Q54 54 58 51" fill="none" stroke="#8a6a4a" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M90 50 Q86 54 82 51" fill="none" stroke="#8a6a4a" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M60 56 Q70 63 80 56" fill="none" stroke="#5a3a20" strokeWidth="2.5" strokeLinecap="round" />
+      {/* eyebrows, grey */}
+      <path d="M55 36 Q61 33 66 36" fill="none" stroke="#cfcfcf" strokeWidth="2" strokeLinecap="round" />
+      <path d="M74 36 Q79 33 85 36" fill="none" stroke="#cfcfcf" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 const CANDY_PALETTE = ["#E0433D", "#E8942A", "#E8D023", "#4CAF50", "#3B7FE0", "#9B59B6"];
 
 // Sesotho Match — a local, code-only match-3 (like Ludo/Chess: no Supabase,
@@ -186,7 +239,8 @@ const STORY_INTRO = [
   "Long ago, every elder in the village could speak four tongues, and every word was kept safe in one great book.",
   "One stormy night, the Moya oa Lebala — the Wind of Forgetting — tore through the village and scattered every page across the land.",
   "Without its words, the village fell silent...",
-  "Now it's up to you. Match the tiles, recover each page, and outrun the Wind before it swallows the last word forever.",
+  "This is Nkhono — the village's oldest storyteller, and the only one who still remembers every word by heart.",
+  "She'll guide you as you go. Match the tiles, recover each page, and outrun the Wind before it swallows the last word forever.",
 ];
 
 const LEVELS = [
@@ -681,6 +735,7 @@ export default function SesothoMatchPage({ onBack, c }) {
   const level = LEVELS[levelIdx];
 
   const finishStory = () => {
+    wordSpeech.stop();
     try { localStorage.setItem(STORY_SEEN_KEY, "1"); } catch { /* fine, will just show again next time */ }
     setScreen("map");
   };
@@ -826,6 +881,17 @@ export default function SesothoMatchPage({ onBack, c }) {
     }
   }, [screen, walkTo]);
 
+  // Nkhono narrates each story step as it appears - the first line may be
+  // silently blocked by browser autoplay rules (nothing has been tapped
+  // yet), but reaching this screen via "The story" button, or tapping
+  // Continue, is a real tap and reads fine.
+  useEffect(() => {
+    if (screen === "story" && soundOn) {
+      wordSpeech.speak(STORY_INTRO[storyStep], { onHdProgress: setHdLoading });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, storyStep]);
+
   const tokenAt = walkTo != null ? walkTo : progress.unlocked;
   const dangerLevel = level ? 1 - movesLeft / level.moves : 0; // 0 = safe, 1 = Wind about to catch you
 
@@ -834,8 +900,8 @@ export default function SesothoMatchPage({ onBack, c }) {
     return (
       <div className="max-w-md mx-auto px-4 pt-10 pb-16 flex flex-col items-center text-center min-h-[70vh] justify-center">
         <GameStyles />
-        <Wind size={40} style={{ color: c.textDim }} className="mb-4" />
-        <div className="font-display text-2xl mb-5" style={{ color: c.text }}>The Wind of Forgetting</div>
+        <Nkhono size={110} />
+        <div className="font-display text-2xl mt-3 mb-5" style={{ color: c.text }}>Nkhono's Story</div>
         <div className="font-body text-base leading-relaxed mb-8" style={{ color: c.textDim, minHeight: 110 }}>
           {STORY_INTRO[storyStep]}
         </div>
@@ -863,8 +929,8 @@ export default function SesothoMatchPage({ onBack, c }) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.72)" }}>
         <div className="rounded-2xl p-6 text-center max-w-xs w-full" style={{ background: c.surface, border: `2px solid ${CAT_COLORS[lv.id]}` }}>
-          <BookOpen size={30} style={{ color: CAT_COLORS[lv.id] }} className="mx-auto mb-3" />
-          <div className="font-body text-xs uppercase tracking-wide mb-1" style={{ color: c.textFaint }}>Page {preLevel + 1} of {LEVELS.length}</div>
+          <Nkhono size={54} />
+          <div className="font-body text-xs uppercase tracking-wide mt-2 mb-1" style={{ color: c.textFaint }}>Page {preLevel + 1} of {LEVELS.length}</div>
           <div className="font-display text-xl mb-3" style={{ color: c.text }}>{lv.title}</div>
           <div className="font-body text-sm mb-6" style={{ color: c.textDim }}>{lv.blurb}</div>
           <div className="flex flex-col gap-2">
@@ -1047,9 +1113,12 @@ export default function SesothoMatchPage({ onBack, c }) {
               border: "2px solid #A9824F", boxShadow: "0 16px 40px rgba(0,0,0,0.45)", color: "#3C2E1A",
             }}>
             <div className="flex items-center justify-between mb-3">
-              <span className="font-body text-[10px] uppercase tracking-widest" style={{ color: "#8a6f42" }}>
-                Page recovered
-              </span>
+              <div className="flex items-center gap-2">
+                <div style={{ position: "relative", top: -6 }}><Nkhono size={30} /></div>
+                <span className="font-body text-[10px] uppercase tracking-widest" style={{ color: "#8a6f42" }}>
+                  Page recovered
+                </span>
+              </div>
               <button onClick={(e) => { e.stopPropagation(); replayLesson(); }} style={{ color: "#8a6f42" }} aria-label="Read aloud again">
                 <Volume2 size={16} />
               </button>
