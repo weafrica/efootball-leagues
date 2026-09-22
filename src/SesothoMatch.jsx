@@ -86,35 +86,41 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 let _hdAudio = null;
 const wordSpeech = {
   async speak(text, { onHdProgress } = {}) {
-    wordSpeech.stop();
-    if (isHdVoiceEnabled()) {
-      try {
-        const engine = await loadNeuralVoice(onHdProgress);
-        onHdProgress?.(null); // download finished (or was already cached) - hide any progress UI
-        const { blob, playbackRate } = await engine.speak(text, NARRATOR_VOICE_KEY);
-        const audio = new Audio(URL.createObjectURL(blob));
-        audio.playbackRate = playbackRate || 1;
-        _hdAudio = audio;
-        audio.play();
-        return;
-      } catch {
-        // HD failed to load/generate (offline, unsupported device, etc.) -
-        // fall through to the always-available free voice below.
-        onHdProgress?.(null);
+    try { wordSpeech.stop(); } catch { /* never let a stop failure block a new speak */ }
+    try {
+      if (isHdVoiceEnabled()) {
+        try {
+          const engine = await loadNeuralVoice(onHdProgress);
+          onHdProgress?.(null); // download finished (or was already cached) - hide any progress UI
+          const { blob, playbackRate } = await engine.speak(text, NARRATOR_VOICE_KEY);
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.playbackRate = playbackRate || 1;
+          _hdAudio = audio;
+          audio.play();
+          return;
+        } catch {
+          // HD failed to load/generate (offline, unsupported device, a PWA
+          // sandbox restricting the download, etc.) - fall through to the
+          // always-available free voice below rather than going silent.
+          onHdProgress?.(null);
+        }
       }
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      const utter = new SpeechSynthesisUtterance(text);
+      const voice = pickBestVoice(_wordVoices);
+      if (voice) utter.voice = voice;
+      utter.lang = voice?.lang || "en-US";
+      utter.rate = 0.82;  // slow, storytelling pace
+      utter.pitch = 0.9;  // warm and a little lower, not the voice's default brightness
+      window.speechSynthesis.speak(utter);
+    } catch {
+      // Narration is a nice-to-have, never something that should be able
+      // to break gameplay - swallow anything unexpected here.
     }
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const utter = new SpeechSynthesisUtterance(text);
-    const voice = pickBestVoice(_wordVoices);
-    if (voice) utter.voice = voice;
-    utter.lang = voice?.lang || "en-US";
-    utter.rate = 0.82;  // slow, storytelling pace
-    utter.pitch = 0.9;  // warm and a little lower, not the voice's default brightness
-    window.speechSynthesis.speak(utter);
   },
   stop() {
-    if (_hdAudio) { _hdAudio.pause(); _hdAudio = null; }
-    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    try { if (_hdAudio) { _hdAudio.pause(); _hdAudio = null; } } catch { /* ignore */ }
+    try { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ }
   },
 };
 
@@ -343,19 +349,49 @@ const LEVELS = [
 ];
 
 // Real, verified facts pulled straight from the book's own chapters and
-// glossary (plural forms, the noun-class note in Chapter 8) - nothing
-// invented. Shown once per word on its "recovered page" popup, and again
-// via the replay button.
+// glossary (plural forms, noun-class examples from Chapter 8), plus a
+// small pool of well-known general facts about the language, so the
+// "recovered page" popup doesn't repeat the same paragraph every time.
+// One category-specific fact plus the general pool are combined and
+// picked at random each time the popup actually shows.
 const CATEGORY_LESSON = {
-  numbers: "Sesotho numbers 1\u20135 actually change form depending on what you're counting \u2014 the word for \u201cone\u201d isn't the same for people, sheep, or villages. It's one reason many Basotho count in English instead.",
-  greetings: "\u201cKea leboha\u201d (thank you) literally starts with \u201cke\u201d \u2014 I. Many Sesotho phrases are built like tiny sentences, not fixed stock phrases.",
-  animals: "Notice the pattern: most animals here take \u201cli-\u201d to become plural \u2014 poli (goat) becomes lipoli, katse (cat) becomes likatse.",
-  food: "Tee and tsoekere don't even have a plural form in Sesotho \u2014 just like \u201ctea\u201d and \u201csugar\u201d in English, there's simply too much of them to count!",
-  family: "'m\u00e8, ntate, abuti and ausi all take their own special prefix, \u201cbo-\u201d, in the plural \u2014 a family word-shape all their own.",
-  home: "Most everyday objects here take \u201cli-\u201d in the plural too \u2014 the same pattern as the animals. Setulo (chair) becomes litulo.",
-  nature: "naleli, pula and sefate all take \u201cli-\u201d in the plural as well \u2014 linaleli, lipula, lifate.",
-  people: "Most role words here take \u201cba-\u201d in the plural \u2014 moeti (visitor) becomes baeti, molemi (farmer) becomes balemi.",
+  numbers: [
+    "Sesotho numbers 1\u20135 actually change form depending on what you're counting \u2014 the word for \u201cone\u201d isn't the same for people, sheep, or villages. It's one reason many Basotho count in English instead.",
+    "Watch \u201cone\u201d shift shape: motho a le mong (one person), nku e le 'ngoe (one sheep), sefate se le seng (one tree) \u2014 three completely different-looking phrases, all just meaning \u201cone.\u201d",
+    "Once you get past five, Sesotho numbers stop changing form \u2014 tselela (six) stays tselela no matter what you're counting.",
+  ],
+  greetings: [
+    "\u201cKea leboha\u201d (thank you) literally starts with \u201cke\u201d \u2014 I. Many Sesotho phrases are built like tiny sentences, not fixed stock phrases.",
+  ],
+  animals: [
+    "Notice the pattern: most animals here take \u201cli-\u201d to become plural \u2014 poli (goat) becomes lipoli, katse (cat) becomes likatse.",
+  ],
+  food: [
+    "Tee and tsoekere don't even have a plural form in Sesotho \u2014 just like \u201ctea\u201d and \u201csugar\u201d in English, there's simply too much of them to count!",
+  ],
+  family: [
+    "'m\u00e8, ntate, abuti and ausi all take their own special prefix, \u201cbo-\u201d, in the plural \u2014 a family word-shape all their own.",
+  ],
+  home: [
+    "Most everyday objects here take \u201cli-\u201d in the plural too \u2014 the same pattern as the animals. Setulo (chair) becomes litulo.",
+  ],
+  nature: [
+    "naleli, pula and sefate all take \u201cli-\u201d in the plural as well \u2014 linaleli, lipula, lifate.",
+  ],
+  people: [
+    "Most role words here take \u201cba-\u201d in the plural \u2014 moeti (visitor) becomes baeti, molemi (farmer) becomes balemi.",
+  ],
 };
+const GENERAL_FACTS = [
+  "Sesotho is spoken by roughly 5 to 6 million people, mostly in Lesotho and South Africa, where it's an official language.",
+  "Sesotho is a tonal language \u2014 the pitch a word is said with can change its meaning, not just the letters.",
+  "Lesotho is the only country in the world that lies entirely above 1,000 metres in elevation \u2014 part of why it's nicknamed the Kingdom in the Sky.",
+  "Sesotho belongs to the Bantu language family, which includes hundreds of related languages spoken across most of Southern and Central Africa.",
+];
+function randomLesson(levelId) {
+  const pool = [...(CATEGORY_LESSON[levelId] || []), ...GENERAL_FACTS];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 const PLURALS = {
   ntja: "lintja", katse: "likatse", khoho: "likhoho", poli: "lipoli", nku: "linku", nonyana: "linonyana",
   bohobe: "mahobe", lebese: "mabese", lehe: "mahe", tee: "no plural form", tsoekere: "no plural form", tlhapi: "litlhapi",
@@ -718,6 +754,8 @@ export default function SesothoMatchPage({ onBack, c }) {
   const [busy, setBusy] = useState(false);
   const [lessonWord, setLessonWord] = useState(null); // { word, level } while the "recovered page" popup is open
   const [discovered, setDiscovered] = useState(loadDiscovered);
+  const matchCountRef = useRef(0);
+  const lessonThresholdRef = useRef(3 + Math.floor(Math.random() * 2)); // 3 or 4
   const [hypeToast, setHypeToast] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [walkTo, setWalkTo] = useState(null);
@@ -761,7 +799,8 @@ export default function SesothoMatchPage({ onBack, c }) {
   const openLesson = (levelId, word) => {
     play(SFX.pageFlip);
     const isNew = !discovered.has(word.id);
-    setLessonWord({ levelId, word, isNew });
+    const lesson = randomLesson(levelId);
+    setLessonWord({ levelId, word, isNew, lesson });
     if (isNew) {
       setDiscovered((prev) => {
         const next = new Set(prev); next.add(word.id);
@@ -770,19 +809,20 @@ export default function SesothoMatchPage({ onBack, c }) {
       });
     }
     if (soundOn) {
+      // The Sesotho word itself is skipped in speech - an English TTS
+      // voice mispronounces it badly enough to be actively unhelpful, so
+      // it's shown on the card to read, not read aloud.
       const opener = isNew ? "New page recovered!" : "Page recovered!";
-      const lesson = CATEGORY_LESSON[levelId] || "";
-      wordSpeech.speak(`${opener} The word is ${word.sesotho}. In English, that means ${word.english}. ${lesson}`, { onHdProgress: setHdLoading });
+      wordSpeech.speak(`${opener} In English, this page's word means ${word.english}. ${lesson}`, { onHdProgress: setHdLoading });
     }
   };
   const replayLesson = () => {
     if (!lessonWord) return;
-    const lesson = CATEGORY_LESSON[lessonWord.levelId] || "";
-    wordSpeech.speak(`The word is ${lessonWord.word.sesotho}. In English, that means ${lessonWord.word.english}. ${lesson}`, { onHdProgress: setHdLoading });
+    wordSpeech.speak(`In English, this page's word means ${lessonWord.word.english}. ${lessonWord.lesson}`, { onHdProgress: setHdLoading });
   };
   const closeLesson = () => {
-    wordSpeech.stop();
     setLessonWord(null);
+    try { wordSpeech.stop(); } catch { /* the popup must always close, no matter what audio does */ }
   };
   const showHype = (text) => {
     setHypeToast(text);
@@ -817,7 +857,20 @@ export default function SesothoMatchPage({ onBack, c }) {
         if (next >= level.target && !outcome) setOutcome("won");
         return next;
       });
-      if (firstMatchType != null) openLesson(level.id, level.words[firstMatchType]);
+      if (firstMatchType != null) {
+        const word = level.words[firstMatchType];
+        const isFirstEver = !discovered.has(word.id);
+        matchCountRef.current += 1;
+        // Show the full "recovered page" popup for a genuinely new word
+        // right away, but otherwise only every 3-4 matches - stopping to
+        // read a full page on literally every single match got tedious
+        // fast, so this keeps it a periodic highlight instead.
+        if (isFirstEver || matchCountRef.current >= lessonThresholdRef.current) {
+          matchCountRef.current = 0;
+          lessonThresholdRef.current = 3 + Math.floor(Math.random() * 2);
+          openLesson(level.id, word);
+        }
+      }
       const hypeIdx = Math.min(COMBO_HYPE.length - 1, (bestRunLen - 3) + (passes - 1) * 2);
       if (hypeIdx > 0 || passes > 1) showHype(COMBO_HYPE[Math.max(0, hypeIdx)]);
       // Layer the sound to match what actually happened - a plain match
@@ -1146,7 +1199,7 @@ export default function SesothoMatchPage({ onBack, c }) {
             </div>
 
             <div className="page-line font-body text-xs leading-relaxed pt-3" style={{ borderTop: "1px dashed #A9824F", color: "#5a4a30", animationDelay: "0.3s" }}>
-              {CATEGORY_LESSON[lessonWord.levelId]}
+              {lessonWord.lesson}
             </div>
 
             <div className="page-tap-hint text-center font-body text-[11px] mt-4" style={{ color: "#8a6f42" }}>
