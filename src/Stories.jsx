@@ -182,6 +182,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const [speakingChoices, setSpeakingChoices] = useState(false);
   const speakingChoicesRef = useRef(false);
   const choiceAudioRef = useRef(null);
+  const choiceBlobCacheRef = useRef({}); // nodeId -> [blob, ...] in choice order, synthesized ahead of time
+  const prefetchedNarrationRef = useRef(new Set()); // "storyId/lang/nodeId" already warmed in the browser cache
 
   const stopChoiceSpeech = () => {
     speakingChoicesRef.current = false;
@@ -206,12 +208,20 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
 
     if (isHdVoiceEnabled()) {
       try {
-        setHdLoading(!neuralVoiceReady());
-        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
-        setHdLoading(false);
-        for (const [i, choice] of choices.entries()) {
+        let blobs = choiceBlobCacheRef.current[nodeId];
+        if (!blobs) {
+          // Prefetch effect hasn't finished (or wasn't running, e.g. HD
+          // was just turned on) — fall back to synthesizing now.
+          setHdLoading(!neuralVoiceReady());
+          const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
+          setHdLoading(false);
+          blobs = await Promise.all(
+            choices.map((choice, i) => engine.speak(`Option ${i + 1}. ${choice.text}`).then((r) => r.blob))
+          );
+          choiceBlobCacheRef.current[nodeId] = blobs;
+        }
+        for (const blob of blobs) {
           if (!speakingChoicesRef.current) return; // stopped mid-sequence
-          const { blob } = await engine.speak(`Option ${i + 1}. ${choice.text}`);
           const audio = new Audio(URL.createObjectURL(blob));
           choiceAudioRef.current = audio;
           await new Promise((resolve) => {
@@ -262,6 +272,51 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     audio.play().catch(autoReadChoices); // autoplay blocked — still auto-read choices
     return () => { audio.pause(); audio.onended = null; audio.onerror = null; };
   }, [narrationOn, activeStory, language, nodeId, content, hdEnabled]);
+
+  // Starts synthesizing this node's choice audio the moment the node
+  // loads — in parallel with narration playing, not after it ends. This
+  // is what actually fixes the "options are slow to respond" lag: by the
+  // time narration finishes and auto-read (or a manual tap) wants to play
+  // the choices, they're usually already sitting in the cache, ready to
+  // play instantly instead of waiting on fresh synthesis.
+  useEffect(() => {
+    if (!hdEnabled || !content || !nodeId) return;
+    const node = content.graph.nodes[nodeId];
+    const hasChoices = !node?.ending && node?.choices?.length;
+    if (!hasChoices || choiceBlobCacheRef.current[nodeId]) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
+        if (cancelled) return;
+        const blobs = await Promise.all(
+          node.choices.map((choice, i) => engine.speak(`Option ${i + 1}. ${choice.text}`).then((r) => r.blob))
+        );
+        if (!cancelled) choiceBlobCacheRef.current[nodeId] = blobs;
+      } catch {
+        // Silent — speakChoices() falls back to synthesizing on demand.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [hdEnabled, content, nodeId]);
+
+  // Prefetches the narration file for every node this one's choices could
+  // lead to, while the player is still reading/listening to THIS node —
+  // "preload the next page before it starts." A plain fetch() is enough:
+  // it just warms the browser's HTTP cache, so when a choice is tapped
+  // and the real <audio> element requests the same URL, it's already
+  // local instead of a fresh network round-trip.
+  useEffect(() => {
+    if (!narrationOn || !activeStory || !content || !nodeId) return;
+    const node = content.graph.nodes[nodeId];
+    if (!node?.choices) return;
+    node.choices.forEach((choice) => {
+      const key = `${activeStory.id}/${language}/${choice.goto}`;
+      if (prefetchedNarrationRef.current.has(key)) return;
+      prefetchedNarrationRef.current.add(key);
+      fetch(`${AUDIO_BASE}/${key}.wav`).catch(() => {});
+    });
+  }, [narrationOn, activeStory, language, content, nodeId]);
 
   const toggleNarration = () => {
     setNarrationOn((prev) => {
