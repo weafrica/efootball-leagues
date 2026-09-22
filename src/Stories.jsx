@@ -13,6 +13,36 @@ const AUDIO_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/p
 const SFX_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-sfx";
 const NARRATION_PREF_KEY = "storyGame:narrationOn";
 const AUDIO_CACHE_NAME = "story-audio-cache-v1";
+const DATA_CACHE_NAME = "story-data-cache-v1";
+
+// Same Cache Storage mechanism as the audio helpers below, but for the
+// story text/choices JSON itself (a Supabase query result, not a plain
+// URL) — so a story someone has already opened stays readable, and its
+// choices stay tappable, with no connection.
+function dataCacheRequest(key) {
+  return new Request(`https://story-data-cache.local/${key}`);
+}
+
+async function readDataCache(key) {
+  if (!("caches" in window)) return null;
+  try {
+    const cache = await caches.open(DATA_CACHE_NAME);
+    const response = await cache.match(dataCacheRequest(key));
+    return response ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDataCache(key, value) {
+  if (!("caches" in window)) return;
+  try {
+    const cache = await caches.open(DATA_CACHE_NAME);
+    await cache.put(dataCacheRequest(key), new Response(JSON.stringify(value)));
+  } catch {
+    // best-effort only
+  }
+}
 
 // Persistent, visited-only offline caching: uses the browser's Cache
 // Storage API (the same mechanism a service worker uses, callable
@@ -112,19 +142,38 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const { data: storyRows } = await supabase
+
+    const fetchStoryList = async () => {
+      const { data, error } = await supabase
         .from("game_stories")
         .select("id, slug, default_title, emoji, languages")
         .order("sort_order", { ascending: true });
+      return error ? null : data;
+    };
 
+    (async () => {
+      const cached = await readDataCache("story-list");
+      if (!cancelled && cached) setStories(cached);
+
+      const fresh = await fetchStoryList();
+      if (cancelled) return;
+      if (fresh) {
+        setStories(fresh); // background refresh landing — updates the list even if a cached copy already showed
+        writeDataCache("story-list", fresh);
+      } else if (!cached) {
+        setStories([]); // offline with nothing cached yet — stop spinning, show "no stories yet" rather than hang forever
+      }
+
+      // Progress is per-player and only meaningful live — no offline
+      // caching here, it's small and fast when there IS a connection,
+      // and stale progress ("in progress" / "completed" labels) offline
+      // isn't worth the complexity. If this fails offline, the list
+      // above still renders fine, just without those labels yet.
       const { data: progressRows } = await supabase
         .from("game_story_progress")
         .select("story_id, language, current_node_id, completed, ending_id")
         .eq("user_id", session.user.id);
-
       if (cancelled) return;
-      setStories(storyRows || []);
       const byStory = {};
       (progressRows || []).forEach((p) => { byStory[p.story_id] = p; });
       setProgressByStory(byStory);
@@ -150,14 +199,38 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     setLoadingContent(true);
     setLanguage(lang);
     localStorage.setItem(LAST_LANGUAGE_KEY, lang);
-    const { data, error } = await supabase
-      .from("game_story_content")
-      .select("title, graph")
-      .eq("story_id", story.id)
-      .eq("language", lang)
-      .maybeSingle();
+
+    const cacheKey = `story-content:${story.id}:${lang}`;
+    const fetchContent = async () => {
+      const { data, error } = await supabase
+        .from("game_story_content")
+        .select("title, graph")
+        .eq("story_id", story.id)
+        .eq("language", lang)
+        .maybeSingle();
+      return error || !data ? null : data;
+    };
+
+    const cached = await readDataCache(cacheKey);
+    let data = cached;
+
+    if (cached) {
+      // Enter immediately from cache; refresh quietly in the background
+      // for next time. Deliberately doesn't re-render mid-story if this
+      // lands after the player's already reading — it only updates what
+      // the NEXT visit sees.
+      fetchContent().then((fresh) => { if (fresh) writeDataCache(cacheKey, fresh); });
+    } else {
+      data = await fetchContent();
+      if (!data) {
+        setLoadingContent(false);
+        showToast?.("Couldn't load that story — check your connection and try again.");
+        return;
+      }
+      writeDataCache(cacheKey, data);
+    }
+
     setLoadingContent(false);
-    if (error || !data) { showToast?.("Couldn't load that story — try again."); return; }
     setContent(data);
     const existing = progressByStory[story.id];
     const startId = (existing && existing.language === lang && !existing.completed)
@@ -167,6 +240,12 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     setScreen("play");
   }, [progressByStory, showToast]);
 
+  // Writes always need a live connection — unlike the reads above, there's
+  // no offline queue here. Supabase's client doesn't throw on a failed
+  // upsert, it just returns silently, so playing offline still works
+  // (local state below still updates), it just won't sync progress to the
+  // server until back online. A "retry when reconnected" queue would
+  // close that gap, but is a deliberately separate piece of work.
   const saveProgress = useCallback(async (story, lang, id, node, existingFlags) => {
     const isEnding = !!node.ending;
     const flags = node.win ? { ...existingFlags, [node.win.flag]: true } : existingFlags;
