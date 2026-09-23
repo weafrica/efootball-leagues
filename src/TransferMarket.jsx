@@ -227,6 +227,30 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   };
 
   const loadListings = async () => {
+    // Postgres egress fix (postgres-egress-fix-plan.md Step 4) — initial
+    // load/browse comes from the cached bundle endpoint (shared, 1hr TTL)
+    // rather than a live query, since "what's currently for sale" is
+    // identical for every viewer. Falls back to a direct live query if the
+    // cached endpoint is unreachable, same fallback shape as
+    // ladder-league-results.js.
+    try {
+      const res = await fetch("/api/kit-room-listings");
+      if (res.ok) {
+        const json = await res.json();
+        setListings(json.transferListings || []);
+        return;
+      }
+    } catch {
+      // Falls through to the live query below.
+    }
+    await loadListingsLive();
+  };
+
+  // Live, uncached refresh — used after MY OWN action (listing, cancelling,
+  // accepting/declining an offer) so the seller/buyer sees the result of
+  // their own deliberate action immediately, instead of waiting on the
+  // cached bundle's up-to-1hr window like every other viewer does.
+  const loadListingsLive = async () => {
     const { data, error } = await supabase.from("transfer_listings").select(TRANSFER_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setListings(data || []);
   };
@@ -276,7 +300,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     });
     if (error) { showToast(`Couldn't list your club: ${error.message}`); return false; }
     showToast("Club listed in The Kit Room.");
-    await loadListings();
+    await loadListingsLive();
     setTab("mine");
     return true;
   };
@@ -302,7 +326,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("accept_transfer_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
     showToast("Deal done — the club has been transferred.");
-    await loadListings();
+    await loadListingsLive();
     if (offer.listing_id) loadOffersFor(offer.listing_id);
   };
 
@@ -316,11 +340,26 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("cancel_transfer_listing", { p_listing_id: listing.id });
     if (error) { showToast(`Couldn't cancel listing: ${error.message}`); return; }
     showToast("Listing cancelled.");
-    loadListings();
+    loadListingsLive();
   };
 
   // ── Team Sales ────────────────────────────────────────────────────────
   const loadTeamListings = async () => {
+    // Same cached-then-live-fallback pattern as loadListings above.
+    try {
+      const res = await fetch("/api/kit-room-listings");
+      if (res.ok) {
+        const json = await res.json();
+        setTeamListings(json.teamListings || []);
+        return;
+      }
+    } catch {
+      // Falls through to the live query below.
+    }
+    await loadTeamListingsLive();
+  };
+
+  const loadTeamListingsLive = async () => {
     const { data, error } = await supabase.from("team_sale_listings").select(TEAM_SALE_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setTeamListings(data || []);
   };
@@ -350,7 +389,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     });
     if (error) { showToast(`Couldn't list your team: ${error.message}`); return false; }
     showToast("Team listed in The Kit Room.");
-    await loadTeamListings();
+    await loadTeamListingsLive();
     setTeamTab("mine");
     return true;
   };
@@ -376,7 +415,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("accept_team_sale_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
     showToast("Deal accepted — you can now coordinate the handover.");
-    await loadTeamListings();
+    await loadTeamListingsLive();
     if (offer.listing_id) loadTeamOffersFor(offer.listing_id);
   };
 
@@ -390,11 +429,26 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("cancel_team_sale_listing", { p_listing_id: listing.id });
     if (error) { showToast(`Couldn't cancel listing: ${error.message}`); return; }
     showToast("Listing cancelled.");
-    loadTeamListings();
+    loadTeamListingsLive();
   };
 
   // ── Items ─────────────────────────────────────────────────────────────
   const loadItemListings = async () => {
+    // Same cached-then-live-fallback pattern as loadListings above.
+    try {
+      const res = await fetch("/api/kit-room-listings");
+      if (res.ok) {
+        const json = await res.json();
+        setItemListings(json.itemListings || []);
+        return;
+      }
+    } catch {
+      // Falls through to the live query below.
+    }
+    await loadItemListingsLive();
+  };
+
+  const loadItemListingsLive = async () => {
     const { data, error } = await supabase.from("item_listings").select(ITEM_LISTING_SELECT).order("created_at", { ascending: false });
     if (!error) setItemListings(data || []);
   };
@@ -423,7 +477,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     });
     if (error) { showToast(`Couldn't list your item: ${error.message}`); return false; }
     showToast("Item listed in The Kit Room.");
-    await loadItemListings();
+    await loadItemListingsLive();
     setItemTab("mine");
     return true;
   };
@@ -449,7 +503,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("accept_item_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
     showToast("Deal done — Nets have been settled.");
-    await loadItemListings();
+    await loadItemListingsLive();
     if (offer.listing_id) loadItemOffersFor(offer.listing_id);
   };
 
@@ -463,7 +517,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
     const { error } = await supabase.rpc("cancel_item_listing", { p_listing_id: listing.id });
     if (error) { showToast(`Couldn't cancel listing: ${error.message}`); return; }
     showToast("Listing cancelled.");
-    loadItemListings();
+    loadItemListingsLive();
   };
 
   if (!session) {
