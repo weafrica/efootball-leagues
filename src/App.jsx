@@ -6018,6 +6018,20 @@ export default function App() {
   // bulk updates with different values in one call, so we fire them in parallel.
   const createLeague = async (input) => {
     const { name, teamNames, format, survivor, groups, knockoutLegs, ladderCupCutoffAt, entryClosesAt, startsAt, description, leagueType, roundPeriodHours } = input;
+    // The Three-Day Titans League (the recurring Fri-Sun groups_knockout
+    // "Weekend League" — see isWeekendLeague) was discontinued Sep 2026:
+    // its last few cycles kept stalling out with unplayed fixtures lingering
+    // long after the weekend ended, so no new instance should be created
+    // going forward. Matched loosely on "titan" (not the exact historical
+    // name, which used a non-breaking hyphen) so a differently-punctuated
+    // re-creation attempt is still caught. The database has the same check
+    // (see 20260950_block_titans_league_recreation.sql) as the real
+    // backstop — this is just so the admin gets an immediate, friendly
+    // message instead of a raw insert error.
+    if (/titan/i.test(name)) {
+      showToast("The Three-Day Titans League has been discontinued and won't be recreated.");
+      return;
+    }
     const insertPayload = {
       name, created_by: session.user.id, format,
       // Survival Ladder Cup has no entry-close date of its own — clubs join
