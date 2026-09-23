@@ -1077,6 +1077,18 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   const [fixtures, setFixtures] = useState(null);
   const [profilesById, setProfilesById] = useState({});
   const [loading, setLoading] = useState(true);
+  // Tracks whether THIS league (leagueId) has completed at least one load.
+  // load() only flips `loading` true — which blanks the whole screen down
+  // to "Loading…" below — the first time a given league is opened. Every
+  // later call to load() (after submitting/confirming/disputing a result,
+  // an admin approve/reject, a correction, joining) is a background
+  // refresh: it fetches quietly and swaps the data in once it lands,
+  // same as normal leagues' refreshLeague never blanking the page either.
+  // Resetting this ref when leagueId itself changes (below) means
+  // genuinely switching to a different tier league still shows the
+  // loading state once, since there's no data at all for it yet.
+  const hasLoadedOnceRef = useRef(false);
+  useEffect(() => { hasLoadedOnceRef.current = false; }, [leagueId]);
   const [scoreDrafts, setScoreDrafts] = useState({}); // fixtureId -> { home, away }
   const [submittingId, setSubmittingId] = useState(null);
   const [proofFiles, setProofFiles] = useState({}); // fixtureId -> File, mirrors scoreDrafts
@@ -1163,7 +1175,8 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   const c = useMemo(() => getLadderTierTheme(tier), [tier]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
+    hasLoadedOnceRef.current = true;
     const { data: leagueRow } = await supabase.from("ladder_leagues").select("tier").eq("id", leagueId).maybeSingle();
     setTier(leagueRow?.tier ?? null);
 
