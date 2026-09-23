@@ -326,3 +326,79 @@ export function describeCaptureNarrative(chessAfterMove, moveResult) {
     ? `A straight trade — ${capturedName} for ${capturerName}, evens out, and it's answerable immediately.`
     : `A clean, even trade — ${capturedName} for ${capturerName}.`;
 }
+
+// ---------------------------------------------------------------------
+// The bot's forward-looking "plan" — what it says it's going for, not
+// just what it just did. Honest framing: the bot's actual move choice
+// comes from a shallow minimax (see pickAiMove) — it doesn't compute or
+// store a real long-term plan. This reads cheap, real signals off the
+// current position (material balance, whether your king has castled,
+// how much is left on the board) and picks a plausible, grounded line —
+// dramatized commentary, not a literal readout of deep search.
+
+function findKingSquare(chess, color) {
+  const board = chess.board();
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const cell = board[r][f];
+      if (cell && cell.type === "k" && cell.color === color) return `${"abcdefgh"[f]}${8 - r}`;
+    }
+  }
+  return null;
+}
+
+const PLAN_LINES = {
+  king_exposed: [
+    "Your king's still stuck in the center — I'm coming for it.",
+    "That king hasn't castled yet. I like my chances there.",
+    "I'm going to keep opening lines toward your king. This won't be comfortable.",
+  ],
+  down_material: [
+    "I'm behind on material, so I need to make this messy and find some tactics.",
+    "Material's not on my side — time to complicate things and hope you slip.",
+    "I'm down material. Watch for tricks — I've got nothing to lose here.",
+  ],
+  up_material: [
+    "I'm ahead on material — I'll look to trade pieces and grind this out.",
+    "With this material lead, simplifying toward an endgame suits me fine.",
+    "I'm up material now. Trading down is the plan.",
+  ],
+  endgame: [
+    "Not much left on the board — this comes down to whoever's pawns run faster.",
+    "Endgame territory. I'm counting tempo from here.",
+  ],
+  balanced: [
+    "Roughly even for now — I'm just hunting for the best move each turn.",
+    "Nothing decisive yet. I'll keep probing for a weakness.",
+  ],
+};
+
+// generateBotPlan — call with the position AFTER the bot's own move.
+// Bot always plays black in vs-AI games (see 20260941_chess_ai.sql).
+export function generateBotPlan(chess) {
+  let whiteMaterial = 0, blackMaterial = 0, nonPawnMaterial = 0;
+  const board = chess.board();
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const cell = board[r][f];
+      if (!cell) continue;
+      const val = PIECE_VALUE[cell.type];
+      if (cell.color === "w") whiteMaterial += val; else blackMaterial += val;
+      if (cell.type !== "p" && cell.type !== "k") nonPawnMaterial += val;
+    }
+  }
+  const botDiff = blackMaterial - whiteMaterial; // positive = bot (black) ahead
+  const isEndgame = nonPawnMaterial < 2600; // rough: most major/minor pieces traded off
+  const whiteKing = findKingSquare(chess, "w");
+  const kingExposed = !isEndgame && whiteKing === "e1" && chess.history().length > 6;
+
+  let category;
+  if (kingExposed) category = "king_exposed";
+  else if (isEndgame) category = "endgame";
+  else if (botDiff <= -200) category = "down_material";
+  else if (botDiff >= 200) category = "up_material";
+  else category = "balanced";
+
+  const pool = PLAN_LINES[category];
+  return { category, line: pool[Math.floor(Math.random() * pool.length)] };
+}

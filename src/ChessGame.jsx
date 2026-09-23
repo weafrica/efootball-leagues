@@ -23,7 +23,7 @@ import { Chess } from "chess.js";
 import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
-import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative, maybeFunnyAside } from "./chessAi.js";
+import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative, maybeFunnyAside, generateBotPlan } from "./chessAi.js";
 import { chessSpeech, dramatizeSquare } from "./chessVoice.js";
 import { getVoiceTier, setVoiceTierOverride, isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
@@ -356,6 +356,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   // analysis or advantage, just drama.
   const [captureFlash, setCaptureFlash] = useState(null); // { text, glyph, combo, key } | null
   const captureStreakRef = useRef({ color: null, count: 0 });
+  const lastPlanCategoryRef = useRef(null); // only announce the bot's "plan" when its read of the position actually changes
   const CAPTURE_WORDS = ["CAPTURED!", "TAKEN DOWN!", "SMASHED!", "CRUSHED!", "OUTPLAYED!", "DESTROYED!"];
   const flashCapture = (moveResult) => {
     const streak = captureStreakRef.current;
@@ -375,6 +376,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     chessRef.current = new Chess(data.fen);
     setSelected(null);
     setLegalTargets([]);
+    lastPlanCategoryRef.current = null; // fresh game — let the bot announce its opening read of the position
   }, [gameId, onBack, showToast]);
 
   useEffect(() => { load(); }, [load]);
@@ -439,8 +441,21 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
         : explainAiMove(chess, moveResult);
       const narrative = describeCaptureNarrative(chess, moveResult);
       const aside = maybeFunnyAside(qualityOrExplain?.tag, moveResult, chess.isCheckmate(), game?.move_count);
-      const display = [qualityOrExplain?.display, narrative, aside].filter(Boolean).join(" ");
-      const spoken = [qualityOrExplain?.spoken, narrative, aside].filter(Boolean).join(" ");
+      // The bot's forward-looking "plan" — only on its own moves, and
+      // only spoken again when its read of the position actually shifts
+      // (material swing, your king still exposed, hitting the endgame),
+      // not on every single move — that would get old fast. Comes right
+      // after its move explanation, same as asked: plan follows analysis.
+      let planLine = null;
+      if (mover === "ai" && !chess.isGameOver()) {
+        const plan = generateBotPlan(chess);
+        if (plan.category !== lastPlanCategoryRef.current) {
+          planLine = plan.line;
+          lastPlanCategoryRef.current = plan.category;
+        }
+      }
+      const display = [qualityOrExplain?.display, narrative, aside, planLine].filter(Boolean).join(" ");
+      const spoken = [qualityOrExplain?.spoken, narrative, aside, planLine].filter(Boolean).join(" ");
       if (display) {
         setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text: display }]);
         // Read the analysis aloud automatically — this is the whole
