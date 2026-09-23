@@ -23,7 +23,8 @@ import { Chess } from "chess.js";
 import { ArrowLeft, Swords, Plus, Users, Flag, Loader2, Trophy, Clock, Bot, BookOpen, GraduationCap, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { formatNets } from "./nets.js";
-import { pickAiMove, AI_DIFFICULTIES, AI_REWARD_NETS, commentOnHumanMove, explainAiMove, describeCaptureNarrative, maybeFunnyAside, generateBotPlan } from "./chessAi.js";
+import { AI_DIFFICULTIES, AI_REWARD_NETS, buildHumanMoveComment, explainAiMove, describeCaptureNarrative, maybeFunnyAside, generateBotPlan } from "./chessAi.js";
+import { pickAiMoveAsync, classifyMoveAsync } from "./chessWorkerClient.js";
 import { chessSpeech, dramatizeSquare } from "./chessVoice.js";
 import { getVoiceTier, setVoiceTierOverride, isHdVoiceEnabled, setHdVoiceEnabled, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
@@ -436,9 +437,13 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     // Only past this point is the move locked in — safe to comment on it.
     if (moveContext) {
       const { fenBeforeMove, moveResult, mover } = moveContext;
-      const qualityOrExplain = mover === "human"
-        ? commentOnHumanMove(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion }, moveResult.san)
-        : explainAiMove(chess, moveResult);
+      let qualityOrExplain;
+      if (mover === "human") {
+        const { tag, lossCp, reason } = await classifyMoveAsync(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion });
+        qualityOrExplain = buildHumanMoveComment(tag, lossCp, moveResult.san, reason);
+      } else {
+        qualityOrExplain = explainAiMove(chess, moveResult);
+      }
       const narrative = describeCaptureNarrative(chess, moveResult);
       const aside = maybeFunnyAside(qualityOrExplain?.tag, moveResult, chess.isCheckmate(), game?.move_count);
       // The bot's forward-looking "plan" — only on its own moves, and
@@ -484,7 +489,8 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       if (cancelled) return;
       const chess = chessRef.current;
       const fenBeforeMove = chess.fen();
-      const move = pickAiMove(chess, game.ai_difficulty);
+      const move = await pickAiMoveAsync(fenBeforeMove, game.ai_difficulty);
+      if (cancelled) return; // player left/moved on while the worker was thinking
       if (!move) { setAiThinking(false); return; }
       let result;
       try { result = chess.move(move); } catch { result = null; }

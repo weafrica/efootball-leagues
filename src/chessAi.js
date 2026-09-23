@@ -144,25 +144,28 @@ const PIECE_NAME = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen",
 // Returns { tag, lossCp } from the mover's own perspective — lossCp is
 // how many centipawns worse the played move was than the best one, 0 or
 // negative meaning it basically *was* the best move.
-export function classifyMove(fenBeforeMove, playedMove, depth = 2) {
+export function classifyMove(fenBeforeMove, playedMove, depth = 1) {
   const chess = new Chess(fenBeforeMove);
   const moverIsWhite = chess.turn() === "w";
   const legal = chess.moves({ verbose: true });
-  if (legal.length === 0) return { tag: "Only move", lossCp: 0 };
+  if (legal.length === 0) return { tag: "Only move", lossCp: 0, reason: null };
 
   let bestScore = -Infinity;
+  let bestMove = null;
   let playedScore = null;
+  let playedMoveObj = null;
   for (const m of legal) {
     chess.move(m);
     const score = minimax(chess, depth - 1, -Infinity, Infinity, !moverIsWhite);
     const fromMoverPerspective = moverIsWhite ? score : -score;
     chess.undo();
-    if (fromMoverPerspective > bestScore) bestScore = fromMoverPerspective;
+    if (fromMoverPerspective > bestScore) { bestScore = fromMoverPerspective; bestMove = m; }
     if (m.from === playedMove.from && m.to === playedMove.to && (m.promotion || null) === (playedMove.promotion || null)) {
       playedScore = fromMoverPerspective;
+      playedMoveObj = m;
     }
   }
-  if (playedScore === null) return { tag: "Move played", lossCp: 0 }; // shouldn't happen, defensive fallback
+  if (playedScore === null) return { tag: "Move played", lossCp: 0, reason: null }; // shouldn't happen, defensive fallback
 
   const lossCp = Math.max(0, Math.round(bestScore - playedScore));
   let tag;
@@ -172,7 +175,51 @@ export function classifyMove(fenBeforeMove, playedMove, depth = 2) {
   else if (lossCp < 150) tag = "Inaccuracy";
   else if (lossCp < 300) tag = "Mistake";
   else tag = "Blunder";
-  return { tag, lossCp };
+
+  const reason = diagnoseMoveReason(chess, playedMoveObj, bestMove, tag);
+  return { tag, lossCp, reason, bestMoveSan: bestMove?.san };
+}
+
+// diagnoseMoveReason — the actual "why" behind a tag, not just the tag
+// itself. Cheap, honest heuristics, not a full tactical read: catches
+// the clearest, most instructive cases (a piece left hanging for free, a
+// bigger capture that was missed, a move that wins material or gives
+// check) rather than claiming to explain every possible reason.
+function diagnoseMoveReason(chess, playedMove, bestMove, tag) {
+  const isGood = tag === "Best move" || tag === "Excellent" || tag === "Good";
+
+  if (isGood) {
+    if (playedMove.captured) return `it wins a ${PIECE_NAME[playedMove.captured]}`;
+    if (playedMove.san.includes("+") || playedMove.san.includes("#")) return "it puts the king in check";
+    if (bestMove && bestMove.san === playedMove.san) return "it's the most active move available here";
+    return null;
+  }
+
+  // Did the played move leave the piece it just moved sitting on a
+  // square the opponent can take for free (no immediate recapture of
+  // equal-or-greater value)? This is the single most useful thing to
+  // flag for someone learning — a straight-up hung piece.
+  chess.move(playedMove);
+  const opponentReplies = chess.moves({ verbose: true });
+  const hangCapture = opponentReplies.find((m) => m.to === playedMove.to && m.captured);
+  let reason = null;
+  if (hangCapture && PIECE_VALUE[playedMove.piece] > 0) {
+    chess.move(hangCapture);
+    const canRecapture = chess.moves({ verbose: true })
+      .some((m) => m.to === hangCapture.to && m.captured && PIECE_VALUE[m.captured] >= PIECE_VALUE[hangCapture.piece]);
+    chess.undo();
+    if (!canRecapture) reason = `it leaves your ${PIECE_NAME[playedMove.piece]} hanging on ${playedMove.to} — nothing stops it being taken for free`;
+  }
+  chess.undo();
+
+  if (!reason && bestMove) {
+    if (bestMove.captured && (!playedMove.captured || PIECE_VALUE[bestMove.captured] > PIECE_VALUE[playedMove.captured])) {
+      reason = `${bestMove.san} was there and wins more material`;
+    } else {
+      reason = `${bestMove.san} kept a bigger edge`;
+    }
+  }
+  return reason;
 }
 
 const ENCOURAGING = {
@@ -221,16 +268,32 @@ export function sanToSpeech(san) {
 // of the move that was actually played (for referencing it by name).
 // Returns { display, spoken } — the caption keeps standard notation
 // (normal for a chess app), the spoken version expands it to words.
+// commentOnHumanMove — the "praise/criticize" side, kept for callers
+// that don't need to run the (expensive) classification off-thread.
+// ChessGame.jsx instead runs classifyMove in a Web Worker (see
+// chessWorker.js) and calls buildHumanMoveComment below with the result,
+// so the heavy search never blocks the main thread/UI/voice.
 export function commentOnHumanMove(fenBeforeMove, playedMove, moveSan) {
-  const { tag, lossCp } = classifyMove(fenBeforeMove, playedMove);
+  const { tag, lossCp, reason } = classifyMove(fenBeforeMove, playedMove);
+  return buildHumanMoveComment(tag, lossCp, moveSan, reason);
+}
+
+// buildHumanMoveComment — the cheap, pure text-formatting half of the
+// above, split out so it can run instantly on the main thread once the
+// worker has already done the expensive classifyMove search. `reason`
+// is the specific "why" from diagnoseMoveReason (e.g. "it wins a rook",
+// "it leaves your knight hanging on d5") — when there isn't one, falls
+// back to a generic line rather than leaving the comment thin.
+export function buildHumanMoveComment(tag, lossCp, moveSan, reason) {
   if (tag === "Only move" || tag === "Move played") return null; // nothing useful to say
   const spokenMove = sanToSpeech(moveSan);
   if (tag === "Best move" || tag === "Excellent" || tag === "Good") {
-    const line = pick(ENCOURAGING[tag] || ENCOURAGING["Good"]);
-    return { display: `${tag}: ${line}`, spoken: `${spokenMove}. ${line}`, tag };
+    const line = reason ? `${tag} — ${reason}.` : `${tag}: ${pick(ENCOURAGING[tag] || ENCOURAGING["Good"])}`;
+    return { display: line, spoken: `${spokenMove}. ${line}`, tag };
   }
-  const line = pick(CRITICAL[tag]);
-  return { display: `${tag} (${moveSan}): ${line} (~${lossCp}cp)`, spoken: `${spokenMove}. ${tag}. ${line}`, tag };
+  const why = reason ? reason : pick(CRITICAL[tag]);
+  const display = `${tag} (${moveSan}) — ${why}. (~${lossCp}cp)`;
+  return { display, spoken: `${spokenMove}. ${tag}. ${why}.`, tag };
 }
 
 // explainAiMove — the "how I made my brilliant move" side. Template-based
