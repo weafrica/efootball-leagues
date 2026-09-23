@@ -398,7 +398,12 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     const hasChoices = !node?.ending && node?.choices?.length;
 
     const autoReadChoices = () => {
-      if (hasChoices && hdEnabled) speakChoices(node.choices);
+      // Not gated on hdEnabled — speakChoices() itself already picks HD
+      // vs. the plain built-in voice. Gating the AUTO-TRIGGER on HD meant
+      // choices simply never auto-played at all whenever HD was off
+      // (different device, never toggled on, etc.) — that silence is what
+      // read as "auto play isn't working."
+      if (hasChoices) speakChoices(node.choices);
     };
 
     if (!narrationOn) { autoReadChoices(); return; }
@@ -417,7 +422,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     })();
 
     return () => { cancelled = true; audio.pause(); audio.onended = null; audio.onerror = null; };
-  }, [narrationOn, activeStory, language, nodeId, content, hdEnabled]);
+  }, [narrationOn, activeStory, language, nodeId, content]);
 
   // Starts synthesizing this node's choice audio the moment the node
   // loads — in parallel with narration playing, not after it ends. This
@@ -490,12 +495,18 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const currentFlags = () => progressByStory[activeStory?.id]?.flags || {};
 
   const choose = (goto) => {
+    // Cuts any choices still being read aloud immediately — previously
+    // that audio kept playing over the new page loading, which is what
+    // made tapping a choice feel slow/unresponsive even though the text
+    // itself had already moved on.
+    stopChoiceSpeech();
     const node = content.graph.nodes[goto];
     setNodeId(goto);
     saveProgress(activeStory, language, goto, node, currentFlags());
   };
 
   const restart = () => {
+    stopChoiceSpeech();
     const startId = content.graph.startNode;
     setNodeId(startId);
     saveProgress(activeStory, language, startId, content.graph.nodes[startId], {});
