@@ -10752,7 +10752,7 @@ function StatTile({ label, value, index, c, ring }) {
 // which is how Standings ended up always passing null (its copy silently
 // went stale). One source of truth now; callers just pass the rank they
 // already have.
-export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, badges, onClose, c }) {
+export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, badges, rivalry, onClose, c }) {
   const tier = tierFor(rank, c);
   const isMedal = tier.key === "gold" || tier.key === "silver" || tier.key === "bronze";
 
@@ -10823,6 +10823,49 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, bad
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Head-to-head vs the viewer — omitted on your own card (isMe) and
+            when the caller has no rivalry data to offer (rivalry undefined,
+            e.g. not signed in). rivalry.matches is whatever confirmed
+            challenge matches the caller could find between the two of you;
+            an empty array still renders the section (0-0-0, "haven't played
+            yet") rather than hiding it, so the card doesn't silently change
+            shape depending on match history. */}
+        {rivalry && !isMe && (
+          <div className="relative mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.15em] mb-2.5 flex items-center gap-1.5" style={{ color: c.textFaint }}>
+              <Swords size={11} /> Head to head
+            </div>
+            <div className="flex items-center justify-center gap-5 mb-3">
+              <div className="text-center">
+                <div className="font-mono text-xl font-extrabold" style={{ color: c.greenText }}>{rivalry.myWins}</div>
+                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Your wins</div>
+              </div>
+              <div className="text-center">
+                <div className="font-mono text-xl font-extrabold" style={{ color: c.text }}>{rivalry.draws}</div>
+                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Draws</div>
+              </div>
+              <div className="text-center">
+                <div className="font-mono text-xl font-extrabold" style={{ color: c.red }}>{rivalry.theirWins}</div>
+                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>{username}'s wins</div>
+              </div>
+            </div>
+            {rivalry.matches.length === 0 ? (
+              <div className="font-body text-xs text-center" style={{ color: c.textFaint }}>You haven't played {username} yet.</div>
+            ) : (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {rivalry.matches.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between font-mono text-[11px] px-2.5 py-1.5 rounded-lg" style={{ background: c.surface }}>
+                    <span style={{ color: c.textFaint }}>{timeAgo(m.playedAt)}</span>
+                    <span className="font-semibold" style={{ color: m.myScore === m.theirScore ? c.textDim : m.myScore > m.theirScore ? c.greenText : c.red }}>
+                      {m.myScore} – {m.theirScore}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

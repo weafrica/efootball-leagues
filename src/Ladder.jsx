@@ -79,6 +79,31 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
       });
   }, [challenges, myId]);
 
+  // Head-to-head record vs whichever player's card is currently open —
+  // built from recentMatches (confirmed ladder results), the same list
+  // rendered further down as "Recent matches". Only covers what that list
+  // holds, so a very old match that's scrolled out of "recent" won't show
+  // up here either.
+  const rivalryFor = useMemo(() => {
+    if (!session || !profileRow || profileRow.user_id === myId) return null;
+    const theirId = profileRow.user_id;
+    const matches = (recentMatches || [])
+      .filter((m) => (m.challenger_id === myId && m.opponent_id === theirId) || (m.opponent_id === myId && m.challenger_id === theirId))
+      .map((m) => {
+        const iAmChallenger = m.challenger_id === myId;
+        return {
+          id: m.id,
+          playedAt: m.result_confirmed_at,
+          myScore: iAmChallenger ? m.challenger_score : m.opponent_score,
+          theirScore: iAmChallenger ? m.opponent_score : m.challenger_score,
+        };
+      });
+    const myWins = matches.filter((m) => m.myScore > m.theirScore).length;
+    const theirWins = matches.filter((m) => m.theirScore > m.myScore).length;
+    const draws = matches.length - myWins - theirWins;
+    return { matches, myWins, theirWins, draws };
+  }, [session, profileRow, myId, recentMatches]);
+
   const handleJoin = async () => {
     if (joining) return;
     setJoining(true);
@@ -359,6 +384,7 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
             { label: "Points", value: profileRow.points },
             { label: "W · D · L", value: `${profileRow.wins} · ${profileRow.draws} · ${profileRow.losses}` },
           ]}
+          rivalry={rivalryFor}
           onClose={() => setProfileRow(null)}
           c={c}
         />
