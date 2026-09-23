@@ -8761,7 +8761,7 @@ export default function App() {
                 challenges={challenges} openChallenges={openChallenges} onOpenChallenges={openChallengesScreen}
                 onOpenLogResult={(ch) => setChallengeResultModal({ kind: "challenge", challenge: ch })}
                 onOpenLogResultOpen={(ch) => setChallengeResultModal({ kind: "open", challenge: ch })}
-                ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder} onOpenLadderLeague={openLeagueLadder}
+                ladder={ladderTop5} myLadderRank={myLadderRank} onOpenLadder={openLadderScreen} onOpenLeaderboard={() => setView("leaderboard")} onJoinLadder={joinLadder} onOpenLadderLeague={openLeagueLadder} onOpenCashLadder={() => setView("cashLadder")}
                 myLadderActionCount={myLadderActionCount}
                 onOpen={(id, fixtureId) => { setActiveLeagueId(id); setView("league"); if (fixtureId) setPendingLogFixtureId(fixtureId); }}
                 onCreate={() => setView("create")} onJoin={startJoin} onOpenShop={() => setView("shop")} onOpenTransferMarket={() => setView("transferMarket")} onOpenCompletedLeagues={openCompletedLeaguesScreen} memberAvatars={challengeMembers} allAchievements={allAchievements} ladderChampions={ladderChampions} onAchievementsSynced={loadAllAchievements} myAvatarUrl={profile?.avatar_url}
@@ -11164,7 +11164,7 @@ function LadderMaintenanceModal({ onClose, c }) {
   );
 }
 
-function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, onResubmitPayment, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, onSuggestNotifications, c }) {
+function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, myPaymentStatus, canManageLeague, myTeam, onOpen, onCreate, onJoin, onResubmitPayment, session, onToggleLeagueReaction, challenges, openChallenges, onOpenChallenges, onOpenLogResult, onOpenLogResultOpen, ladder, myLadderRank, onOpenLadder, onJoinLadder, onOpenLadderLeague, myLadderActionCount, onOpenLeaderboard, onOpenShop, onOpenTransferMarket, onOpenCompletedLeagues, onOpenCashLadder, memberAvatars, allAchievements, ladderChampions, onAchievementsSynced, myAvatarUrl, weekendOverride, onSetWeekendOverride, showToast, quickActions, onSuggestNotifications, c }) {
   // The per-minute attention-score tick (see LeagueListsSection below) used
   // to live here, which meant the achievements/Wall of Fame/XP-bar/
   // leaderboard machinery below — none of which is time-sensitive — also
@@ -11538,6 +11538,7 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
             entirely now that the real section (with live League 1-5 cards)
             sits in this spot instead of a banner just pointing at it. */}
         <LadderLeagueSection session={session} isAdmin={isAdmin} onOpenLadderLeague={onOpenLadderLeague} c={c} />
+        <CashLadderHomeSection session={session} c={c} onOpenCashLadder={onOpenCashLadder} />
         {/* Weekend League — sits directly below the League Ladder section
             and above the Leaderboard preview, per request. Always
             rendered — the League Ladder pass inside it (LadderWeekendCard)
@@ -13526,6 +13527,44 @@ function LadderMoveBanner({ session, myLadderActionCount, onOpenLadderLeague, c 
 // is reached only by promotion, an auction win, or a relegated arrival,
 // never a direct join, so a card for a higher tier the viewer isn't in
 // shows "Promotion only" instead of a Join button.
+function CashLadderHomeSection({ session, c, onOpenCashLadder }) {
+  const [balance, setBalance] = useState(null);
+  const [membership, setMembership] = useState(null);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    supabase.from("cash_ladder_goats_wallet").select("balance").eq("user_id", session.user.id).maybeSingle()
+      .then(({ data }) => setBalance(data?.balance ?? 0));
+    supabase.from("cash_ladder_memberships").select("id").eq("user_id", session.user.id).eq("status", "active").maybeSingle()
+      .then(({ data }) => setMembership(data || null));
+  }, [session?.user?.id]);
+
+  return (
+    <section className="mt-8">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
+            <Wallet size={15} style={{ color: c.accent }} />
+          </span>
+          <div className="font-extrabold uppercase tracking-tight text-lg leading-none">Cash Ladder</div>
+        </div>
+        <button onClick={onOpenCashLadder} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+          {membership ? "View" : "Join"}
+        </button>
+      </div>
+      <div className="rounded-2xl p-4" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+        <p className="font-body text-xs" style={{ color: c.textDim }}>
+          {membership
+            ? "You\u2019re in this season \u2014 tap View to see your matches."
+            : balance
+            ? `You have ${balance}G waiting \u2014 tap Join to enter this season.`
+            : "Real-money League Ladder, same rules, paid out to the top finishers each season."}
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function LadderLeagueSection({ session, isAdmin, onOpenLadderLeague, c }) {
   const [ladderLeagues, setLadderLeagues] = useState(null); // null = still loading
   const [cycle, setCycle] = useState(null);

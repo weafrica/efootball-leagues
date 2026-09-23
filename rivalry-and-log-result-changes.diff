@@ -1,0 +1,120 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 7533cc1..410426d 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -7748,7 +7748,7 @@ function StatTile({ label, value, index, c, ring }) {
+ // which is how Standings ended up always passing null (its copy silently
+ // went stale). One source of truth now; callers just pass the rank they
+ // already have.
+-export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, onClose, c }) {
++export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, rivalry, onClose, c }) {
+   const tier = tierFor(rank, c);
+   const isMedal = tier.key === "gold" || tier.key === "silver" || tier.key === "bronze";
+ 
+@@ -7800,6 +7800,49 @@ export function PlayerProfileModal({ username, avatarUrl, rank, isMe, stats, onC
+             <StatTile key={s.label} label={s.label} value={s.value} index={i} c={c} ring={tier.ring} />
+           ))}
+         </div>
++
++        {/* Head-to-head vs the viewer — omitted on your own card (isMe) and
++            when the caller has no rivalry data to offer (rivalry undefined,
++            e.g. not signed in). rivalry.matches is whatever confirmed
++            challenge matches the caller could find between the two of you;
++            an empty array still renders the section (0-0-0, "haven't played
++            yet") rather than hiding it, so the card doesn't silently change
++            shape depending on match history. */}
++        {rivalry && !isMe && (
++          <div className="relative mt-4 pt-4 border-t" style={{ borderColor: c.border }}>
++            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.15em] mb-2.5 flex items-center gap-1.5" style={{ color: c.textFaint }}>
++              <Swords size={11} /> Head to head
++            </div>
++            <div className="flex items-center justify-center gap-5 mb-3">
++              <div className="text-center">
++                <div className="font-mono text-xl font-extrabold" style={{ color: c.greenText }}>{rivalry.myWins}</div>
++                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Your wins</div>
++              </div>
++              <div className="text-center">
++                <div className="font-mono text-xl font-extrabold" style={{ color: c.text }}>{rivalry.draws}</div>
++                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Draws</div>
++              </div>
++              <div className="text-center">
++                <div className="font-mono text-xl font-extrabold" style={{ color: c.red }}>{rivalry.theirWins}</div>
++                <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>{username}'s wins</div>
++              </div>
++            </div>
++            {rivalry.matches.length === 0 ? (
++              <div className="font-body text-xs text-center" style={{ color: c.textFaint }}>You haven't played {username} yet.</div>
++            ) : (
++              <div className="space-y-1 max-h-32 overflow-y-auto">
++                {rivalry.matches.map((m) => (
++                  <div key={m.id} className="flex items-center justify-between font-mono text-[11px] px-2.5 py-1.5 rounded-lg" style={{ background: c.surface }}>
++                    <span style={{ color: c.textFaint }}>{timeAgo(m.playedAt)}</span>
++                    <span className="font-semibold" style={{ color: m.myScore === m.theirScore ? c.textDim : m.myScore > m.theirScore ? c.greenText : c.red }}>
++                      {m.myScore} – {m.theirScore}
++                    </span>
++                  </div>
++                ))}
++              </div>
++            )}
++          </div>
++        )}
+       </div>
+     </div>
+   );
+diff --git a/src/Ladder.jsx b/src/Ladder.jsx
+index 53d6788..80f386d 100644
+--- a/src/Ladder.jsx
++++ b/src/Ladder.jsx
+@@ -76,6 +76,31 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
+       });
+   }, [challenges, myId]);
+ 
++  // Head-to-head record vs whichever player's card is currently open —
++  // built from recentMatches (confirmed ladder results), the same list
++  // rendered further down as "Recent matches". Only covers what that list
++  // holds, so a very old match that's scrolled out of "recent" won't show
++  // up here either.
++  const rivalryFor = useMemo(() => {
++    if (!session || !profileRow || profileRow.user_id === myId) return null;
++    const theirId = profileRow.user_id;
++    const matches = (recentMatches || [])
++      .filter((m) => (m.challenger_id === myId && m.opponent_id === theirId) || (m.opponent_id === myId && m.challenger_id === theirId))
++      .map((m) => {
++        const iAmChallenger = m.challenger_id === myId;
++        return {
++          id: m.id,
++          playedAt: m.result_confirmed_at,
++          myScore: iAmChallenger ? m.challenger_score : m.opponent_score,
++          theirScore: iAmChallenger ? m.opponent_score : m.challenger_score,
++        };
++      });
++    const myWins = matches.filter((m) => m.myScore > m.theirScore).length;
++    const theirWins = matches.filter((m) => m.theirScore > m.myScore).length;
++    const draws = matches.length - myWins - theirWins;
++    return { matches, myWins, theirWins, draws };
++  }, [session, profileRow, myId, recentMatches]);
++
+   if (!ladder) return <Loader c={c} />;
+ 
+   const q = query.trim().toLowerCase();
+@@ -327,6 +352,7 @@ export default function LadderPage({ ladder, myLadderRank, targets, session, onO
+             { label: "Points", value: profileRow.points },
+             { label: "W · D · L", value: `${profileRow.wins} · ${profileRow.draws} · ${profileRow.losses}` },
+           ]}
++          rivalry={rivalryFor}
+           onClose={() => setProfileRow(null)}
+           c={c}
+         />
+diff --git a/src/LeagueDetail.jsx b/src/LeagueDetail.jsx
+index 7a14060..ab726d9 100644
+--- a/src/LeagueDetail.jsx
++++ b/src/LeagueDetail.jsx
+@@ -483,7 +483,7 @@ function LadderCupOpponentRow({ opponent, myTeamId, myTeamName, match, walkoverC
+         {match && !resultPending && (
+           <button onClick={() => onOpenResult(match)}
+             className="shrink-0 flex items-center gap-1.5 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>
+-            <Trophy size={13} /> Log result{match.match_length_minutes != null ? ` · ${match.match_length_minutes}m` : ""}
++            <Trophy size={13} /> Log result
+           </button>
+         )}
+         {resultPending && !iReported && !escalated && (
