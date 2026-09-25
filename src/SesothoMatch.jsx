@@ -578,6 +578,13 @@ function CandyTile({ level, word, colorIndex = 0, special, size = 44, dim = fals
       {special === "stripedH" && <rect x="10" y="52" width="100" height="16" rx="8" fill="#fff" opacity="0.85" />}
       {special === "stripedV" && <rect x="52" y="10" width="16" height="100" rx="8" fill="#fff" opacity="0.85" />}
       {special === "wrapped" && <rect x="14" y="14" width="92" height="92" rx="20" fill="none" stroke="#fff" strokeWidth="6" strokeDasharray="10 8" opacity="0.9" />}
+      {special === "bomb" && (
+        <g opacity="0.9">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#E0433D" strokeWidth="5" strokeDasharray="18 6" transform="rotate(0 60 60)" />
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#3B7FE0" strokeWidth="5" strokeDasharray="18 6" transform="rotate(30 60 60)" />
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#E8D023" strokeWidth="5" strokeDasharray="18 6" transform="rotate(60 60 60)" />
+        </g>
+      )}
     </svg>
   );
 }
@@ -669,7 +676,7 @@ function resolveCascade(startBoard, n, swapOrigin) {
         // own convention closely enough for our purposes).
         let origin = run.cells.find((p) => swapOrigin && p.r === swapOrigin.r && p.c === swapOrigin.c);
         if (!origin) origin = run.cells[Math.floor(run.cells.length / 2)];
-        const special = run.cells.length >= 5 ? "wrapped" : (run.dir === "h" ? "stripedV" : "stripedH");
+        const special = run.cells.length >= 6 ? "bomb" : run.cells.length >= 5 ? "wrapped" : (run.dir === "h" ? "stripedV" : "stripedH");
         upgrades.push({ r: origin.r, c: origin.c, special });
       }
     }
@@ -690,6 +697,12 @@ function resolveCascade(startBoard, n, swapOrigin) {
           for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
             const nr = r + dr, nc = cc + dc;
             if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) added.push(`${nr},${nc}`);
+          }
+        } else if (sp === "bomb") {
+          // Rainbow candy - wipes every tile of its own color, board-wide.
+          const targetType = board[r][cc].type;
+          for (let rr = 0; rr < GRID; rr++) for (let ccx = 0; ccx < GRID; ccx++) {
+            if (board[rr][ccx] && board[rr][ccx].type === targetType) added.push(`${rr},${ccx}`);
           }
         }
         for (const a of added) if (!toClear.has(a)) { toClear.add(a); changed = true; detonated = true; }
