@@ -13,10 +13,33 @@ import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { logActivity } from "./activityLog";
 import { BANK_DETAILS, MUKURU_DETAILS, CardBrandsBadge } from "./paymentConfig";
+import { resolvePlayerLocation } from "./utils/timezone";
 
 const goats = (n) => `${n}G`;
 const rand = (n) => `R${Number(n).toLocaleString("en-ZA")}`;
 const AMOUNT_PRESETS = [20, 50, 100, 200];
+
+// Rough, approximate ZAR conversion for display only -- every real charge
+// happens in Rand through the actual payment rails (Capitec, Mukuru,
+// iKhokha). This is just so people outside South Africa have a sense of
+// scale; it is NOT a live feed and should be re-checked/updated
+// periodically rather than trusted as exact.
+const APPROX_ZAR_RATE = {
+  ZA: { code: "ZAR", symbol: "R", rate: 1 },
+  US: { code: "USD", symbol: "$", rate: 0.061 },
+  GB: { code: "GBP", symbol: "\u00a3", rate: 0.045 },
+  NG: { code: "NGN", symbol: "\u20a6", rate: 85 },
+  KE: { code: "KES", symbol: "KSh", rate: 7.85 },
+  ZW: { code: "USD", symbol: "$", rate: 0.061 },
+};
+const EU_COUNTRIES = new Set(["DE","FR","ES","IT","NL","BE","PT","IE","AT","FI","GR","LU"]);
+
+function approxCurrencyFor(countryCode) {
+  if (!countryCode) return null;
+  if (APPROX_ZAR_RATE[countryCode]) return APPROX_ZAR_RATE[countryCode];
+  if (EU_COUNTRIES.has(countryCode)) return { code: "EUR", symbol: "\u20ac", rate: 0.052 };
+  return null;
+}
 
 // Small, self-contained animation styles — kept local to this component so
 // it doesn't depend on Tailwind config elsewhere having these defined.
@@ -85,6 +108,14 @@ export default function CashLadder({ session, profile, c, onBack }) {
 
   const userId = session?.user?.id;
   const goatsPreview = Math.round(Number(amount || 0) * 3.8);
+  const entryFeePreview = Math.round(goatsPreview / 2);
+  const { country_code } = resolvePlayerLocation(profile?.phone) || {};
+  const approxCurrency = approxCurrencyFor(country_code);
+  const approxAmount = (randValue) => {
+    if (!approxCurrency || approxCurrency.code === "ZAR") return null;
+    const converted = Number(randValue || 0) * approxCurrency.rate;
+    return `\u2248 ${approxCurrency.symbol}${converted < 10 ? converted.toFixed(2) : Math.round(converted)}`;
+  };
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -247,6 +278,11 @@ export default function CashLadder({ session, profile, c, onBack }) {
           <h1 className="font-display text-xl font-extrabold uppercase tracking-tight text-white drop-shadow-sm">Cash Ladder</h1>
         </div>
         <p className="font-body text-[11px] text-white/90 ml-9">Real prizes, paid out every season \u2014 top 3 get the pool.</p>
+        {!membership && (
+          <p key={entryFeePreview} className="cl-pop font-body text-[11px] font-bold text-white ml-9 mt-1">
+            Entry fee for this amount: {goats(entryFeePreview)} \u00b7 rest banked for next season
+          </p>
+        )}
       </div>
 
       {toast && (
@@ -327,6 +363,9 @@ export default function CashLadder({ session, profile, c, onBack }) {
               style={{ background: `${c.accent}18`, color: c.text }}
             >
               You'll get <span className="font-extrabold" style={{ color: c.accent }}>{goats(goatsPreview)}</span>
+              {approxAmount(amount) && (
+                <span className="font-mono text-[10px] ml-1.5" style={{ color: c.textFaint }}>({approxAmount(amount)})</span>
+              )}
               <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
                 half enters you this season \u00b7 half banked for next season
               </div>
@@ -340,7 +379,11 @@ export default function CashLadder({ session, profile, c, onBack }) {
             style={{ background: c.accent, color: c.accentText }}
           >
             <CreditCard size={17} />
-            {saving ? "Redirecting\u2026" : `Pay ${rand(amount || 0)} by card`}
+            {saving
+              ? "Redirecting\u2026"
+              : approxAmount(amount)
+              ? `Pay ${rand(amount || 0)} (${approxAmount(amount)}) by card`
+              : `Pay ${rand(amount || 0)} by card`}
           </button>
           <div className="flex justify-center mb-4">
             <CardBrandsBadge />
