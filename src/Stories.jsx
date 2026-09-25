@@ -320,8 +320,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const [speakingChoices, setSpeakingChoices] = useState(false);
   const speakingChoicesRef = useRef(false);
   const choiceAudioRef = useRef(null);
-  const choiceBlobCacheRef = useRef({}); // nodeId -> [blob, ...] in choice order, synthesized ahead of time
   const prefetchedNarrationRef = useRef(new Set()); // "storyId/lang/nodeId" already warmed in the browser cache
+  const prefetchedChoicesRef = useRef(new Set()); // "storyId/lang/nodeId" — this node's own choice audio already warmed
 
   const stopChoiceSpeech = () => {
     speakingChoicesRef.current = false;
@@ -330,60 +330,69 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     setSpeakingChoices(false);
   };
 
-  // Reads the current choices aloud. Choice text is player-facing and
-  // grows with every new branch anyone writes — pre-generating audio for
-  // it, the way narration is handled, doesn't scale. This reuses the
-  // same live, in-browser neural voice built for Chess (chessVoiceHD.js):
-  // real quality (Kokoro, ~86MB, or the lighter Piper-in-browser tier),
-  // downloaded once on opt-in and cached, then able to speak ANY text
-  // instantly from then on — no authoring step, ever. Falls back to the
-  // plain built-in browser voice if HD is off or fails to load, same
-  // resilience chess already relies on.
+  // Plays a single choice's pre-generated audio file if one exists.
+  // Resolves true on success, false if it's missing (not yet synthesized)
+  // or fails for any other reason — the caller decides what to do next.
+  const playPregeneratedChoice = (storyId, lang, node_id, index) => new Promise(async (resolve) => {
+    const url = `${AUDIO_BASE}/${storyId}/${lang}/${node_id}_choice${index}.wav`;
+    const playableUrl = await cachedAudioUrl(url);
+    const audio = new Audio(playableUrl);
+    choiceAudioRef.current = audio;
+    audio.onended = () => resolve(true);
+    audio.onerror = () => resolve(false);
+    audio.play().then(() => {}).catch(() => resolve(false));
+  });
+
+  // Rare fallback for a single choice line that hasn't been synthesized
+  // into a fixed file yet (e.g. a branch just added, synthesis not run
+  // against it since) — reuses the same live HD engine built for Chess,
+  // or the plain browser voice under that. Fixed Piper audio is the
+  // intended source of truth for every choice going forward; this only
+  // covers the gap until that catches up.
+  const speakOneChoiceFallback = async (text) => {
+    if (isHdVoiceEnabled()) {
+      try {
+        setHdLoading(!neuralVoiceReady());
+        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
+        setHdLoading(false);
+        const { blob } = await engine.speak(text);
+        if (!speakingChoicesRef.current) return;
+        const audio = new Audio(URL.createObjectURL(blob));
+        choiceAudioRef.current = audio;
+        await new Promise((resolve) => { audio.onended = resolve; audio.onerror = resolve; audio.play().catch(resolve); });
+        return;
+      } catch (err) {
+        console.warn("HD fallback failed for a choice line:", err);
+        setHdLoading(false);
+      }
+    }
+    if (!("speechSynthesis" in window)) return;
+    await new Promise((resolve) => {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.0;
+      utter.onend = resolve;
+      utter.onerror = resolve;
+      window.speechSynthesis.speak(utter);
+    });
+  };
+
+  // Reads the current choices aloud, one at a time, from their
+  // pre-generated Piper audio (same fixed, deep, cast-voiced narration
+  // pipeline as the story text itself) — falling back per-line to the
+  // live HD engine or the browser's built-in voice only for a choice
+  // that hasn't been synthesized into a file yet.
   const speakChoices = async (choices) => {
     if (speakingChoices) { stopChoiceSpeech(); return; }
     speakingChoicesRef.current = true;
     setSpeakingChoices(true);
 
-    if (isHdVoiceEnabled()) {
-      try {
-        let blobs = choiceBlobCacheRef.current[nodeId];
-        if (!blobs) {
-          // Prefetch effect hasn't finished (or wasn't running, e.g. HD
-          // was just turned on) — fall back to synthesizing now.
-          setHdLoading(!neuralVoiceReady());
-          const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
-          setHdLoading(false);
-          blobs = await Promise.all(
-            choices.map((choice, i) => engine.speak(`Option ${i + 1}. ${choice.text}`).then((r) => r.blob))
-          );
-          choiceBlobCacheRef.current[nodeId] = blobs;
-        }
-        for (const blob of blobs) {
-          if (!speakingChoicesRef.current) return; // stopped mid-sequence
-          const audio = new Audio(URL.createObjectURL(blob));
-          choiceAudioRef.current = audio;
-          await new Promise((resolve) => {
-            audio.onended = resolve;
-            audio.onerror = resolve;
-            audio.play().catch(resolve);
-          });
-        }
-        setSpeakingChoices(false);
-        return;
-      } catch (err) {
-        console.warn("HD voice failed for choices, falling back to the built-in voice:", err);
-        setHdLoading(false);
-      }
+    for (const [i, choice] of choices.entries()) {
+      if (!speakingChoicesRef.current) return; // stopped mid-sequence
+      const played = await playPregeneratedChoice(activeStory.id, language, nodeId, i);
+      if (!speakingChoicesRef.current) return;
+      if (!played) await speakOneChoiceFallback(`Option ${i + 1}. ${choice.text}`);
     }
-
-    if (!("speechSynthesis" in window)) { setSpeakingChoices(false); return; }
-    window.speechSynthesis.cancel();
-    choices.forEach((choice, i) => {
-      const utter = new SpeechSynthesisUtterance(`Option ${i + 1}: ${choice.text}`);
-      utter.rate = 1.0;
-      if (i === choices.length - 1) utter.onend = () => setSpeakingChoices(false);
-      window.speechSynthesis.speak(utter);
-    });
+    setSpeakingChoices(false);
   };
 
   // Plays the current node's pre-generated narration, if any exists yet,
@@ -424,32 +433,22 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     return () => { cancelled = true; audio.pause(); audio.onended = null; audio.onerror = null; };
   }, [narrationOn, activeStory, language, nodeId, content]);
 
-  // Starts synthesizing this node's choice audio the moment the node
-  // loads — in parallel with narration playing, not after it ends. This
-  // is what actually fixes the "options are slow to respond" lag: by the
-  // time narration finishes and auto-read (or a manual tap) wants to play
-  // the choices, they're usually already sitting in the cache, ready to
-  // play instantly instead of waiting on fresh synthesis.
+  // Warms the cache for this node's own pre-generated choice files as
+  // soon as it loads — in parallel with narration playing, not after.
+  // Cheap now: it's just fetching small existing files (like the
+  // narration prefetch below), not running live synthesis, since fixed
+  // Piper audio is the primary source for choices too now.
   useEffect(() => {
-    if (!hdEnabled || !content || !nodeId) return;
+    if (!activeStory || !content || !nodeId) return;
     const node = content.graph.nodes[nodeId];
     const hasChoices = !node?.ending && node?.choices?.length;
-    if (!hasChoices || choiceBlobCacheRef.current[nodeId]) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
-        if (cancelled) return;
-        const blobs = await Promise.all(
-          node.choices.map((choice, i) => engine.speak(`Option ${i + 1}. ${choice.text}`).then((r) => r.blob))
-        );
-        if (!cancelled) choiceBlobCacheRef.current[nodeId] = blobs;
-      } catch {
-        // Silent — speakChoices() falls back to synthesizing on demand.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [hdEnabled, content, nodeId]);
+    const key = `${activeStory.id}/${language}/${nodeId}`;
+    if (!hasChoices || prefetchedChoicesRef.current.has(key)) return;
+    prefetchedChoicesRef.current.add(key);
+    node.choices.forEach((_, i) => {
+      warmAudioCache(`${AUDIO_BASE}/${activeStory.id}/${language}/${nodeId}_choice${i}.wav`);
+    });
+  }, [activeStory, language, content, nodeId]);
 
   // Prefetches the narration file for every node this one's choices could
   // lead to, while the player is still reading/listening to THIS node —
@@ -468,6 +467,16 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       if (prefetchedNarrationRef.current.has(key)) return;
       prefetchedNarrationRef.current.add(key);
       warmAudioCache(`${AUDIO_BASE}/${key}.wav`);
+
+      // Also warm that next node's OWN choice files, one hop ahead — so
+      // its "what do you do next?" is ready the instant its narration
+      // ends, not just the narration itself.
+      const nextNode = content.graph.nodes[choice.goto];
+      if (!nextNode?.ending && nextNode?.choices?.length) {
+        nextNode.choices.forEach((_, i) => {
+          warmAudioCache(`${AUDIO_BASE}/${key}_choice${i}.wav`);
+        });
+      }
     });
   }, [narrationOn, activeStory, language, content, nodeId]);
 
