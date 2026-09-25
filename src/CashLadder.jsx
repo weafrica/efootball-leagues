@@ -8,7 +8,7 @@
 //   <CashLadder session={session} profile={profile} c={c} onBack={() => setView("home")} />
 
 import { useEffect, useState, useCallback } from "react";
-import { Wallet, CreditCard, X, ArrowLeft } from "lucide-react";
+import { Wallet, CreditCard, ChevronDown, Sparkles, ArrowLeft } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { logActivity } from "./activityLog";
@@ -16,13 +16,38 @@ import { BANK_DETAILS, MUKURU_DETAILS, CardBrandsBadge } from "./paymentConfig";
 
 const goats = (n) => `${n}G`;
 const rand = (n) => `R${Number(n).toLocaleString("en-ZA")}`;
+const AMOUNT_PRESETS = [20, 50, 100, 200];
 
-function Panel({ c, title, children }) {
+// Small, self-contained animation styles — kept local to this component so
+// it doesn't depend on Tailwind config elsewhere having these defined.
+function CashLadderStyles() {
   return (
-    <div className="rounded-2xl p-4 mb-4" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-      <h2 className="font-mono text-[10px] uppercase tracking-wider mb-3" style={{ color: c.textFaint }}>
-        {title}
-      </h2>
+    <style>{`
+      @keyframes cl-pop { 0% { transform: scale(0.9); opacity: 0; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
+      @keyframes cl-pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 var(--cl-glow); } 50% { box-shadow: 0 0 22px 4px var(--cl-glow); } }
+      @keyframes cl-shimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+      @keyframes cl-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      .cl-pop { animation: cl-pop 0.28s cubic-bezier(.2,1.4,.4,1); }
+      .cl-fade-up { animation: cl-fade-up 0.25s ease-out; }
+      .cl-glow-btn { animation: cl-pulse-glow 2.4s ease-in-out infinite; }
+      .cl-shimmer-bg { background-size: 200% 200%; animation: cl-shimmer 6s ease-in-out infinite; }
+      .cl-chip { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+      .cl-chip:active { transform: scale(0.94); }
+      .cl-btn { transition: transform 0.15s ease, filter 0.15s ease; }
+      .cl-btn:hover { filter: brightness(1.08); }
+      .cl-btn:active { transform: scale(0.97); }
+    `}</style>
+  );
+}
+
+function Panel({ c, title, children, className = "" }) {
+  return (
+    <div className={`rounded-2xl p-4 mb-4 ${className}`} style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+      {title && (
+        <h2 className="font-mono text-[10px] uppercase tracking-wider mb-3" style={{ color: c.textFaint }}>
+          {title}
+        </h2>
+      )}
       {children}
     </div>
   );
@@ -51,12 +76,15 @@ export default function CashLadder({ session, profile, c, onBack }) {
   const [loading, setLoading] = useState(true);
 
   const [amount, setAmount] = useState(50);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [scoreDrafts, setScoreDrafts] = useState({});
 
   const userId = session?.user?.id;
+  const goatsPreview = Math.round(Number(amount || 0) * 3.8);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -119,7 +147,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
       });
       if (rpcErr) throw rpcErr;
 
-      setToast(`Submitted — ${rand(amount)} pending admin approval.`);
+      setToast(`Submitted \u2014 ${rand(amount)} pending admin approval.`);
       setFile(null);
       await load();
     } catch (e) {
@@ -131,12 +159,12 @@ export default function CashLadder({ session, profile, c, onBack }) {
 
   const payByCard = async () => {
     if (saving) return;
-    const rand = Number(amount);
-    if (!rand || rand <= 0) { setToast("Enter an amount greater than R0."); return; }
+    const randAmount = Number(amount);
+    if (!randAmount || randAmount <= 0) { setToast("Enter an amount greater than R0."); return; }
     setSaving(true);
     try {
       const { data: topup, error: rpcErr } = await supabase.rpc("submit_cash_ladder_goats_topup", {
-        p_amount_rand: rand,
+        p_amount_rand: randAmount,
         p_checkout_method: null,
         p_payment_proof_path: null,
         p_gateway_reference: null,
@@ -157,7 +185,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
         setToast(data.error || "Couldn't start card payment. Please try again.");
         return;
       }
-      setToast("Redirecting to secure card checkout — you'll be topped up automatically once payment confirms.");
+      setToast("Redirecting to secure card checkout \u2014 you'll be topped up automatically once payment confirms.");
       window.location.href = data.paylinkUrl;
     } catch (e) {
       setToast(e.message ?? "Couldn't start card payment.");
@@ -195,100 +223,176 @@ export default function CashLadder({ session, profile, c, onBack }) {
   };
 
   if (loading) {
-    return <div className="p-6 font-body text-sm" style={{ color: c.textDim }}>Loading Cash Ladder…</div>;
+    return <div className="p-6 font-body text-sm" style={{ color: c.textDim }}>Loading Cash Ladder\u2026</div>;
   }
 
   return (
-    <div className="max-w-lg mx-auto p-4">
-      <div className="flex items-center gap-2 mb-4">
-        {onBack && (
-          <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-full" style={{ background: c.surface, color: c.textDim }}>
-            <ArrowLeft size={14} />
-          </button>
-        )}
-        <h1 className="font-display text-xl font-extrabold uppercase tracking-tight" style={{ color: c.text }}>Cash Ladder</h1>
+    <div className="max-w-lg mx-auto p-4" style={{ "--cl-glow": `${c.accent}66` }}>
+      <CashLadderStyles />
+
+      {/* Vibrant header banner */}
+      <div
+        className="rounded-2xl p-4 mb-4 cl-shimmer-bg relative overflow-hidden"
+        style={{
+          backgroundImage: `linear-gradient(115deg, ${c.accent}, #ff9f43, ${c.accent})`,
+        }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          {onBack && (
+            <button onClick={onBack} className="w-7 h-7 flex items-center justify-center rounded-full bg-black/20 text-white shrink-0">
+              <ArrowLeft size={13} />
+            </button>
+          )}
+          <Sparkles size={16} className="text-white" />
+          <h1 className="font-display text-xl font-extrabold uppercase tracking-tight text-white drop-shadow-sm">Cash Ladder</h1>
+        </div>
+        <p className="font-body text-[11px] text-white/90 ml-9">Real prizes, paid out every season \u2014 top 3 get the pool.</p>
       </div>
 
       {toast && (
-        <div className="rounded-lg p-3 mb-4 font-body text-xs" style={{ background: c.surface, color: c.text }}>
+        <div className="rounded-lg p-3 mb-4 font-body text-xs cl-fade-up" style={{ background: c.surface, color: c.text }}>
           {toast}
         </div>
       )}
 
-      <Panel c={c} title="Your Goats balance">
-        <div className="flex items-center justify-between">
-          <div className="font-display text-2xl font-extrabold" style={{ color: c.accent }}>{goats(wallet.balance)}</div>
-          {!membership && wallet.balance > 0 && (
-            <button onClick={joinFromBalance} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
-              Join with balance
-            </button>
-          )}
+      {/* Wallet balance, glowing */}
+      <div
+        className="rounded-2xl p-4 mb-4 flex items-center justify-between"
+        style={{ background: c.bg, border: `1px solid ${c.accent}55` }}
+      >
+        <div className="flex items-center gap-2.5">
+          <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: `${c.accent}22` }}>
+            <Wallet size={16} style={{ color: c.accent }} />
+          </span>
+          <div>
+            <div className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>Your balance</div>
+            <div key={wallet.balance} className="font-display text-2xl font-extrabold cl-pop" style={{ color: c.accent }}>{goats(wallet.balance)}</div>
+          </div>
         </div>
-      </Panel>
+        {!membership && wallet.balance > 0 && (
+          <button onClick={joinFromBalance} className="cl-btn font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
+            Join now
+          </button>
+        )}
+      </div>
 
       {!membership && (
-        <Panel c={c} title="Top up">
-          <div className="flex items-center gap-2 mb-2">
-            <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
-            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Via bank transfer</span>
-          </div>
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-body text-xs mb-3" style={{ color: c.textDim }}>
-            <span style={{ color: c.textFaint }}>Bank</span><span>{BANK_DETAILS.bank}</span>
-            <span style={{ color: c.textFaint }}>Account name</span><span>{BANK_DETAILS.accountName}</span>
-            <span style={{ color: c.textFaint }}>Account number</span><span className="font-mono">{BANK_DETAILS.accountNumber}</span>
-            <span style={{ color: c.textFaint }}>Account type</span><span>{BANK_DETAILS.accountType}</span>
-          </div>
-          <div className="flex items-center gap-2 mb-2">
-            <img src="/mukuru-logo.png" alt="Mukuru" className="h-4 w-auto object-contain" />
-            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or via Mukuru</span>
-          </div>
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-body text-xs mb-4" style={{ color: c.textDim }}>
-            <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
-            <span style={{ color: c.textFaint }}>Receiver phone</span><span className="font-mono">{MUKURU_DETAILS.receiverPhone}</span>
-          </div>
+        <>
+          {/* Amount picker */}
+          <Panel c={c} title="Choose an amount">
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {AMOUNT_PRESETS.map((preset) => {
+                const active = Number(amount) === preset && !customOpen;
+                return (
+                  <button
+                    key={preset}
+                    onClick={() => { setAmount(preset); setCustomOpen(false); }}
+                    className="cl-chip rounded-xl py-2.5 font-body text-sm font-bold"
+                    style={{
+                      background: active ? c.accent : c.surfaceHover,
+                      color: active ? c.accentText : c.text,
+                      border: `1px solid ${active ? c.accent : c.border}`,
+                      boxShadow: active ? `0 4px 14px -4px ${c.accent}99` : "none",
+                    }}
+                  >
+                    R{preset}
+                  </button>
+                );
+              })}
+            </div>
 
-          <label className="block font-mono text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Amount you paid (Rand)</label>
-          <input
-            type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 font-body text-sm mb-3"
-            style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
-          />
-          <div className="font-body text-[11px] mb-3" style={{ color: c.textFaint }}>
-            \u2248 {goats(Math.round(Number(amount || 0) * 3.8))} — half enters you this season, half is banked for next season.
-          </div>
+            <button
+              onClick={() => setCustomOpen((v) => !v)}
+              className="w-full flex items-center justify-between font-body text-xs mb-2"
+              style={{ color: c.textFaint }}
+            >
+              <span>Enter a different amount</span>
+              <ChevronDown size={13} style={{ transform: customOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+            </button>
+            {customOpen && (
+              <div className="cl-fade-up flex items-center gap-2 mb-3">
+                <span className="font-body text-sm font-semibold" style={{ color: c.textDim }}>R</span>
+                <input
+                  type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)}
+                  className="flex-1 rounded-lg px-3 py-2 font-body text-sm"
+                  style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
+                  autoFocus
+                />
+              </div>
+            )}
 
-          <label className="block font-mono text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Proof of payment</label>
-          <input
-            type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="w-full font-body text-xs mb-4" style={{ color: c.textDim }}
-          />
+            <div
+              key={goatsPreview}
+              className="cl-pop rounded-xl p-3 text-center font-body text-sm"
+              style={{ background: `${c.accent}18`, color: c.text }}
+            >
+              You'll get <span className="font-extrabold" style={{ color: c.accent }}>{goats(goatsPreview)}</span>
+              <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
+                half enters you this season \u00b7 half banked for next season
+              </div>
+            </div>
+          </Panel>
 
-          <button
-            onClick={submitTopup} disabled={saving}
-            className="w-full font-body text-sm font-semibold py-2 rounded-full disabled:opacity-50"
-            style={{ background: c.accent, color: c.accentText }}
-          >
-            {saving ? "Submitting…" : "Submit top-up"}
-          </button>
-
-          <div className="flex items-center gap-2 my-3">
-            <div className="flex-1 h-px" style={{ background: c.border }} />
-            <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>or</span>
-            <div className="flex-1 h-px" style={{ background: c.border }} />
-          </div>
-
+          {/* Pay by card \u2014 primary action */}
           <button
             onClick={payByCard} disabled={saving}
-            className="w-full flex items-center justify-center gap-2 font-body text-sm font-semibold py-2 rounded-full disabled:opacity-50"
-            style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
+            className="cl-btn cl-glow-btn w-full flex items-center justify-center gap-2 font-body text-base font-extrabold py-3.5 rounded-2xl mb-2 disabled:opacity-50"
+            style={{ background: c.accent, color: c.accentText }}
           >
-            <CreditCard size={14} />
-            {saving ? "Redirecting…" : "Pay by card"}
+            <CreditCard size={17} />
+            {saving ? "Redirecting\u2026" : `Pay ${rand(amount || 0)} by card`}
           </button>
-          <div className="mt-2">
+          <div className="flex justify-center mb-4">
             <CardBrandsBadge />
           </div>
-        </Panel>
+
+          {/* Manual payment \u2014 secondary, collapsed by default */}
+          <button
+            onClick={() => setManualOpen((v) => !v)}
+            className="w-full flex items-center justify-between font-body text-xs mb-2 px-1"
+            style={{ color: c.textFaint }}
+          >
+            <span>Prefer to pay by EFT or Mukuru instead?</span>
+            <ChevronDown size={13} style={{ transform: manualOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+          </button>
+
+          {manualOpen && (
+            <Panel c={c} className="cl-fade-up">
+              <div className="flex items-center gap-2 mb-2">
+                <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Via bank transfer</span>
+              </div>
+              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-body text-xs mb-3" style={{ color: c.textDim }}>
+                <span style={{ color: c.textFaint }}>Bank</span><span>{BANK_DETAILS.bank}</span>
+                <span style={{ color: c.textFaint }}>Account name</span><span>{BANK_DETAILS.accountName}</span>
+                <span style={{ color: c.textFaint }}>Account number</span><span className="font-mono">{BANK_DETAILS.accountNumber}</span>
+                <span style={{ color: c.textFaint }}>Account type</span><span>{BANK_DETAILS.accountType}</span>
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <img src="/mukuru-logo.png" alt="Mukuru" className="h-4 w-auto object-contain" />
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or via Mukuru</span>
+              </div>
+              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-body text-xs mb-4" style={{ color: c.textDim }}>
+                <span style={{ color: c.textFaint }}>Receiver name</span><span>{MUKURU_DETAILS.receiverName}</span>
+                <span style={{ color: c.textFaint }}>Receiver phone</span><span className="font-mono">{MUKURU_DETAILS.receiverPhone}</span>
+              </div>
+
+              <label className="block font-mono text-[10px] uppercase tracking-wider mb-1" style={{ color: c.textFaint }}>Proof of payment</label>
+              <input
+                type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="w-full font-body text-xs mb-4" style={{ color: c.textDim }}
+              />
+
+              <button
+                onClick={submitTopup} disabled={saving}
+                className="cl-btn w-full font-body text-sm font-semibold py-2 rounded-full disabled:opacity-50"
+                style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
+              >
+                {saving ? "Submitting\u2026" : `Submit ${rand(amount || 0)} top-up`}
+              </button>
+            </Panel>
+          )}
+        </>
       )}
 
       {topups.length > 0 && (
@@ -332,7 +436,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
                           onChange={(e) => setScoreDrafts((s) => ({ ...s, [f.id]: { ...draft, file: e.target.files?.[0] ?? null } }))}
                           className="flex-1 font-body text-[10px]" style={{ color: c.textFaint }} />
                         <button onClick={() => submitResult(f.id)}
-                          className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                          className="cl-btn font-body text-[11px] font-semibold px-2.5 py-1 rounded-full"
                           style={{ background: c.accent, color: c.accentText }}>
                           Submit
                         </button>
