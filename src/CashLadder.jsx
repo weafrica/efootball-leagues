@@ -129,6 +129,43 @@ export default function CashLadder({ session, profile, c, onBack }) {
     }
   };
 
+  const payByCard = async () => {
+    if (saving) return;
+    const rand = Number(amount);
+    if (!rand || rand <= 0) { setToast("Enter an amount greater than R0."); return; }
+    setSaving(true);
+    try {
+      const { data: topup, error: rpcErr } = await supabase.rpc("submit_cash_ladder_goats_topup", {
+        p_amount_rand: rand,
+        p_checkout_method: null,
+        p_payment_proof_path: null,
+        p_gateway_reference: null,
+      });
+      if (rpcErr) throw rpcErr;
+
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const response = await fetch(
+        "https://jobgzxljuczzqljwavyq.supabase.co/functions/v1/create-cash-ladder-payment",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentSession.access_token}` },
+          body: JSON.stringify({ topup_id: topup.id }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        setToast(data.error || "Couldn't start card payment. Please try again.");
+        return;
+      }
+      setToast("Redirecting to secure card checkout — you'll be topped up automatically once payment confirms.");
+      window.location.href = data.paylinkUrl;
+    } catch (e) {
+      setToast(e.message ?? "Couldn't start card payment.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const joinFromBalance = async () => {
     const { error } = await supabase.rpc("join_cash_ladder_league_from_balance");
     if (error) setToast(error.message);
@@ -232,6 +269,21 @@ export default function CashLadder({ session, profile, c, onBack }) {
             style={{ background: c.accent, color: c.accentText }}
           >
             {saving ? "Submitting…" : "Submit top-up"}
+          </button>
+
+          <div className="flex items-center gap-2 my-3">
+            <div className="flex-1 h-px" style={{ background: c.border }} />
+            <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: c.textFaint }}>or</span>
+            <div className="flex-1 h-px" style={{ background: c.border }} />
+          </div>
+
+          <button
+            onClick={payByCard} disabled={saving}
+            className="w-full flex items-center justify-center gap-2 font-body text-sm font-semibold py-2 rounded-full disabled:opacity-50"
+            style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
+          >
+            <CreditCard size={14} />
+            {saving ? "Redirecting…" : "Pay by card"}
           </button>
           <div className="mt-2">
             <CardBrandsBadge />
