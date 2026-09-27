@@ -85,7 +85,14 @@ function computeActions(color, dice, diceUsed, tokensByColor) {
       }
     });
   });
-  if (!diceUsed[0] && !diceUsed[1] && dice[0] !== dice[1]) {
+  // No real reason to block combining a double (2+2, 5+5, etc) — it's
+  // just as valid a move as combining two different values, and the old
+  // "dice[0] !== dice[1]" restriction here was the actual cause of the
+  // "combine sometimes doesn't respond" bug: the UI showed the combine
+  // total whenever both dice were selected regardless of this check, so
+  // on a double it displayed a total that led nowhere and no token
+  // highlighted for it. Removed.
+  if (!diceUsed[0] && !diceUsed[1]) {
     const sum = dice[0] + dice[1];
     list.forEach((tk) => {
       if (tk.step >= 0 && tk.step < HOME_STEP) {
@@ -141,13 +148,16 @@ function isDangerous(color, resultStep, tokensByColor, active) {
 function scoreAction(action, color, tokensByColor, active) {
   const sim = applyAction(action, color, tokensByColor, active);
   let score = (action.dist || 6) * 1.5;
+  const dangerBefore = action.fromStep >= 0 && isDangerous(color, action.fromStep, tokensByColor, active);
+  const dangerAfter = isDangerous(color, action.resultStep, sim.tokens, active);
+  const safeAfter = action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep);
   if (sim.captured) score += 1000;
   if (sim.finished) score += 500;
   if (action.kind === "exit") score += 70;
-  if (action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep)) score += 35;
-  if (isDangerous(color, action.resultStep, sim.tokens, active)) score -= 55;
-  if (action.fromStep >= 0 && isDangerous(color, action.fromStep, tokensByColor, active)) score += 15; // extra credit for escaping danger
-  return { score, sim };
+  if (safeAfter) score += 35;
+  if (dangerAfter) score -= 55;
+  if (dangerBefore) score += 15; // extra credit for escaping danger
+  return { score, sim, dangerBefore, dangerAfter, safeAfter };
 }
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -179,34 +189,51 @@ const CAPTURE_LINES = [
   (me, opp) => `${me} commits several crimes against ${opp} and feels zero remorse.`,
   (me, opp) => `${me} ambushes ${opp} out of absolutely nowhere!`,
   (me, opp) => `${me} sends ${opp} a one-way ticket back to base. Non-refundable.`,
+  (me, opp) => `${me} absolutely flattens ${opp}. Didn't even look back.`,
+  (me, opp) => `${me} pulls off a heist against ${opp} in broad daylight.`,
+  (me, opp) => `${me} just made ${opp}'s day significantly worse.`,
+  (me, opp) => `${me} drop-kicks ${opp} clear off the board.`,
+  (me, opp) => `${me} says "this is my square now" to ${opp}.`,
 ];
 const FINISH_LINES = [
   (me) => `${me} strolls a token home like it was nothing at all.`,
   (me) => `${me} brings one home — safe, sound, and extremely smug about it.`,
   (me) => `${me} plants the flag. One token, home free!`,
   (me) => `${me} tucks a token in for the night. Mission accomplished.`,
+  (me) => `${me} clocks in a token. One down.`,
+  (me) => `${me} lands one safely — didn't even break a sweat.`,
+  (me) => `${me} books a token's ticket home. Boarding complete.`,
 ];
 const EXIT_LINES = [
   (me) => `${me} rolls an actual 6 and busts out of the yard!`,
   (me) => `${me} was NOT waiting one more turn — a token's finally out!`,
   (me) => `${me} deploys a fresh token. Let the chaos begin.`,
   (me) => `${me} kicks the yard door open. Showtime.`,
+  (me) => `${me} unleashes another token onto an unsuspecting board.`,
+  (me) => `${me} finally gets one out of the yard. About time.`,
+  (me) => `${me} sends in reinforcements.`,
 ];
 const COMBINE_LINES = [
   (me, sum) => `${me} does the math — a ${sum}! — and goes long.`,
   (me, sum) => `${me} combines both dice for a big ${sum}-square power move.`,
   (me, sum) => `${me} isn't messing around: full ${sum} squares, one token.`,
+  (me, sum) => `${me} cashes in both dice for a ${sum}-square sprint.`,
+  (me, sum) => `${me} goes all-in on one token: ${sum} squares in one go.`,
 ];
 const SAFE_LINES = [
-  (me) => `${me} tucks in on a safe square. Sneaky.`,
-  (me) => `${me} plays it safe. Boring, but smart.`,
+  (me) => `${me} tucks in on a safe square.`,
+  (me) => `${me} plays it safe.`,
   (me) => `${me} ducks out of harm's way just in time.`,
+  (me) => `${me} finds a nice, quiet, untouchable square.`,
+  (me) => `${me} takes cover.`,
 ];
 const PLAIN_LINES = [
   (me, n) => `${me} nudges a token forward ${n}.`,
-  (me, n) => `${me} inches ahead ${n} squares, no drama.`,
+  (me, n) => `${me} inches ahead ${n} squares.`,
   (me, n) => `${me} makes a quiet little ${n}-square move.`,
   (me, n) => `${me} shuffles ${n} squares closer to victory. Probably.`,
+  (me, n) => `${me} moves ${n}, no fuss.`,
+  (me, n) => `${me} taps a token forward ${n} squares.`,
 ];
 const NO_MOVE_LINES = [
   (me) => `${me} has literally nothing to play. Awkward silence.`,
@@ -214,15 +241,52 @@ const NO_MOVE_LINES = [
   (me) => `${me} is stuck. Truly, deeply stuck.`,
 ];
 
-function explainAction(action, color, sim, dice) {
+// The "why", not just the "what" — appended after the main line so bots
+// sound like they're actually thinking, not just narrating outcomes.
+// Skipped for captures/finishes, since the event itself is the reason.
+const REASON_ESCAPE = [
+  " Had to get out of there before it got ugly.",
+  " Something was breathing down its neck — bailed just in time.",
+  " One more turn there and it was toast.",
+  " Smelled danger and got moving.",
+  " That square was about to get very unsafe.",
+];
+const REASON_SAFE_PICK = [
+  " Nothing touches it there.",
+  " Patience — that square's untouchable.",
+  " Building a fortress one square at a time.",
+  " Small move, zero risk. Fine by me.",
+];
+const REASON_RISK = [
+  " Risky, but it's the only real option on the table.",
+  " Not ideal, but every other token's worse off.",
+  " Gritting its teeth and going for it anyway.",
+  " Knows it's exposed. Doing it anyway.",
+];
+const REASON_PLAIN = [
+  " Just building position for later.",
+  " Every square counts eventually.",
+  " Nothing flashy, just progress.",
+  " Playing the long game here.",
+  " Small steps. That's the plan.",
+];
+
+function explainAction(action, color, sim, dice, meta) {
   const name = COLORS[color].name;
   let line;
   if (sim.captured) line = pick(CAPTURE_LINES)(name, COLORS[sim.capturedColor].name);
   else if (sim.finished) line = pick(FINISH_LINES)(name);
   else if (action.kind === "exit") line = pick(EXIT_LINES)(name);
   else if (action.kind === "combine") line = pick(COMBINE_LINES)(name, dice[0] + dice[1]);
-  else if (action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep)) line = pick(SAFE_LINES)(name);
+  else if (meta?.safeAfter) line = pick(SAFE_LINES)(name);
   else line = pick(PLAIN_LINES)(name, action.dist);
+
+  if (!sim.captured && !sim.finished) {
+    if (meta?.dangerBefore && !meta?.dangerAfter) line += pick(REASON_ESCAPE);
+    else if (meta?.safeAfter && action.kind !== "exit") line += pick(REASON_SAFE_PICK);
+    else if (meta?.dangerAfter) line += pick(REASON_RISK);
+    else if (Math.random() < 0.5) line += pick(REASON_PLAIN);
+  }
   return withAside(line, color);
 }
 
@@ -506,23 +570,27 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setDiceUsed(newUsed);
     setSelectedDice([]);
 
+    let finalUsed = newUsed;
     if (newUsed[0] && newUsed[1]) {
       resolveEndOfDice(snapshotDice);
     } else {
-      // The remaining die might have nothing to do at all -- if so, skip
-      // it automatically rather than leaving the player stuck tapping a
-      // dead die.
+      // The remaining die might have nothing to do at all -- if so, mark
+      // it used right away instead of leaving the player stuck tapping a
+      // dead die. This used to happen on a short delay, which could fire
+      // at the same time as the AI's own turn loop separately noticing
+      // the same dead die and ending the turn itself -- the turn could
+      // get resolved twice, silently skipping the next player. Doing it
+      // synchronously, right here, means it only ever happens once.
       const remaining = computeActions(color, snapshotDice, newUsed, nextTokens);
       if (remaining.length === 0) {
+        finalUsed = [...newUsed];
         const idx = newUsed[0] ? 1 : 0;
-        const skipped = [...newUsed]; skipped[idx] = true;
-        setTimeout(() => {
-          setDiceUsed(skipped);
-          if (skipped[0] && skipped[1]) resolveEndOfDice(snapshotDice);
-        }, 350);
+        finalUsed[idx] = true;
+        setDiceUsed(finalUsed);
+        resolveEndOfDice(snapshotDice);
       }
     }
-    return { done: false, newUsed, nextTokens };
+    return { done: false, newUsed: finalUsed, nextTokens };
   }, [active, resolveEndOfDice, pushLog, shakeBoard]);
 
   const rollDice = () => {
@@ -597,6 +665,28 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     commitAction(action, turnColor, tokens, dice, diceUsed, null);
   };
 
+  // Auto-play the obvious move: when there's genuinely only one legal
+  // thing to do with the current dice (one token, one die/combine, no
+  // real decision), just play it rather than making the player tap a
+  // die and then a token for a "choice" that isn't one. Fires again
+  // after that move lands, in case the remaining die is now also down
+  // to a single option. Any turn with a real choice (2+ actions) still
+  // waits for a tap, same as before.
+  const autoPlayingRef = useRef(false);
+  useEffect(() => {
+    if (phase !== "playing" || !turnColor || roles[turnColor] === "ai" || aiBusy) return;
+    if (dice == null || currentActions.length !== 1) return;
+    if (autoPlayingRef.current) return;
+    autoPlayingRef.current = true;
+    const action = currentActions[0];
+    const t = setTimeout(() => {
+      autoPlayingRef.current = false;
+      commitAction(action, turnColor, tokens, dice, diceUsed, null);
+    }, 450);
+    return () => { clearTimeout(t); autoPlayingRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentActions, phase, turnColor, roles, aiBusy]);
+
   // ---- AI turn loop ------------------------------------------------------
   useEffect(() => {
     if (phase !== "playing" || !turnColor || roles[turnColor] !== "ai") return;
@@ -630,7 +720,14 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
 
       // Resolve both dice, one decision at a time, so each move is
-      // visible rather than the whole turn jumping at once.
+      // visible rather than the whole turn jumping at once. commitAction
+      // already resolves the turn itself the moment both dice are spent
+      // (see its own comment) -- alreadyResolved just tracks that so the
+      // fallback call below doesn't fire a second time and silently
+      // skip whoever's turn is next. It's only needed for the one case
+      // commitAction never runs at all: the very first roll having zero
+      // legal moves on either die.
+      let alreadyResolved = false;
       while (!(used[0] && used[1])) {
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
         const actions = computeActions(turnColor, d, used, workingTokens);
@@ -642,7 +739,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         const scored = actions.map((a) => ({ a, ...scoreAction(a, turnColor, workingTokens, active) }));
         scored.sort((x, y) => y.score - x.score);
         const best = scored[0];
-        const explanation = aiExplain ? explainAction(best.a, turnColor, best.sim, d) : null;
+        const explanation = aiExplain ? explainAction(best.a, turnColor, best.sim, d, best) : null;
 
         await wait(550);
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
@@ -650,11 +747,12 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         if (result.done) { setAiBusy(false); return; }
         workingTokens = result.nextTokens;
         used = result.newUsed;
+        if (used[0] && used[1]) alreadyResolved = true;
         await wait(250);
       }
 
       if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
-      if (used[0] && used[1]) resolveEndOfDice(d);
+      if (used[0] && used[1] && !alreadyResolved) resolveEndOfDice(d);
       setAiBusy(false);
     })();
 
@@ -927,9 +1025,14 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
                 <div className="flex items-center gap-2 flex-wrap">
                   {renderDie(dice[0], 0)}
                   {renderDie(dice[1], 1)}
-                  {selectedDice.length === 2 && (
+                  {selectedDice.length === 2 && combineHasActions && (
                     <span className="flex items-center gap-1.5 rounded-xl px-3 h-11 font-body text-xs" style={{ background: COLORS[turnColor].dim, color: COLORS[turnColor].hex, border: `2px solid ${COLORS[turnColor].hex}` }}>
                       <Combine size={14} /> {dice[0]}+{dice[1]} = {dice[0] + dice[1]}
+                    </span>
+                  )}
+                  {selectedDice.length === 2 && !combineHasActions && (
+                    <span className="flex items-center gap-1.5 rounded-xl px-3 h-11 font-body text-xs" style={{ color: c.textFaint, border: `2px dashed ${c.border}` }}>
+                      No token can use that combined move
                     </span>
                   )}
                 </div>
