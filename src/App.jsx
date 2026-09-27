@@ -8695,12 +8695,12 @@ export default function App() {
         else setView("home");
       },
     },
-    // Games grouped first (right after the priority/admin tiles above),
-    // per an explicit "show all the games first" ask — Ludo, Chess,
-    // Sesotho Match, and Stories are all little standalone games/
+    // Games grouped first (right after the priority/admin tiles above).
+    // Chess leads the group per an explicit "show Chess first" ask —
+    // Ludo, Sesotho Match, and Stories are all little standalone games/
     // experiences distinct from the league/ladder utility tiles below.
-    { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: Swords, label: "Chess", onClick: () => setView("chess") },
+    { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: BookOpen, label: "Sesotho Match", onClick: () => setView("sesothoMatch") },
     { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
@@ -9281,8 +9281,8 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         <section className="grid grid-cols-4 gap-2 mt-4">
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
-          <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
+          <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
         </section>
