@@ -43,9 +43,13 @@ const PIECE_GLYPH = {
 
 function squareId(file, rank) { return `${FILES[file]}${rank}`; }
 
-export default function ChessGame({ c, session, showToast, onBack }) {
+export default function ChessGame({ c, session, showToast, onBack, startInPractice }) {
   const [activeGameId, setActiveGameId] = useState(null);
-  const [practiceOpen, setPracticeOpen] = useState(false);
+  // Guests (no account) land straight in the practice board — the only
+  // part of Chess that needs no sign-in (no game row, no Nets, no RPCs).
+  // Their "Back" from there exits Chess entirely rather than falling
+  // through to the lobby, which needs an account to do anything useful.
+  const [practiceOpen, setPracticeOpen] = useState(!!startInPractice);
 
   if (activeGameId) {
     return (
@@ -59,7 +63,7 @@ export default function ChessGame({ c, session, showToast, onBack }) {
     );
   }
   if (practiceOpen) {
-    return <ChessPracticeBoard onBack={() => setPracticeOpen(false)} c={c} />;
+    return <ChessPracticeBoard onBack={startInPractice ? onBack : () => setPracticeOpen(false)} c={c} />;
   }
   return (
     <ChessLobby session={session} showToast={showToast} onBack={onBack} onOpenGame={setActiveGameId}

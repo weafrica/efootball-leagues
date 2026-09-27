@@ -8995,6 +8995,9 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   const [staySignedIn, setStaySignedIn] = useState(true);
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
   const [ludoOpen, setLudoOpen] = useState(false);
+  // Chess gets the same guest-playable treatment as Ludo — practice
+  // board only (no account, no Nets, no RPCs needed for that part).
+  const [chessOpen, setChessOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   // Guest page starts showing only the quick-actions row — no league/ladder
   // content until "Ladder" or "Leagues" is tapped, per request. Local to
@@ -9045,8 +9048,27 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+  // Same treatment, own state key, for the guest-playable Chess practice board.
+  const guestChessNavFirstRef = useRef(true);
   useEffect(() => {
-    document.title = shopOpen ? "Department Store" : ludoOpen ? "Ludo" : "Matchday — eFootball Leagues";
+    const state = { guestChessOpen: true, chessOpen };
+    const cur = window.history.state;
+    if (cur && cur.guestChessOpen && cur.chessOpen === chessOpen) return;
+    if (guestChessNavFirstRef.current) { guestChessNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
+    window.history.pushState(state, "");
+  }, [chessOpen]);
+
+  useEffect(() => {
+    const onPopState = (e) => {
+      const state = e.state;
+      if (!state || !("chessOpen" in state) || !state.guestChessOpen) return;
+      setChessOpen(!!state.chessOpen);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    document.title = shopOpen ? "Department Store" : ludoOpen ? "Ludo" : chessOpen ? "Chess" : "Matchday — eFootball Leagues";
   }, [shopOpen]);
   const ladderRef = useRef(null);
   const tablesRef = useRef(null);
@@ -9233,7 +9255,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       </header>
 
       <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
-        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}-${ludoOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); setLudoOpen(false); }}>
+        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}-${ludoOpen}-${chessOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); setLudoOpen(false); setChessOpen(false); }}>
         {shopOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
@@ -9241,6 +9263,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         ) : ludoOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <LudoPage c={c} onBack={() => setLudoOpen(false)} loggedIn={false} onRequireAuth={() => onRequireAuth("Sign in to find real Matchday opponents and play together.")} />
+          </Suspense>
+        ) : chessOpen ? (
+          <Suspense fallback={<Loader c={c} />}>
+            <ChessPage c={c} session={null} onBack={() => setChessOpen(false)} startInPractice />
           </Suspense>
         ) : termsOpen ? (
           <Suspense fallback={<Loader c={c} />}>
@@ -9256,6 +9282,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
+          <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
         </section>

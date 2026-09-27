@@ -50,8 +50,15 @@ function pstValue(type, sq, color) {
 
 function evaluate(chess) {
   // Positive favors white, negative favors black — standard convention.
+  // Deliberately does NOT call chess.isDraw() — that includes a
+  // threefold-repetition check that re-scans the whole game history, and
+  // calling it at every leaf of a search tree with thousands of leaves
+  // measurably slows down as a game gets longer. A shallow flavor bot
+  // doesn't need perfect draw-awareness; material + position is enough
+  // at this depth. Checkmate/stalemate/insufficient-material are cheap
+  // (no history scan) and stay.
   if (chess.isCheckmate()) return chess.turn() === "w" ? -100000 : 100000;
-  if (chess.isDraw() || chess.isStalemate()) return 0;
+  if (chess.isStalemate() || chess.isInsufficientMaterial()) return 0;
 
   let score = 0;
   const board = chess.board();
@@ -69,14 +76,24 @@ function evaluate(chess) {
   return score;
 }
 
-function minimax(chess, depth, alpha, beta, maximizing) {
-  if (depth === 0 || chess.isGameOver()) return evaluate(chess);
+// deadline — a hard wall-clock cutoff (Date.now()-based ms timestamp),
+// not just a depth limit. A depth limit alone doesn't protect against
+// slow devices: the exact same search that takes ~1s on a fast machine
+// can take many times longer on a budget phone, which is what was
+// actually causing the app to freeze for over a minute — not a missing
+// background thread (that was already fixed), the computation itself
+// had no upper bound. Checking the deadline at every node guarantees
+// the search NEVER runs longer than the budget, on any device, however
+// slow — it just returns whatever it's found so far instead.
+function minimax(chess, depth, alpha, beta, maximizing, deadline) {
+  if (depth === 0 || Date.now() > deadline || chess.isCheckmate() || chess.isStalemate()) return evaluate(chess);
   const moves = chess.moves({ verbose: true });
   if (maximizing) {
     let best = -Infinity;
     for (const m of moves) {
+      if (Date.now() > deadline) break;
       chess.move(m);
-      best = Math.max(best, minimax(chess, depth - 1, alpha, beta, false));
+      best = Math.max(best, minimax(chess, depth - 1, alpha, beta, false, deadline));
       chess.undo();
       alpha = Math.max(alpha, best);
       if (beta <= alpha) break;
@@ -85,8 +102,9 @@ function minimax(chess, depth, alpha, beta, maximizing) {
   }
   let best = Infinity;
   for (const m of moves) {
+    if (Date.now() > deadline) break;
     chess.move(m);
-    best = Math.min(best, minimax(chess, depth - 1, alpha, beta, true));
+    best = Math.min(best, minimax(chess, depth - 1, alpha, beta, true, deadline));
     chess.undo();
     beta = Math.min(beta, best);
     if (beta <= alpha) break;
@@ -97,27 +115,41 @@ function minimax(chess, depth, alpha, beta, maximizing) {
 // difficulty -> { depth, randomness } — randomness picks among the top-N
 // roughly-equal moves instead of always the single best, so "easy" makes
 // human-plausible mistakes rather than playing perfectly-but-shallow.
+// "hard" is depth 2, not 3 — depth 3 measured over a second on a fast
+// desktop CPU for a busy middlegame position even after the isDraw()
+// fix; on a slower phone that's exactly the kind of multi-second stall
+// the deadline below exists to prevent, so the ceiling is lower too.
 const DIFFICULTY = {
   easy: { depth: 1, topN: 5 },
   medium: { depth: 2, topN: 3 },
-  hard: { depth: 3, topN: 1 },
+  hard: { depth: 2, topN: 1 },
 };
+const THINK_BUDGET_MS = 900; // hard cap on how long any single search may run
 
 // pickAiMove — returns a chess.js move object ({from, to, promotion, ...})
-// for the side to move. Synchronous; hard/depth-3 on an empty-ish board
-// is a few thousand nodes at most, fine on a phone.
+// for the side to move. Bounded by THINK_BUDGET_MS regardless of depth
+// or device speed (see minimax's deadline argument above).
 export function pickAiMove(chess, difficulty) {
   const { depth, topN } = DIFFICULTY[difficulty] || DIFFICULTY.medium;
   const moves = chess.moves({ verbose: true });
   if (moves.length === 0) return null;
 
+  const deadline = Date.now() + THINK_BUDGET_MS;
   const aiIsMaximizing = chess.turn() === "w";
-  const scored = moves.map((m) => {
+  const scored = [];
+  for (const m of moves) {
+    if (Date.now() > deadline) break; // out of budget — go with whatever's been scored so far
     chess.move(m);
-    const score = minimax(chess, depth - 1, -Infinity, Infinity, !aiIsMaximizing);
+    const score = minimax(chess, depth - 1, -Infinity, Infinity, !aiIsMaximizing, deadline);
     chess.undo();
-    return { move: m, score };
-  });
+    scored.push({ move: m, score });
+  }
+  if (scored.length === 0) {
+    // Ran out of budget before scoring even one move (an extremely slow
+    // device) — better to play any legal move than freeze or do nothing.
+    const m = moves[Math.floor(Math.random() * moves.length)];
+    return { from: m.from, to: m.to, promotion: m.promotion };
+  }
   scored.sort((a, b) => (aiIsMaximizing ? b.score - a.score : a.score - b.score));
 
   const pool = scored.slice(0, Math.min(topN, scored.length));
@@ -150,22 +182,39 @@ export function classifyMove(fenBeforeMove, playedMove, depth = 1) {
   const legal = chess.moves({ verbose: true });
   if (legal.length === 0) return { tag: "Only move", lossCp: 0, reason: null };
 
-  let bestScore = -Infinity;
-  let bestMove = null;
-  let playedScore = null;
-  let playedMoveObj = null;
-  for (const m of legal) {
+  const playedIdx = legal.findIndex((m) =>
+    m.from === playedMove.from && m.to === playedMove.to && (m.promotion || null) === (playedMove.promotion || null));
+  if (playedIdx === -1) return { tag: "Move played", lossCp: 0, reason: null }; // shouldn't happen, defensive fallback
+
+  const deadline = Date.now() + THINK_BUDGET_MS;
+
+  // The played move is always scored first, with no deadline check
+  // gating it — this guarantees playedScore is always real (never a
+  // silent fallback) even on a device so slow the budget runs out
+  // immediately. Everything after just looks for something better; if
+  // time runs out partway through, "best" is just whatever's been
+  // checked so far — worst case the tag is a little less precise, it
+  // never blocks or stalls.
+  let bestScore, bestMove, playedScore, playedMoveObj;
+  {
+    const m = legal[playedIdx];
     chess.move(m);
-    const score = minimax(chess, depth - 1, -Infinity, Infinity, !moverIsWhite);
-    const fromMoverPerspective = moverIsWhite ? score : -score;
+    const score = minimax(chess, depth - 1, -Infinity, Infinity, !moverIsWhite, deadline);
     chess.undo();
-    if (fromMoverPerspective > bestScore) { bestScore = fromMoverPerspective; bestMove = m; }
-    if (m.from === playedMove.from && m.to === playedMove.to && (m.promotion || null) === (playedMove.promotion || null)) {
-      playedScore = fromMoverPerspective;
-      playedMoveObj = m;
-    }
+    const perspective = moverIsWhite ? score : -score;
+    playedScore = perspective; playedMoveObj = m;
+    bestScore = perspective; bestMove = m;
   }
-  if (playedScore === null) return { tag: "Move played", lossCp: 0, reason: null }; // shouldn't happen, defensive fallback
+  for (let i = 0; i < legal.length; i++) {
+    if (i === playedIdx) continue;
+    if (Date.now() > deadline) break;
+    const m = legal[i];
+    chess.move(m);
+    const score = minimax(chess, depth - 1, -Infinity, Infinity, !moverIsWhite, deadline);
+    chess.undo();
+    const perspective = moverIsWhite ? score : -score;
+    if (perspective > bestScore) { bestScore = perspective; bestMove = m; }
+  }
 
   const lossCp = Math.max(0, Math.round(bestScore - playedScore));
   let tag;
