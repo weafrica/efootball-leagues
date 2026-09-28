@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX, Sparkles } from "lucide-react";
+import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import PlayerCharacter from "./PlayerCharacter.jsx";
-import { isHdVoiceEnabled, setHdVoiceEnabled, getVoiceTier, loadNeuralVoice, neuralVoiceReady } from "./chessVoiceHD.js";
 
 // Pre-generated narration (Piper TTS, synthesized offline — see
 // synthesize_story.py / upload_story_audio.py) lives as plain files in
@@ -314,9 +313,6 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     return () => { cancelled = true; };
   }, [narrationOn, content, nodeId]);
 
-  const [hdEnabled, setHdEnabledState] = useState(() => isHdVoiceEnabled());
-  const [hdLoading, setHdLoading] = useState(false);
-  const [hdProgress, setHdProgress] = useState(0);
   const [speakingChoices, setSpeakingChoices] = useState(false);
   const speakingChoicesRef = useRef(false);
   const choiceAudioRef = useRef(null);
@@ -345,27 +341,11 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
 
   // Rare fallback for a single choice line that hasn't been synthesized
   // into a fixed file yet (e.g. a branch just added, synthesis not run
-  // against it since) — reuses the same live HD engine built for Chess,
-  // or the plain browser voice under that. Fixed Piper audio is the
-  // intended source of truth for every choice going forward; this only
-  // covers the gap until that catches up.
+  // against it since) — the browser's own built-in voice: instant, no
+  // model to download, nothing that can hang the UI. Fixed Piper audio
+  // is the source of truth for every choice; this only covers the gap
+  // until that catches up.
   const speakOneChoiceFallback = async (text) => {
-    if (isHdVoiceEnabled()) {
-      try {
-        setHdLoading(!neuralVoiceReady());
-        const engine = await loadNeuralVoice((frac) => setHdProgress(frac));
-        setHdLoading(false);
-        const { blob } = await engine.speak(text);
-        if (!speakingChoicesRef.current) return;
-        const audio = new Audio(URL.createObjectURL(blob));
-        choiceAudioRef.current = audio;
-        await new Promise((resolve) => { audio.onended = resolve; audio.onerror = resolve; audio.play().catch(resolve); });
-        return;
-      } catch (err) {
-        console.warn("HD fallback failed for a choice line:", err);
-        setHdLoading(false);
-      }
-    }
     if (!("speechSynthesis" in window)) return;
     await new Promise((resolve) => {
       const utter = new SpeechSynthesisUtterance(text);
@@ -379,8 +359,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   // Reads the current choices aloud, one at a time, from their
   // pre-generated Piper audio (same fixed, deep, cast-voiced narration
   // pipeline as the story text itself) — falling back per-line to the
-  // live HD engine or the browser's built-in voice only for a choice
-  // that hasn't been synthesized into a file yet.
+  // browser's built-in voice only for a choice that hasn't been
+  // synthesized into a file yet.
   const speakChoices = async (choices) => {
     if (speakingChoices) { stopChoiceSpeech(); return; }
     speakingChoicesRef.current = true;
@@ -407,11 +387,6 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     const hasChoices = !node?.ending && node?.choices?.length;
 
     const autoReadChoices = () => {
-      // Not gated on hdEnabled — speakChoices() itself already picks HD
-      // vs. the plain built-in voice. Gating the AUTO-TRIGGER on HD meant
-      // choices simply never auto-played at all whenever HD was off
-      // (different device, never toggled on, etc.) — that silence is what
-      // read as "auto play isn't working."
       if (hasChoices) speakChoices(node.choices);
     };
 
@@ -563,14 +538,6 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
             <ArrowLeft size={15} /> Stories
           </button>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => { const next = !hdEnabled; setHdVoiceEnabled(next); setHdEnabledState(next); }}
-              className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-2 py-1.5 rounded-full"
-              style={{ background: c.surface, border: `1px solid ${c.border}`, color: hdEnabled ? c.accent : c.textFaint }}
-              title={`HD voice for choices (${getVoiceTier() === "hd" ? "~86MB, best quality" : "~20-60MB, lighter"}) — downloads once, opt-in`}
-            >
-              <Sparkles size={11} /> HD
-            </button>
             <button onClick={toggleNarration} aria-label={narrationOn ? "Mute narration" : "Unmute narration"}
               className="flex items-center justify-center w-8 h-8 rounded-full" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
               {narrationOn ? <Volume2 size={15} style={{ color: c.accent }} /> : <VolumeX size={15} style={{ color: c.textFaint }} />}
@@ -626,7 +593,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
             <button onClick={() => speakChoices(node.choices)}
               className="flex items-center justify-center gap-1.5 text-xs font-semibold self-center mb-1" style={{ color: c.textFaint }}>
               <Volume2 size={12} />
-              {hdLoading ? `Loading HD voice… ${Math.round(hdProgress * 100)}%` : speakingChoices ? "Tap to stop" : "Hear your options"}
+              {speakingChoices ? "Tap to stop" : "Hear your options"}
             </button>
             {node.choices.map((choice, i) => (
               <button key={i} onClick={() => choose(choice.goto)}
