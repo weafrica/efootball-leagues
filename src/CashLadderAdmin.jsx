@@ -93,7 +93,7 @@ export default function CashLadderAdmin({ c }) {
   return (
     <div className="max-w-2xl mx-auto p-4">
       <h1 className="font-display text-xl font-extrabold uppercase tracking-tight mb-4" style={{ color: c.text }}>
-        Cash Ladder \u2014 Admin
+        League Ladder (Cash Rewards) — Admin
       </h1>
 
       {error && (
@@ -105,12 +105,12 @@ export default function CashLadderAdmin({ c }) {
         {topups.map((t) => (
           <Row c={c} key={t.id}>
             <div className="font-body text-xs" style={{ color: c.textDim }}>
-              <div>{rand(t.amount_rand)} \u2192 {goats(t.total_goats)}</div>
+              <div>{rand(t.amount_rand)} → {goats(t.total_goats)}</div>
               <div style={{ color: c.textFaint }}>
                 {t.checkout_method ?? "no method noted"}
                 {t.payment_proof_path && (
                   <>
-                    {" \u00b7 "}
+                    {" · "}
                     <button onClick={() => viewProof("payment-proofs", t.payment_proof_path)} className="underline">view proof</button>
                   </>
                 )}
@@ -135,7 +135,7 @@ export default function CashLadderAdmin({ c }) {
         {submissions.map((s) => (
           <Row c={c} key={s.id}>
             <div className="font-body text-xs" style={{ color: c.textDim }}>
-              <div className="font-semibold">{s.home_score} \u2013 {s.away_score}</div>
+              <div className="font-semibold">{s.home_score} – {s.away_score}</div>
               {s.proof_url && (
                 <button onClick={() => viewProof("result-proofs", s.proof_url)} className="underline" style={{ color: c.textFaint }}>view proof</button>
               )}
@@ -177,7 +177,7 @@ export default function CashLadderAdmin({ c }) {
         {leagues.map((l) => (
           <Row c={c} key={l.id}>
             <div className="font-body text-xs" style={{ color: c.textDim }}>
-              Tier {l.tier} \u00b7 {l.status} \u00b7 season {l.current_season} \u00b7 pool {goats(l.pool_balance)}
+              Tier {l.tier} · {l.status} · season {l.current_season} · pool {goats(l.pool_balance)}
             </div>
             {l.status === "active" && (
               <Btn c={c} disabled={busyId === l.id}

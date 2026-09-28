@@ -8,7 +8,7 @@
 //   <CashLadder session={session} profile={profile} c={c} onBack={() => setView("home")} />
 
 import { useEffect, useState, useCallback } from "react";
-import { Wallet, CreditCard, ChevronDown, Sparkles, ArrowLeft } from "lucide-react";
+import { Wallet, CreditCard, ChevronDown, Sparkles, ArrowLeft, Trophy, Users, PieChart } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { logActivity } from "./activityLog";
@@ -25,20 +25,41 @@ const AMOUNT_PRESETS = [20, 50, 100, 200];
 // scale; it is NOT a live feed and should be re-checked/updated
 // periodically rather than trusted as exact.
 const APPROX_ZAR_RATE = {
+  // South Africa itself -- no conversion, this IS the real charge currency.
   ZA: { code: "ZAR", symbol: "R", rate: 1 },
-  US: { code: "USD", symbol: "$", rate: 0.061 },
-  GB: { code: "GBP", symbol: "\u00a3", rate: 0.045 },
-  NG: { code: "NGN", symbol: "\u20a6", rate: 85 },
-  KE: { code: "KES", symbol: "KSh", rate: 7.85 },
+  // Common Monetary Area -- these three are pegged 1:1 to the Rand by
+  // treaty, not a floating estimate, so this one's exact, not approximate.
+  NA: { code: "NAD", symbol: "N$", rate: 1 },
+  LS: { code: "LSL", symbol: "L", rate: 1 },
+  SZ: { code: "SZL", symbol: "E", rate: 1 },
+  // Other African countries -- floating market rates, approximate.
   ZW: { code: "USD", symbol: "$", rate: 0.061 },
+  NG: { code: "NGN", symbol: "₦", rate: 85 },
+  KE: { code: "KES", symbol: "KSh", rate: 7.85 },
+  GH: { code: "GHS", symbol: "GH₵", rate: 0.70 },
+  UG: { code: "UGX", symbol: "USh", rate: 225 },
+  TZ: { code: "TZS", symbol: "TSh", rate: 158.75 },
+  ZM: { code: "ZMW", symbol: "ZK", rate: 1.6 },
+  EG: { code: "EGP", symbol: "E£", rate: 3.05 },
+  BW: { code: "BWP", symbol: "P", rate: 0.81 },
+  MZ: { code: "MZN", symbol: "MT", rate: 3.85 },
+  // Rest of the world -- major currencies with a verified estimate.
+  US: { code: "USD", symbol: "$", rate: 0.061 },
+  GB: { code: "GBP", symbol: "£", rate: 0.045 },
 };
 const EU_COUNTRIES = new Set(["DE","FR","ES","IT","NL","BE","PT","IE","AT","FI","GR","LU"]);
 
+// If we don't recognise the country at all, fall back to a US Dollar
+// estimate rather than showing nothing -- USD is the most broadly
+// understood reference currency worldwide.
+const FALLBACK_CURRENCY = { code: "USD", symbol: "$", rate: 0.061 };
+
 function approxCurrencyFor(countryCode) {
-  if (!countryCode) return null;
+  if (!countryCode) return FALLBACK_CURRENCY;
+  if (countryCode === "ZA") return null; // no badge needed, Rand IS the real currency
   if (APPROX_ZAR_RATE[countryCode]) return APPROX_ZAR_RATE[countryCode];
-  if (EU_COUNTRIES.has(countryCode)) return { code: "EUR", symbol: "\u20ac", rate: 0.052 };
-  return null;
+  if (EU_COUNTRIES.has(countryCode)) return { code: "EUR", symbol: "€", rate: 0.052 };
+  return FALLBACK_CURRENCY;
 }
 
 // Small, self-contained animation styles — kept local to this component so
@@ -114,7 +135,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
   const approxAmount = (randValue) => {
     if (!approxCurrency || approxCurrency.code === "ZAR") return null;
     const converted = Number(randValue || 0) * approxCurrency.rate;
-    return `\u2248 ${approxCurrency.symbol}${converted < 10 ? converted.toFixed(2) : Math.round(converted)}`;
+    return `≈ ${approxCurrency.symbol}${converted < 10 ? converted.toFixed(2) : Math.round(converted)}`;
   };
 
   const load = useCallback(async () => {
@@ -178,7 +199,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
       });
       if (rpcErr) throw rpcErr;
 
-      setToast(`Submitted \u2014 ${rand(amount)} pending admin approval.`);
+      setToast(`Submitted — ${rand(amount)} pending admin approval.`);
       setFile(null);
       await load();
     } catch (e) {
@@ -216,7 +237,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
         setToast(data.error || "Couldn't start card payment. Please try again.");
         return;
       }
-      setToast("Redirecting to secure card checkout \u2014 you'll be topped up automatically once payment confirms.");
+      setToast("Redirecting to secure card checkout — you'll be topped up automatically once payment confirms.");
       window.location.href = data.paylinkUrl;
     } catch (e) {
       setToast(e.message ?? "Couldn't start card payment.");
@@ -254,7 +275,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
   };
 
   if (loading) {
-    return <div className="p-6 font-body text-sm" style={{ color: c.textDim }}>Loading Cash Ladder\u2026</div>;
+    return <div className="p-6 font-body text-sm" style={{ color: c.textDim }}>Loading League Ladder (Cash Rewards)…</div>;
   }
 
   return (
@@ -275,12 +296,20 @@ export default function CashLadder({ session, profile, c, onBack }) {
             </button>
           )}
           <Sparkles size={16} className="text-white" />
-          <h1 className="font-display text-xl font-extrabold uppercase tracking-tight text-white drop-shadow-sm">Cash Ladder</h1>
+          <h1 className="font-display text-lg font-extrabold uppercase tracking-tight text-white drop-shadow-sm leading-tight">League Ladder <span className="font-normal opacity-90">(Cash Rewards)</span></h1>
         </div>
-        <p className="font-body text-[11px] text-white/90 ml-9">Real prizes, paid out every season \u2014 top 3 get the pool.</p>
+        <p className="font-body text-[11px] text-white/90 ml-9">Real prizes, paid out every season — top 3 get the pool.</p>
         {!membership && (
           <p key={entryFeePreview} className="cl-pop font-body text-[11px] font-bold text-white ml-9 mt-1">
-            Entry fee for this amount: {goats(entryFeePreview)} \u00b7 rest banked for next season
+            Entry fee for this amount: {goats(entryFeePreview)}
+            {(() => {
+              const feeRand = (amount || 0) / 2;
+              const est = approxCurrency && approxCurrency.code !== "ZAR"
+                ? approxAmount(feeRand)
+                : null;
+              return est ? ` (${est})` : ` (${rand(feeRand)})`;
+            })()}
+            {" · rest banked for next season"}
           </p>
         )}
       </div>
@@ -367,12 +396,12 @@ export default function CashLadder({ session, profile, c, onBack }) {
                 <span className="font-mono text-[10px] ml-1.5" style={{ color: c.textFaint }}>({approxAmount(amount)})</span>
               )}
               <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>
-                half enters you this season \u00b7 half banked for next season
+                half enters you this season · half banked for next season
               </div>
             </div>
           </Panel>
 
-          {/* Pay by card \u2014 primary action */}
+          {/* Pay by card — primary action */}
           <button
             onClick={payByCard} disabled={saving}
             className="cl-btn cl-glow-btn w-full flex items-center justify-center gap-2 font-body text-base font-extrabold py-3.5 rounded-2xl mb-2 disabled:opacity-50"
@@ -380,7 +409,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
           >
             <CreditCard size={17} />
             {saving
-              ? "Redirecting\u2026"
+              ? "Redirecting…"
               : approxAmount(amount)
               ? `Pay ${rand(amount || 0)} (${approxAmount(amount)}) by card`
               : `Pay ${rand(amount || 0)} by card`}
@@ -389,7 +418,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
             <CardBrandsBadge />
           </div>
 
-          {/* Manual payment \u2014 secondary, collapsed by default */}
+          {/* Manual payment — secondary, collapsed by default */}
           <button
             onClick={() => setManualOpen((v) => !v)}
             className="w-full flex items-center justify-between font-body text-xs mb-2 px-1"
@@ -431,7 +460,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
                 className="cl-btn w-full font-body text-sm font-semibold py-2 rounded-full disabled:opacity-50"
                 style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }}
               >
-                {saving ? "Submitting\u2026" : `Submit ${rand(amount || 0)} top-up`}
+                {saving ? "Submitting…" : `Submit ${rand(amount || 0)} top-up`}
               </button>
             </Panel>
           )}
@@ -443,7 +472,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
           <div className="space-y-2">
             {topups.map((t) => (
               <div key={t.id} className="flex items-center justify-between font-body text-xs" style={{ color: c.textDim }}>
-                <span>{rand(t.amount_rand)} \u2192 {goats(t.total_goats)}</span>
+                <span>{rand(t.amount_rand)} → {goats(t.total_goats)}</span>
                 <StatusPill c={c} status={t.payment_status} />
               </div>
             ))}
@@ -452,7 +481,7 @@ export default function CashLadder({ session, profile, c, onBack }) {
       )}
 
       {membership && (
-        <Panel c={c} title={`Tier ${membership.cash_ladder_leagues?.tier} \u00b7 Season ${membership.week_number}`}>
+        <Panel c={c} title={`Tier ${membership.cash_ladder_leagues?.tier} · Season ${membership.week_number}`}>
           {fixtures.length === 0 ? (
             <p className="font-body text-xs" style={{ color: c.textFaint }}>Fixtures for this season haven't been generated yet.</p>
           ) : (
@@ -464,14 +493,14 @@ export default function CashLadder({ session, profile, c, onBack }) {
                   <div key={f.id} className="rounded-lg p-2.5" style={{ background: c.surface }}>
                     <div className="flex items-center justify-between font-body text-xs mb-1" style={{ color: c.textDim }}>
                       <span style={{ color: c.textFaint }}>Leg {f.leg}</span>
-                      {played ? <span className="font-semibold">{f.home_score} \u2013 {f.away_score}</span> : <StatusPill c={c} status="pending" />}
+                      {played ? <span className="font-semibold">{f.home_score} – {f.away_score}</span> : <StatusPill c={c} status="pending" />}
                     </div>
                     {!played && (
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <input type="number" min="0" placeholder="You" value={draft.home}
                           onChange={(e) => setScoreDrafts((s) => ({ ...s, [f.id]: { ...draft, home: e.target.value } }))}
                           className="w-14 rounded px-2 py-1 font-body text-xs" style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />
-                        <span style={{ color: c.textFaint }}>\u2013</span>
+                        <span style={{ color: c.textFaint }}>–</span>
                         <input type="number" min="0" placeholder="Opp" value={draft.away}
                           onChange={(e) => setScoreDrafts((s) => ({ ...s, [f.id]: { ...draft, away: e.target.value } }))}
                           className="w-14 rounded px-2 py-1 font-body text-xs" style={{ background: c.surfaceHover, border: `1px solid ${c.border}`, color: c.text }} />

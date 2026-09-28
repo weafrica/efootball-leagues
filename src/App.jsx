@@ -8663,8 +8663,8 @@ export default function App() {
     // very first entry (ahead of even the promoted "League N" tile below)
     // so admins reach it without hunting through the rest of the dock.
     ...(isAdmin ? [{ icon: Trophy, label: "League Ladder (Admin)", onClick: openLeagueLadderTestScreen }] : []),
-    { icon: Wallet, label: "Cash Ladder", onClick: () => setView("cashLadder") },
-    ...(isAdmin ? [{ icon: Wallet, label: "Cash Ladder (Admin)", onClick: () => setView("cashLadderAdmin") }] : []),
+    { icon: Wallet, label: "League Ladder (Cash Rewards)", onClick: () => setView("cashLadder") },
+    ...(isAdmin ? [{ icon: Wallet, label: "League Ladder (Cash Rewards) Admin", onClick: () => setView("cashLadderAdmin") }] : []),
     // First on the list for everyone else — labeled with the player's actual current tier
     // ("League 3", etc.) once myLeagueLadderMembership has loaded, so it
     // reads as "jump back into your league" rather than a generic entry
@@ -13591,7 +13591,7 @@ function CashLadderHomeSection({ session, c, onOpenCashLadder }) {
           <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.surfaceHover, border: `1px solid ${c.border}` }}>
             <Wallet size={15} style={{ color: c.accent }} />
           </span>
-          <div className="font-extrabold uppercase tracking-tight text-lg leading-none">Cash Ladder</div>
+          <div className="font-extrabold uppercase tracking-tight text-base leading-tight">League Ladder <span className="font-normal opacity-80">(Cash Rewards)</span></div>
         </div>
         <button onClick={onOpenCashLadder} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.accent, color: c.accentText }}>
           {membership ? "View" : "Join"}
