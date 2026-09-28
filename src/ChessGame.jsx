@@ -425,6 +425,18 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       else if (chess.isInsufficientMaterial()) { reason = "insufficient_material"; outcome = "draw"; }
       else { reason = "fifty_move"; outcome = "draw"; }
     }
+    // Start the (purely local) move analysis at the same moment as the
+    // network save — they don't depend on each other, so waiting for the
+    // save to finish before even starting the analysis was just wasted
+    // time stacked on top of a network round trip. Nothing from it is
+    // shown or spoken until the save below has confirmed, so the "only
+    // comment once the move is locked in" guarantee is unchanged.
+    let classifyPromise = null;
+    if (moveContext && moveContext.mover === "human") {
+      const { fenBeforeMove, moveResult } = moveContext;
+      classifyPromise = classifyMoveAsync(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion });
+      classifyPromise.catch(() => {}); // no unhandled-rejection noise if the save fails and we never read it
+    }
     const { error } = await supabase.rpc("chess_submit_ai_move", {
       p_game_id: gameId,
       p_new_fen: chess.fen(),
@@ -440,11 +452,16 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     }
     // Only past this point is the move locked in — safe to comment on it.
     if (moveContext) {
-      const { fenBeforeMove, moveResult, mover } = moveContext;
-      let qualityOrExplain;
+      const { moveResult, mover } = moveContext;
+      let qualityOrExplain = null;
       if (mover === "human") {
-        const { tag, lossCp, reason } = await classifyMoveAsync(fenBeforeMove, { from: moveResult.from, to: moveResult.to, promotion: moveResult.promotion });
-        qualityOrExplain = buildHumanMoveComment(tag, lossCp, moveResult.san, reason);
+        try {
+          const { tag, lossCp, reason } = await classifyPromise;
+          qualityOrExplain = buildHumanMoveComment(tag, lossCp, moveResult.san, reason);
+        } catch {
+          // A failed analysis should never break the game itself — just skip the commentary this move.
+          qualityOrExplain = null;
+        }
       } else {
         qualityOrExplain = explainAiMove(chess, moveResult);
       }
@@ -500,7 +517,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       try { result = chess.move(move); } catch { result = null; }
       if (result) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" });
       if (!cancelled) setAiThinking(false);
-    }, 500 + Math.random() * 500); // small delay reads as "thinking" rather than instant/robotic
+    }, 150 + Math.random() * 150); // a small pause still reads as "thinking" — 500-1000ms was pure theatre stacked on top of the real computation, and once the real computation got fast, that theatre became the single biggest cost in the whole turn
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game?.fen, game?.is_vs_ai, game?.status, game?.turn]);

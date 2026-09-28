@@ -124,7 +124,7 @@ const DIFFICULTY = {
   medium: { depth: 2, topN: 3 },
   hard: { depth: 2, topN: 1 },
 };
-const THINK_BUDGET_MS = 900; // hard cap on how long any single search may run
+const THINK_BUDGET_MS = 600; // hard cap on how long any single search may run — tightened after reports the app still felt slow even under the 900ms cap
 
 // pickAiMove — returns a chess.js move object ({from, to, promotion, ...})
 // for the side to move. Bounded by THINK_BUDGET_MS regardless of depth
