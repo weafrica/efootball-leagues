@@ -769,8 +769,13 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     })();
 
     return () => { cancelled = true; };
+    // rollAgainStreak is included so a 6-6 reroll re-triggers this effect:
+    // resolveEndOfDice() clears the dice and bumps that counter but keeps
+    // the same AI player's turn (turnColor doesn't change), so without this
+    // dependency the AI would just sit there with no dice and never roll
+    // again — a freeze on any double-6.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, turnColor, roles]);
+  }, [phase, turnColor, roles, rollAgainStreak]);
 
   // ---- rendering ---------------------------------------------------------
   const occupants = useMemo(() => {
