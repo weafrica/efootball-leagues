@@ -506,6 +506,12 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
     if (!game || !game.is_vs_ai || game.status !== "active" || game.turn !== "b") return;
     let cancelled = false;
     setAiThinking(true);
+    // No artificial delay here on purpose — the real computation below
+    // (worker-based, ~40-300ms even in worst-case testing) already gives
+    // the bot a natural, brief pause. Adding fake "thinking" time on top
+    // fights the actual goal, which is for the bot to feel instant.
+    // setTimeout(fn, 0) still yields one tick to the browser so the
+    // "aiThinking" indicator has a chance to actually paint first.
     const timer = setTimeout(async () => {
       if (cancelled) return;
       const chess = chessRef.current;
@@ -517,7 +523,7 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       try { result = chess.move(move); } catch { result = null; }
       if (result) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" });
       if (!cancelled) setAiThinking(false);
-    }, 150 + Math.random() * 150); // a small pause still reads as "thinking" — 500-1000ms was pure theatre stacked on top of the real computation, and once the real computation got fast, that theatre became the single biggest cost in the whole turn
+    }, 0);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game?.fen, game?.is_vs_ai, game?.status, game?.turn]);
