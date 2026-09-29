@@ -32,14 +32,56 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
   }, 300);
 }
 
-// A little pitch/rate variety per color so four "voices" reading banter
-// back to back don't all sound identical — same trick chess uses per
-// piece type (BROWSER_VOICE_PARAMS_BY_PIECE), applied to colors instead.
+// ---- what makes browser voices sound robotic, and what we do about it ------
+// 1. Emoji. "💥 Red captured Green!" gets read as "collision symbol Red..."
+//    — strip them (and other symbols) before speaking.
+// 2. Extreme pitch. The old chipmunk/growl settings (pitch 0.85 - 1.3) are
+//    the biggest giveaway. Now only a gentle nudge per colour.
+// 3. Same voice for everyone, same rate every time. Each colour now gets its
+//    own natural-sounding voice where the device has several, and every line
+//    gets a tiny random pitch/rate wobble, like a person would.
+// 4. Flat delivery. Lines ending in "!" are said a touch higher and quicker.
+export function speakable(text) {
+  return String(text || "")
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([!?.,])/g, "$1")
+    .trim();
+}
+
+const NATURAL_HINTS = [/natural/i, /neural/i, /online/i, /premium/i, /enhanced/i, /google/i];
+const KNOWN_GOOD = /samantha|ava\b|allison|susan|zoe|nicky|jenny|aria|guy|davis|jane|tony|sara|libby|ryan|sonia|daniel|karen|moira|serena/i;
+
+function naturalEnglishVoices(voices) {
+  const en = (voices || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith("en"));
+  const score = (v) => {
+    let sc = 0;
+    NATURAL_HINTS.forEach((re, i) => { if (re.test(v.name)) sc += 10 - i; });
+    if (KNOWN_GOOD.test(v.name)) sc += 3;
+    if (/^en[-_]us/i.test(v.lang)) sc += 2;
+    if (/compact|espeak|robot|fred|zarvox|trinoids|whisper|bad news|bubbles/i.test(v.name)) sc -= 20;
+    return sc;
+  };
+  return en.map((v) => ({ v, sc: score(v) })).sort((a, b) => b.sc - a.sc).map((x) => x.v);
+}
+
+const COLOR_SLOT = { red: 0, green: 1, yellow: 2, blue: 3 };
+function voiceForColor(color) {
+  const ranked = naturalEnglishVoices(ludoVoicesCache);
+  if (!ranked.length) return pickBestVoice(ludoVoicesCache);
+  // Only rotate between voices that are actually good; if the device has a
+  // single natural voice, everyone shares it (and pitch does the rest).
+  const top = ranked[0] ? ranked.filter((v) => NATURAL_HINTS.some((re) => re.test(v.name)) || KNOWN_GOOD.test(v.name)) : [];
+  const pool = top.length ? top.slice(0, 4) : ranked.slice(0, 1);
+  return pool[(COLOR_SLOT[color] ?? 0) % pool.length];
+}
+
+// Gentle per-colour character (no more chipmunk / monster voices).
 export const LUDO_VOICE_PARAMS = {
-  red: { pitch: 0.85, rate: 1.15 },   // hot-headed, quick
-  green: { pitch: 1.05, rate: 0.95 }, // sly, unhurried
-  yellow: { pitch: 1.3, rate: 1.2 },  // chaotic, hyper
-  blue: { pitch: 0.95, rate: 1.0 },   // calm, calculating
+  red: { pitch: 0.96, rate: 1.08 },    // hot-headed, quick
+  green: { pitch: 1.02, rate: 0.98 },  // sly, unhurried
+  yellow: { pitch: 1.1, rate: 1.1 },   // chaotic, bubbly
+  blue: { pitch: 1.0, rate: 1.02 },    // calm, calculating
 };
 
 export const ludoSpeech = {
@@ -64,13 +106,18 @@ export const ludoSpeech = {
   // currently playing — either the first request in, or the next one in
   // line once the previous utterance's onend fires.
   speakNow(id, text, color) {
-    const utter = new SpeechSynthesisUtterance(text);
-    const voice = pickBestVoice(ludoVoicesCache);
+    const clean = speakable(text);
+    if (!clean) { this.advance(); return; }
+    const utter = new SpeechSynthesisUtterance(clean);
+    const voice = voiceForColor(color);
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
     const params = LUDO_VOICE_PARAMS[color] || { pitch: 1, rate: 1.05 };
-    utter.pitch = params.pitch;
-    utter.rate = params.rate;
+    const wobble = () => (Math.random() - 0.5) * 0.08;
+    const excited = /!\s*$/.test(clean);
+    utter.pitch = Math.min(1.4, Math.max(0.7, params.pitch + wobble() + (excited ? 0.06 : 0)));
+    utter.rate = Math.min(1.35, Math.max(0.85, params.rate + wobble() + (excited ? 0.05 : 0)));
+    utter.volume = 1;
     utter.onend = () => this.advance();
     utter.onerror = () => this.advance();
     this.speakingId = id;
@@ -110,6 +157,9 @@ export const ludoSpeech = {
     if (queuedIdx !== -1) { this.queue.splice(queuedIdx, 1); this.notify(); return; }
     if (this.speakingId == null) { this.speakNow(id, text, color); return; }
     this.queue.push({ id, text, color });
+    // Short lines + fast turns can pile up; drop the oldest waiting lines so
+    // the voice never falls far behind the game.
+    while (this.queue.length > 2) this.queue.shift();
     this.notify();
   },
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },

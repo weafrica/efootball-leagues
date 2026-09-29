@@ -2,9 +2,14 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   ArrowLeft, Trophy, RotateCcw, Dice1, Dice2, Dice3, Dice4, Dice5, Dice6,
   HelpCircle, X, Search, Bot, User, Skull, Shield, Zap, Combine,
-  Volume2, VolumeX, Send, Flame, Rocket,
+  Volume2, VolumeX, Send, Flame, Rocket, Music,
 } from "lucide-react";
 import { ludoSpeech, useLudoSpeakingId } from "./ludoVoice.js";
+import { sfx } from "./ludoSound.js";
+import {
+  pick, CAPTURE_LINES, EXIT_LINES, FINISH_LINES, COMBINE_LINES, SAFE_LINES, PLAIN_LINES,
+  FORCED_LINES, NO_MOVE_LINES, JUMP_LINES, FORFEIT_LINES, CAPTURE_LABELS, MULTI_CAPTURE_LABEL,
+} from "./ludoBanter.js";
 
 // ---------------------------------------------------------------------------
 // BOARD GEOMETRY — unchanged from the first version. See the derivation
@@ -160,138 +165,106 @@ function scoreAction(action, color, tokensByColor, active) {
   return { score, sim, dangerBefore, dangerAfter, safeAfter };
 }
 
-function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+// ---- "obvious move" logic ---------------------------------------------
+// When only ONE piece can move (tokens sitting in the yard count as one
+// piece — they're identical), there is no decision to make, so the game
+// plays it. Two things follow from that:
+//  * The piece is forced to use BOTH dice, so it can't stop halfway to eat
+//    something and carry on — it jumps clean over anyone it could have eaten
+//    with one die, and only captures if it *ends* on them. That's exactly what
+//    the combined move does, so we use it whenever it's available.
+//  * If the two dice can't be combined (the total would overshoot home), it
+//    plays whichever single die scores best.
+// Returns a scored-entry shaped like the AI's own picks, or null when the
+// player has a real choice.
+function forcedAction(color, dice, actions, tokensByColor, active) {
+  if (!actions.length) return null;
+  if (new Set(actions.map((a) => a.fromStep)).size !== 1) return null;
+  const scoredAll = actions.map((a) => ({ a, ...scoreAction(a, color, tokensByColor, active) }));
+  const combo = scoredAll.find((x) => x.a.kind === "combine");
+  const chosen = combo || scoredAll.sort((x, y) => y.score - x.score)[0];
+  let jumped = null;
+  if (chosen.a.kind === "combine") {
+    // Would either die alone have landed on (and eaten) somebody? If so, this
+    // move is a "jump" — worth a joke.
+    [0, 1].forEach((i) => {
+      if (jumped) return;
+      const ns = chosen.a.fromStep + dice[i];
+      if (ns > HOME_STEP) return;
+      const single = { kind: "move", die: i, tokenId: chosen.a.tokenId, fromStep: chosen.a.fromStep, resultStep: ns, dist: dice[i] };
+      const sim = applyAction(single, color, tokensByColor, active);
+      if (sim.captured) jumped = sim.capturedColor;
+    });
+  }
+  return { ...chosen, forced: true, jumped };
+}
 
-// Each color's a little personality, not just a hex code — spliced onto
-// the end of a line every so often so the same 4 "voices" reading banter
-// all game don't feel identical. Same idea as chessVoice.js's per-piece
-// PIECE_INTRO flavor, just per-color instead of per-piece.
+// Each color's a little personality, spliced onto the end of a spoken line
+// now and then (rarely — the old 35% made the voice repeat itself).
 const PERSONALITY_ASIDE = {
-  red: ["🔥 Typical Red.", "🔥 No chill, as usual.", "🔥 Red doesn't do patience."],
-  green: ["🐍 Sneaky as ever.", "🐍 Green's been planning this.", "🐍 Quietly menacing."],
-  yellow: ["🌀 Pure chaos.", "🌀 Yellow has no plan and it's working.", "🌀 Unhinged, honestly."],
-  blue: ["🧊 Ice cold.", "🧊 Blue calculated that three moves ago.", "🧊 Cold-blooded."],
+  red: ["🔥 Typical Red.", "🔥 No chill, as usual."],
+  green: ["🐍 Sneaky as ever.", "🐍 Quietly menacing."],
+  yellow: ["🌀 Pure chaos.", "🌀 Unhinged, honestly."],
+  blue: ["🧊 Ice cold.", "🧊 Cold-blooded."],
 };
 function withAside(line, color) {
-  if (Math.random() > 0.35) return line;
+  if (Math.random() > 0.15) return line;
   return `${line} ${pick(PERSONALITY_ASIDE[color] || [""])}`.trim();
 }
 
-// The actual bot banter — funny and a little ridiculous on purpose, not
-// dry move notation. Several variants per situation so back-to-back AI
-// turns don't repeat themselves. `me`/`opp` are already-resolved color
-// names.
-const CAPTURE_LINES = [
-  (me, opp) => `${me} sends ${opp} back to the yard. CRUNCH.`,
-  (me, opp) => `${me} just yeeted ${opp}'s token clean off the board!`,
-  (me, opp) => `${me} says "not today" and boots ${opp} home in shame.`,
-  (me, opp) => `${me} obliterates ${opp}. Utterly no survivors.`,
-  (me, opp) => `${me} commits several crimes against ${opp} and feels zero remorse.`,
-  (me, opp) => `${me} ambushes ${opp} out of absolutely nowhere!`,
-  (me, opp) => `${me} sends ${opp} a one-way ticket back to base. Non-refundable.`,
-  (me, opp) => `${me} absolutely flattens ${opp}. Didn't even look back.`,
-  (me, opp) => `${me} pulls off a heist against ${opp} in broad daylight.`,
-  (me, opp) => `${me} just made ${opp}'s day significantly worse.`,
-  (me, opp) => `${me} drop-kicks ${opp} clear off the board.`,
-  (me, opp) => `${me} says "this is my square now" to ${opp}.`,
-];
-const FINISH_LINES = [
-  (me) => `${me} strolls a token home like it was nothing at all.`,
-  (me) => `${me} brings one home — safe, sound, and extremely smug about it.`,
-  (me) => `${me} plants the flag. One token, home free!`,
-  (me) => `${me} tucks a token in for the night. Mission accomplished.`,
-  (me) => `${me} clocks in a token. One down.`,
-  (me) => `${me} lands one safely — didn't even break a sweat.`,
-  (me) => `${me} books a token's ticket home. Boarding complete.`,
-];
-const EXIT_LINES = [
-  (me) => `${me} rolls an actual 6 and busts out of the yard!`,
-  (me) => `${me} was NOT waiting one more turn — a token's finally out!`,
-  (me) => `${me} deploys a fresh token. Let the chaos begin.`,
-  (me) => `${me} kicks the yard door open. Showtime.`,
-  (me) => `${me} unleashes another token onto an unsuspecting board.`,
-  (me) => `${me} finally gets one out of the yard. About time.`,
-  (me) => `${me} sends in reinforcements.`,
-];
-const COMBINE_LINES = [
-  (me, sum) => `${me} does the math — a ${sum}! — and goes long.`,
-  (me, sum) => `${me} combines both dice for a big ${sum}-square power move.`,
-  (me, sum) => `${me} isn't messing around: full ${sum} squares, one token.`,
-  (me, sum) => `${me} cashes in both dice for a ${sum}-square sprint.`,
-  (me, sum) => `${me} goes all-in on one token: ${sum} squares in one go.`,
-];
-const SAFE_LINES = [
-  (me) => `${me} tucks in on a safe square.`,
-  (me) => `${me} plays it safe.`,
-  (me) => `${me} ducks out of harm's way just in time.`,
-  (me) => `${me} finds a nice, quiet, untouchable square.`,
-  (me) => `${me} takes cover.`,
-];
-const PLAIN_LINES = [
-  (me, n) => `${me} nudges a token forward ${n}.`,
-  (me, n) => `${me} inches ahead ${n} squares.`,
-  (me, n) => `${me} makes a quiet little ${n}-square move.`,
-  (me, n) => `${me} shuffles ${n} squares closer to victory. Probably.`,
-  (me, n) => `${me} moves ${n}, no fuss.`,
-  (me, n) => `${me} taps a token forward ${n} squares.`,
-];
-const NO_MOVE_LINES = [
-  (me) => `${me} has literally nothing to play. Awkward silence.`,
-  (me) => `${me} stares at the dice, does nothing, passes.`,
-  (me) => `${me} is stuck. Truly, deeply stuck.`,
-];
-
-// The "why", not just the "what" — appended after the main line so bots
-// sound like they're actually thinking, not just narrating outcomes.
-// Skipped for captures/finishes, since the event itself is the reason.
+// The "why" — shown in the log for learners, but NOT read aloud (long
+// sentences are the main reason the voice sounded like a robot).
 const REASON_ESCAPE = [
   " Had to get out of there before it got ugly.",
   " Something was breathing down its neck — bailed just in time.",
-  " One more turn there and it was toast.",
-  " Smelled danger and got moving.",
   " That square was about to get very unsafe.",
 ];
 const REASON_SAFE_PICK = [
   " Nothing touches it there.",
-  " Patience — that square's untouchable.",
-  " Building a fortress one square at a time.",
-  " Small move, zero risk. Fine by me.",
+  " Small move, zero risk.",
 ];
 const REASON_RISK = [
   " Risky, but it's the only real option on the table.",
-  " Not ideal, but every other token's worse off.",
-  " Gritting its teeth and going for it anyway.",
   " Knows it's exposed. Doing it anyway.",
 ];
 const REASON_PLAIN = [
   " Just building position for later.",
-  " Every square counts eventually.",
   " Nothing flashy, just progress.",
-  " Playing the long game here.",
-  " Small steps. That's the plan.",
 ];
 
+// Returns { text, spoken }: `text` goes in the battle log, `spoken` (the
+// short funny line only) is what gets read aloud.
 function explainAction(action, color, sim, dice, meta) {
   const name = COLORS[color].name;
   let line;
   if (sim.captured) line = pick(CAPTURE_LINES)(name, COLORS[sim.capturedColor].name);
   else if (sim.finished) line = pick(FINISH_LINES)(name);
+  else if (meta?.jumped) line = pick(JUMP_LINES)(name, COLORS[meta.jumped].name);
   else if (action.kind === "exit") line = pick(EXIT_LINES)(name);
+  else if (meta?.forced) line = pick(FORCED_LINES)(name);
   else if (action.kind === "combine") line = pick(COMBINE_LINES)(name, dice[0] + dice[1]);
   else if (meta?.safeAfter) line = pick(SAFE_LINES)(name);
   else line = pick(PLAIN_LINES)(name, action.dist);
+  line = withAside(line, color);
 
-  if (!sim.captured && !sim.finished) {
-    if (meta?.dangerBefore && !meta?.dangerAfter) line += pick(REASON_ESCAPE);
-    else if (meta?.safeAfter && action.kind !== "exit") line += pick(REASON_SAFE_PICK);
-    else if (meta?.dangerAfter) line += pick(REASON_RISK);
-    else if (Math.random() < 0.5) line += pick(REASON_PLAIN);
+  let text = line;
+  if (!sim.captured && !sim.finished && !meta?.forced) {
+    if (meta?.dangerBefore && !meta?.dangerAfter) text += pick(REASON_ESCAPE);
+    else if (meta?.safeAfter && action.kind !== "exit") text += pick(REASON_SAFE_PICK);
+    else if (meta?.dangerAfter) text += pick(REASON_RISK);
+    else if (Math.random() < 0.4) text += pick(REASON_PLAIN);
   }
-  return withAside(line, color);
+  return { text, spoken: line, quiet: !sim.captured && !sim.finished && action.kind !== "exit" && !meta?.jumped };
 }
 
-const SINGLE_CAPTURE_LABELS = ["CAPTURED!", "SENT HOME!", "OBLITERATED!", "SMASHED!"];
-const MULTI_CAPTURE_LABEL = { 2: "DOUBLE CAPTURE!", 3: "TRIPLE CAPTURE!", 4: "RAMPAGE!" };
+const SINGLE_CAPTURE_LABELS = CAPTURE_LABELS;
+
+// Particle burst geometry for the big capture banner (computed once).
+const BURST = Array.from({ length: 14 }, (_, i) => {
+  const ang = (i / 14) * Math.PI * 2;
+  const r = 95 + (i % 3) * 38;
+  return { dx: Math.round(Math.cos(ang) * r), dy: Math.round(Math.sin(ang) * r), size: 18 + (i % 4) * 7, delay: (i % 3) * 45 };
+});
 
 // ---------------------------------------------------------------------------
 // Help modal — same look as the real Rules panel (header/icon/title/X,
@@ -315,6 +288,10 @@ const LUDO_RULES_SECTIONS = [
     "Land exactly on a square an opponent occupies and their token is sent straight back to their yard.",
     "Starting squares and the star squares are safe — no captures ever happen there.",
     "A capture earns you another roll, on top of anything from 6-6.",
+  ]},
+  { heading: "Obvious moves", items: [
+    "If only one piece can move, the game plays it for you — no tapping needed.",
+    "A lone piece must use both dice, so it can't stop halfway to eat and carry on. It jumps over anyone it could have eaten with one die, and only captures if it lands on them at the very end.",
   ]},
   { heading: "Extra rolls & forfeits", items: [
     "Roll 6 and 6 together (12 total) and you get another roll after you finish using this pair — any other matching pair (2-2, 3-3, etc) does not.",
@@ -388,6 +365,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const [roles, setRoles] = useState({}); // color -> 'human' | 'ai'
   const [aiExplain, setAiExplain] = useState(true);
   const [readAloud, setReadAloud] = useState(false);
+  const [sfxOn, setSfxOn] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
 
   const [tokens, setTokens] = useState({});
@@ -400,7 +378,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const [turnCaptures, setTurnCaptures] = useState(0);
   const [message, setMessage] = useState("");
   const [log, setLog] = useState([]); // {id, text, color, speak}[]
-  const [celebrate, setCelebrate] = useState(null); // {text} shown as a brief center banner
+  const [celebrate, setCelebrate] = useState(null); // {text, sub, color, level, gold, key} — the big dramatic banner
   const [shaking, setShaking] = useState(false);
   const [stats, setStats] = useState({ captures: 0, finishes: 0 });
   const [commentText, setCommentText] = useState("");
@@ -411,7 +389,10 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const celebrateTimer = useRef(null);
   const shakeTimer = useRef(null);
   const logIdRef = useRef(0);
+  const celebrateKeyRef = useRef(0);
+  const turnCapsRef = useRef(0); // captures this turn — a ref, so logging never runs inside a state updater
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); if (shakeTimer.current) clearTimeout(shakeTimer.current); }, []);
+  useEffect(() => { sfx.enabled = sfxOn; }, [sfxOn]);
   useEffect(() => () => ludoSpeech.stop(), []); // don't leave a voice talking after leaving the page
   const speakingId = useLudoSpeakingId();
 
@@ -420,21 +401,23 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const shakeBoard = useCallback(() => {
     setShaking(true);
     if (shakeTimer.current) clearTimeout(shakeTimer.current);
-    shakeTimer.current = setTimeout(() => setShaking(false), 450);
+    shakeTimer.current = setTimeout(() => setShaking(false), 550);
   }, []);
 
-  // opts: { big, color, speak } — color/speak pick the read-aloud voice
-  // and whether this line auto-reads when "Read moves aloud" is on;
-  // plain factual system lines (turn passes, etc) pass neither.
+  // opts: { big, color, speak, spoken } — `big` is {text, sub, color, level,
+  // gold} for the full-board banner; color/speak pick the read-aloud voice
+  // and whether this line auto-reads when "Read moves aloud" is on; `spoken`
+  // is the short version to actually say (defaults to the log text).
   const pushLog = useCallback((text, opts = {}) => {
     const id = ++logIdRef.current;
     setLog((l) => [{ id, text, color: opts.color || null }, ...l].slice(0, 10));
     if (opts.big) {
-      setCelebrate({ text: opts.big });
+      celebrateKeyRef.current += 1;
+      setCelebrate({ ...opts.big, key: celebrateKeyRef.current });
       if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
-      celebrateTimer.current = setTimeout(() => setCelebrate(null), 1500);
+      celebrateTimer.current = setTimeout(() => setCelebrate(null), 2100);
     }
-    if (readAloud && opts.speak) ludoSpeech.speak(`log-${id}`, text, opts.color);
+    if (readAloud && opts.speak) ludoSpeech.speak(`log-${id}`, opts.spoken || text, opts.color);
     return id;
   }, [readAloud]);
 
@@ -464,6 +447,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const order = COLOR_ORDER.filter((c2) => useRoles[c2]);
     const t = {};
     order.forEach((c2) => { t[c2] = freshTokens(); });
+    sfx.unlock();
+    turnCapsRef.current = 0;
     epochRef.current += 1;
     setActive(order);
     setTokens(t);
@@ -473,6 +458,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setSelectedDice([]);
     setRollAgainStreak(0);
     setTurnCaptures(0);
+    setCelebrate(null);
     setStats({ captures: 0, finishes: 0 });
     setWinner(null);
     setLog([]);
@@ -500,6 +486,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setDiceUsed([false, false]);
     setSelectedDice([]);
     setRollAgainStreak(0);
+    turnCapsRef.current = 0;
     setTurnCaptures(0);
     setTurnIdx((i) => {
       const next = (i + 1) % active.length;
@@ -516,7 +503,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       setRollAgainStreak((s) => {
         const next = s + 1;
         if (next >= 3) {
-          pushLog(`${COLORS[turnColor].name} rolled three 6-6s in a row — turn forfeited.`, { color: turnColor, speak: true });
+          pushLog(pick(FORFEIT_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
+          sfx.forfeit();
           setMessage("Three 6-6 rolls in a row — turn forfeited!");
           setTimeout(() => reallyAdvanceTurn(), 700);
           return 0;
@@ -539,27 +527,47 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const { tokens: nextTokens, captured, capturedColor, finished, diceUsedIdx } = applyAction(action, color, snapshotTokens, active);
     setTokens(nextTokens);
 
+    const me = COLORS[color].name;
     if (captured) {
       shakeBoard();
-      setStats((s) => ({ ...s, captures: s.captures + 1 }));
-      setTurnCaptures((n) => {
-        const next = n + 1;
-        const label = next === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[next] || "RAMPAGE!");
-        pushLog(`💥 ${COLORS[color].name} captured ${COLORS[capturedColor].name}!`, { big: label, color, speak: true });
-        return next;
+      setStats((s2) => ({ ...s2, captures: s2.captures + 1 }));
+      turnCapsRef.current += 1;
+      const n = turnCapsRef.current;
+      setTurnCaptures(n);
+      const opp = COLORS[capturedColor].name;
+      const label = n === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[n] || "RAMPAGE!");
+      const line = explain?.text || pick(CAPTURE_LINES)(me, opp);
+      pushLog(`💥 ${line}`, {
+        big: { text: label, sub: `${me} ate ${opp}`, color, level: n },
+        color, speak: true, spoken: explain?.spoken || line,
       });
+      sfx.whoosh();
+      sfx.capture(n);
+    } else if (finished) {
+      setStats((s2) => ({ ...s2, finishes: s2.finishes + 1 }));
+      const line = explain?.text || pick(FINISH_LINES)(me);
+      pushLog(`🏆 ${line}`, {
+        big: { text: "HOME!", sub: `${me} gets a token home`, color, level: 0, gold: true },
+        color, speak: true, spoken: explain?.spoken || line,
+      });
+      sfx.home();
+    } else {
+      // Quiet moves: a soft step sound; exits and safe squares get their own.
+      if (action.kind === "exit") sfx.exit();
+      else if (action.resultStep < TRACK_LEN && isSafeStep(color, action.resultStep)) sfx.safe();
+      else sfx.step();
+      const line = explain || (action.kind === "exit" ? (() => { const t = pick(EXIT_LINES)(me); return { text: t, spoken: t, quiet: false }; })() : null);
+      // Plain moves are only read aloud some of the time so the voice doesn't
+      // drone on; exits and jumps always are.
+      if (line) pushLog(line.text, { color, speak: !line.quiet || Math.random() < 0.55, spoken: line.spoken });
     }
-    if (finished) {
-      setStats((s) => ({ ...s, finishes: s.finishes + 1 }));
-      pushLog(`🏆 ${COLORS[color].name} got a token home!`, { color, speak: true });
-    }
-    if (explain) pushLog(explain, { color, speak: true });
 
     const newUsed = [...snapshotUsed];
     diceUsedIdx.forEach((i) => { newUsed[i] = true; });
 
     const allHome = (nextTokens[color] || []).every((t) => t.step === HOME_STEP);
     if (allHome) {
+      sfx.win();
       setWinner(color);
       setPhase("won");
       setDice(null);
@@ -595,6 +603,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
   const rollDice = () => {
     if (rolling || dice != null || phase !== "playing" || aiBusy) return;
+    sfx.roll();
     setRolling(true);
     setMessage("");
     setCelebrate(null);
@@ -613,7 +622,9 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         const actions = computeActions(turnColor, d, [false, false], tokens);
         if (actions.length === 0) {
           setMessage(`No moves for ${d[0]} & ${d[1]}.`);
-          setTimeout(() => resolveEndOfDice(d), 700);
+          pushLog(pick(NO_MOVE_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
+          sfx.pass();
+          setTimeout(() => resolveEndOfDice(d), 900);
         } else {
           setMessage(`${COLORS[turnColor].name} rolled ${d[0]} & ${d[1]} — tap a die, then a token.`);
         }
@@ -648,6 +659,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
   const tapDie = (i) => {
     if (roles[turnColor] === "ai" || diceUsed[i]) return;
+    sfx.click();
     setSelectedDice((sel) => {
       if (sel.includes(i)) return sel.filter((x) => x !== i); // tap again to deselect
       if (sel.length >= 2) return [i]; // start a fresh selection rather than stack a 3rd
@@ -665,27 +677,24 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     commitAction(action, turnColor, tokens, dice, diceUsed, null);
   };
 
-  // Auto-play the obvious move: when there's genuinely only one legal
-  // thing to do with the current dice (one token, one die/combine, no
-  // real decision), just play it rather than making the player tap a
-  // die and then a token for a "choice" that isn't one. Fires again
-  // after that move lands, in case the remaining die is now also down
-  // to a single option. Any turn with a real choice (2+ actions) still
-  // waits for a tap, same as before.
-  const autoPlayingRef = useRef(false);
+  // Auto-play the obvious move: when only ONE piece can move there's no real
+  // decision, so just play it instead of making the player tap a die and
+  // then a token. See forcedAction() above for the lone-piece "jump" rule.
+  // Fires again after the move lands, in case the second die is now also
+  // down to a single obvious option. Any turn with a real choice (2+ different
+  // pieces) still waits for a tap.
   useEffect(() => {
     if (phase !== "playing" || !turnColor || roles[turnColor] === "ai" || aiBusy) return;
-    if (dice == null || currentActions.length !== 1) return;
-    if (autoPlayingRef.current) return;
-    autoPlayingRef.current = true;
-    const action = currentActions[0];
+    if (dice == null || rolling) return;
+    const forced = forcedAction(turnColor, dice, currentActions, tokens, active);
+    if (!forced) return;
     const t = setTimeout(() => {
-      autoPlayingRef.current = false;
-      commitAction(action, turnColor, tokens, dice, diceUsed, null);
-    }, 450);
-    return () => { clearTimeout(t); autoPlayingRef.current = false; };
+      const explain = explainAction(forced.a, turnColor, forced.sim, dice, forced);
+      commitAction(forced.a, turnColor, tokens, dice, diceUsed, explain);
+    }, 650);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActions, phase, turnColor, roles, aiBusy]);
+  }, [currentActions, phase, turnColor, roles, aiBusy, rolling]);
 
   // ---- AI turn loop ------------------------------------------------------
   useEffect(() => {
@@ -703,6 +712,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       let used = diceUsed;
 
       if (d == null) {
+        sfx.roll();
         setRolling(true);
         for (let i = 0; i < 6; i++) {
           if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
@@ -732,13 +742,15 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
         const actions = computeActions(turnColor, d, used, workingTokens);
         if (actions.length === 0) {
-          if (aiExplain) pushLog(`${COLORS[turnColor].name} has no move — passes.`, { color: turnColor, speak: true });
+          if (aiExplain) pushLog(pick(NO_MOVE_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
+          sfx.pass();
           used = [true, true];
           break;
         }
         const scored = actions.map((a) => ({ a, ...scoreAction(a, turnColor, workingTokens, active) }));
         scored.sort((x, y) => y.score - x.score);
-        const best = scored[0];
+        // Same obvious-move rule as a human: one piece only means no choice.
+        const best = forcedAction(turnColor, d, actions, workingTokens, active) || scored[0];
         const explanation = aiExplain ? explainAction(best.a, turnColor, best.sim, d, best) : null;
 
         await wait(550);
@@ -894,6 +906,12 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         <button onClick={onBack} className="flex items-center gap-1.5 font-body text-sm" style={{ color: c.textDim }}><ArrowLeft size={15} /> Back</button>
         <div className="flex items-center gap-2">
           {phase !== "setup" && (
+            <button onClick={() => setSfxOn((v) => !v)} title="Sound effects" aria-label="Toggle sound effects"
+              className="flex items-center justify-center rounded-full w-8 h-8 shrink-0" style={{ background: sfxOn ? c.accent : c.surface, border: `1px solid ${sfxOn ? c.accent : c.border}`, color: sfxOn ? c.accentText : c.textDim }}>
+              <Music size={14} />
+            </button>
+          )}
+          {phase !== "setup" && (
             <button onClick={() => { setReadAloud((v) => !v); if (readAloud) ludoSpeech.stop(); }} title="Read battle log aloud" aria-label="Toggle read aloud"
               className="flex items-center justify-center rounded-full w-8 h-8 shrink-0" style={{ background: readAloud ? c.accent : c.surface, border: `1px solid ${readAloud ? c.accent : c.border}`, color: readAloud ? c.accentText : c.textDim }}>
               {readAloud ? <Volume2 size={14} /> : <VolumeX size={14} />}
@@ -962,6 +980,10 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: aiExplain ? c.accent : c.border, color: aiExplain ? c.accentText : c.textFaint }}>{aiExplain ? "On" : "Off"}</span>
             </button>
           )}
+          <button onClick={() => setSfxOn((v) => !v)} className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 mb-2 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}>
+            <span className="flex items-center gap-2"><Music size={14} style={{ color: c.textFaint }} /> Sound effects</span>
+            <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: sfxOn ? c.accent : c.border, color: sfxOn ? c.accentText : c.textFaint }}>{sfxOn ? "On" : "Off"}</span>
+          </button>
           <button onClick={() => setReadAloud((v) => !v)} className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 mb-4 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.text }}>
             <span className="flex items-center gap-2">{readAloud ? <Volume2 size={14} style={{ color: c.textFaint }} /> : <VolumeX size={14} style={{ color: c.textFaint }} />} Read the battle log aloud</span>
             <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: readAloud ? c.accent : c.border, color: readAloud ? c.accentText : c.textFaint }}>{readAloud ? "On" : "Off"}</span>
@@ -974,18 +996,35 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
       {(phase === "playing" || phase === "won") && (
         <div>
-          {shaking && (
-            <style>{`
-              @keyframes ludoBoardShake {
-                0%, 100% { transform: translate(0, 0); }
-                20% { transform: translate(-4px, 2px); }
-                40% { transform: translate(4px, -2px); }
-                60% { transform: translate(-3px, -2px); }
-                80% { transform: translate(3px, 2px); }
-              }
-              .ludo-shake { animation: ludoBoardShake 0.45s ease; }
-            `}</style>
-          )}
+          <style>{`
+            @keyframes ludoBoardShake {
+              0%, 100% { transform: translate(0, 0); }
+              15% { transform: translate(-7px, 3px) rotate(-0.6deg); }
+              30% { transform: translate(7px, -3px) rotate(0.6deg); }
+              45% { transform: translate(-5px, -3px); }
+              60% { transform: translate(5px, 3px); }
+              80% { transform: translate(-2px, 1px); }
+            }
+            .ludo-shake { animation: ludoBoardShake 0.55s ease; }
+            @keyframes ludoSlam {
+              0% { transform: scale(3.4) rotate(-7deg); opacity: 0; }
+              16% { transform: scale(0.9) rotate(2deg); opacity: 1; }
+              28% { transform: scale(1.1) rotate(-1deg); }
+              40% { transform: scale(1) rotate(0deg); }
+              86% { transform: scale(1.03); opacity: 1; }
+              100% { transform: scale(1.12); opacity: 0; }
+            }
+            @keyframes ludoFlash { 0% { opacity: 0; } 8% { opacity: 1; } 100% { opacity: 0; } }
+            @keyframes ludoDim { 0% { opacity: 0; } 10% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; } }
+            @keyframes ludoBurst {
+              0% { transform: translate(0, 0) scale(0.2) rotate(0deg); opacity: 1; }
+              100% { transform: translate(var(--dx), var(--dy)) scale(1.5) rotate(160deg); opacity: 0; }
+            }
+            .ludo-banner { animation: ludoSlam 2.1s cubic-bezier(0.2, 0.9, 0.3, 1) forwards; }
+            .ludo-flash { animation: ludoFlash 0.9s ease-out forwards; }
+            .ludo-dim { animation: ludoDim 2.1s ease forwards; }
+            .ludo-burst { animation: ludoBurst 1.1s ease-out forwards; }
+          `}</style>
           <div className={`aspect-square w-full rounded-2xl overflow-hidden mb-4 relative${shaking ? " ludo-shake" : ""}`} style={{ border: `2px solid ${c.border}`, background: c.surface }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(15, 1fr)", gridTemplateRows: "repeat(15, 1fr)", width: "100%", height: "100%" }}>
               {COLOR_ORDER.map(renderYard)}
@@ -993,13 +1032,31 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               {Object.entries(STRETCH).flatMap(([color, cells]) => cells.map(([r, cc]) => renderTrackCell(r, cc)))}
               {centerCells}
             </div>
-            {celebrate && (
-              <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none">
-                <div className="flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-display text-sm animate-pulse" style={{ background: "rgba(0,0,0,0.8)", color: "#fff" }}>
-                  <Zap size={14} style={{ color: "#E8B923" }} /> {celebrate.text}
+            {celebrate && (() => {
+              const hex = celebrate.gold ? "#F5B800" : COLORS[celebrate.color].hex;
+              const big = (celebrate.level || 0) >= 2;
+              return (
+                <div key={celebrate.key} className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden" style={{ zIndex: 30 }}>
+                  <div className="ludo-dim absolute inset-0" style={{ background: "rgba(0,0,0,0.55)" }} />
+                  <div className="ludo-flash absolute inset-0" style={{ background: `radial-gradient(circle at center, ${hex}dd 0%, transparent 70%)` }} />
+                  {BURST.map((p, i) => (
+                    <span key={i} className="ludo-burst absolute" style={{ "--dx": `${p.dx}px`, "--dy": `${p.dy}px`, fontSize: p.size, animationDelay: `${p.delay}ms` }}>
+                      {celebrate.gold ? "⭐" : i % 4 === 0 ? "💀" : "💥"}
+                    </span>
+                  ))}
+                  <div className="ludo-banner relative w-full text-center" style={{ background: `linear-gradient(90deg, transparent 0%, ${hex} 14%, ${hex} 86%, transparent 100%)`, padding: big ? "22px 0" : "16px 0" }}>
+                    <div className="font-display uppercase" style={{ fontSize: big ? 46 : 38, lineHeight: 1, letterSpacing: "0.04em", color: "#fff", textShadow: "0 3px 0 rgba(0,0,0,0.45), 0 0 22px rgba(255,255,255,0.7)" }}>
+                      {celebrate.text}
+                    </div>
+                    {celebrate.sub && (
+                      <div className="font-body font-bold uppercase mt-1.5" style={{ fontSize: 12, letterSpacing: "0.22em", color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+                        {celebrate.sub}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {(stats.captures > 0 || stats.finishes > 0) && (
