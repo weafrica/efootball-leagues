@@ -28,16 +28,35 @@
 // after the cache window expires triggers one, and everyone after that (up
 // to REVALIDATE_SECONDS later) gets the stale-but-fine copy while it
 // refreshes behind the scenes.
+//
+// Postgres egress fix Step 6 — before that CDN-cache-miss path even
+// reaches Postgres, this now checks a snapshot on Cloudflare R2 first (see
+// _r2Snapshot.js). Catches the case a low-traffic route's CDN entry gets
+// evicted early, or a cold edge node has no cache at all yet — either way,
+// a fresh-enough R2 snapshot means Postgres never gets hit for that
+// request. After a real Postgres fetch, the fresh payload gets written
+// back to R2 for next time.
 import { createClient } from "@supabase/supabase-js";
+import { readR2Snapshot, writeR2Snapshot } from "./_r2Snapshot.js";
 
 const CACHE_SECONDS = 3600;
 const REVALIDATE_SECONDS = 7200;
+const R2_SNAPSHOT_KEY = "guest-data";
 
 export default async function handler(req, res) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
     res.status(500).json({ error: "Server misconfigured" });
+    return;
+  }
+
+  const cacheControlHeader = `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`;
+
+  const snapshot = await readR2Snapshot(R2_SNAPSHOT_KEY, CACHE_SECONDS * 1000);
+  if (snapshot) {
+    res.setHeader("Cache-Control", cacheControlHeader);
+    res.status(200).json(snapshot);
     return;
   }
 
@@ -66,10 +85,11 @@ export default async function handler(req, res) {
     // 20260913. Nothing left to assemble here.
     const payload = data.payload;
 
-    res.setHeader(
-      "Cache-Control",
-      `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`
-    );
+    // Awaited before sending the response — see _r2Snapshot.js's own
+    // comment on writeR2Snapshot for why this isn't left dangling.
+    await writeR2Snapshot(R2_SNAPSHOT_KEY, payload);
+
+    res.setHeader("Cache-Control", cacheControlHeader);
     res.status(200).json(payload);
   } catch {
     res.setHeader("Cache-Control", "no-store");

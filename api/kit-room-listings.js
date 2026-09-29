@@ -19,10 +19,15 @@
 // need to be current the moment someone acts — TransferMarket.jsx's
 // loadMyOffers/loadOffersFor etc. are untouched, still live direct
 // queries.
+//
+// Postgres egress fix Step 6 — the same R2-snapshot-before-Postgres layer
+// as guest-data.js and ladder-league-results.js (see _r2Snapshot.js).
 import { createClient } from "@supabase/supabase-js";
+import { readR2Snapshot, writeR2Snapshot } from "./_r2Snapshot.js";
 
 const CACHE_SECONDS = 3600;
 const REVALIDATE_SECONDS = 7200;
+const R2_SNAPSHOT_KEY = "kit-room-listings";
 
 // Matches TRANSFER_LISTING_SELECT / TEAM_SALE_LISTING_SELECT /
 // ITEM_LISTING_SELECT in src/TransferMarket.jsx — kept as literals here
@@ -38,6 +43,15 @@ export default async function handler(req, res) {
   const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
     res.status(500).json({ error: "Server misconfigured" });
+    return;
+  }
+
+  const cacheControlHeader = `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`;
+
+  const snapshot = await readR2Snapshot(R2_SNAPSHOT_KEY, CACHE_SECONDS * 1000);
+  if (snapshot) {
+    res.setHeader("Cache-Control", cacheControlHeader);
+    res.status(200).json(snapshot);
     return;
   }
 
@@ -59,15 +73,16 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.setHeader(
-      "Cache-Control",
-      `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`
-    );
-    res.status(200).json({
+    const payload = {
       transferListings: transferRes.data || [],
       teamListings: teamRes.data || [],
       itemListings: itemRes.data || [],
-    });
+    };
+
+    await writeR2Snapshot(R2_SNAPSHOT_KEY, payload);
+
+    res.setHeader("Cache-Control", cacheControlHeader);
+    res.status(200).json(payload);
   } catch {
     res.setHeader("Cache-Control", "no-store");
     res.status(502).json({ error: "Upstream fetch failed" });

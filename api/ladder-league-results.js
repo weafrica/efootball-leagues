@@ -24,7 +24,12 @@
 // for data that isn't admin-correctable should default to the standard
 // 1hr (CACHE_SECONDS = 3600) this plan uses everywhere else — this file's
 // short window is the exception, not the new default.
+//
+// Postgres egress fix Step 6 — the same R2-snapshot-before-Postgres layer
+// as guest-data.js and kit-room-listings.js (see _r2Snapshot.js), keyed
+// per league+week since that's the actual cache granularity here.
 import { createClient } from "@supabase/supabase-js";
+import { readR2Snapshot, writeR2Snapshot } from "./_r2Snapshot.js";
 
 const CACHE_SECONDS = 300;
 const REVALIDATE_SECONDS = 600;
@@ -54,6 +59,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  const cacheControlHeader = `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`;
+  const snapshotKey = `ladder-league-results-${leagueId}-${week}`;
+
+  const snapshot = await readR2Snapshot(snapshotKey, CACHE_SECONDS * 1000);
+  if (snapshot) {
+    res.setHeader("Cache-Control", cacheControlHeader);
+    res.status(200).json(snapshot);
+    return;
+  }
+
   const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
   try {
@@ -73,11 +88,12 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.setHeader(
-      "Cache-Control",
-      `public, max-age=${CACHE_SECONDS}, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS}`
-    );
-    res.status(200).json({ fixtures: data || [] });
+    const payload = { fixtures: data || [] };
+
+    await writeR2Snapshot(snapshotKey, payload);
+
+    res.setHeader("Cache-Control", cacheControlHeader);
+    res.status(200).json(payload);
   } catch {
     res.setHeader("Cache-Control", "no-store");
     res.status(502).json({ error: "Upstream fetch failed" });
