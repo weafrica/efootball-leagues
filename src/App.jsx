@@ -3885,6 +3885,7 @@ export default function App() {
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
   const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
+  const [shopPathOpen, setShopPathOpen] = useState(false); // from a bare /shop link (weafrica.co.za/shop, www.weafrica.co.za/shop)
   const c = useMemo(() => withAccent(THEMES[theme], theme, accentKey), [theme, accentKey]);
 
   // The app's own content div paints its themed background, but the real
@@ -5422,6 +5423,10 @@ export default function App() {
     if (match) {
       setShopDeepLinkProductId(match[1]);
       window.history.replaceState({}, "", "/");
+    } else if (/^\/shop\/?$/.test(window.location.pathname)) {
+      // Bare /shop — open the shop itself, no specific product.
+      setShopPathOpen(true);
+      window.history.replaceState({}, "", "/");
     }
     setHandledShopDeepLink(true);
   }, [handledShopDeepLink]);
@@ -5430,6 +5435,12 @@ export default function App() {
   useEffect(() => {
     if (shopDeepLinkProductId && session) setView("shop");
   }, [shopDeepLinkProductId, session]);
+
+  // Same for a bare /shop link. Cleared once used so a later session refresh
+  // can't yank the person back to the shop.
+  useEffect(() => {
+    if (shopPathOpen && session) { setView("shop"); setShopPathOpen(false); }
+  }, [shopPathOpen, session]);
 
   // Browser tab title reflects where the shopper actually is.
   useEffect(() => {
@@ -8569,7 +8580,7 @@ export default function App() {
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
           onSignIn={(stay) => signInWithGoogle(stay)}
           onRequireAuth={(reason) => setAuthPrompt(reason)}
-          initialShopProductId={shopDeepLinkProductId} />
+          initialShopProductId={shopDeepLinkProductId} openShopOnLoad={shopPathOpen} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
             onCancel={() => setAuthPrompt(null)}
@@ -8980,7 +8991,7 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId }) {
+function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId, openShopOnLoad }) {
   // Accent color (used for primary buttons/highlights throughout this page)
   // is picked from ACCENTS and lives in the app root now — see the comment
   // by accentKey's useState in App() — so whatever a guest picks here is
@@ -8993,7 +9004,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => window.removeEventListener("keydown", onKey);
   }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
-  const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
+  const [shopOpen, setShopOpen] = useState(!!initialShopProductId || !!openShopOnLoad);
   const [ludoOpen, setLudoOpen] = useState(false);
   // Chess gets the same guest-playable treatment as Ludo — practice
   // board only (no account, no Nets, no RPCs needed for that part).
@@ -9004,8 +9015,8 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // this component so every fresh visit/reload starts collapsed again.
   const [guestLeaguesRevealed, setGuestLeaguesRevealed] = useState(false);
   useEffect(() => {
-    if (initialShopProductId) setShopOpen(true);
-  }, [initialShopProductId]);
+    if (initialShopProductId || openShopOnLoad) setShopOpen(true);
+  }, [initialShopProductId, openShopOnLoad]);
 
   // Same real-history treatment as the signed-in app (see App()'s appNav
   // effects) — a guest opening the shop and swiping back should land on the
