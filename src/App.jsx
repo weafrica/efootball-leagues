@@ -3885,7 +3885,6 @@ export default function App() {
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
   const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
-  const [shopPathOpen, setShopPathOpen] = useState(false); // from a bare /shop link (weafrica.co.za/shop, www.weafrica.co.za/shop)
   const c = useMemo(() => withAccent(THEMES[theme], theme, accentKey), [theme, accentKey]);
 
   // The app's own content div paints its themed background, but the real
@@ -4050,11 +4049,7 @@ export default function App() {
     // URL that the client can never parse into a session. That's what
     // caused the sign-in loop: every retry got a messier URL than the last.
     // origin + pathname only, so each attempt starts from a clean slate.
-    // Sign-in started from /shop redirects to the site root (a URL the auth
-    // provider already allows) and remembers to bounce back into the shop.
-    const inShop = window.location.pathname.startsWith("/shop");
-    if (inShop) { try { window.sessionStorage.setItem("wa_return_to", "/shop"); } catch { /* storage blocked */ } }
-    const redirectTo = `${window.location.origin}${inShop ? "/" : window.location.pathname}`;
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
   };
 
@@ -4645,12 +4640,7 @@ export default function App() {
   // fails, the RPC's own transaction rolls back the whole thing.
   const joinLadder = async () => {
     const { error } = await supabase.rpc("join_ladder");
-    if (error) {
-      showToast(/insufficient/i.test(error.message || "")
-        ? `You need ${formatNets(LADDER_JOIN_FEE_NETS)} to join the ladder.`
-        : `Couldn't join the ladder: ${error.message}`);
-      return;
-    }
+    if (error) { showToast(`Couldn't join the ladder: ${error.message}`); return; }
     await loadMyLadderRank();
     if (view === "ladder") await loadLadder();
     showToast("You're on the ladder!");
@@ -4665,13 +4655,13 @@ export default function App() {
   // This button exists for running it on demand — right after a known
   // wave of signups, say — rather than waiting for the nightly job.
   // Purged players aren't banned; join_ladder() has no history check, so
-  // anyone removed can pay the 5N fee and join again like a new player.
+  // anyone removed can just join again like a new player (joining is free).
   // Destructive (a real DELETE, no undo), so it goes through the same
   // 3-step requestConfirm guard as the other irreversible admin actions
   // instead of a single window.confirm().
   const purgeInactiveLadderMembers = () => {
     requestConfirm([
-      "Remove everyone on the ladder who's never played a match (and joined 7+ days ago)? They keep their profile — just lose their ladder spot and would need to pay the join fee again.",
+      "Remove everyone on the ladder who's never played a match (and joined 7+ days ago)? They keep their profile — just lose their ladder spot and would need to join again.",
       "Are you sure? This deletes their ladder_ranks row outright — there's no undo.",
       "Final check — click to permanently remove every never-played member from the ladder.",
     ], async () => {
@@ -5423,21 +5413,10 @@ export default function App() {
   // one, signed in or not, so this runs independently of session state.
   useEffect(() => {
     if (handledShopDeepLink) return;
-    const path = window.location.pathname;
-    const match = path.match(/^\/shop\/([^/]+)\/?$/);
-    // Coming back from Google sign-in that was started inside the shop
-    // (see signInWithGoogle) — put the person back in the shop.
-    let returnTo = null;
-    try { returnTo = window.sessionStorage.getItem("wa_return_to"); window.sessionStorage.removeItem("wa_return_to"); } catch { /* storage blocked */ }
-    // The address bar is deliberately left on /shop (or /shop/<id>) so a
-    // reload lands right back here instead of on the login page.
+    const match = window.location.pathname.match(/^\/shop\/([^/]+)\/?$/);
     if (match) {
       setShopDeepLinkProductId(match[1]);
-    } else if (/^\/shop\/?$/.test(path)) {
-      setShopPathOpen(true); // bare /shop — the shop itself, no specific product
-    } else if (path === "/" && returnTo === "/shop") {
-      setShopPathOpen(true);
-      window.history.replaceState(window.history.state, "", `/shop${window.location.search}${window.location.hash}`);
+      window.history.replaceState({}, "", "/");
     }
     setHandledShopDeepLink(true);
   }, [handledShopDeepLink]);
@@ -5446,12 +5425,6 @@ export default function App() {
   useEffect(() => {
     if (shopDeepLinkProductId && session) setView("shop");
   }, [shopDeepLinkProductId, session]);
-
-  // Same for a bare /shop link. Cleared once used so a later session refresh
-  // can't yank the person back to the shop.
-  useEffect(() => {
-    if (shopPathOpen && session) { setView("shop"); setShopPathOpen(false); }
-  }, [shopPathOpen, session]);
 
   // Browser tab title reflects where the shopper actually is.
   useEffect(() => {
@@ -5483,23 +5456,6 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-
-  // Keep the address bar honest: /shop while the shop is open, back to /
-  // when the person leaves it (via a button, sign-out, or the quick dock).
-  // Back/forward need nothing here — every history entry remembers its own
-  // URL. Only touches /shop paths, so ?league= links etc. are left alone.
-  const prevViewRef = useRef(view);
-  useEffect(() => {
-    const prev = prevViewRef.current;
-    prevViewRef.current = view;
-    if (!session) return;
-    const onShopPath = window.location.pathname.startsWith("/shop");
-    if (view === "shop") {
-      if (!onShopPath) window.history.replaceState(window.history.state, "", "/shop");
-    } else if (prev === "shop" && onShopPath) {
-      window.history.replaceState(window.history.state, "", "/");
-    }
-  }, [view, session]);
 
   // Every in-app "← Back" button used to call setView("home") directly —
   // which *pushes* a new history entry rather than stepping back through
@@ -8608,7 +8564,7 @@ export default function App() {
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
           onSignIn={(stay) => signInWithGoogle(stay)}
           onRequireAuth={(reason) => setAuthPrompt(reason)}
-          initialShopProductId={shopDeepLinkProductId} openShopOnLoad={shopPathOpen} />
+          initialShopProductId={shopDeepLinkProductId} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
             onCancel={() => setAuthPrompt(null)}
@@ -8734,9 +8690,6 @@ export default function App() {
         else setView("home");
       },
     },
-    // The department store — right after the promoted League tile so it's
-    // one of the first things in the dock, on every screen.
-    { icon: ShoppingBag, label: "Shop", tourId: "qa-shop", onClick: () => setView("shop") },
     // Games grouped first (right after the priority/admin tiles above).
     // Chess leads the group per an explicit "show Chess first" ask —
     // Ludo, Sesotho Match, and Stories are all little standalone games/
@@ -9022,7 +8975,7 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId, openShopOnLoad }) {
+function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId }) {
   // Accent color (used for primary buttons/highlights throughout this page)
   // is picked from ACCENTS and lives in the app root now — see the comment
   // by accentKey's useState in App() — so whatever a guest picks here is
@@ -9035,7 +8988,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => window.removeEventListener("keydown", onKey);
   }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
-  const [shopOpen, setShopOpen] = useState(!!initialShopProductId || !!openShopOnLoad);
+  const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
   const [ludoOpen, setLudoOpen] = useState(false);
   // Chess gets the same guest-playable treatment as Ludo — practice
   // board only (no account, no Nets, no RPCs needed for that part).
@@ -9046,8 +8999,8 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // this component so every fresh visit/reload starts collapsed again.
   const [guestLeaguesRevealed, setGuestLeaguesRevealed] = useState(false);
   useEffect(() => {
-    if (initialShopProductId || openShopOnLoad) setShopOpen(true);
-  }, [initialShopProductId, openShopOnLoad]);
+    if (initialShopProductId) setShopOpen(true);
+  }, [initialShopProductId]);
 
   // Same real-history treatment as the signed-in app (see App()'s appNav
   // effects) — a guest opening the shop and swiping back should land on the
@@ -9058,9 +9011,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     const cur = window.history.state;
     if (cur && cur.guestShopOpen && cur.shopOpen === shopOpen) return;
     if (guestShopNavFirstRef.current) { guestShopNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
-    // The address bar follows the guest into the shop (/shop) and back out
-    // (/), so a reload — or a shared link — lands on the same screen.
-    window.history.pushState(state, "", shopOpen ? "/shop" : "/");
+    window.history.pushState(state, "");
   }, [shopOpen]);
 
   useEffect(() => {
@@ -9171,25 +9122,6 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // that fresh list — so a guest landing on the page gets a different pair
   // each time, without needing an account or touching the shop itself.
   const [shopPicks, setShopPicks] = useState(null);
-  // "Visit Sports · Check out Tactical Shop" — real department names (only
-  // ones with something in stock), so the banner names actual aisles.
-  const [shopTeaser, setShopTeaser] = useState("");
-  useEffect(() => {
-    if (!guestLeaguesRevealed) return;
-    let cancelled = false;
-    (async () => {
-      const [{ data: depts }, { data: prods }] = await Promise.all([
-        supabase.from("shop_departments").select("id, name, position").order("position", { ascending: true }),
-        supabase.from("shop_products").select("department_id").eq("active", true),
-      ]);
-      if (cancelled) return;
-      const stocked = new Set((prods || []).map((p) => p.department_id));
-      const names = (depts || []).filter((d) => stocked.has(d.id)).map((d) => d.name);
-      if (names.length >= 2) setShopTeaser(`Visit ${names[0]} · Check out ${names[1]}`);
-      else if (names.length === 1) setShopTeaser(`Visit ${names[0]}`);
-    })();
-    return () => { cancelled = true; };
-  }, [guestLeaguesRevealed]);
   useEffect(() => {
     if (!guestLeaguesRevealed) return;
     let cancelled = false;
@@ -9342,7 +9274,6 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             below (unmounted, not just hidden, until then); the two
             account-gated tiles still just prompt sign-in as before. */}
         <section className="grid grid-cols-4 gap-2 mt-4">
-          <GuestMenuTile icon={ShoppingBag} label="Shop" gold onClick={() => setShopOpen(true)} c={c} />
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
@@ -9464,7 +9395,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             page content above — hidden and unfetched until Leagues/Ladder
             is tapped. */}
         {guestLeaguesRevealed && (
-          <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} teaser={shopTeaser} onOpenPick={(id) => setShopOpen(true)} c={c} />
+          <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
         )}
           </>
         )}
@@ -9800,9 +9731,9 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
 // an account. Ladder just scrolls down to content that's already public;
 // Shop carries an "external" badge instead of a lock since it needs no
 // account, it just leaves the app.
-function GuestMenuTile({ icon: Icon, label, locked, external, gold, onClick, c }) {  return (
+function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {  return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
-      style={gold ? { background: `linear-gradient(150deg, ${SHOP_GOLD}29, ${c.surface} 62%)`, border: `1px solid ${SHOP_GOLD}77` } : { background: c.surface, border: `1px solid ${c.border}` }}>
+      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
       {locked && (
         <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
           <Lock size={9} />
@@ -9813,10 +9744,10 @@ function GuestMenuTile({ icon: Icon, label, locked, external, gold, onClick, c }
           <ExternalLink size={9} />
         </span>
       )}
-      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: gold ? `${SHOP_GOLD}26` : c.surfaceHover }}>
-        <Icon size={16} style={{ color: gold ? SHOP_GOLD : c.accent }} />
+      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
+        <Icon size={16} style={{ color: c.accent }} />
       </span>
-      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: gold ? SHOP_GOLD : c.textDim }}>{label}</span>
+      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{label}</span>
     </button>
   );
 }
@@ -10062,9 +9993,10 @@ function GoogleIcon({ small }) {
 // in gold, not the app's green, so it registers as a store placement rather
 // than another screen inside the app. The whole card is a tap target (not
 // just the pill), open to guests and members alike since browsing the store
-// needs no account. (The Shop also has its own tile in the Quick actions
-// dock — see quickActionItems in App — and in the guest quick-actions row.)
-function ShopBanner({ onOpen, picks, teaser, onOpenPick, c }) {
+// needs no account. (No longer surfaced from the signed-in Home's quick
+// actions either — see quickActionItems in App — so this banner is now the
+// one place the Shop is promoted from.)
+function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   const hasPicks = picks && picks.length > 0;
   return (
     <section onClick={onOpen} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
@@ -10095,7 +10027,7 @@ function ShopBanner({ onOpen, picks, teaser, onOpenPick, c }) {
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: SHOP_GOLD }}>Official store</div>
           <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">{SHOP_NAME}</div>
-          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>{teaser || "Kits, jerseys & gear — open to everyone"}</div>
+          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone</div>
         </div>
         <span className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
           Shop now <ChevronRight size={12} />
@@ -11547,7 +11479,12 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           "who am I" and before "what's due". Deliberately its own teal/
           amber look (see WILDCARD_TEAL/WILDCARD_AMBER) so it reads as a
           special one-tap event, not just another list item. */}
-      <WildcardMatchSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges} c={c} />
+      {/* Battles — Wildcard Match and Ladder Battles combined into one
+          banner (previously two separate stacked cards), right under the
+          player card so it's the first thing anyone sees after "who am I"
+          and before "what's due". */}
+      <BattlesSpotlight openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges}
+        ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} onJoinLadder={onJoinLadder} showToast={showToast} c={c} />
 
       {/* Continue playing — one merged banner (results to log, then
           upcoming fixtures) instead of two separate stacked strips, so the
@@ -11660,7 +11597,6 @@ function Home({ leagues, isAdmin, isMemberOf, entryClosed, qualifiesForLeague, m
           hideLadderPass c={c} />
         <LeaderboardStrip leagues={leagues} session={session} memberAvatars={memberAvatars} myAvatarUrl={myAvatarUrl} onOpenLeaderboard={onOpenLeaderboard} c={c} />
       </div>
-      <LadderStrip ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} session={session} onJoinLadder={onJoinLadder} showToast={showToast} c={c} />
 
       {/* Achievements — the badge collection layer, right after "where you
           stand" so a player sees their rank first, then what they've earned
@@ -11814,7 +11750,7 @@ export function MenuTile({ icon: Icon, label, badge, external, onClick, c, speci
         ? { background: `linear-gradient(150deg, ${LADDER_GOLD}29, ${c.surface} 62%, ${LADDER_GOLD}14)`, border: `1px solid ${LADDER_GOLD}77`, boxShadow: `0 0 0 1px ${LADDER_GOLD}22 inset` }
         : { background: c.surface, border: `1px solid ${c.border}` }}>
       {/* Special tile gets the same drifting-glow shine other spotlight
-          cards use (WildcardMatchSpotlight, shop banner) so it doesn't just
+          cards use (BattlesSpotlight, shop banner) so it doesn't just
           look "differently colored" but actually reads as alive/premium
           among the plain equal-weight tiles around it. */}
       {special && (
@@ -11887,16 +11823,16 @@ function QuickActionsDock({ open, onToggle, items, c }) {
   );
 }
 
-// Wildcard Match — a dedicated, standalone spotlight for the open/"random"
-// challenge broadcast (see sendRandomChallenge/acceptOpenChallenge in App,
-// and the "Random challenge" board in ChallengesScreen), promoted out of
-// the header's small badge icon into its own eye-catching card right at the
-// top of Home. It never fires or grabs a challenge itself — same "preview
-// card that opens the full screen" contract as LadderStrip/LeaderboardStrip
-// below — it just makes the feature impossible to miss and always shows the
-// most exciting truth available: someone else's open challenge beats your
-// own waiting one, which beats the plain "try it" pitch.
-function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpenChallenges, c }) {
+// Battles — Wildcard Match (random/open challenges) and Ladder Battles
+// (the personal 1v1 ranking) combined into one banner on request, instead
+// of two separate cards stacked with a gap between them. Both halves keep
+// 100% of their own original behavior — their own tap target, their own
+// buttons, their own state — this only changes the outer wrapping from
+// two <section>s to one shared card with a divider between them. Both are
+// completely free to use: sending/accepting either kind of challenge
+// always was, and joining the Ladder Battles ranking itself no longer
+// charges anything either (previously a one-time 5 Nets fee).
+function BattlesSpotlight({ openChallenges, session, memberAvatars, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onJoinLadder, showToast, c }) {
   const myId = session?.user?.id;
   const list = openChallenges || [];
   const grabbable = list.filter((ch) => ch.status === "open" && ch.creator_id !== myId);
@@ -11917,69 +11853,181 @@ function WildcardMatchSpotlight({ openChallenges, session, memberAvatars, onOpen
     ? (grabbable.length === 1 ? "1 wildcard is live" : `${grabbable.length} wildcards are live`)
     : state === "waiting" ? "Your wildcard is live" : "Fire one open to everyone";
 
+  const theme = LADDER_THEME; // the Ladder half always renders in the Ladder's own black/gold look
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const top5 = (ladder || []).slice(0, 5);
+  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
+  const isMember = !!myLadderRank;
+  const canJoin = !!session && !isMember;
+  // Same "still show the Join card even with zero members" fix the
+  // standalone version had — only hide the Ladder half entirely if
+  // there's genuinely nothing useful in it (no members AND no Join card).
+  const showLadderHalf = top5.length > 0 || canJoin;
+
+  const handleJoin = async (e) => {
+    e.stopPropagation();
+    if (joining) return;
+    setJoining(true);
+    try {
+      await onJoinLadder();
+    } catch (err) {
+      showToast?.(`Couldn't join the ladder: ${err.message}`);
+    } finally {
+      setJoining(false);
+    }
+  };
+
   return (
     <section className="mt-6">
-      <div role="button" tabIndex={0} onClick={onOpenChallenges} onKeyDown={(e) => { if (e.key === "Enter") onOpenChallenges(); }}
-        className="relative w-full rounded-2xl p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
-        style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}26, ${c.surface} 60%, ${WILDCARD_AMBER}14)`, border: `1px solid ${WILDCARD_TEAL}55` }}>
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_TEAL, opacity: 0.22 }} />
-          <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_AMBER, opacity: 0.18, animationDelay: "3s" }} />
-          {state === "grabbable" && (
-            <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_AMBER}3D 45%, ${WILDCARD_TEAL}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
-          )}
-        </div>
-
-        <div className="relative flex items-center gap-2.5">
-          <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_TEAL}66` }}>
-            <Shuffle size={18} style={{ color: WILDCARD_AMBER }} />
-            {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_AMBER, boxShadow: `0 0 0 2px ${c.surface}` }} />}
-          </span>
-          <div className="flex-1 min-w-0 leading-tight">
-            <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>Wildcard Match</div>
-            <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
+      <div className="relative w-full rounded-2xl overflow-hidden" style={{ border: `1px solid ${WILDCARD_TEAL}55` }}>
+        {/* Wildcard half */}
+        <div role="button" tabIndex={0} onClick={onOpenChallenges} onKeyDown={(e) => { if (e.key === "Enter") onOpenChallenges(); }}
+          className="relative w-full p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
+          style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}26, ${c.surface} 60%, ${WILDCARD_AMBER}14)` }}>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_TEAL, opacity: 0.22 }} />
+            <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_AMBER, opacity: 0.18, animationDelay: "3s" }} />
+            {state === "grabbable" && (
+              <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_AMBER}3D 45%, ${WILDCARD_TEAL}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
+            )}
           </div>
-          <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1"
-            style={{ background: `${WILDCARD_TEAL}22`, color: WILDCARD_TEAL, border: `1px solid ${WILDCARD_TEAL}55` }}>
-            <Sparkles size={10} /> +{winNets} Nets
-          </span>
+
+          <div className="relative flex items-center gap-2.5">
+            <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_TEAL}66` }}>
+              <Shuffle size={18} style={{ color: WILDCARD_AMBER }} />
+              {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_AMBER, boxShadow: `0 0 0 2px ${c.surface}` }} />}
+            </span>
+            <div className="flex-1 min-w-0 leading-tight">
+              <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>Wildcard Match</div>
+              <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
+            </div>
+            <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1"
+              style={{ background: `${WILDCARD_TEAL}22`, color: WILDCARD_TEAL, border: `1px solid ${WILDCARD_TEAL}55` }}>
+              <Sparkles size={10} /> +{winNets} Nets
+            </span>
+          </div>
+
+          <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_TEAL}40` }}>
+            {state === "grabbable" && (
+              <>
+                <div className="flex -space-x-2.5 shrink-0">
+                  {grabbable.slice(0, 4).map((ch) => (
+                    <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
+                      <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={28} c={c} />
+                    </div>
+                  ))}
+                  {grabbable.length > 4 && (
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint, boxShadow: `0 0 0 2px ${c.surface}` }}>+{grabbable.length - 4}</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it — before someone else does.</div>
+              </>
+            )}
+            {state === "waiting" && (
+              <>
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER }} />
+                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.3s" }} />
+                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.6s" }} />
+                </span>
+                <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
+              </>
+            )}
+            {state === "idle" && (
+              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>One tap. Open to every player. First to accept it wins it.</div>
+            )}
+            <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
+              style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}, ${WILDCARD_AMBER})`, color: "#fff" }}>
+              {state === "grabbable" ? <>Grab it <ChevronRight size={12} /></> : state === "waiting" ? <>View <ChevronRight size={12} /></> : <><Shuffle size={13} /> Send</>}
+            </span>
+          </div>
         </div>
 
-        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_TEAL}40` }}>
-          {state === "grabbable" && (
-            <>
-              <div className="flex -space-x-2.5 shrink-0">
-                {grabbable.slice(0, 4).map((ch) => (
-                  <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
-                    <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={28} c={c} />
-                  </div>
-                ))}
-                {grabbable.length > 4 && (
-                  <span className="w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint, boxShadow: `0 0 0 2px ${c.surface}` }}>+{grabbable.length - 4}</span>
+        {/* Ladder Battles half */}
+        {showLadderHalf && (
+          <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
+            className="relative w-full p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
+            style={{ background: theme.bg, borderTop: `1px solid ${theme.border}` }}>
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16 }} />
+            </div>
+            <div className="relative flex items-center justify-between mb-3 gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${theme.borderStrong}` }} />
+                <div className="leading-tight min-w-0">
+                  <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: theme.accent }}>Ladder Battles</div>
+                  <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: theme.red }}>No Mercy</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={theme} />
+                {isMember && (
+                  <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
+                    style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
+                    {myLadderRank.rank_position <= 3 && <Crown size={10} />} You're #{myLadderRank.rank_position} <ChevronRight size={12} />
+                  </button>
                 )}
               </div>
-              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it — before someone else does.</div>
-            </>
-          )}
-          {state === "waiting" && (
-            <>
-              <span className="flex items-center gap-1 shrink-0">
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER }} />
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.3s" }} />
-                <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.6s" }} />
-              </span>
-              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
-            </>
-          )}
-          {state === "idle" && (
-            <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>One tap. Open to every player. First to accept it wins it.</div>
-          )}
-          <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
-            style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}, ${WILDCARD_AMBER})`, color: "#fff" }}>
-            {state === "grabbable" ? <>Grab it <ChevronRight size={12} /></> : state === "waiting" ? <>View <ChevronRight size={12} /></> : <><Shuffle size={13} /> Send</>}
-          </span>
-        </div>
+            </div>
+
+            {canJoin && (
+              <div className="relative flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 mb-3"
+                onClick={(e) => e.stopPropagation()}
+                style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
+                <div className="font-body text-xs min-w-0" style={{ color: theme.textDim }}>
+                  Not on the ladder yet — <span className="font-bold" style={{ color: theme.accent }}>free</span> to join.
+                </div>
+                <button onClick={handleJoin} disabled={joining}
+                  className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-50"
+                  style={{ background: theme.accent, color: theme.accentText }}>
+                  <Swords size={13} /> {joining ? "Joining..." : "Join"}
+                </button>
+              </div>
+            )}
+
+            <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
+              {top5.length === 0 ? (
+                <div className="flex items-center shrink-0 rounded-xl px-3.5 py-2.5 font-body text-xs"
+                  style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
+                  No one's on the ladder yet — be the first.
+                </div>
+              ) : top5.map((row, i) => (
+                <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
+                  style={{
+                    background: i === 0 ? `linear-gradient(135deg, ${theme.accent}26, ${theme.surface})` : theme.surface,
+                    border: `1px solid ${i === 0 ? theme.accent + "55" : theme.border}`,
+                  }}>
+                  {i === 0 && (
+                    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                      <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}3D, transparent)` }} />
+                    </div>
+                  )}
+                  {i < 3 ? (
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                      {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
+                    </span>
+                  ) : (
+                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: theme.surfaceHover, color: theme.textFaint }}>
+                      {i + 1}
+                    </span>
+                  )}
+                  <div className="flex flex-col leading-tight">
+                    <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: theme.text }}>{row.username}</span>
+                    <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
+                  </div>
+                </div>
+              ))}
+              <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
+                style={{ color: theme.accent, background: theme.surfaceHover, border: `1px dashed ${theme.borderStrong}` }}>
+                <Swords size={13} /> {isMember && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+      {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={theme} /></Suspense>}
     </section>
   );
 }
@@ -12020,7 +12068,7 @@ function CompletedLeaguesWidget({ count, onOpen, c }) {
 // Deliberately built as a "retail tag" rather than another soft-glow event
 // card (see KIT_ROOM_COBALT/KIT_ROOM_STEEL): a solid left rail, a faint
 // diagonal fabric-stripe texture (evoking a kit/jersey), and a rotated
-// corner tag — its own visual family, not a WildcardMatchSpotlight reskin.
+// corner tag — its own visual family, not a BattlesSpotlight reskin.
 function KitRoomSpotlight({ onOpenTransferMarket, c }) {
   return (
     <section className="mt-6">
@@ -12065,140 +12113,6 @@ function KitRoomSpotlight({ onOpenTransferMarket, c }) {
           </span>
         </div>
       </div>
-    </section>
-  );
-}
-
-// The permanent ladder, sitting in front of everything else on Home — a
-// horizontally-scrolling strip, not a boxed-off card, so it reads as part of
-// the page rather than a widget bolted onto it. Shows the top 5 by
-// rank_position (which never resets) plus, if the viewer has a spot on it
-// themselves, a quiet "you're #N" line that opens the challenge picker.
-// The permanent ladder, sitting in front of everything else on Home — a
-// horizontally-scrolling strip, not a boxed-off card, so it reads as part of
-// the page rather than a widget bolted onto it. Shows the top 5 by
-// rank_position (which never resets), plus one of three states for the
-// viewer themselves:
-//   - signed out: no personal state, just a plain way in
-//   - signed in, not yet a member: a friendly one-liner + a Join button —
-//     the one place on Home this fee is explained, so it's spelled out
-//     rather than assumed
-//   - signed in, already a member: the "you're #N" chip this always had
-//
-// Previously this only ever showed the "you're #N" chip when myLadderRank
-// existed and silently showed nothing in its place otherwise — a brand new
-// player had no way to tell from this widget that joining was even a thing,
-// let alone that it cost anything. That's the gap this redesign closes.
-function LadderStrip({ ladder, myLadderRank, onOpenLadder, session, onJoinLadder, showToast }) {
-  const theme = LADDER_THEME; // this strip always renders in the Ladder's own black/gold look
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const [joining, setJoining] = useState(false);
-  if (!ladder) return null; // still loading — nothing to show either way yet
-  const top5 = ladder.slice(0, 5);
-  const rankColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
-  const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
-  const isMember = !!myLadderRank;
-  const canJoin = !!session && !isMember;
-  // A truly empty ladder (nobody's ever joined, or everyone who never
-  // played got purged) used to make this whole card vanish — Join button
-  // included — which meant the very first person who'd want to click Join
-  // could never see it. Only bail out now if there's genuinely nothing
-  // useful to show: no members AND no Join card for this viewer either.
-  if (top5.length === 0 && !canJoin) return null;
-
-  const handleJoin = async (e) => {
-    e.stopPropagation(); // sits inside the whole-card onClick=onOpenLadder below
-    if (joining) return;
-    setJoining(true);
-    try {
-      await onJoinLadder();
-    } catch (err) {
-      showToast?.(`Couldn't join the ladder: ${err.message}`);
-    } finally {
-      setJoining(false);
-    }
-  };
-
-  return (
-    <section className="pt-5">
-      <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
-        className="relative w-full rounded-2xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]" style={{ background: theme.bg, border: `1px solid ${theme.border}` }}>
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16 }} />
-        </div>
-        <div className="relative flex items-center justify-between mb-3 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${theme.borderStrong}` }} />
-            <div className="leading-tight min-w-0">
-              <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: theme.accent }}>Ladder Battles</div>
-              <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: theme.red }}>No Mercy</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={theme} />
-            {isMember && (
-              <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
-                style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
-                {myLadderRank.rank_position <= 3 && <Crown size={10} />} You're #{myLadderRank.rank_position} <ChevronRight size={12} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {canJoin && (
-          <div className="relative flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 mb-3"
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
-            <div className="font-body text-xs min-w-0" style={{ color: theme.textDim }}>
-              Not on the ladder yet — one-time <span className="font-bold" style={{ color: theme.accent }}><NetsAmount amount={LADDER_JOIN_FEE_NETS} /></span> to join.
-            </div>
-            <button onClick={handleJoin} disabled={joining}
-              className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-50"
-              style={{ background: theme.accent, color: theme.accentText }}>
-              <Swords size={13} /> {joining ? "Joining..." : "Join"}
-            </button>
-          </div>
-        )}
-
-        <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
-          {top5.length === 0 ? (
-            <div className="flex items-center shrink-0 rounded-xl px-3.5 py-2.5 font-body text-xs"
-              style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
-              No one's on the ladder yet — be the first.
-            </div>
-          ) : top5.map((row, i) => (
-            <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
-              style={{
-                background: i === 0 ? `linear-gradient(135deg, ${theme.accent}26, ${theme.surface})` : theme.surface,
-                border: `1px solid ${i === 0 ? theme.accent + "55" : theme.border}`,
-              }}>
-              {i === 0 && (
-                <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                  <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}3D, transparent)` }} />
-                </div>
-              )}
-              {i < 3 ? (
-                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
-                  {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
-                </span>
-              ) : (
-                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: theme.surfaceHover, color: theme.textFaint }}>
-                  {i + 1}
-                </span>
-              )}
-              <div className="flex flex-col leading-tight">
-                <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: theme.text }}>{row.username}</span>
-                <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
-              </div>
-            </div>
-          ))}
-          <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
-            style={{ color: theme.accent, background: theme.surfaceHover, border: `1px dashed ${theme.borderStrong}` }}>
-            <Swords size={13} /> {isMember && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
-          </button>
-        </div>
-      </div>
-      {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={theme} /></Suspense>}
     </section>
   );
 }
