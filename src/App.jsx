@@ -4050,7 +4050,11 @@ export default function App() {
     // URL that the client can never parse into a session. That's what
     // caused the sign-in loop: every retry got a messier URL than the last.
     // origin + pathname only, so each attempt starts from a clean slate.
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    // Sign-in started from /shop redirects to the site root (a URL the auth
+    // provider already allows) and remembers to bounce back into the shop.
+    const inShop = window.location.pathname.startsWith("/shop");
+    if (inShop) { try { window.sessionStorage.setItem("wa_return_to", "/shop"); } catch { /* storage blocked */ } }
+    const redirectTo = `${window.location.origin}${inShop ? "/" : window.location.pathname}`;
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
   };
 
@@ -5419,14 +5423,21 @@ export default function App() {
   // one, signed in or not, so this runs independently of session state.
   useEffect(() => {
     if (handledShopDeepLink) return;
-    const match = window.location.pathname.match(/^\/shop\/([^/]+)\/?$/);
+    const path = window.location.pathname;
+    const match = path.match(/^\/shop\/([^/]+)\/?$/);
+    // Coming back from Google sign-in that was started inside the shop
+    // (see signInWithGoogle) — put the person back in the shop.
+    let returnTo = null;
+    try { returnTo = window.sessionStorage.getItem("wa_return_to"); window.sessionStorage.removeItem("wa_return_to"); } catch { /* storage blocked */ }
+    // The address bar is deliberately left on /shop (or /shop/<id>) so a
+    // reload lands right back here instead of on the login page.
     if (match) {
       setShopDeepLinkProductId(match[1]);
-      window.history.replaceState({}, "", "/");
-    } else if (/^\/shop\/?$/.test(window.location.pathname)) {
-      // Bare /shop — open the shop itself, no specific product.
+    } else if (/^\/shop\/?$/.test(path)) {
+      setShopPathOpen(true); // bare /shop — the shop itself, no specific product
+    } else if (path === "/" && returnTo === "/shop") {
       setShopPathOpen(true);
-      window.history.replaceState({}, "", "/");
+      window.history.replaceState(window.history.state, "", `/shop${window.location.search}${window.location.hash}`);
     }
     setHandledShopDeepLink(true);
   }, [handledShopDeepLink]);
@@ -5472,6 +5483,23 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  // Keep the address bar honest: /shop while the shop is open, back to /
+  // when the person leaves it (via a button, sign-out, or the quick dock).
+  // Back/forward need nothing here — every history entry remembers its own
+  // URL. Only touches /shop paths, so ?league= links etc. are left alone.
+  const prevViewRef = useRef(view);
+  useEffect(() => {
+    const prev = prevViewRef.current;
+    prevViewRef.current = view;
+    if (!session) return;
+    const onShopPath = window.location.pathname.startsWith("/shop");
+    if (view === "shop") {
+      if (!onShopPath) window.history.replaceState(window.history.state, "", "/shop");
+    } else if (prev === "shop" && onShopPath) {
+      window.history.replaceState(window.history.state, "", "/");
+    }
+  }, [view, session]);
 
   // Every in-app "← Back" button used to call setView("home") directly —
   // which *pushes* a new history entry rather than stepping back through
@@ -8706,6 +8734,9 @@ export default function App() {
         else setView("home");
       },
     },
+    // The department store — right after the promoted League tile so it's
+    // one of the first things in the dock, on every screen.
+    { icon: ShoppingBag, label: "Shop", tourId: "qa-shop", onClick: () => setView("shop") },
     // Games grouped first (right after the priority/admin tiles above).
     // Chess leads the group per an explicit "show Chess first" ask —
     // Ludo, Sesotho Match, and Stories are all little standalone games/
@@ -9027,7 +9058,9 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     const cur = window.history.state;
     if (cur && cur.guestShopOpen && cur.shopOpen === shopOpen) return;
     if (guestShopNavFirstRef.current) { guestShopNavFirstRef.current = false; window.history.replaceState(state, ""); return; }
-    window.history.pushState(state, "");
+    // The address bar follows the guest into the shop (/shop) and back out
+    // (/), so a reload — or a shared link — lands on the same screen.
+    window.history.pushState(state, "", shopOpen ? "/shop" : "/");
   }, [shopOpen]);
 
   useEffect(() => {
@@ -9138,6 +9171,25 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // that fresh list — so a guest landing on the page gets a different pair
   // each time, without needing an account or touching the shop itself.
   const [shopPicks, setShopPicks] = useState(null);
+  // "Visit Sports · Check out Tactical Shop" — real department names (only
+  // ones with something in stock), so the banner names actual aisles.
+  const [shopTeaser, setShopTeaser] = useState("");
+  useEffect(() => {
+    if (!guestLeaguesRevealed) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: depts }, { data: prods }] = await Promise.all([
+        supabase.from("shop_departments").select("id, name, position").order("position", { ascending: true }),
+        supabase.from("shop_products").select("department_id").eq("active", true),
+      ]);
+      if (cancelled) return;
+      const stocked = new Set((prods || []).map((p) => p.department_id));
+      const names = (depts || []).filter((d) => stocked.has(d.id)).map((d) => d.name);
+      if (names.length >= 2) setShopTeaser(`Visit ${names[0]} · Check out ${names[1]}`);
+      else if (names.length === 1) setShopTeaser(`Visit ${names[0]}`);
+    })();
+    return () => { cancelled = true; };
+  }, [guestLeaguesRevealed]);
   useEffect(() => {
     if (!guestLeaguesRevealed) return;
     let cancelled = false;
@@ -9290,6 +9342,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             below (unmounted, not just hidden, until then); the two
             account-gated tiles still just prompt sign-in as before. */}
         <section className="grid grid-cols-4 gap-2 mt-4">
+          <GuestMenuTile icon={ShoppingBag} label="Shop" gold onClick={() => setShopOpen(true)} c={c} />
           <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
@@ -9411,7 +9464,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             page content above — hidden and unfetched until Leagues/Ladder
             is tapped. */}
         {guestLeaguesRevealed && (
-          <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} onOpenPick={(id) => setShopOpen(true)} c={c} />
+          <ShopBanner onOpen={() => setShopOpen(true)} picks={shopPicks} teaser={shopTeaser} onOpenPick={(id) => setShopOpen(true)} c={c} />
         )}
           </>
         )}
@@ -9747,9 +9800,9 @@ function WeekendLeagueCard({ item, index, isHottest, heatPct, isJoined, onCardCl
 // an account. Ladder just scrolls down to content that's already public;
 // Shop carries an "external" badge instead of a lock since it needs no
 // account, it just leaves the app.
-function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {  return (
+function GuestMenuTile({ icon: Icon, label, locked, external, gold, onClick, c }) {  return (
     <button onClick={onClick} className="relative flex flex-col items-center justify-center gap-1.5 rounded-xl py-3 px-1 font-body"
-      style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+      style={gold ? { background: `linear-gradient(150deg, ${SHOP_GOLD}29, ${c.surface} 62%)`, border: `1px solid ${SHOP_GOLD}77` } : { background: c.surface, border: `1px solid ${c.border}` }}>
       {locked && (
         <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.textFaint }}>
           <Lock size={9} />
@@ -9760,10 +9813,10 @@ function GuestMenuTile({ icon: Icon, label, locked, external, onClick, c }) {  r
           <ExternalLink size={9} />
         </span>
       )}
-      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover }}>
-        <Icon size={16} style={{ color: c.accent }} />
+      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: gold ? `${SHOP_GOLD}26` : c.surfaceHover }}>
+        <Icon size={16} style={{ color: gold ? SHOP_GOLD : c.accent }} />
       </span>
-      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: c.textDim }}>{label}</span>
+      <span className="text-[10px] font-semibold text-center leading-tight" style={{ color: gold ? SHOP_GOLD : c.textDim }}>{label}</span>
     </button>
   );
 }
@@ -10009,10 +10062,9 @@ function GoogleIcon({ small }) {
 // in gold, not the app's green, so it registers as a store placement rather
 // than another screen inside the app. The whole card is a tap target (not
 // just the pill), open to guests and members alike since browsing the store
-// needs no account. (No longer surfaced from the signed-in Home's quick
-// actions either — see quickActionItems in App — so this banner is now the
-// one place the Shop is promoted from.)
-function ShopBanner({ onOpen, picks, onOpenPick, c }) {
+// needs no account. (The Shop also has its own tile in the Quick actions
+// dock — see quickActionItems in App — and in the guest quick-actions row.)
+function ShopBanner({ onOpen, picks, teaser, onOpenPick, c }) {
   const hasPicks = picks && picks.length > 0;
   return (
     <section onClick={onOpen} className="relative mt-4 rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
@@ -10043,7 +10095,7 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: SHOP_GOLD }}>Official store</div>
           <div className="font-extrabold uppercase tracking-tight text-lg leading-tight truncate">{SHOP_NAME}</div>
-          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone</div>
+          <div className="font-body text-xs truncate" style={{ color: c.textDim }}>{teaser || "Kits, jerseys & gear — open to everyone"}</div>
         </div>
         <span className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
           Shop now <ChevronRight size={12} />

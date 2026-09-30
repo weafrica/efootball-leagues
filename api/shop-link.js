@@ -74,7 +74,8 @@ export default async function handler(req, res) {
   const id = req.query?.id;
   const host = req.headers.host;
   const proto = req.headers["x-forwarded-proto"] || "https";
-  const pageUrl = `${proto}://${host}/shop/${encodeURIComponent(id || "")}`;
+  // Bare /shop (no id) is the shop's front door — shares as the shop itself.
+  const pageUrl = id ? `${proto}://${host}/shop/${encodeURIComponent(id)}` : `${proto}://${host}/shop`;
   const userAgent = req.headers["user-agent"] || "";
   const isCrawler = BOT_UA_PATTERN.test(userAgent);
 
@@ -121,7 +122,7 @@ export default async function handler(req, res) {
   const priceText = product?.price != null ? formatRand(product.price) : "";
   const description = product
     ? (product.description ? product.description : `${priceText} — available now on WeAfrica Shop.`)
-    : "Browse the WeAfrica Shop.";
+    : "Step into the WeAfrica department store — kits, gear, clothes, bags and more. Visit a department and start browsing.";
   const fullTitle = product && priceText ? `${title} — ${priceText}` : title;
   const image = absoluteProxiedImage(product?.image_url, supabaseUrl, proto, host) || `${proto}://${host}/hero-emblem.png`;
 
@@ -132,7 +133,7 @@ export default async function handler(req, res) {
 <title>${escapeHtml(fullTitle)}</title>
 <meta name="description" content="${escapeHtml(description)}" />
 
-<meta property="og:type" content="product" />
+<meta property="og:type" content="${product ? "product" : "website"}" />
 <meta property="og:title" content="${escapeHtml(fullTitle)}" />
 <meta property="og:description" content="${escapeHtml(description)}" />
 <meta property="og:image" content="${escapeHtml(image)}" />

@@ -231,7 +231,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     const catPathEqual = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
     if (cur && cur.shopNav && cur.shopSubview === subview && (cur.shopProductId ?? null) === productId
       && (cur.shopDept || "all") === shopDept && catPathEqual(cur.shopCatPath || [], shopCatPath)) return;
-    window.history.pushState(state, "");
+    window.history.pushState(state, "", productId ? `/shop/${productId}` : "/shop");
   }, [subview, activeProduct, shopDept, shopCatPath]);
 
   useEffect(() => {
@@ -427,7 +427,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
               <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
               <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
             </div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.2em] mt-1.5" style={{ color: c.textFaint }}>Department store · browse by department</div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.2em] mt-1.5" style={{ color: c.textFaint }}>Step onto the floor · every department, one store</div>
           </div>
           <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
@@ -624,16 +624,23 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
         const dept = departments.find((d) => d.id === selected);
         const num = deptNum.get(dept.id);
         const tint = DEPT_TINTS[((parseInt(num, 10) || 1) - 1) % DEPT_TINTS.length];
+        const all = products.filter((p) => p.department_id === dept.id);
+        const photos = [...new Set(all.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
+        const from = deptFromPrice(all);
         return (
-          <div className="rounded-2xl p-4 mb-4" style={{ background: tint }}>
-            <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/80">Department{num ? ` ${num}` : ""}</div>
-            <div className="text-white font-extrabold uppercase tracking-tight text-xl leading-tight mt-0.5" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
-            <div className="text-white/85 font-mono text-[11px] mt-1">
-              {deptItems.length} item{deptItems.length === 1 ? "" : "s"}{deptCategories.length > 0 ? ` · ${deptCategories.length} categor${deptCategories.length === 1 ? "y" : "ies"}` : ""}
-            </div>
-            <button onClick={() => selectDept("all")} className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: "rgba(0,0,0,0.35)", color: "#fff" }}>
+          <div className="relative rounded-2xl overflow-hidden mb-4 min-h-[170px] flex flex-col justify-end p-4" style={{ background: tint }}>
+            {photos.length > 0 && <DeptTileCollage photos={photos} />}
+            <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.1) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.3), rgba(0,0,0,0.05))" }} />
+            <button onClick={() => selectDept("all")} className="absolute top-3 left-3 font-mono text-[10px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}>
               ‹ All departments
             </button>
+            <div className="relative">
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/85">Department{num ? ` ${num}` : ""} · you're inside</div>
+              <div className="text-white font-extrabold uppercase tracking-tight text-4xl leading-[0.95] mt-1" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>{dept.name}</div>
+              <div className="text-white/90 font-mono text-[11px] mt-2">
+                {deptItems.length} item{deptItems.length === 1 ? "" : "s"}{deptCategories.length > 0 ? ` · ${deptCategories.length} categor${deptCategories.length === 1 ? "y" : "ies"}` : ""}{from != null ? ` · from ${formatMoney(from)}` : ""}
+              </div>
+            </div>
           </div>
         );
       })()}
@@ -728,9 +735,9 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
               {departments.length > 0 && (
                 <div className="flex items-center gap-2 mb-2.5">
                   <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded tracking-[0.15em]" style={{ background: SHOP_GOLD, color: "#1a1200" }}>DEPT {deptNum.get(dept.id)}</span>
-                  <span className="font-extrabold uppercase tracking-tight text-sm" style={{ color: c.text }}>{dept.name}</span>
+                  <span className="font-extrabold uppercase tracking-tight text-lg leading-none" style={{ color: c.text }}>{dept.name}</span>
                   <span className="font-mono text-[11px]" style={{ color: c.textFaint }}>({items.length})</span>
-                  <button onClick={() => selectDept(dept.id)} className="ml-auto font-mono text-[10px] uppercase tracking-wide underline underline-offset-2" style={{ color: c.textDim }}>View department ›</button>
+                  <button onClick={() => selectDept(dept.id)} className="ml-auto shrink-0 font-mono text-[10px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ border: `1px solid ${SHOP_GOLD}`, color: SHOP_GOLD }}>Visit department ›</button>
                 </div>
               )}
               <ProductGrid products={items} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
@@ -770,6 +777,15 @@ const DEPT_TINTS = [
   "linear-gradient(135deg,#5B4B8A,#211A3A)",
 ];
 
+// Rotating call-to-action verbs, one per department (by its number), so the
+// directory reads like signage: "Visit Sports", "Check out Tactical Shop"...
+const DEPT_VERBS = ["Visit", "Check out", "Explore", "Step into", "Discover", "Shop"];
+const deptVerb = (num) => DEPT_VERBS[((parseInt(num, 10) || 1) - 1) % DEPT_VERBS.length];
+const deptFromPrice = (items) => {
+  const prices = items.map((it) => Number(it.price)).filter((n) => Number.isFinite(n) && n > 0);
+  return prices.length ? Math.min(...prices) : null;
+};
+
 // The store directory — the first thing a shopper sees when they open the
 // shop. Big tappable department tiles (photo where one exists, an accent
 // gradient where it doesn't) so picking an aisle is a glance-and-tap, not a
@@ -786,26 +802,37 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, deptNum, c }
           <span className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>Departments</span>
           <span className="font-mono text-[11px]" style={{ color: c.textFaint }}>· {groups.length}</span>
         </div>
-        <div className="font-body text-xs mt-0.5" style={{ color: c.textDim }}>Tap a department to walk in and see what it stocks.</div>
+        <div className="font-body text-xs mt-0.5" style={{ color: c.textDim }}>Step onto the floor — pick a department and dive in.</div>
       </div>
       <div className="grid grid-cols-2 gap-2.5">
-        {groups.map(({ dept, items }) => {
+        {groups.map(({ dept, items }, idx) => {
           const num = deptNum.get(dept.id);
+          // The first department gets a full-width hero tile once there are
+          // enough of them for it to feel like a feature, not a gap.
+          const hero = idx === 0 && groups.length >= 3;
           // Distinct products' photos (not the same item repeated) — up to 4,
-          // arranged as a collage so the tile itself hints at what's actually
-          // in the department before anyone taps in.
+          // arranged as a collage so the tile itself shows what's actually
+          // on the shelves before anyone taps in.
           const photos = [...new Set(items.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
+          const from = deptFromPrice(items);
           return (
             <button key={dept.id} onClick={() => onSelect(dept.id)}
-              className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
+              className={`group text-left rounded-2xl overflow-hidden relative active:scale-[0.98] transition-transform ${hero ? "col-span-2 aspect-[16/9]" : "aspect-[4/3]"}`}
               style={{ background: DEPT_TINTS[((parseInt(num, 10) || 1) - 1) % DEPT_TINTS.length] }}>
-              {photos.length > 0 && <DeptTileCollage photos={photos} />}
-              <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
+              {photos.length > 0 && (
+                <div className="absolute inset-0 transition-transform duration-700 ease-out group-hover:scale-110 group-active:scale-105">
+                  <DeptTileCollage photos={photos} />
+                </div>
+              )}
+              <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 38%, rgba(0,0,0,0.02) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
               <span className="absolute top-2 left-2 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded tracking-[0.15em]" style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}>DEPT {num}</span>
-              <span className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center font-mono text-[11px]" style={{ background: "rgba(0,0,0,0.45)", color: "#fff" }}>›</span>
+              <span className="absolute top-2 right-2 font-mono text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>Enter ›</span>
               <div className="absolute bottom-0 left-0 right-0 p-3">
-                <div className="text-white font-extrabold uppercase tracking-tight text-[13px] leading-tight truncate" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
-                <div className="text-white/85 font-mono text-[10px] mt-0.5">{items.length} item{items.length === 1 ? "" : "s"}</div>
+                <div className="text-white/90 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>{deptVerb(num)}</div>
+                <div className={`text-white font-extrabold uppercase tracking-tight leading-[0.95] line-clamp-2 ${hero ? "text-3xl" : "text-xl"}`} style={{ textShadow: "0 2px 6px rgba(0,0,0,0.6)" }}>{dept.name}</div>
+                <div className="text-white/90 font-mono text-[10px] mt-1.5">
+                  {items.length} item{items.length === 1 ? "" : "s"}{from != null ? ` · from ${formatMoney(from)}` : ""}
+                </div>
               </div>
             </button>
           );
@@ -815,7 +842,8 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, deptNum, c }
             className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] flex flex-col justify-end p-3 active:scale-[0.98] transition-transform border border-dashed"
             style={{ background: c.surface, borderColor: c.borderStrong }}>
             <LayoutGrid size={16} className="mb-auto mt-0.5" style={{ color: c.textFaint }} />
-            <div className="font-extrabold uppercase tracking-tight text-[13px] leading-tight" style={{ color: c.text }}>Other items</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>More to find</div>
+            <div className="font-extrabold uppercase tracking-tight text-lg leading-tight" style={{ color: c.text }}>Other items</div>
             <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>{uncategorizedCount} item{uncategorizedCount === 1 ? "" : "s"}</div>
           </button>
         )}
