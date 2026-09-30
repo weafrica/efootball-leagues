@@ -12,33 +12,43 @@ import {
 } from "./ludoBanter.js";
 
 // ---------------------------------------------------------------------------
-// BOARD GEOMETRY — unchanged from the first version. See the derivation
-// notes that used to live here (kept out now to save space): TRACK is a
-// hand-verified 56-cell closed loop (every consecutive pair, including the
-// wraparound, is a real orthogonal step; no cell repeats). The 4 starting
-// squares land unevenly spaced (13/14/14/15 cells apart) rather than a
-// perfect 13 apart — doesn't affect fairness, every color still travels
-// once all the way around before turning home, just counted from a
-// different absolute cell. Moves render as a jump to the new square
-// (matching the dice) rather than an animated walk, so the one place this
-// isn't pixel-adjacent — a color's last shared square before its own home
+// BOARD GEOMETRY. TRACK is a hand-verified 52-cell closed loop (every
+// consecutive pair, including the wraparound, is a real orthogonal step —
+// EXCEPT at 4 intentional "corner cuts" near the center, marked below,
+// where the path bends without a token ever landing on the actual corner
+// cell of the center 3x3 block. Those 4 cells are excluded from TRACK on
+// purpose: no color's step count ever reaches them, so a move never stops
+// there and there's nothing to render as track — they fall through to the
+// plain decorative center-hub styling instead, same as the middle trophy
+// cell. No cell repeats otherwise. The 4 starting squares land unevenly
+// spaced (12/13/13/14 cells apart) rather than a perfect 13 apart —
+// doesn't affect fairness, every color still travels once all the way
+// around before turning home, just counted from a different absolute
+// cell. Moves render as a jump to the new square (matching the dice)
+// rather than an animated walk, so the one place this isn't
+// pixel-adjacent — a color's last shared square before its own home
 // column — never actually shows.
 const TRACK = [
-  [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], [6, 6],
+  [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],  // corner cut: skips [6, 6]
   [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6], [0, 7],
-  [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8], [6, 8],
+  [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],  // corner cut: skips [6, 8]
   [6, 9], [6, 10], [6, 11], [6, 12], [6, 13], [6, 14],
   [7, 14],
-  [8, 14], [8, 13], [8, 12], [8, 11], [8, 10], [8, 9], [8, 8],
+  [8, 14], [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],  // corner cut: skips [8, 8]
   [9, 8], [10, 8], [11, 8], [12, 8], [13, 8], [14, 8],
   [14, 7],
-  [14, 6], [13, 6], [12, 6], [11, 6], [10, 6], [9, 6], [8, 6],
+  [14, 6], [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],  // corner cut: skips [8, 6]
   [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0],
   [7, 0], [6, 0],
 ];
-const TRACK_LEN = TRACK.length; // 56
-const START_INDEX = { red: 0, green: 13, yellow: 27, blue: 41 };
-const SAFE_INDICES = new Set([0, 6, 13, 19, 27, 33, 41, 47]);
+const TRACK_LEN = TRACK.length; // 52
+const START_INDEX = { red: 0, green: 12, yellow: 25, blue: 38 };
+// Only the 4 starting squares are safe — one per color, at each color's own
+// entry point onto the shared track. (Ludo traditionally also marks 4 extra
+// "star" squares safe; those are removed here on purpose.) Since these are
+// absolute track positions, this makes a color's start square safe for
+// EVERYONE's tokens, not just its own — the same as the traditional rule.
+const SAFE_INDICES = new Set(Object.values(START_INDEX));
 const STRETCH = {
   red: [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6]],
   green: [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7], [6, 7]],
@@ -286,7 +296,7 @@ const LUDO_RULES_SECTIONS = [
   ]},
   { heading: "Capturing", items: [
     "Land exactly on a square an opponent occupies and their token is sent straight back to their yard.",
-    "Starting squares and the star squares are safe — no captures ever happen there.",
+    "Only the 4 starting squares are safe — no captures ever happen there.",
     "A capture earns you another roll, on top of anything from 6-6.",
   ]},
   { heading: "Obvious moves", items: [
@@ -391,6 +401,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const logIdRef = useRef(0);
   const celebrateKeyRef = useRef(0);
   const turnCapsRef = useRef(0); // captures this turn — a ref, so logging never runs inside a state updater
+  const rollCapturedRef = useRef(false); // did THIS roll (current pair of dice) land a capture? drives the capture-bonus reroll
+  const [yardChoice, setYardChoice] = useState(null); // {dice, tokens: [...yard tokenIds]} — double-6 with 2+ tokens waiting, asking the human how many to bring out
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); if (shakeTimer.current) clearTimeout(shakeTimer.current); }, []);
   useEffect(() => { sfx.enabled = sfxOn; }, [sfxOn]);
   useEffect(() => () => ludoSpeech.stop(), []); // don't leave a voice talking after leaving the page
@@ -499,7 +511,12 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   // earns another roll — not any other matching pair (2+2, 3+3, etc).
   const resolveEndOfDice = useCallback((finalDice) => {
     const d = finalDice;
-    if (d[0] + d[1] === 12) {
+    const rolledDouble6 = d[0] + d[1] === 12;
+    // A capture earns another roll too, same as 6-6 — but it doesn't count
+    // toward the "three 6-6 in a row" forfeit streak, since that streak is
+    // specifically about doubles, not about being on a hot streak of kills.
+    const capturedThisRoll = rollCapturedRef.current;
+    if (rolledDouble6) {
       setRollAgainStreak((s) => {
         const next = s + 1;
         if (next >= 3) {
@@ -512,9 +529,14 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         setDice(null);
         setDiceUsed([false, false]);
         setSelectedDice([]);
-        setMessage(`6 and 6! ${COLORS[turnColor].name} rolls again.`);
+        setMessage(capturedThisRoll ? `6 and 6, plus a kill! ${COLORS[turnColor].name} rolls again.` : `6 and 6! ${COLORS[turnColor].name} rolls again.`);
         return next;
       });
+    } else if (capturedThisRoll) {
+      setDice(null);
+      setDiceUsed([false, false]);
+      setSelectedDice([]);
+      setMessage(`Capture bonus! ${COLORS[turnColor].name} rolls again.`);
     } else {
       reallyAdvanceTurn();
     }
@@ -530,6 +552,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const me = COLORS[color].name;
     if (captured) {
       shakeBoard();
+      rollCapturedRef.current = true;
       setStats((s2) => ({ ...s2, captures: s2.captures + 1 }));
       turnCapsRef.current += 1;
       const n = turnCapsRef.current;
@@ -603,6 +626,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
   const rollDice = () => {
     if (rolling || dice != null || phase !== "playing" || aiBusy) return;
+    rollCapturedRef.current = false;
     sfx.roll();
     setRolling(true);
     setMessage("");
@@ -683,18 +707,52 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   // Fires again after the move lands, in case the second die is now also
   // down to a single obvious option. Any turn with a real choice (2+ different
   // pieces) still waits for a tap.
+  //
+  // One exception: rolling double-6 with 2+ tokens still in the yard would
+  // otherwise get silently swept up in this too — every yard token shares
+  // the same "fromStep" (-1), so forcedAction() can't tell them apart from a
+  // genuinely single piece. Since bringing tokens out is a real decision
+  // (hold one back and safe in the yard, or release it into danger), we stop
+  // and ask instead of deciding for the player.
   useEffect(() => {
     if (phase !== "playing" || !turnColor || roles[turnColor] === "ai" || aiBusy) return;
-    if (dice == null || rolling) return;
+    if (dice == null || rolling || yardChoice) return;
     const forced = forcedAction(turnColor, dice, currentActions, tokens, active);
     if (!forced) return;
+    const isFreshDouble6 = dice[0] === 6 && dice[1] === 6 && !diceUsed[0] && !diceUsed[1];
+    if (isFreshDouble6 && forced.a.kind === "exit") {
+      const yardTokens = (tokens[turnColor] || []).filter((tk) => tk.step === -1);
+      if (yardTokens.length >= 2) {
+        setYardChoice({ dice, tokenIds: yardTokens.map((tk) => tk.id) });
+        return;
+      }
+    }
     const t = setTimeout(() => {
       const explain = explainAction(forced.a, turnColor, forced.sim, dice, forced);
       commitAction(forced.a, turnColor, tokens, dice, diceUsed, explain);
     }, 650);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActions, phase, turnColor, roles, aiBusy, rolling]);
+  }, [currentActions, phase, turnColor, roles, aiBusy, rolling, yardChoice]);
+
+  // Resolves the yard-choice prompt: exits either 1 or 2 tokens using the
+  // double-6 that triggered it. Releasing 2 uses both dice (die 0 for the
+  // first token, die 1 for the second) and ends the roll the normal way
+  // (commitAction spots both dice spent and calls resolveEndOfDice itself).
+  // Releasing 1 only spends die 0, leaving die 1 free for the player to use
+  // however they like — including on the second yard token, if they change
+  // their mind.
+  const chooseYardRelease = (count) => {
+    if (!yardChoice) return;
+    const { dice: d, tokenIds } = yardChoice;
+    setYardChoice(null);
+    const exitAction = (die, tokenId) => ({ kind: "exit", die, tokenId, fromStep: -1, resultStep: 0, dist: 6 });
+    const first = exitAction(0, tokenIds[0]);
+    const r1 = commitAction(first, turnColor, tokens, d, [false, false]);
+    if (r1.done || count < 2) return;
+    const second = exitAction(1, tokenIds[1]);
+    commitAction(second, turnColor, r1.nextTokens, d, r1.newUsed);
+  };
 
   // ---- AI turn loop ------------------------------------------------------
   useEffect(() => {
@@ -712,6 +770,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       let used = diceUsed;
 
       if (d == null) {
+        rollCapturedRef.current = false;
         sfx.roll();
         setRolling(true);
         for (let i = 0; i < 6; i++) {
@@ -1138,6 +1197,28 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       )}
 
       {showHelp && <LudoHelpModal onClose={() => setShowHelp(false)} c={c} />}
+
+      {yardChoice && turnColor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.6)" }}>
+          <div className="rounded-2xl p-6 text-center max-w-xs w-full" style={{ background: c.surface, border: `2px solid ${COLORS[turnColor].hex}` }}>
+            <div className="rounded-full mx-auto mb-3 flex items-center justify-center" style={{ width: 44, height: 44, background: COLORS[turnColor].dim }}>
+              <Dice6 size={22} style={{ color: COLORS[turnColor].hex }} />
+            </div>
+            <div className="font-display text-lg mb-1" style={{ color: c.text }}>Double 6!</div>
+            <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>
+              {COLORS[turnColor].name} has {yardChoice.tokenIds.length} tokens waiting. Bring out one, or both?
+            </div>
+            <div className="flex gap-2.5">
+              <button onClick={() => chooseYardRelease(1)} className="flex-1 rounded-xl py-3 font-display text-base" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>
+                Just 1
+              </button>
+              <button onClick={() => chooseYardRelease(2)} className="flex-1 rounded-xl py-3 font-display text-base" style={{ background: COLORS[turnColor].hex, color: "#fff" }}>
+                Both!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {phase === "won" && winner && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.6)" }}>
