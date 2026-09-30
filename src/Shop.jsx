@@ -422,9 +422,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {subview === "browse" && (
         <>
-          <div className="flex items-center gap-2 mb-5">
-            <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
-            <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
+          <div className="mb-5">
+            <div className="flex items-center gap-2">
+              <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
+              <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
+            </div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.2em] mt-1.5" style={{ color: c.textFaint }}>Department store · browse by department</div>
           </div>
           <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
@@ -570,6 +573,11 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   else if (sort === "name") searchable = [...searchable].sort((a, b) => a.name.localeCompare(b.name));
 
   const deptIds = new Set(departments.map((d) => d.id));
+  // "Dept 01", "Dept 02"... — numbered from the full (unsearched) product
+  // list, so a department keeps its number and colour while filtering.
+  const deptNum = new Map(
+    departments.filter((d) => products.some((p) => p.department_id === d.id)).map((d, i) => [d.id, String(i + 1).padStart(2, "0")])
+  );
   const grouped = departments
     .map((d) => ({ dept: d, items: searchable.filter((p) => p.department_id === d.id) }))
     .filter((g) => g.items.length > 0);
@@ -577,7 +585,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   // Chips (and directory tiles) only ever show departments that actually
   // have something in them right now — no dead-end aisles.
   const chips = [
-    { id: "all", name: "All", count: searchable.length },
+    { id: "all", name: departments.length > 0 ? "All departments" : "All", count: searchable.length },
     ...grouped.map(({ dept, items }) => ({ id: dept.id, name: dept.name, count: items.length })),
     ...(uncategorized.length > 0 ? [{ id: "uncategorized", name: "Other", count: uncategorized.length }] : []),
   ];
@@ -609,8 +617,26 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   return (
     <div>
       {selected === "all" && !q && (
-        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={selectDept} c={c} />
+        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={selectDept} deptNum={deptNum} c={c} />
       )}
+
+      {selected !== "all" && selected !== "uncategorized" && departments.some((d) => d.id === selected) && (() => {
+        const dept = departments.find((d) => d.id === selected);
+        const num = deptNum.get(dept.id);
+        const tint = DEPT_TINTS[((parseInt(num, 10) || 1) - 1) % DEPT_TINTS.length];
+        return (
+          <div className="rounded-2xl p-4 mb-4" style={{ background: tint }}>
+            <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/80">Department{num ? ` ${num}` : ""}</div>
+            <div className="text-white font-extrabold uppercase tracking-tight text-xl leading-tight mt-0.5" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
+            <div className="text-white/85 font-mono text-[11px] mt-1">
+              {deptItems.length} item{deptItems.length === 1 ? "" : "s"}{deptCategories.length > 0 ? ` · ${deptCategories.length} categor${deptCategories.length === 1 ? "y" : "ies"}` : ""}
+            </div>
+            <button onClick={() => selectDept("all")} className="mt-3 font-mono text-[10px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: "rgba(0,0,0,0.35)", color: "#fff" }}>
+              ‹ All departments
+            </button>
+          </div>
+        );
+      })()}
 
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
@@ -639,6 +665,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
       {departments.length > 0 && (
         <div className="sticky top-0 z-10 -mx-4 px-4 pb-1 pt-1" style={{ background: c.bg }}>
           <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+            <span className="shrink-0 self-center font-mono text-[10px] font-bold uppercase tracking-[0.2em] pr-1" style={{ color: SHOP_GOLD }}>Departments</span>
             {chips.map((d) => (
               <button key={d.id} onClick={() => selectDept(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase flex items-center gap-1.5"
                 style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
@@ -666,6 +693,11 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
         </div>
       )}
 
+      {childCats.length > 0 && selected !== "all" && selected !== "uncategorized" && (
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
+          Categories in {currentCatId ? categories.find((cc) => cc.id === currentCatId)?.name : departments.find((d) => d.id === selected)?.name}
+        </div>
+      )}
       {childCats.length > 0 && (
         <CategoryShowcase categories={childCats} allCategories={deptCategories} itemsForCat={itemsForCat} onSelect={drillInto} c={c} />
       )}
@@ -694,8 +726,11 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
           {grouped.map(({ dept, items }) => (
             <div key={dept.id}>
               {departments.length > 0 && (
-                <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5 flex items-baseline gap-1.5" style={{ color: c.textFaint }}>
-                  {dept.name} <span style={{ opacity: 0.6 }}>({items.length})</span>
+                <div className="flex items-center gap-2 mb-2.5">
+                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded tracking-[0.15em]" style={{ background: SHOP_GOLD, color: "#1a1200" }}>DEPT {deptNum.get(dept.id)}</span>
+                  <span className="font-extrabold uppercase tracking-tight text-sm" style={{ color: c.text }}>{dept.name}</span>
+                  <span className="font-mono text-[11px]" style={{ color: c.textFaint }}>({items.length})</span>
+                  <button onClick={() => selectDept(dept.id)} className="ml-auto font-mono text-[10px] uppercase tracking-wide underline underline-offset-2" style={{ color: c.textDim }}>View department ›</button>
                 </div>
               )}
               <ProductGrid products={items} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
@@ -705,7 +740,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
             <div>
               {departments.length > 0 && (
                 <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5 flex items-baseline gap-1.5" style={{ color: c.textFaint }}>
-                  Other <span style={{ opacity: 0.6 }}>({uncategorized.length})</span>
+                  Other items <span style={{ opacity: 0.6 }}>({uncategorized.length})</span>
                 </div>
               )}
               <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
@@ -740,17 +775,22 @@ const DEPT_TINTS = [
 // gradient where it doesn't) so picking an aisle is a glance-and-tap, not a
 // hunt through a small chip row. "Other" gets its own tile too, styled as
 // the catch-all it is rather than pretending to be a real department.
-function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
+function DepartmentShowcase({ groups, uncategorizedCount, onSelect, deptNum, c }) {
   const tileCount = groups.length + (uncategorizedCount > 0 ? 1 : 0);
   if (tileCount < 2) return null; // one aisle isn't a directory — skip straight to the grid
   return (
     <div className="mb-6">
-      <div className="flex items-center gap-1.5 mb-2.5">
-        <LayoutGrid size={13} style={{ color: SHOP_GOLD }} />
-        <span className="font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: c.textFaint }}>Shop by department</span>
+      <div className="mb-3">
+        <div className="flex items-center gap-1.5">
+          <LayoutGrid size={15} style={{ color: SHOP_GOLD }} />
+          <span className="font-extrabold uppercase tracking-tight text-base" style={{ color: c.text }}>Departments</span>
+          <span className="font-mono text-[11px]" style={{ color: c.textFaint }}>· {groups.length}</span>
+        </div>
+        <div className="font-body text-xs mt-0.5" style={{ color: c.textDim }}>Tap a department to walk in and see what it stocks.</div>
       </div>
       <div className="grid grid-cols-2 gap-2.5">
-        {groups.map(({ dept, items }, i) => {
+        {groups.map(({ dept, items }) => {
+          const num = deptNum.get(dept.id);
           // Distinct products' photos (not the same item repeated) — up to 4,
           // arranged as a collage so the tile itself hints at what's actually
           // in the department before anyone taps in.
@@ -758,9 +798,11 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
           return (
             <button key={dept.id} onClick={() => onSelect(dept.id)}
               className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] active:scale-[0.98] transition-transform"
-              style={{ background: DEPT_TINTS[i % DEPT_TINTS.length] }}>
+              style={{ background: DEPT_TINTS[((parseInt(num, 10) || 1) - 1) % DEPT_TINTS.length] }}>
               {photos.length > 0 && <DeptTileCollage photos={photos} />}
               <div className="absolute inset-0" style={{ background: photos.length > 0 ? "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.05) 100%)" : "linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0.05))" }} />
+              <span className="absolute top-2 left-2 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded tracking-[0.15em]" style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}>DEPT {num}</span>
+              <span className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center font-mono text-[11px]" style={{ background: "rgba(0,0,0,0.45)", color: "#fff" }}>›</span>
               <div className="absolute bottom-0 left-0 right-0 p-3">
                 <div className="text-white font-extrabold uppercase tracking-tight text-[13px] leading-tight truncate" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{dept.name}</div>
                 <div className="text-white/85 font-mono text-[10px] mt-0.5">{items.length} item{items.length === 1 ? "" : "s"}</div>
@@ -773,7 +815,7 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, c }) {
             className="text-left rounded-2xl overflow-hidden relative aspect-[4/3] flex flex-col justify-end p-3 active:scale-[0.98] transition-transform border border-dashed"
             style={{ background: c.surface, borderColor: c.borderStrong }}>
             <LayoutGrid size={16} className="mb-auto mt-0.5" style={{ color: c.textFaint }} />
-            <div className="font-extrabold uppercase tracking-tight text-[13px] leading-tight" style={{ color: c.text }}>Other</div>
+            <div className="font-extrabold uppercase tracking-tight text-[13px] leading-tight" style={{ color: c.text }}>Other items</div>
             <div className="font-mono text-[10px] mt-0.5" style={{ color: c.textFaint }}>{uncategorizedCount} item{uncategorizedCount === 1 ? "" : "s"}</div>
           </button>
         )}
