@@ -12,37 +12,34 @@ import {
 } from "./ludoBanter.js";
 
 // ---------------------------------------------------------------------------
-// BOARD GEOMETRY. TRACK is a hand-verified 52-cell closed loop (every
-// consecutive pair, including the wraparound, is a real orthogonal step —
-// EXCEPT at 4 intentional "corner cuts" near the center, marked below,
-// where the path bends without a token ever landing on the actual corner
-// cell of the center 3x3 block. Those 4 cells are excluded from TRACK on
-// purpose: no color's step count ever reaches them, so a move never stops
-// there and there's nothing to render as track — they fall through to the
-// plain decorative center-hub styling instead, same as the middle trophy
-// cell. No cell repeats otherwise. The 4 starting squares land unevenly
-// spaced (12/13/13/14 cells apart) rather than a perfect 13 apart —
-// doesn't affect fairness, every color still travels once all the way
-// around before turning home, just counted from a different absolute
-// cell. Moves render as a jump to the new square (matching the dice)
-// rather than an animated walk, so the one place this isn't
-// pixel-adjacent — a color's last shared square before its own home
+// BOARD GEOMETRY. TRACK is a hand-verified, rotationally-symmetric 52-cell
+// closed loop: one 13-cell quadrant per color, each the 90°-rotation of the
+// last (rot(r,c) = (c, 14-r) — the same rotation the STRETCH arrays below
+// already use). Every consecutive pair, including the wraparound, is a real
+// orthogonal step — EXCEPT at 4 intentional "corner cuts" near the center,
+// one per quadrant, where the path bends without a token ever landing on
+// the actual corner cell of the center 3x3 block. Those 4 cells are
+// excluded from TRACK on purpose: no color's step count ever reaches them,
+// so a move never stops there — they fall through to the plain decorative
+// center-hub styling instead, same as the middle trophy cell. Because the
+// quadrants are true rotations of each other, all 4 starting squares land
+// exactly 13 cells apart (12 squares between one start and the next),
+// evenly all the way around. Moves render as a jump to the new square
+// (matching the dice) rather than an animated walk, so the one place this
+// isn't pixel-adjacent — a color's last shared square before its own home
 // column — never actually shows.
 const TRACK = [
   [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],  // corner cut: skips [6, 6]
-  [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6], [0, 7],
-  [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],  // corner cut: skips [6, 8]
-  [6, 9], [6, 10], [6, 11], [6, 12], [6, 13], [6, 14],
-  [7, 14],
-  [8, 14], [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],  // corner cut: skips [8, 8]
-  [9, 8], [10, 8], [11, 8], [12, 8], [13, 8], [14, 8],
-  [14, 7],
-  [14, 6], [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],  // corner cut: skips [8, 6]
-  [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0],
-  [7, 0], [6, 0],
+  [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6], [0, 7], [0, 8],
+  [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],  // corner cut: skips [6, 8]
+  [6, 9], [6, 10], [6, 11], [6, 12], [6, 13], [6, 14], [7, 14], [8, 14],
+  [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],  // corner cut: skips [8, 8]
+  [9, 8], [10, 8], [11, 8], [12, 8], [13, 8], [14, 8], [14, 7], [14, 6],
+  [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],  // corner cut: skips [8, 6]
+  [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0], [7, 0], [6, 0],
 ];
 const TRACK_LEN = TRACK.length; // 52
-const START_INDEX = { red: 0, green: 12, yellow: 25, blue: 38 };
+const START_INDEX = { red: 0, green: 13, yellow: 26, blue: 39 };
 // Only the 4 starting squares are safe — one per color, at each color's own
 // entry point onto the shared track. (Ludo traditionally also marks 4 extra
 // "star" squares safe; those are removed here on purpose.) Since these are
@@ -385,6 +382,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const [rolling, setRolling] = useState(false);
   const [selectedDice, setSelectedDice] = useState([]); // indices of dice the player has tapped, in tap order (max 2)
   const [rollAgainStreak, setRollAgainStreak] = useState(0);
+  const [rerollTick, setRerollTick] = useState(0); // bumps on EVERY granted reroll (double-6 or capture) so effects keyed to "same player rolls again" always refire
   const [turnCaptures, setTurnCaptures] = useState(0);
   const [message, setMessage] = useState("");
   const [log, setLog] = useState([]); // {id, text, color, speak}[]
@@ -529,6 +527,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         setDice(null);
         setDiceUsed([false, false]);
         setSelectedDice([]);
+        setRerollTick((t) => t + 1);
         setMessage(capturedThisRoll ? `6 and 6, plus a kill! ${COLORS[turnColor].name} rolls again.` : `6 and 6! ${COLORS[turnColor].name} rolls again.`);
         return next;
       });
@@ -536,6 +535,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       setDice(null);
       setDiceUsed([false, false]);
       setSelectedDice([]);
+      setRerollTick((t) => t + 1);
       setMessage(`Capture bonus! ${COLORS[turnColor].name} rolls again.`);
     } else {
       reallyAdvanceTurn();
@@ -694,10 +694,39 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     });
   };
 
+  // Tapping a token directly (no die pre-selected) auto-picks a die for it,
+  // rather than forcing "tap a die, then tap a token" every time:
+  //  - if a die is already selected, that explicit choice still wins
+  //    (this is also how the two-dice "combine" mode keeps working)
+  //  - otherwise, of the dice that can legally move THIS token, prefer
+  //    whichever one shows a 6 (most valuable — getting a token out, or
+  //    just using the best roll first); if neither is a 6, use the first
+  //    die that can move it
+  //  - releasing a second yard token afterward re-runs this same logic
+  //    fresh, so it naturally picks up whichever die is left
   const onTokenTap = (tokenId) => {
     if (roles[turnColor] === "ai" || aiBusy) return;
-    const action = armedActions.find((a) => a.tokenId === tokenId);
+    let action = armedActions.find((a) => a.tokenId === tokenId);
+    if (!action && selectedDice.length === 0 && dice) {
+      const options = currentActions.filter((a) => (a.kind === "exit" || a.kind === "move") && a.tokenId === tokenId);
+      if (options.length) {
+        const sixOption = options.find((a) => dice[a.die] === 6);
+        action = sixOption || options[0];
+      }
+    }
     if (!action) return;
+    // Tapping a yard token directly, with both dice still free and both
+    // showing 6 and 2+ tokens waiting, is the same "release how many?"
+    // decision as the double-6 auto-trigger below — route it to the same
+    // prompt instead of silently exiting just the one that was tapped.
+    if (action.kind === "exit" && dice && dice[0] === 6 && dice[1] === 6 && !diceUsed[0] && !diceUsed[1]) {
+      const yardTokens = (tokens[turnColor] || []).filter((tk) => tk.step === -1);
+      if (yardTokens.length >= 2) {
+        const ids = [tokenId, ...yardTokens.map((tk) => tk.id).filter((id) => id !== tokenId)];
+        setYardChoice({ dice, tokenIds: ids });
+        return;
+      }
+    }
     commitAction(action, turnColor, tokens, dice, diceUsed, null);
   };
 
@@ -733,7 +762,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     }, 650);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActions, phase, turnColor, roles, aiBusy, rolling, yardChoice]);
+  }, [currentActions, phase, turnColor, roles, aiBusy, rolling, yardChoice, rerollTick]);
 
   // Resolves the yard-choice prompt: exits either 1 or 2 tokens using the
   // double-6 that triggered it. Releasing 2 uses both dice (die 0 for the
@@ -834,7 +863,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     // dependency the AI would just sit there with no dice and never roll
     // again — a freeze on any double-6.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, turnColor, roles, rollAgainStreak]);
+  }, [phase, turnColor, roles, rerollTick]);
 
   // ---- rendering ---------------------------------------------------------
   const occupants = useMemo(() => {
@@ -917,12 +946,28 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
           <div className="flex flex-wrap items-center justify-center gap-[1px]" style={{ position: "absolute", inset: 1 }}>
             {occ.map(({ color, tokenId }) => {
               const canTap = turnColor === color && movable.includes(tokenId) && roles[color] !== "ai";
+              const size = occ.length > 1 ? "50%" : "76%";
+              const hex = COLORS[color].hex;
               return (
-                <button key={`${color}-${tokenId}`} onClick={() => canTap && onTokenTap(tokenId)} disabled={!canTap} className="rounded-full" style={{
-                  width: occ.length > 1 ? "48%" : "72%", height: occ.length > 1 ? "48%" : "72%",
-                  background: COLORS[color].hex, border: "1.5px solid rgba(255,255,255,0.7)",
-                  boxShadow: canTap ? `0 0 0 3px ${COLORS[color].hex}66` : "none", cursor: canTap ? "pointer" : "default",
-                }} />
+                <button key={`${color}-${tokenId}`} onClick={() => canTap && onTokenTap(tokenId)} disabled={!canTap}
+                  className="ludo-runner" style={{
+                    width: size, height: size, background: "transparent", border: "none", padding: 0,
+                    filter: canTap ? `drop-shadow(0 0 2px ${hex}) drop-shadow(0 0 4px ${hex}aa)` : "none",
+                    cursor: canTap ? "pointer" : "default",
+                  }}>
+                  {/* A tiny running figure, all inline SVG shapes — no image
+                      assets, so it costs nothing to load and nothing extra
+                      to keep animating. Legs/arms swing via the .ludo-limb
+                      CSS classes above; the whole figure also bobs slightly. */}
+                  <svg viewBox="0 0 24 24" width="100%" height="100%" style={{ overflow: "visible" }}>
+                    <line className="ludo-limb ludo-limb-a" x1="10" y1="13" x2="10" y2="20" stroke={hex} strokeWidth="2.4" strokeLinecap="round" />
+                    <line className="ludo-limb ludo-limb-b" x1="14" y1="13" x2="14" y2="20" stroke={hex} strokeWidth="2.4" strokeLinecap="round" />
+                    <line className="ludo-limb ludo-limb-b" x1="9" y1="10" x2="6" y2="14" stroke={hex} strokeWidth="1.8" strokeLinecap="round" opacity="0.85" />
+                    <line className="ludo-limb ludo-limb-a" x1="15" y1="10" x2="18" y2="14" stroke={hex} strokeWidth="1.8" strokeLinecap="round" opacity="0.85" />
+                    <rect x="9.5" y="7.5" width="5" height="6.5" rx="2.2" fill={hex} stroke="rgba(255,255,255,0.7)" strokeWidth="0.8" />
+                    <circle cx="12" cy="5" r="3.3" fill={hex} stroke="rgba(255,255,255,0.7)" strokeWidth="0.8" />
+                  </svg>
+                </button>
               );
             })}
           </div>
@@ -1070,6 +1115,18 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               80% { transform: translate(-2px, 1px); }
             }
             .ludo-shake { animation: ludoBoardShake 0.55s ease; }
+            /* Running-person tokens: cheap, code-only animation (2 legs +
+               2 arms scissoring, plus a tiny bob) — no images, no per-move
+               JS, just a looping CSS transform so every token on the board
+               looks like it's jogging in place. Low CPU (GPU-composited
+               transforms only) and zero extra data. */
+            @keyframes ludoRunBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
+            @keyframes ludoRunSwingA { 0%, 100% { transform: rotate(28deg); } 50% { transform: rotate(-28deg); } }
+            @keyframes ludoRunSwingB { 0%, 100% { transform: rotate(-28deg); } 50% { transform: rotate(28deg); } }
+            .ludo-runner { animation: ludoRunBob 0.46s ease-in-out infinite; transform-origin: 50% 70%; }
+            .ludo-limb { transform-box: fill-box; transform-origin: 50% 0%; animation-duration: 0.46s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+            .ludo-limb-a { animation-name: ludoRunSwingA; }
+            .ludo-limb-b { animation-name: ludoRunSwingB; }
             @keyframes ludoSlam {
               0% { transform: scale(3.4) rotate(-7deg); opacity: 0; }
               16% { transform: scale(0.9) rotate(2deg); opacity: 1; }
