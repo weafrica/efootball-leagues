@@ -72,7 +72,7 @@ const KOKORO_VOICE_BY_PIECE = {
 // out of one recording. Small pieces read faster and higher, big pieces
 // slower and deeper.
 const PIPER_PLAYBACK_BY_PIECE = {
-  p: 1.35, n: 1.18, b: 1.0, r: 0.85, q: 0.92, k: 0.65,
+  p: 1.08, n: 1.03, b: 1.0, r: 0.93, q: 0.97, k: 0.85,
 };
 // Same idea for the free browser voice (chessVoice.js) — pitch is a real,
 // universally-supported SpeechSynthesisUtterance property. Note: not
@@ -81,13 +81,20 @@ const PIPER_PLAYBACK_BY_PIECE = {
 // a real, known limitation of the Web Speech API, not a bug here) — rate
 // is far more reliably respected, so the gap is pushed hard on both to
 // make sure at least one of the two is audible everywhere.
+// Pitch/rate previously ranged all the way to 2.0 (the SpeechSynthesis
+// maximum) for pawns and down to 0.4 for the king — meant to make sure
+// SOME device would notice a difference, but 2.0 genuinely sounds like a
+// chipmunk on most voices, and that's what "squeaky" was. Narrowed to a
+// band that stays natural on ordinary voices, and shifted deeper overall
+// (nothing above 1.05 now) rather than centered — a deeper voice reads
+// as more natural than a higher one on most TTS engines.
 export const BROWSER_VOICE_PARAMS_BY_PIECE = {
-  p: { pitch: 2.0, rate: 1.35 },
-  n: { pitch: 1.6, rate: 1.18 },
-  b: { pitch: 1.2, rate: 1.0 },
-  r: { pitch: 0.7, rate: 0.85 },
-  q: { pitch: 1.3, rate: 0.95 },
-  k: { pitch: 0.4, rate: 0.65 },
+  p: { pitch: 1.05, rate: 1.05 },
+  n: { pitch: 0.98, rate: 1.0 },
+  b: { pitch: 0.92, rate: 0.97 },
+  r: { pitch: 0.85, rate: 0.93 },
+  q: { pitch: 0.95, rate: 0.97 },
+  k: { pitch: 0.75, rate: 0.85 },
 };
 
 let engine = null; // { tier, speak(text) -> Promise<Blob> }

@@ -141,7 +141,7 @@ export const chessSpeech = {
     // Same single browser voice for everyone, but pitch/rate is a real,
     // universally-supported property — cheap way to give each piece its
     // own character without needing a second real voice.
-    const params = BROWSER_VOICE_PARAMS_BY_PIECE[pieceType] || { pitch: 1, rate: 1.05 };
+    const params = BROWSER_VOICE_PARAMS_BY_PIECE[pieceType] || { pitch: 0.9, rate: 1.0 };
     utter.pitch = params.pitch;
     utter.rate = params.rate;
     let started = false;
