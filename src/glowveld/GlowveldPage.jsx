@@ -93,7 +93,7 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
   }
   const leave = () => {
     G.stopped = true; stopNet(); audio.stopMusic();
-    try { if (window.location.pathname.startsWith('/vediogame')) window.history.pushState({}, '', '/'); } catch { /* */ }
+    try { if (/^\/(glowveld|vediogame)/i.test(window.location.pathname)) window.history.pushState({}, '', '/'); } catch { /* */ }
     onBack && onBack();
   };
   const toMenu = () => { stopNet(); G.w = null; G.mode = 'menu'; G.synced = false; setHud(null); setScreen('menu'); };

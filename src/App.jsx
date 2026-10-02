@@ -3729,7 +3729,7 @@ export default function App() {
   // means a refresh lands back on whichever screen the appNav effect below
   // last recorded, instead of always bouncing to Home.
   const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
-  useEffect(() => { try { if (/^\/vediogame\/?$/i.test(window.location.pathname)) setView("glowveld"); } catch (e) { /* ignore */ } }, []);
+  useEffect(() => { try { if (/^\/(glowveld|vediogame)\/?$/i.test(window.location.pathname)) setView("glowveld"); } catch (e) { /* ignore */ } }, []);
   // Quick actions dock — floating on every screen (see the root return
   // below), open/closed state lives here rather than inside Home now that
   // it's no longer scoped to a single screen.
@@ -8697,7 +8697,7 @@ export default function App() {
     // Ludo, Sesotho Match, and Stories are all little standalone games/
     // experiences distinct from the league/ladder utility tiles below.
     { icon: Swords, label: "Chess", onClick: () => setView("chess") },
-    { icon: Gamepad2, label: "Glowveld", tourId: "qa-glowveld", onClick: () => { setView("glowveld"); try { window.history.pushState({}, "", "/vediogame"); } catch (e) { /* ignore */ } } },
+    { icon: Gamepad2, label: "Glowveld", tourId: "qa-glowveld", onClick: () => { setView("glowveld"); try { window.history.pushState({}, "", "/glowveld"); } catch (e) { /* ignore */ } } },
     { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: BookOpen, label: "Sesotho Match", onClick: () => setView("sesothoMatch") },
     { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
