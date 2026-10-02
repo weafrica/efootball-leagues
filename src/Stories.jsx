@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import PlayerCharacter from "./PlayerCharacter.jsx";
+import Stage from "./Stage.jsx";
+import PenaltyGame from "./PenaltyGame.jsx";
 
 // Pre-generated narration (Piper TTS, synthesized offline — see
 // synthesize_story.py / upload_story_audio.py) lives as plain files in
@@ -555,16 +556,25 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
           {content.title} · {languageLabel(language)}
         </div>
-        <div className="rounded-2xl p-5 mb-4" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+        <div className="mb-4">
           {/* scene.pose is optional per node — authors can skip it entirely
-              and the character just stays idle. Keeps writing a story a
-              purely-text task; animation is opt-in set dressing on top. */}
-          <PlayerCharacter pose={node.scene?.pose} kitColor={c.accent} />
-          <p className="text-base leading-relaxed text-center mt-3">
+              and "you" just stay idle. Stage puts everyone with a line in
+              this node on screen too, on a background matching `ambience`
+              (the same tag already driving sound). Keeps writing a story a
+              purely-text task; the scene assembles itself from that. */}
+          <Stage node={node} playerPose={node.scene?.pose} accentColor={c.accent} />
+        </div>
+        <div className="rounded-2xl p-5 mb-4" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+          <p className="text-base leading-relaxed text-center">
             {node.lines ? node.lines.map((l) => l.text).join(" ") : node.text}
           </p>
         </div>
-        {isEnding ? (
+        {node.minigame === "penalty" ? (
+          <PenaltyGame c={c} onResult={(result) => {
+            const target = result === "win" ? node.minigameWinNode : node.minigameLoseNode;
+            if (target) choose(target);
+          }} />
+        ) : isEnding ? (
           <div className="flex flex-col gap-2">
             {node.ending === "cliffhanger" ? (
               <div className="text-center mb-1">
