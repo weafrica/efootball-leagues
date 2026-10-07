@@ -78,40 +78,81 @@ function saveSoundPref(on) { try { localStorage.setItem("sesothoMatch:sound", on
 // either game unlocks it in both, and costs nothing twice).
 // ---------------------------------------------------------------------
 let _wordVoices = [];
-function refreshWordVoices() { if (typeof window !== "undefined" && window.speechSynthesis) _wordVoices = window.speechSynthesis.getVoices(); }
+let _voiceWaiters = [];
+function refreshWordVoices() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  const list = window.speechSynthesis.getVoices();
+  if (list.length > 0) {
+    _wordVoices = list;
+    _voiceWaiters.forEach((resolve) => resolve());
+    _voiceWaiters = [];
+  }
+}
 if (typeof window !== "undefined" && window.speechSynthesis) {
   refreshWordVoices();
   window.speechSynthesis.addEventListener("voiceschanged", refreshWordVoices);
 }
+// Some browsers report an empty voice list for a moment after page load -
+// wait briefly for a real one rather than guessing, same fix Chess uses.
+function waitForVoices() {
+  if (_wordVoices.length > 0) return Promise.resolve();
+  return new Promise((resolve) => { _voiceWaiters.push(resolve); setTimeout(resolve, 1500); });
+}
+// A promise that gives up after `ms` instead of waiting forever - this is
+// the actual fix for the freeze: a stuck HD download or a browser that
+// silently never starts speaking would otherwise hang indefinitely with
+// nothing to time it out. Chess hit the exact same problem and fixed it
+// the same way (a 2s "did it actually start?" watchdog).
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timed out")), ms)),
+  ]);
+}
+
 let _hdAudio = null;
+let _speakToken = 0; // bumped on every speak()/stop() so a stale, still-loading attempt can't play late
 const wordSpeech = {
   async speak(text, { onHdProgress } = {}) {
+    const myToken = ++_speakToken;
     try { wordSpeech.stop(); } catch { /* never let a stop failure block a new speak */ }
     try {
       if (isHdVoiceEnabled()) {
         try {
-          const engine = await loadNeuralVoice(onHdProgress);
+          const engine = await withTimeout(loadNeuralVoice(onHdProgress), 10000);
           onHdProgress?.(null); // download finished (or was already cached) - hide any progress UI
-          const { blob, playbackRate } = await engine.speak(text, NARRATOR_VOICE_KEY);
+          if (myToken !== _speakToken) return; // superseded while we were waiting
+          const { blob, playbackRate } = await withTimeout(engine.speak(text, NARRATOR_VOICE_KEY), 10000);
+          if (myToken !== _speakToken) return;
           const audio = new Audio(URL.createObjectURL(blob));
           audio.playbackRate = playbackRate || 1;
           _hdAudio = audio;
-          audio.play();
+          audio.play().catch(() => {});
           return;
         } catch {
-          // HD failed to load/generate (offline, unsupported device, a PWA
-          // sandbox restricting the download, etc.) - fall through to the
-          // always-available free voice below rather than going silent.
+          // HD failed, or a stuck download/generation ran past its time
+          // limit (offline, unsupported device, a PWA sandbox restricting
+          // the download, etc.) - fall through to the free voice below
+          // rather than going silent or hanging.
           onHdProgress?.(null);
         }
       }
+      if (myToken !== _speakToken) return;
       if (typeof window === "undefined" || !window.speechSynthesis) return;
+      await waitForVoices();
+      if (myToken !== _speakToken) return;
       const utter = new SpeechSynthesisUtterance(text);
       const voice = pickBestVoice(_wordVoices);
       if (voice) utter.voice = voice;
       utter.lang = voice?.lang || "en-US";
       utter.rate = 0.82;  // slow, storytelling pace
       utter.pitch = 0.9;  // warm and a little lower, not the voice's default brightness
+      // Same silent-failure watchdog Chess uses: some browsers (mostly
+      // Android WebViews / PWAs) accept the utterance and just never
+      // speak it, with no error at all.
+      let started = false;
+      utter.onstart = () => { started = true; };
+      setTimeout(() => { if (!started) { try { window.speechSynthesis.cancel(); } catch { /* ignore */ } } }, 4000);
       window.speechSynthesis.speak(utter);
     } catch {
       // Narration is a nice-to-have, never something that should be able
@@ -119,6 +160,7 @@ const wordSpeech = {
     }
   },
   stop() {
+    _speakToken++; // orphans any in-flight speak() so it can't play late
     try { if (_hdAudio) { _hdAudio.pause(); _hdAudio = null; } } catch { /* ignore */ }
     try { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); } catch { /* ignore */ }
   },
@@ -769,6 +811,8 @@ export default function SesothoMatchPage({ onBack, c }) {
   const [discovered, setDiscovered] = useState(loadDiscovered);
   const matchCountRef = useRef(0);
   const lessonThresholdRef = useRef(3 + Math.floor(Math.random() * 2)); // 3 or 4
+  const [isPractice, setIsPractice] = useState(false);
+  const practiceMasteredRef = useRef(false);
   const [hypeToast, setHypeToast] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [walkTo, setWalkTo] = useState(null);
@@ -791,16 +835,18 @@ export default function SesothoMatchPage({ onBack, c }) {
     setScreen("map");
   };
 
-  const startLevel = (idx) => {
+  const startLevel = (idx, practice = false) => {
     const lv = LEVELS[idx];
     setLevelIdx(idx);
     setBoard(makeBoard(lv.words.length));
     setScore(0);
-    setMovesLeft(lv.moves);
+    setIsPractice(practice);
+    setMovesLeft(practice ? Infinity : lv.moves);
     setSelected(null);
     setOutcome(null);
     setBusy(false);
     setHint(null);
+    practiceMasteredRef.current = false;
     setScreen("play");
   };
 
@@ -861,13 +907,24 @@ export default function SesothoMatchPage({ onBack, c }) {
     }
     setBoard(swapped);
     setSelected(null);
-    setMovesLeft((m) => m - 1);
+    if (!isPractice) setMovesLeft((m) => m - 1);
     setTimeout(() => {
       const { board: finalBoard, gained, firstMatchType, bestRunLen, passes, createdSpecial, detonated } = resolveCascade(swapped, level.words.length, b);
       setBoard(finalBoard);
       setScore((s) => {
         const next = s + gained;
-        if (next >= level.target && !outcome) setOutcome("won");
+        if (next >= level.target && !outcome) {
+          if (isPractice) {
+            // No pressure in practice - a light one-time toast instead of
+            // the full stop-and-congratulate modal, so play continues.
+            if (!practiceMasteredRef.current) {
+              practiceMasteredRef.current = true;
+              showHype("Page mastered!");
+            }
+          } else {
+            setOutcome("won");
+          }
+        }
         return next;
       });
       if (firstMatchType != null) {
@@ -897,11 +954,11 @@ export default function SesothoMatchPage({ onBack, c }) {
   };
 
   useEffect(() => {
-    if (screen === "play" && !busy && movesLeft <= 0 && score < level.target && !outcome) {
+    if (screen === "play" && !isPractice && !busy && movesLeft <= 0 && score < level.target && !outcome) {
       setOutcome("lost");
       play(SFX.lose);
     }
-  }, [movesLeft, score, level, outcome, screen, busy]);
+  }, [movesLeft, score, level, outcome, screen, busy, isPractice]);
 
   useEffect(() => {
     if (outcome === "won") {
