@@ -344,6 +344,7 @@ function ChessLobby({ session, showToast, onBack, onOpenGame, onOpenPractice, c 
 function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
   const [game, setGame] = useState(null); // the chess_games row
   const chessRef = useRef(new Chess());
+  const [, forceBoardRender] = useState(0); // bumps a render with no other state change needed
   const [selected, setSelected] = useState(null); // square id ("e2") or null
   const [legalTargets, setLegalTargets] = useState([]); // square ids
   const [submitting, setSubmitting] = useState(false);
@@ -521,6 +522,12 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       if (!move) { setAiThinking(false); return; }
       let result;
       try { result = chess.move(move); } catch { result = null; }
+      // Show the bot's move on the board the instant it's decided — not
+      // after the network save and the voice line finish. chessRef is a
+      // ref, not state, so mutating it alone doesn't repaint anything;
+      // this is the one missing piece that was making the move itself
+      // look delayed even after the bot's thinking got fast.
+      if (result && !cancelled) forceBoardRender((n) => n + 1);
       if (result) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" });
       if (!cancelled) setAiThinking(false);
     }, 0);
