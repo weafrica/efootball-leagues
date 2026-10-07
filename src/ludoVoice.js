@@ -113,10 +113,10 @@ export const ludoSpeech = {
     if (voice) utter.voice = voice;
     utter.lang = voice?.lang || "en-US";
     const params = LUDO_VOICE_PARAMS[color] || { pitch: 1, rate: 1.05 };
-    const wobble = () => (Math.random() - 0.5) * 0.08;
+    const wobble = () => (Math.random() - 0.5) * 0.04;
     const excited = /!\s*$/.test(clean);
-    utter.pitch = Math.min(1.4, Math.max(0.7, params.pitch + wobble() + (excited ? 0.06 : 0)));
-    utter.rate = Math.min(1.35, Math.max(0.85, params.rate + wobble() + (excited ? 0.05 : 0)));
+    utter.pitch = Math.min(1.25, Math.max(0.8, params.pitch + wobble() + (excited ? 0.025 : 0)));
+    utter.rate = Math.min(1.22, Math.max(0.9, params.rate + wobble() + (excited ? 0.02 : 0)));
     utter.volume = 1;
     utter.onend = () => this.advance();
     utter.onerror = () => this.advance();
@@ -142,7 +142,10 @@ export const ludoSpeech = {
     this.clearWatchdog();
     const next = this.queue.shift();
     if (!next) { this.speakingId = null; this.notify(); return; }
-    this.speakNow(next.id, next.text, next.color);
+    // A short natural gap before the next line — zero pause between
+    // back-to-back utterances is what makes a queue of short lines sound
+    // like a teleprompter rather than someone actually talking.
+    setTimeout(() => this.speakNow(next.id, next.text, next.color), 180);
   },
   // Tapping the line that's currently playing stops everything (and
   // drops anything still queued) — same convention as commentSpeech's

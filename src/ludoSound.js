@@ -143,6 +143,25 @@ export const sfx = {
     [523, 659, 784, 1047].forEach((f) => tone(a, { type: "triangle", f0: f, t: 1.05, dur: 1.1, vol: 0.16 }));
   },
 
+  // A lock mechanically clicking open, then a bright, relieved little
+  // fanfare — the "ransom paid, you're free" moment.
+  buyback() {
+    const a = ac(); if (!a) return;
+    noise(a, { dur: 0.045, vol: 0.3, freq: 2400, type: "bandpass", q: 6 });
+    noise(a, { t: 0.05, dur: 0.05, vol: 0.28, freq: 1800, type: "bandpass", q: 5 });
+    tone(a, { type: "triangle", f0: 200, f1: 90, t: 0.08, dur: 0.12, vol: 0.18 });
+    [523, 659, 784, 1047].forEach((f, i) => tone(a, { type: "triangle", f0: f, t: 0.18 + i * 0.07, dur: 0.22, vol: 0.2 }));
+    tone(a, { type: "sine", f0: 1568, t: 0.46, dur: 0.4, vol: 0.12 });
+  },
+
+  // A small, attention-pulling "you have a choice" alert — plays when the
+  // buyback prompt first appears, before the player taps anything.
+  ransomAlert() {
+    const a = ac(); if (!a) return;
+    tone(a, { type: "sine", f0: 740, dur: 0.1, vol: 0.16 });
+    tone(a, { type: "sine", f0: 988, t: 0.11, dur: 0.14, vol: 0.14 });
+  },
+
   forfeit() {
     const a = ac(); if (!a) return;
     tone(a, { type: "sawtooth", f0: 140, f1: 90, dur: 0.45, vol: 0.28, filter: 1200 });

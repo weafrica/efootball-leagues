@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   ArrowLeft, Trophy, RotateCcw, Dice1, Dice2, Dice3, Dice4, Dice5, Dice6,
   HelpCircle, X, Search, Bot, User, Skull, Shield, Zap, Combine,
-  Volume2, VolumeX, Send, Flame, Rocket, Music,
+  Volume2, VolumeX, Send, Flame, Rocket, Music, Lock, Unlock,
 } from "lucide-react";
 import { ludoSpeech, useLudoSpeakingId } from "./ludoVoice.js";
 import { sfx } from "./ludoSound.js";
@@ -90,7 +90,7 @@ function computeActions(color, dice, diceUsed, tokensByColor) {
     const v = dice[i];
     list.forEach((tk) => {
       if (tk.step === -1) {
-        if (v === 6) actions.push({ kind: "exit", die: i, tokenId: tk.id, fromStep: -1, resultStep: 0, dist: v });
+        if (v === 6 && !tk.heldBy) actions.push({ kind: "exit", die: i, tokenId: tk.id, fromStep: -1, resultStep: 0, dist: v });
       } else if (tk.step < HOME_STEP) {
         const ns = tk.step + v;
         if (ns <= HOME_STEP) actions.push({ kind: "move", die: i, tokenId: tk.id, fromStep: tk.step, resultStep: ns, dist: v });
@@ -121,7 +121,7 @@ function computeActions(color, dice, diceUsed, tokensByColor) {
 // state updater and the AI's own local working copy.
 function applyAction(action, color, tokensByColor, active) {
   const next = { ...tokensByColor };
-  next[color] = (tokensByColor[color] || []).map((tk) => tk.id === action.tokenId ? { ...tk, step: action.resultStep } : tk);
+  next[color] = (tokensByColor[color] || []).map((tk) => tk.id === action.tokenId ? { ...tk, step: action.resultStep, heldBy: null } : tk);
   let captured = false, capturedColor = null;
   if (action.resultStep >= 0 && action.resultStep < TRACK_LEN && !isSafeStep(color, action.resultStep)) {
     const [ar, ac] = absCellForStep(color, action.resultStep);
@@ -129,7 +129,7 @@ function applyAction(action, color, tokensByColor, active) {
       next[oc] = (next[oc] || tokensByColor[oc] || []).map((ox) => {
         if (ox.step === -1 || ox.step >= TRACK_LEN) return ox;
         const [orr, occ] = absCellForStep(oc, ox.step);
-        if (orr === ar && occ === ac) { captured = true; capturedColor = oc; return { ...ox, step: -1 }; }
+        if (orr === ar && occ === ac) { captured = true; capturedColor = oc; return { ...ox, step: -1, heldBy: color }; }
         return ox;
       });
     });
@@ -401,6 +401,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const turnCapsRef = useRef(0); // captures this turn — a ref, so logging never runs inside a state updater
   const rollCapturedRef = useRef(false); // did THIS roll (current pair of dice) land a capture? drives the capture-bonus reroll
   const [yardChoice, setYardChoice] = useState(null); // {dice, tokens: [...yard tokenIds]} — double-6 with 2+ tokens waiting, asking the human how many to bring out
+  const [buybackChoice, setBuybackChoice] = useState(null); // {dice, die, captors: [color...], chosenCaptor} — a six is available and this color has a captive token to maybe ransom back
+  const buybackDeclinedRef = useRef(new Set()); // keys of (dice pair + die index) the player already said "wait" to, so we don't re-nag them about the same six
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); if (shakeTimer.current) clearTimeout(shakeTimer.current); }, []);
   useEffect(() => { sfx.enabled = sfxOn; }, [sfxOn]);
   useEffect(() => () => ludoSpeech.stop(), []); // don't leave a voice talking after leaving the page
@@ -550,7 +552,15 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setTokens(nextTokens);
 
     const me = COLORS[color].name;
-    if (captured) {
+    if (action.kind === "buyback") {
+      const captorName = COLORS[action.captor].name;
+      const line = explain?.text || `${me} buys back their token from ${captorName}!`;
+      pushLog(`🔓 ${line}`, {
+        big: { text: "BOUGHT BACK!", sub: `${me} frees a token held by ${captorName}`, color, level: 0 },
+        color, speak: true, spoken: explain?.spoken || `${me} buys their token back from ${captorName}!`,
+      });
+      sfx.buyback();
+    } else if (captured) {
       shakeBoard();
       rollCapturedRef.current = true;
       setStats((s2) => ({ ...s2, captures: s2.captures + 1 }));
@@ -561,7 +571,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       const label = n === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[n] || "RAMPAGE!");
       const line = explain?.text || pick(CAPTURE_LINES)(me, opp);
       pushLog(`💥 ${line}`, {
-        big: { text: label, sub: `${me} ate ${opp}`, color, level: n },
+        big: { text: label, sub: `${me} ate ${opp} — held captive until bought back!`, color, level: n },
         color, speak: true, spoken: explain?.spoken || line,
       });
       sfx.whoosh();
@@ -627,6 +637,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const rollDice = () => {
     if (rolling || dice != null || phase !== "playing" || aiBusy) return;
     rollCapturedRef.current = false;
+    buybackDeclinedRef.current = new Set();
     sfx.roll();
     setRolling(true);
     setMessage("");
@@ -745,7 +756,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   // and ask instead of deciding for the player.
   useEffect(() => {
     if (phase !== "playing" || !turnColor || roles[turnColor] === "ai" || aiBusy) return;
-    if (dice == null || rolling || yardChoice) return;
+    if (dice == null || rolling || yardChoice || buybackChoice) return;
     const forced = forcedAction(turnColor, dice, currentActions, tokens, active);
     if (!forced) return;
     const isFreshDouble6 = dice[0] === 6 && dice[1] === 6 && !diceUsed[0] && !diceUsed[1];
@@ -762,7 +773,47 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     }, 650);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActions, phase, turnColor, roles, aiBusy, rolling, yardChoice, rerollTick]);
+  }, [currentActions, phase, turnColor, roles, aiBusy, rolling, yardChoice, buybackChoice, rerollTick]);
+
+  // A rolled six, with one or more of this color's own tokens currently
+  // held captive in an opponent's base — stop and offer the ransom instead
+  // of silently using that die for anything else. Only for a human; the AI
+  // decides this for itself inside its own turn loop below. The "declined"
+  // ref means saying "wait" sticks for THIS exact die on THIS exact roll —
+  // it doesn't nag again until a genuinely new six comes along.
+  useEffect(() => {
+    if (phase !== "playing" || !turnColor || roles[turnColor] === "ai" || aiBusy) return;
+    if (dice == null || rolling || buybackChoice || yardChoice) return;
+    const sixIdx = [0, 1].find((i) => !diceUsed[i] && dice[i] === 6);
+    if (sixIdx === undefined) return;
+    const key = `${dice[0]},${dice[1]}-${sixIdx}`;
+    if (buybackDeclinedRef.current.has(key)) return;
+    const captors = [...new Set((tokens[turnColor] || []).filter((tk) => tk.heldBy && active.includes(tk.heldBy)).map((tk) => tk.heldBy))];
+    if (!captors.length) return;
+    setBuybackChoice({ dice, die: sixIdx, key, captors, chosenCaptor: captors.length === 1 ? captors[0] : null });
+    sfx.ransomAlert();
+  }, [dice, diceUsed, phase, turnColor, roles, aiBusy, rolling, buybackChoice, yardChoice, tokens, active]);
+
+  // Confirming the ransom: spends the six that triggered the prompt,
+  // returns the chosen hostage straight into play at this color's own
+  // start square (clearing `heldBy`), and logs/sounds/banners the moment.
+  // Declining just remembers not to ask again for this exact die.
+  const resolveBuyback = () => {
+    if (!buybackChoice || !buybackChoice.chosenCaptor) return;
+    const { dice: d, die, chosenCaptor, key } = buybackChoice;
+    const hostageToken = (tokens[turnColor] || []).find((tk) => tk.heldBy === chosenCaptor);
+    setBuybackChoice(null);
+    if (!hostageToken) return;
+    buybackDeclinedRef.current.add(key);
+    const action = { kind: "buyback", die, tokenId: hostageToken.id, captor: chosenCaptor, fromStep: -1, resultStep: 0, dist: 6 };
+    commitAction(action, turnColor, tokens, d, diceUsed, null);
+  };
+  const declineBuyback = () => {
+    if (!buybackChoice) return;
+    buybackDeclinedRef.current.add(buybackChoice.key);
+    setBuybackChoice(null);
+  };
+  const pickBuybackCaptor = (captor) => setBuybackChoice((bc) => (bc ? { ...bc, chosenCaptor: captor } : bc));
 
   // Resolves the yard-choice prompt: exits either 1 or 2 tokens using the
   // double-6 that triggered it. Releasing 2 uses both dice (die 0 for the
@@ -800,6 +851,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
       if (d == null) {
         rollCapturedRef.current = false;
+        buybackDeclinedRef.current = new Set();
         sfx.roll();
         setRolling(true);
         for (let i = 0; i < 6; i++) {
@@ -828,6 +880,26 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       let alreadyResolved = false;
       while (!(used[0] && used[1])) {
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
+
+        // Automatic ransom: holding a captive token and rolled a six?
+        // Always buy it back — a token back in play beats one sitting in
+        // someone else's base, no real strategy needed, no prompt needed
+        // (that's only for the human — see resolveBuyback above).
+        const sixIdx = [0, 1].find((i) => !used[i] && d[i] === 6);
+        if (sixIdx !== undefined) {
+          const hostageToken = (workingTokens[turnColor] || []).find((tk) => tk.heldBy && active.includes(tk.heldBy));
+          if (hostageToken) {
+            await wait(550);
+            if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
+            const action = { kind: "buyback", die: sixIdx, tokenId: hostageToken.id, captor: hostageToken.heldBy, fromStep: -1, resultStep: 0, dist: 6 };
+            const result = commitAction(action, turnColor, workingTokens, d, used, null);
+            if (result.done) { setAiBusy(false); return; }
+            workingTokens = result.nextTokens;
+            used = result.newUsed;
+            continue;
+          }
+        }
+
         const actions = computeActions(turnColor, d, used, workingTokens);
         if (actions.length === 0) {
           if (aiExplain) pushLog(pick(NO_MOVE_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
@@ -906,12 +978,21 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const [r0, c0] = YARD_ORIGIN[color];
     const list = tokens[color] || [];
     const isAI = roles[color] === "ai";
+    // Any tokens OTHER colors have captured and are holding prisoner here,
+    // in THIS color's yard — rendered small, locked, and tinted in their
+    // owner's color so it's obvious at a glance whose token is being held
+    // and by whom. A hostage never renders in its own owner's yard (see the
+    // `!tk.heldBy` filter just below) — it only ever shows up here, at its
+    // captor's base, until bought back.
+    const hostages = active.flatMap((oc) =>
+      (tokens[oc] || []).filter((tk) => tk.heldBy === color).map((tk) => ({ ownerColor: oc, tokenId: tk.id }))
+    );
     return (
       <div key={color} style={{ gridRow: `${r0 + 1} / span 6`, gridColumn: `${c0 + 1} / span 6`, background: COLORS[color].dim, border: `2px solid ${COLORS[color].hex}55`, borderRadius: 14, position: "relative", margin: 3 }}>
         {isAI && <Bot size={12} className="absolute top-1.5 left-1.5 opacity-60" style={{ color: COLORS[color].hex }} />}
         <div className="absolute inset-3 rounded-lg" style={{ background: c.surface }}>
           <div className="w-full h-full grid grid-cols-2 grid-rows-2 place-items-center">
-            {list.filter((tk) => tk.step === -1).map((tk) => {
+            {list.filter((tk) => tk.step === -1 && !tk.heldBy).map((tk) => {
               const canTap = turnColor === color && movable.includes(tk.id) && roles[color] !== "ai";
               return (
                 <button key={tk.id} onClick={() => canTap && onTokenTap(tk.id)} disabled={!canTap}
@@ -924,6 +1005,16 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
             })}
           </div>
         </div>
+        {hostages.length > 0 && (
+          <div className="absolute flex items-center gap-1 flex-wrap justify-center" style={{ left: 4, right: 4, bottom: -9, zIndex: 5 }}>
+            {hostages.map((h) => (
+              <div key={`${h.ownerColor}-${h.tokenId}`} title={`${COLORS[h.ownerColor].name} token held captive`}
+                className="flex items-center justify-center rounded-full" style={{ width: 16, height: 16, background: COLORS[h.ownerColor].hex, border: `1.5px solid ${c.surface}`, boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>
+                <Lock size={9} style={{ color: "#fff" }} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -1273,6 +1364,47 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
                 Both!
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {buybackChoice && turnColor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.6)" }}>
+          <div className="rounded-2xl p-6 text-center max-w-xs w-full" style={{ background: c.surface, border: `2px solid ${COLORS[turnColor].hex}` }}>
+            <div className="rounded-full mx-auto mb-3 flex items-center justify-center" style={{ width: 44, height: 44, background: COLORS[turnColor].dim }}>
+              <Lock size={20} style={{ color: COLORS[turnColor].hex }} />
+            </div>
+            {!buybackChoice.chosenCaptor ? (
+              <>
+                <div className="font-display text-lg mb-1" style={{ color: c.text }}>Rolled a 6!</div>
+                <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>
+                  More than one captor is holding your tokens. Which one do you want to try to buy back from first?
+                </div>
+                <div className="flex flex-col gap-2">
+                  {buybackChoice.captors.map((captor) => (
+                    <button key={captor} onClick={() => pickBuybackCaptor(captor)} className="rounded-xl py-3 font-display text-base flex items-center justify-center gap-2"
+                      style={{ background: COLORS[captor].dim, color: COLORS[captor].hex, border: `1px solid ${COLORS[captor].hex}55` }}>
+                      <Lock size={14} /> From {COLORS[captor].name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="font-display text-lg mb-1" style={{ color: c.text }}>Rolled a 6!</div>
+                <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>
+                  {COLORS[turnColor].name}'s token is held by {COLORS[buybackChoice.chosenCaptor].name}. Buy it back now, or wait?
+                </div>
+                <div className="flex gap-2.5">
+                  <button onClick={declineBuyback} className="flex-1 rounded-xl py-3 font-display text-base" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>
+                    Wait
+                  </button>
+                  <button onClick={resolveBuyback} className="flex-1 rounded-xl py-3 font-display text-base flex items-center justify-center gap-1.5" style={{ background: COLORS[turnColor].hex, color: "#fff" }}>
+                    <Unlock size={16} /> Buy back
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
