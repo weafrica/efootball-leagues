@@ -482,7 +482,13 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
         }
       }
       const display = [qualityOrExplain?.display, narrative, aside, planLine].filter(Boolean).join(" ");
-      const spoken = [qualityOrExplain?.spoken, narrative, aside, planLine].filter(Boolean).join(" ");
+      // Spoken is deliberately shorter than the caption — synthesis time
+      // (especially the HD voice) scales with how much text it has to
+      // generate, and chaining all four parts together every single
+      // move made each line noticeably slow to start. The core "why"
+      // still gets said in full; the capture flourish, the joke, and
+      // the plan update stay as text-only extras in the caption above.
+      const spoken = qualityOrExplain?.spoken || narrative || "";
       if (display) {
         setCommentary((prev) => [...prev.slice(-4), { from: mover === "human" ? "you" : "bot", text: display }]);
         // Read the analysis aloud automatically — this is the whole
@@ -522,14 +528,21 @@ function ChessBoardScreen({ gameId, session, showToast, onBack, c }) {
       if (!move) { setAiThinking(false); return; }
       let result;
       try { result = chess.move(move); } catch { result = null; }
-      // Show the bot's move on the board the instant it's decided — not
-      // after the network save and the voice line finish. chessRef is a
-      // ref, not state, so mutating it alone doesn't repaint anything;
-      // this is the one missing piece that was making the move itself
-      // look delayed even after the bot's thinking got fast.
-      if (result && !cancelled) forceBoardRender((n) => n + 1);
-      if (result) await submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" });
-      if (!cancelled) setAiThinking(false);
+      // Show the bot's move AND unlock the board at the same instant —
+      // both used to wait on the network save (and the voice line) to
+      // finish first. That half-fix last round was worse than before:
+      // the move visibly appeared, but tapping still did nothing until
+      // the save caught up, which read as a freeze. The save and the
+      // spoken commentary now happen in the background; a row lock on
+      // the server (chess_submit_ai_move takes `for update`) keeps your
+      // very next move safely queued behind the bot's save even if you
+      // play again before it's confirmed, so this isn't a data risk —
+      // just no longer blocking the screen.
+      if (result && !cancelled) { forceBoardRender((n) => n + 1); setAiThinking(false); }
+      if (result) {
+        submitAiTurn(chess, { fenBeforeMove, moveResult: result, mover: "ai" })
+          .catch((err) => console.warn("Bot move save failed:", err));
+      }
     }, 0);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
