@@ -40,6 +40,9 @@ export const sfx = {
   go: () => { tone(660, 0.12, 'triangle', 0.15); tone(990, 0.3, 'triangle', 0.15, 0, 0.12); },
   win: () => { [0, 4, 7, 12, 16, 19].forEach((s, i) => tone(hz(s + 12), 0.28, 'triangle', 0.15, 0, i * 0.1)); },
   emote: () => tone(880, 0.1, 'sine', 0.1, 1200),
+  dice: () => { for (let i = 0; i < 6; i++) { tone(300 + Math.random() * 500, 0.04, 'square', 0.05, 0, i * 0.06); noise(0.03, 0.05, 2500, i * 0.06); } tone(700, 0.12, 'triangle', 0.12, 0, 0.4); },
+  boot: () => { noise(0.2, 0.12, 500); tone(260, 0.3, 'sawtooth', 0.12, 70); },
+  lap: () => { [0, 4, 7, 12, 7, 12, 16].forEach((s, i) => tone(hz(s + 12), 0.14, 'triangle', 0.14, 0, i * 0.07)); },
 };
 // Generative "Blackout FM": log-drum bass + mbira-ish plucks, tempo and key change with the mood.
 function logDrum(t, n) {

@@ -1,5 +1,5 @@
 // Glowveld renderer — every pixel is drawn with canvas code. No images anywhere.
-import { W, H, BEACON, TREES, RECTS, COLORS, HATS, PR, GOLDEN_HOUR, quadOf } from './sim.js';
+import { W, H, BEACON, TREES, RECTS, COLORS, HATS, PR, GOLDEN_HOUR, quadOf, RING_N, LAP_BONUS, ringStart, ringXY, isSafeCell } from './sim.js';
 
 const SKIN = ['#8d5524', '#c68642', '#e0ac69', '#f1c27d', '#a0674b', '#6b4226'];
 const hash = (n) => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
@@ -143,7 +143,7 @@ export function drawPlayer(g, p, tm, isMe, big = 1) {
 }
 
 // ----- particles & floating text -----
-export function makeFx() { return { parts: [], texts: [], shake: 0, rings: [], flash: 0, banner: null, tm: 0 }; }
+export function makeFx() { return { parts: [], texts: [], shake: 0, rings: [], flash: 0, banner: null, tm: 0, dice: [], rp: new Map() }; }
 function burst(fx, x, y, col, n, spd = 120, life = 0.6, size = 3) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, v = spd * (0.3 + Math.random()); fx.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, col, size }); } }
 export function feed(fx, ev, meId, snd, w) {
   for (const e of ev) {
@@ -163,6 +163,21 @@ export function feed(fx, ev, meId, snd, w) {
     else if (e.k === 'start') { snd.go(); fx.banner = { t: 'GO!', sub: 'Grab Sparks — bank them at the Beacon', life: 2.2, max: 2.2, col: '#fff' }; }
     else if (e.k === 'end') { snd.win(); }
     else if (e.k === 'emote') { snd.emote(); }
+    else if (e.k === 'roll') {
+      const rp = w.players.find((q) => q.id === e.p); if (!rp) continue;
+      const cc = ringXY(ringStart(rp) + e.to);
+      fx.dice.push({ x: cc.x, y: cc.y - 30, a: e.a, b: e.b, life: 2.0, max: 2.0, me: mine, forfeit: !!e.forfeit });
+      if (mine) snd.dice();
+      if (e.forfeit) fx.texts.push({ x: cc.x, y: cc.y - 50, t: 'Too lucky! Turn lost', life: 1.4, max: 1.4, col: '#ffb3b3', size: 18 });
+      if (e.lap) { fx.texts.push({ x: cc.x, y: cc.y - 56, t: 'LAP! +' + LAP_BONUS, life: 1.6, max: 1.6, col: '#9ff0b0', size: 28 }); burst(fx, cc.x, cc.y, '#9ff0b0', 22, 160, 0.8, 4); if (mine) snd.lap(); }
+      if (e.boot && e.boot.length) {
+        const victims = e.boot.map((id) => w.players.find((q) => q.id === id)).filter(Boolean);
+        for (const v of victims) { const vc = ringXY(ringStart(v)); fx.texts.push({ x: vc.x, y: vc.y - 30, t: 'BOOTED!', life: 1.4, max: 1.4, col: '#ffb3b3', size: 24 }); burst(fx, cc.x, cc.y, '#ff9a9a', 16, 150, 0.6, 3); }
+        if (mine || e.boot.includes(meId)) snd.boot();
+        if (mine && victims[0]) fx.banner = { t: 'BOOT! 👢', sub: 'You sent ' + victims.map((v) => v.name).join(' & ') + ' back to the start (+' + 3 * victims.length + ')', life: 2.2, max: 2.2, col: '#ffd0a0' };
+        else if (e.boot.includes(meId)) fx.banner = { t: 'Booted! 👢', sub: rp.name + ' landed on your runner — back to the start!', life: 2.4, max: 2.4, col: '#ffb3b3' };
+      }
+    }
   }
 }
 export function updateFx(fx, dt) {
@@ -172,6 +187,61 @@ export function updateFx(fx, dt) {
   for (const t of fx.texts) { t.y -= 34 * dt; t.life -= dt; } fx.texts = fx.texts.filter((t) => t.life > 0).slice(-30);
   for (const r of fx.rings) { r.life -= dt; r.r += (r.grow || 60) * dt * 2.6; } fx.rings = fx.rings.filter((r) => r.life > 0);
   if (fx.banner) { fx.banner.life -= dt; if (fx.banner.life <= 0) fx.banner = null; }
+  for (const d of fx.dice) d.life -= dt; fx.dice = fx.dice.filter((d) => d.life > 0);
+}
+
+// ----- Ring Race: stepping-stone pads round the Beacon and a little runner per player -----
+function ringPads(g, w, tm) {
+  for (let i = 0; i < RING_N; i++) {
+    const { x, y } = ringXY(i), safe = isSafeCell(i), owner = w.players.find((p) => !p.still && ringStart(p) === i);
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.28)';
+    g.fillStyle = safe ? (owner ? COLORS[owner.color % COLORS.length] : '#fff4d0') : 'rgba(255,255,255,0.6)';
+    g.beginPath(); g.arc(x, y, safe ? 13 : 9, 0, 6.3); g.fill(); g.stroke();
+    if (safe) { g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(x, y, 4, 0, 6.3); g.fill(); }
+  }
+}
+function runner(g, x, y, col, k, tm, moving, isMe) {
+  const sw = moving ? Math.sin(tm * 18) : Math.sin(tm * 2) * 0.2;
+  g.save(); g.translate(x, y); g.scale(k, k);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(0, 16, 11, 4.5, 0, 0, 6.3); g.fill();
+  if (isMe) { g.strokeStyle = '#fff'; g.lineWidth = 3; g.beginPath(); g.arc(0, 4, 20, 0, 6.3); g.stroke(); }
+  g.strokeStyle = col; g.lineCap = 'round'; g.lineWidth = 4.5;
+  g.beginPath(); g.moveTo(-3, 6); g.lineTo(-3 + sw * 6, 16); g.moveTo(3, 6); g.lineTo(3 - sw * 6, 16); g.stroke();
+  g.lineWidth = 3.4; g.beginPath(); g.moveTo(-6, -2); g.lineTo(-10 - sw * 3, 4); g.moveTo(6, -2); g.lineTo(10 + sw * 3, 4); g.stroke();
+  g.fillStyle = col; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 1.6; g.beginPath(); g.arc(0, 1, 7, 0, 6.3); g.fill(); g.stroke();
+  g.beginPath(); g.arc(0, -10, 6, 0, 6.3); g.fill(); g.stroke();
+  g.restore();
+}
+function ringTokens(g, w, fx, meId, tm, dt) {
+  const seen = new Map();
+  for (const p of w.players) {
+    if (p.still) continue;
+    const target = (p.laps | 0) * RING_N + (p.rs | 0);
+    let cur = fx.rp.has(p.id) ? fx.rp.get(p.id) : target;
+    if (target < cur - 0.01) cur = target; else cur += Math.min(target - cur, 9 * dt);
+    fx.rp.set(p.id, cur);
+    const moving = target - cur > 0.02, c = ringXY(ringStart(p) + cur), key = Math.round(cur + ringStart(p)) % RING_N, n = seen.get(key) || 0; seen.set(key, n + 1);
+    const hop = moving ? -Math.abs(Math.sin(cur * Math.PI)) * 9 : 0, isMe = p.id === meId;
+    runner(g, c.x + n * 7, c.y + hop - n * 4, COLORS[p.color % COLORS.length], isMe ? 1.05 : 0.78, tm, moving, isMe);
+    if (isMe) { g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 3; g.font = 'bold 11px system-ui,sans-serif'; g.textAlign = 'center'; g.strokeText('YOU', c.x + n * 7, c.y + hop - 30 - n * 4); g.fillText('YOU', c.x + n * 7, c.y + hop - 30 - n * 4); }
+  }
+}
+const PIPS = { 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
+function die(g, x, y, v, s) {
+  g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 2; g.beginPath();
+  if (g.roundRect) g.roundRect(x - s / 2, y - s / 2, s, s, s * 0.22); else g.rect(x - s / 2, y - s / 2, s, s);
+  g.fill(); g.stroke(); g.fillStyle = '#222';
+  for (const [dx, dy] of PIPS[v] || []) { g.beginPath(); g.arc(x + dx * s * 0.25, y + dy * s * 0.25, s * 0.075, 0, 6.3); g.fill(); }
+}
+function drawDice(g, fx) {
+  for (const d of fx.dice) {
+    const k = d.me ? 1.5 : 1, t = d.max - d.life, rise = Math.min(1, t * 4) * 18, shake = t < 0.5 ? Math.sin(t * 60) * 3 : 0;
+    g.globalAlpha = Math.min(1, d.life * 2); const y = d.y - rise, s = 26 * k;
+    die(g, d.x - s * 0.62 + shake, y, d.a, s); die(g, d.x + s * 0.62 - shake, y, d.b, s);
+    g.font = `900 ${14 * k}px system-ui,sans-serif`; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.fillStyle = d.forfeit ? '#ffb3b3' : '#fff';
+    if (t > 0.4) { const txt = '= ' + (d.a + d.b); g.strokeText(txt, d.x, y - s * 0.75); g.fillText(txt, d.x, y - s * 0.75); }
+  }
+  g.globalAlpha = 1;
 }
 
 // ----- the frame -----
@@ -191,6 +261,7 @@ export function draw(ctx, w, view, fx, meId) {
   view.camX = camX; view.camY = camY; view.zoomEff = zoom; view.ox = ox; view.oy = oy;
   ctx.drawImage(ground, 0, 0);
   beacon(ctx, tm, w.phase === 'play' ? 1 : 0, w.left);
+  ringPads(ctx, w, tm);
   for (const s of w.sparks) spark(ctx, s, tm);
   for (const u of w.pups) powerup(ctx, u, tm);
   // y-sorted drawables so characters walk behind/in front of trees correctly
@@ -200,6 +271,7 @@ export function draw(ctx, w, view, fx, meId) {
   for (const m of w.grem) items.push({ y: m.y, f: () => gremlin(ctx, m, tm) });
   for (const p of w.players) items.push({ y: p.y, f: () => drawPlayer(ctx, p, tm, p.id === meId) });
   items.sort((a, b) => a.y - b.y); for (const it of items) it.f();
+  ringTokens(ctx, w, fx, meId, tm, view.dt || 1 / 60);
   // particles / rings / floating text
   for (const r of fx.rings) { ctx.globalAlpha = r.life / r.max; ctx.strokeStyle = r.col; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, 6.3); ctx.stroke(); } ctx.globalAlpha = 1;
   for (const p of fx.parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 6.3); ctx.fill(); } ctx.globalAlpha = 1;
@@ -215,6 +287,7 @@ export function draw(ctx, w, view, fx, meId) {
     ctx.strokeStyle = `rgba(255,207,90,${0.5 * fade})`; ctx.setLineDash([14, 10]); ctx.lineWidth = 4; ctx.strokeRect(qx + 3, qy + 3, W / 2 - 6, H / 2 - 6); ctx.setLineDash([]);
   }
   if (w.left <= GOLDEN_HOUR && w.phase === 'play') { ctx.fillStyle = `rgba(255,190,60,${0.08 + Math.sin(tm * 5) * 0.03})`; ctx.fillRect(0, 0, W, H); }
+  drawDice(ctx, fx);
   for (const t of fx.texts) { ctx.globalAlpha = Math.min(1, t.life / (t.max * 0.5)); ctx.font = `900 ${t.size}px system-ui,sans-serif`; ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.strokeText(t.t, t.x, t.y); ctx.fillStyle = t.col; ctx.fillText(t.t, t.x, t.y); } ctx.globalAlpha = 1;
   // screen-space overlays
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -230,3 +303,21 @@ export function draw(ctx, w, view, fx, meId) {
   }
 }
 export const worldToScreen = (view, x, y) => ({ x: (x - view.camX + view.ox) * view.zoomEff, y: (y - view.camY + view.oy) * view.zoomEff });
+
+// Tutorial pointer: a pulsing ring + bobbing arrow on the target, or an arrow at the screen edge when it is off-screen.
+export function drawMarker(ctx, view, x, y, tm) {
+  const { cw, ch } = view, z = view.zoomEff || 1, sc = worldToScreen(view, x, y);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (sc.x < 30 || sc.x > cw - 30 || sc.y < 90 || sc.y > ch - 30) {
+    const a = Math.atan2(sc.y - ch / 2, sc.x - cw / 2), R = Math.min(cw, ch) * 0.38, ex = cw / 2 + Math.cos(a) * R * (cw / ch > 1 ? 1.5 : 1), ey = ch / 2 + Math.sin(a) * R;
+    const k = Math.max(0.8, z); ctx.translate(Math.max(40, Math.min(cw - 40, ex)), Math.max(100, Math.min(ch - 40, ey))); ctx.rotate(a);
+    ctx.fillStyle = '#7dffb0'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 4 * k; ctx.beginPath();
+    ctx.moveTo(26 * k + Math.sin(tm * 6) * 4, 0); ctx.lineTo(-12 * k, -18 * k); ctx.lineTo(-4 * k, 0); ctx.lineTo(-12 * k, 18 * k); ctx.closePath(); ctx.stroke(); ctx.fill();
+  } else {
+    const pulse = 1 + Math.sin(tm * 5) * 0.12, bob = Math.abs(Math.sin(tm * 4)) * 10 * z;
+    ctx.strokeStyle = '#7dffb0'; ctx.globalAlpha = 0.9; ctx.lineWidth = 4 * z; ctx.beginPath(); ctx.arc(sc.x, sc.y, 38 * z * pulse, 0, 6.3); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = '#7dffb0'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3 * z; ctx.beginPath();
+    ctx.moveTo(sc.x, sc.y - 44 * z - bob); ctx.lineTo(sc.x - 15 * z, sc.y - 72 * z - bob); ctx.lineTo(sc.x + 15 * z, sc.y - 72 * z - bob); ctx.closePath(); ctx.stroke(); ctx.fill();
+  }
+  ctx.restore();
+}

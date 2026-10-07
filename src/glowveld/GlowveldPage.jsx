@@ -3,9 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { createWorld, step, snapshot, applySnapshot, roster, humanJoin, humanLeave, setInput, movePlayer, DT, W, H, COLORS, GOLDEN_HOUR, OVER_SECONDS } from './sim.js';
-import { draw, makeFx, feed, updateFx, drawPlayer } from './render.js';
+import { draw, makeFx, feed, updateFx, drawPlayer, drawMarker } from './render.js';
 import * as audio from './audio.js';
 import { joinRoom } from './net.js';
+import { createTutorial, tutUpdate, tutInfo, tutNext } from './tutorial.js';
 
 const h = React.createElement;
 const SAVE_KEY = 'glowveld-save-v1';
@@ -18,8 +19,8 @@ const EMOTES = ['❤️', '😂', '👏', '😮', '🔥'];
 const randName = () => ADJ[Math.floor(Math.random() * ADJ.length)] + ' ' + ANI[Math.floor(Math.random() * ANI.length)];
 
 function loadSave() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || randName(), color: s.color ?? Math.floor(Math.random() * COLORS.length), hat: s.hat || 0, total: s.total || 0, rounds: s.rounds || 0, wins: s.wins || 0, best: s.best || 0, seen: !!s.seen, mute: !!s.mute, id: s.id || 'g' + Math.random().toString(36).slice(2, 10) }; }
-  catch { return { name: randName(), color: 0, hat: 0, total: 0, rounds: 0, wins: 0, best: 0, seen: false, mute: false, id: 'g' + Math.random().toString(36).slice(2, 10) }; }
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || randName(), color: s.color ?? Math.floor(Math.random() * COLORS.length), hat: s.hat || 0, total: s.total || 0, rounds: s.rounds || 0, wins: s.wins || 0, best: s.best || 0, seen: !!s.seen, tutDone: !!s.tutDone, mute: !!s.mute, id: s.id || 'g' + Math.random().toString(36).slice(2, 10) }; }
+  catch { return { name: randName(), color: 0, hat: 0, total: 0, rounds: 0, wins: 0, best: 0, seen: false, tutDone: false, mute: false, id: 'g' + Math.random().toString(36).slice(2, 10) }; }
 }
 function storeSave(s) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } }
 const fmt = (t) => { t = Math.max(0, Math.ceil(t)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
@@ -30,14 +31,14 @@ const panel = { background: 'rgba(20,28,60,0.82)', backdropFilter: 'blur(6px)', 
 export default function GlowveldPage({ profile, onBack, showToast }) {
   const [save, setSave] = useState(loadSave);
   const [screen, setScreen] = useState('menu'); // menu | play
-  const [how, setHow] = useState(() => !loadSave().seen);
+  const [how, setHow] = useState(false);
   const [status, setStatus] = useState('');
   const [hud, setHud] = useState(null);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const cvs = useRef(null), wrap = useRef(null), joyBase = useRef(null), joyKnob = useRef(null);
   const saveRef = useRef(save); saveRef.current = save;
   const G = useRef({ w: null, fx: makeFx(), view: { cx: W / 2, cy: H / 2, dt: 0.016, cw: 800, ch: 600, zoom: 1 }, mode: 'menu', host: true, net: null, outbox: [], acc: 0, last: 0,
-    keys: {}, joy: { x: 0, y: 0, id: null, ox: 0, oy: 0 }, act: { pulse: 0, dash: 0, emote: 0 }, sent: { mx: 0, my: 0, t: 0 }, hudT: 0, synced: false, snapAt: 0, lastRound: 0, ros: [], countT: 0, humans: 1, stopped: false }).current;
+    keys: {}, joy: { x: 0, y: 0, id: null, ox: 0, oy: 0 }, act: { pulse: 0, dash: 0, emote: 0 }, sent: { mx: 0, my: 0, t: 0 }, hudT: 0, synced: false, snapAt: 0, lastRound: 0, ros: [], countT: 0, humans: 1, stopped: false, tut: null, afterTut: null, tutI: null, touch: false }).current;
 
   const me = () => ({ id: save.id, name: save.name, color: save.color, hat: save.hat });
   const patchSave = (p) => setSave((s) => { const n = { ...s, ...p }; storeSave(n); return n; });
@@ -45,12 +46,21 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
   // ---------- starting / stopping ----------
   const stopNet = () => { if (G.net) { G.net.leave(); G.net = null; } };
   const startSolo = () => {
-    stopNet(); audio.unlock(); audio.setMuted(save.mute); audio.startMusic();
+    stopNet(); G.tut = null; audio.unlock(); audio.setMuted(save.mute); audio.startMusic();
     const w = createWorld((Math.random() * 1e9) | 0); humanJoin(w, me()); G.w = w; G.mode = 'solo'; G.host = true; G.synced = true; G.lastRound = w.round; G.humans = 1;
     setStatus(''); setScreen('play');
   };
+  const startTutorial = (after) => {
+    stopNet(); audio.unlock(); audio.setMuted(save.mute); audio.startMusic();
+    const t = createTutorial(me()); G.tut = t; G.w = t.w; G.mode = 'tutorial'; G.host = true; G.synced = true; G.humans = 1; G.afterTut = after || null; G.lastRound = t.w.round;
+    G.tutI = tutInfo(t, G.touch); setStatus(''); setScreen('play');
+  };
+  const go = (fn) => (saveRef.current.tutDone ? fn() : startTutorial(fn));
+  const tutFinish = () => { patchSave({ tutDone: true }); const f = G.afterTut; G.afterTut = null; G.tut = null; (f || startSolo)(); };
+  const tutSkipStep = () => { if (G.tut) { if (tutNext(G.tut)) { tutFinish(); return; } G.tutI = tutInfo(G.tut, G.touch); } };
+  const tutNextOrFinish = () => { if (G.tut && G.tut.i >= G.tutI.n - 1) tutFinish(); else tutSkipStep(); };
   const startOnline = async () => {
-    audio.unlock(); audio.setMuted(save.mute); audio.startMusic(); setStatus('Finding a room…'); stopNet();
+    audio.unlock(); audio.setMuted(save.mute); audio.startMusic(); setStatus('Finding a room…'); stopNet(); G.tut = null;
     const m = me(); G.mode = 'online'; G.synced = false; G.w = null;
     const handlers = {
       onHost: (isHost) => {
@@ -96,13 +106,14 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
     try { if (/^\/(glowveld|vediogame)/i.test(window.location.pathname)) window.history.pushState({}, '', '/'); } catch { /* */ }
     onBack && onBack();
   };
-  const toMenu = () => { stopNet(); G.w = null; G.mode = 'menu'; G.synced = false; setHud(null); setScreen('menu'); };
+  const toMenu = () => { stopNet(); G.tut = null; G.w = null; G.mode = 'menu'; G.synced = false; setHud(null); setScreen('menu'); };
 
   // ---------- main loops ----------
   useEffect(() => {
     const canvas = cvs.current, ctx = canvas.getContext('2d');
     // demo world behind the menu: bots playing by themselves
     G.demo = createWorld((Math.random() * 1e9) | 0);
+    G.touch = !!((window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window);
     const resize = () => {
       const r = wrap.current.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.floor(r.width * dpr); canvas.height = Math.floor(r.height * dpr); G.dpr = dpr; G.view.cw = canvas.width; G.view.ch = canvas.height;
@@ -124,7 +135,9 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
           if (mw) setInput(w, id, { ...inp, pulse: a.pulse, dash: a.dash, emote: a.emote });
           a.pulse = a.dash = a.emote = 0;
           G.acc += dt;
-          while (G.acc >= DT) { step(w, DT); G.acc -= DT; const ev = w.ev.splice(0); if (ev.length) { feed(G.fx, ev, id, audio.sfx, w); G.outbox.push(...ev); } G.tick = (G.tick || 0) + 1;
+          while (G.acc >= DT) { step(w, DT); G.acc -= DT; const ev = w.ev.splice(0); if (ev.length) { feed(G.fx, ev, id, audio.sfx, w); if (G.net) G.outbox.push(...ev); }
+            if (G.mode === 'tutorial' && G.tut) { const r = tutUpdate(G.tut, ev, DT); if (r === 'ok') { audio.sfx.bank(true); G.fx.flash = 0.2; } G.tutI = tutInfo(G.tut, G.touch); }
+            G.tick = (G.tick || 0) + 1;
             if (G.net && G.tick % 4 === 0) { const s = snapshot(w); s.e = G.outbox.splice(0); G.net.send('snap', s); }
             if (G.net && G.tick % 90 === 0) G.net.send('ros', roster(w)); }
         } else {
@@ -146,7 +159,7 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
         G.hudT = now; const mw = w.players.find((p) => p.id === id);
         const board = [...w.players].sort((x, y) => y.score - x.score); const rank = mw ? board.indexOf(mw) + 1 : 0;
         setHud({ left: w.left, round: w.round, phase: w.phase, over: w.over, score: mw ? mw.score : 0, carry: mw ? mw.carry : 0, rank, pcd: mw ? mw.pcd : 0, dcd: mw ? mw.dcd : 0, shield: mw ? mw.shield : 0, speed: mw ? mw.speed : 0, magnet: mw ? mw.magnet : 0, dark: w.dark, humans: G.mode === 'online' ? G.humans : 1,
-          online: G.mode === 'online', synced: G.synced && !!mw, host: G.host, stuns: mw ? mw.stuns : 0, best: mw ? mw.bankedMax : 0,
+          online: G.mode === 'online', synced: G.synced && !!mw, host: G.host, tut: G.mode === 'tutorial' ? G.tutI : null, rs: mw ? mw.rs : 0, laps: mw ? mw.laps : 0, stuns: mw ? mw.stuns : 0, best: mw ? mw.bankedMax : 0,
           board: board.slice(0, 5).map((p) => ({ id: p.id, name: p.name, score: p.score, bot: p.bot, color: p.color })), result: w.phase === 'over' ? w.result.slice(0, 5).map((pid) => { const p = w.players.find((q) => q.id === pid); return p ? { id: p.id, name: p.name, score: p.score, bot: p.bot, color: p.color } : null; }).filter(Boolean) : [] });
         audio.setMood(w.left <= GOLDEN_HOUR ? 2 : w.dark ? 1 : 0);
         if (mw && w.round !== G.lastRound) { G.lastRound = w.round; }
@@ -166,6 +179,7 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
       G.view.dt = 1 / 60; updateFx(G.fx, 1 / 60);
       G.view.zoom = playing ? 1 : 0.62; if (!playing) { G.view.cx = W / 2 + Math.sin(G.fx.tm * 0.15) * 160; G.view.cy = H / 2 + Math.cos(G.fx.tm * 0.11) * 90; }
       draw(ctx, w, G.view, G.fx, playing ? saveRef.current.id : null);
+      if (G.mode === 'tutorial' && G.tutI && G.tutI.target && !G.tutI.ok) drawMarker(ctx, G.view, G.tutI.target.x, G.tutI.target.y, G.fx.tm);
       if (G.fx.banner) { const b = G.fx.banner, a = Math.min(1, b.life / 0.4, (b.max - b.life) / 0.2 + 0.2); const cw = G.view.cw, ch = G.view.ch;
         ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.lineJoin = 'round'; const fs = Math.max(26, Math.min(cw / 14, 64)); ctx.font = `900 ${fs}px system-ui,sans-serif`; ctx.lineWidth = fs / 6; ctx.strokeStyle = 'rgba(0,0,0,0.65)';
         ctx.strokeText(b.t, cw / 2, ch * 0.3); ctx.fillStyle = b.col; ctx.fillText(b.t, cw / 2, ch * 0.3);
@@ -221,12 +235,13 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
         COLORS.map((c, i) => h('button', { key: i, onClick: () => patchSave({ color: i }), 'aria-label': 'colour ' + (i + 1), style: { width: 32, height: 32, borderRadius: 16, background: c, border: save.color === i ? '4px solid #fff' : '3px solid rgba(0,0,0,0.25)', cursor: 'pointer' } }))),
       h('div', { style: { display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 14 } },
         HAT_ICON.map((ic, i) => h('button', { key: i, disabled: !unlocked(i), onClick: () => patchSave({ hat: i }), title: unlocked(i) ? '' : 'Bank ' + HAT_UNLOCK[i] + ' sparks to unlock', style: { width: 42, height: 38, borderRadius: 12, fontSize: 20, background: save.hat === i ? '#ffe27a' : '#2b3a78', color: save.hat === i ? '#222' : '#fff', border: 'none', opacity: unlocked(i) ? 1 : 0.45, cursor: unlocked(i) ? 'pointer' : 'not-allowed' } }, unlocked(i) ? ic : '🔒'))),
-      h('button', { onClick: startSolo, style: { ...btn('#2fc46b'), width: '100%', fontSize: 22, marginBottom: 10 } }, '▶  Play now'),
-      h('button', { onClick: startOnline, disabled: !!status, style: { ...btn('#3a7bff'), width: '100%', marginBottom: 10, opacity: status ? 0.7 : 1 } }, status || '🌍  Play online with others'),
-      h('div', { style: { display: 'flex', gap: 8 } },
-        h('button', { onClick: () => setHow(true), style: { ...btn('#7a5cff'), flex: 1, padding: '10px 8px', fontSize: 15 } }, '❓ How to play'),
-        h('button', { onClick: () => { const m = !save.mute; patchSave({ mute: m }); audio.setMuted(m); }, style: { ...btn('#4a5580'), flex: 1, padding: '10px 8px', fontSize: 15 } }, save.mute ? '🔇 Sound off' : '🔊 Sound on'),
-        h('button', { onClick: leave, style: { ...btn('#6b3b4a'), flex: 1, padding: '10px 8px', fontSize: 15 } }, '← Back')),
+      h('button', { onClick: () => go(startSolo), style: { ...btn('#2fc46b'), width: '100%', fontSize: 22, marginBottom: 10 } }, save.tutDone ? '▶  Play now' : '🎓  Learn to play (2 min)'),
+      h('button', { onClick: () => go(startOnline), disabled: !!status, style: { ...btn('#3a7bff'), width: '100%', marginBottom: 10, opacity: status ? 0.7 : 1 } }, status || '🌍  Play online with others'),
+      h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+        h('button', { onClick: () => startTutorial(null), style: { ...btn('#ff8a3c'), flex: '1 1 45%', padding: '10px 8px', fontSize: 15 } }, '🎓 Tutorial'),
+        h('button', { onClick: () => setHow(true), style: { ...btn('#7a5cff'), flex: '1 1 45%', padding: '10px 8px', fontSize: 15 } }, '❓ How to play'),
+        h('button', { onClick: () => { const m = !save.mute; patchSave({ mute: m }); audio.setMuted(m); }, style: { ...btn('#4a5580'), flex: '1 1 45%', padding: '10px 8px', fontSize: 15 } }, save.mute ? '🔇 Sound off' : '🔊 Sound on'),
+        h('button', { onClick: leave, style: { ...btn('#6b3b4a'), flex: '1 1 45%', padding: '10px 8px', fontSize: 15 } }, '← Back')),
       h('div', { style: { opacity: 0.7, fontSize: 12, marginTop: 10 } }, 'Rounds played: ' + save.rounds + ' • Wins: ' + save.wins + ' • Best round: ' + save.best)));
 
   const howOverlay = how && h('div', { style: { position: 'absolute', inset: 0, background: 'rgba(8,12,36,0.78)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12, zIndex: 5, overflowY: 'auto' } },
@@ -234,31 +249,45 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
       h('div', { style: { fontSize: 26, fontWeight: 900, color: '#ffe27a', marginBottom: 10 } }, 'How to play'),
       [['✨', 'Run around and grab glowing Sparks.'], ['🏆', 'Carry them to the big Beacon in the middle to bank them. Banked sparks are your score!'],
         ['⚡', 'Zap pulse knocks nearby rivals dizzy — they drop their sparks. Nobody gets hurt!'], ['🌑', 'Blackout! One part of town goes dark. Sparks turn golden (worth 3) but cheeky Gremlins come to nick them.'],
-        ['🎁', 'Bubbles, Zoom shoes, Magnets and Cash-in bolts appear — grab them!'], ['🔥', 'Final 20 seconds is Golden Hour: everything you bank counts double.']]
+        ['🎁', 'Bubbles, Zoom shoes, Magnets and Cash-in bolts appear — grab them!'], ['🎲', 'Every bank rolls two dice! Your runner hops round the ring road, like Ludo. Land on a rival to boot them home. A full lap earns bonus points.'], ['🔥', 'Final 20 seconds is Golden Hour: everything you bank counts double.']]
         .map(([ic, t], i) => h('div', { key: i, style: { display: 'flex', gap: 12, alignItems: 'center', marginBottom: 9, fontSize: 16, fontWeight: 600 } }, h('div', { style: { fontSize: 28 } }, ic), h('div', null, t))),
       h('div', { style: { fontSize: 14, opacity: 0.85, margin: '8px 0 12px' } }, 'Move: WASD / arrows or the left side of the screen. Zap: Space or ⚡ button. Dash: Shift or 💨 button. Emotes: 1–5.'),
       h('button', { onClick: () => { setHow(false); if (!save.seen) patchSave({ seen: true }); }, style: { ...btn('#2fc46b'), width: '100%' } }, 'Got it — let\'s play!')));
 
   const sec = (v) => (v > 0 ? Math.ceil(v) : 0);
+  const glow = (k) => (hud && hud.tut && hud.tut.glow === k && Math.floor(Date.now() / 450) % 2 && (k === 'dash' ? hud.dcd <= 0 : hud.pcd <= 0) ? { boxShadow: '0 0 0 6px #fff, 0 0 26px 12px #ffd93b' } : {});
+  const tutCard = hud && hud.tut ? h('div', { style: { position: 'absolute', top: 8, left: 8, right: 108, maxWidth: 520, pointerEvents: 'auto', ...panel, padding: '10px 14px' } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 } },
+      h('div', { style: { fontWeight: 900, fontSize: 18, color: hud.tut.ok ? '#8dffb0' : '#ffe27a' } }, hud.tut.ok ? '✅ Nice one!' : hud.tut.title),
+      h('div', { style: { fontSize: 12, opacity: 0.8, fontWeight: 800, whiteSpace: 'nowrap' } }, 'Step ' + (hud.tut.i + 1) + ' of ' + hud.tut.n)),
+    h('div', { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.35 } }, hud.tut.text),
+    h('div', { style: { height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.2)', marginTop: 8 } }, h('div', { style: { height: 6, borderRadius: 3, background: '#ffe27a', width: ((hud.tut.i + (hud.tut.ok ? 1 : 0)) / hud.tut.n * 100) + '%', transition: 'width .3s' } })),
+    h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+      hud.tut.last ? h('button', { onClick: tutNextOrFinish, style: { ...btn('#2fc46b'), padding: '10px 16px', fontSize: 16 } }, '▶  Play a real round') : h('button', { onClick: tutSkipStep, style: { ...btn('#4a5580'), padding: '6px 12px', fontSize: 13, boxShadow: 'none' } }, 'Skip step ▸'),
+      h('button', { onClick: tutFinish, style: { ...btn('#6b3b4a'), padding: '6px 12px', fontSize: 13, boxShadow: 'none' } }, 'Skip tutorial'))) : null;
+  const hintChip = hud && !hud.tut && hud.phase === 'play' && hud.synced && save.rounds < 3 ? h('div', { style: { position: 'absolute', bottom: 112, left: 0, right: 0, textAlign: 'center', pointerEvents: 'none' } },
+    h('span', { style: { ...panel, padding: '6px 14px', fontWeight: 800, fontSize: 15, display: 'inline-block', maxWidth: '80%' } }, hud.carry > 0 ? '🏆 Run into the golden Beacon to bank your Sparks!' : '✨ Grab the glowing Sparks, then bank them at the Beacon')) : null;
   const playUI = screen === 'play' && h('div', { style: { position: 'absolute', inset: 0, pointerEvents: 'none' } },
     // top bar
     h('div', { style: { position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: 8, alignItems: 'flex-start', justifyContent: 'space-between' } },
-      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+      h('div', { style: { display: hud && hud.tut ? 'none' : 'flex', flexDirection: 'column', gap: 6 } },
         h('div', { style: { ...panel, padding: '6px 14px', fontSize: 26, fontWeight: 900, minWidth: 92, textAlign: 'center', color: hud && hud.left <= GOLDEN_HOUR && hud.phase === 'play' ? '#ffcf5a' : '#fff' } }, hud ? fmt(hud.left) : '–:––'),
         hud && hud.left <= GOLDEN_HOUR && hud.phase === 'play' ? h('div', { style: { ...panel, padding: '3px 10px', background: '#c97a00', fontWeight: 800, fontSize: 13, textAlign: 'center' } }, '🔥 GOLDEN HOUR ×2') : null,
         hud && hud.dark ? h('div', { style: { ...panel, padding: '3px 10px', background: 'rgba(60,40,120,0.9)', fontWeight: 800, fontSize: 13, textAlign: 'center' } }, '🌑 Blackout ' + sec(hud.dark.t) + 's') : null),
-      h('div', { style: { ...panel, padding: '8px 12px', minWidth: 150, fontSize: 14 } },
+      h('div', { style: { ...panel, padding: '8px 12px', minWidth: 150, fontSize: 14, display: hud && hud.tut ? 'none' : 'block' } },
         h('div', { style: { fontWeight: 800, opacity: 0.8, marginBottom: 3 } }, hud ? 'Round ' + hud.round + (hud.online ? ' • 🌍 ' + hud.humans + ' online' : '') : ''),
         hud && hud.board.map((p, i) => h('div', { key: p.id, style: { display: 'flex', justifyContent: 'space-between', gap: 10, fontWeight: p.id === save.id ? 900 : 600, color: p.id === save.id ? '#ffe27a' : '#fff' } },
           h('span', null, (i + 1) + '. ' + (p.bot ? '' : '👤 ') + p.name.slice(0, 11)), h('span', null, p.score)))),
       h('div', { style: { display: 'flex', gap: 6, pointerEvents: 'auto' } },
         h('button', { onClick: () => { const m = !save.mute; patchSave({ mute: m }); audio.setMuted(m); }, style: { ...btn('#3a4580'), padding: '8px 12px', fontSize: 18 }, 'aria-label': 'sound' }, save.mute ? '🔇' : '🔊'),
         h('button', { onClick: toMenu, style: { ...btn('#7a3b4a'), padding: '8px 12px', fontSize: 18 }, 'aria-label': 'leave game' }, '✕'))),
+    tutCard,
     // my status
     hud && h('div', { style: { position: 'absolute', left: 10, bottom: 12, ...panel, padding: '8px 14px', fontWeight: 800, display: 'flex', gap: 14, alignItems: 'center' } },
-      h('div', null, '✨ ' + hud.carry + '/24'), h('div', { style: { color: '#ffe27a' } }, '🏆 ' + hud.score), h('div', { style: { opacity: 0.8 } }, '#' + hud.rank),
+      h('div', null, '✨ ' + hud.carry + '/24'), h('div', { style: { color: '#ffe27a' } }, '🏆 ' + hud.score), h('div', { title: 'Your runner on the ring' }, '🏃 ' + hud.rs + '/30' + (hud.laps ? ' ×' + hud.laps : '')), hud.tut ? null : h('div', { style: { opacity: 0.8 } }, '#' + hud.rank),
       hud.shield > 0 ? h('div', null, '🫧') : null, hud.speed > 0 ? h('div', null, '👟') : null, hud.magnet > 0 ? h('div', null, '🧲') : null),
     hud && !hud.synced && h('div', { style: { position: 'absolute', top: '45%', left: 0, right: 0, textAlign: 'center', color: '#fff', fontWeight: 800, fontSize: 22, textShadow: '0 2px 6px #000' } }, 'Joining the game…'),
+    hintChip,
     // joystick visuals
     h('div', { ref: joyBase, style: { position: 'absolute', width: 110, height: 110, borderRadius: 55, background: 'rgba(255,255,255,0.18)', border: '3px solid rgba(255,255,255,0.45)', opacity: 0, transition: 'opacity .1s' } },
       h('div', { ref: joyKnob, style: { position: 'absolute', left: 30, top: 30, width: 50, height: 50, borderRadius: 25, background: 'rgba(255,255,255,0.7)' } })),
@@ -267,8 +296,8 @@ export default function GlowveldPage({ profile, onBack, showToast }) {
       emoteOpen && h('div', { style: { display: 'flex', gap: 6, ...panel, padding: 6 } }, EMOTES.map((e, i) => h('button', { key: i, 'data-btn': 1, onPointerDown: doEmote(i + 1), style: { fontSize: 26, background: 'transparent', border: 'none', cursor: 'pointer' } }, e))),
       h('div', { style: { display: 'flex', gap: 12, alignItems: 'flex-end' } },
         h('button', { 'data-btn': 1, onPointerDown: act('emote'), style: { ...btn('#4a5580'), width: 50, height: 50, borderRadius: 25, padding: 0, fontSize: 24 }, 'aria-label': 'emotes' }, '😀'),
-        h('button', { 'data-btn': 1, onPointerDown: act('dash'), style: { ...btn(hud && hud.dcd > 0 ? '#566' : '#3aa0ff'), width: 66, height: 66, borderRadius: 33, padding: 0, fontSize: 28, opacity: hud && hud.dcd > 0 ? 0.6 : 1 }, 'aria-label': 'dash' }, hud && hud.dcd > 0 ? Math.ceil(hud.dcd) : '💨'),
-        h('button', { 'data-btn': 1, onPointerDown: act('pulse'), style: { ...btn(hud && hud.pcd > 0 ? '#665' : '#ffb020'), width: 88, height: 88, borderRadius: 44, padding: 0, fontSize: 38, opacity: hud && hud.pcd > 0 ? 0.6 : 1 }, 'aria-label': 'zap' }, hud && hud.pcd > 0 ? Math.ceil(hud.pcd) : '⚡'))),
+        h('button', { 'data-btn': 1, onPointerDown: act('dash'), style: { ...btn(hud && hud.dcd > 0 ? '#566' : '#3aa0ff'), ...glow('dash'), width: 66, height: 66, borderRadius: 33, padding: 0, fontSize: 28, opacity: hud && hud.dcd > 0 ? 0.6 : 1 }, 'aria-label': 'dash' }, hud && hud.dcd > 0 ? Math.ceil(hud.dcd) : '💨'),
+        h('button', { 'data-btn': 1, onPointerDown: act('pulse'), style: { ...btn(hud && hud.pcd > 0 ? '#665' : '#ffb020'), ...glow('pulse'), width: 88, height: 88, borderRadius: 44, padding: 0, fontSize: 38, opacity: hud && hud.pcd > 0 ? 0.6 : 1 }, 'aria-label': 'zap' }, hud && hud.pcd > 0 ? Math.ceil(hud.pcd) : '⚡'))),
     // end-of-round results
     hud && hud.phase === 'over' && h('div', { style: { position: 'absolute', inset: 0, background: 'rgba(10,14,40,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 } },
       h('div', { style: { ...panel, width: 340, maxWidth: '100%', textAlign: 'center', pointerEvents: 'auto' } },

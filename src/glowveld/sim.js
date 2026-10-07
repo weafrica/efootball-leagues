@@ -13,7 +13,15 @@
 export const W = 1400, H = 900, DT = 1 / 30;
 export const ROUND_SECONDS = 150, OVER_SECONDS = 12, TOTAL = 10;
 export const BEACON = { x: 700, y: 450, r: 74 };
-export const PR = 16;                 // player radius
+export const PR = 16;
+// ---- Ludo-style "Ring Race": every time you bank Sparks you roll TWO dice and your runner hops that many
+// steps round the ring road. Land exactly on a rival's runner (not on a safe start square) and they are
+// booted back to their start. 6+6 or a boot earns another roll. A full lap is worth LAP_BONUS points.
+export const RING_N = 30, RING_RX = 280, RING_RY = 200, LAP_BONUS = 8, BOOT_BONUS = 3;
+export const ringStart = (p) => (((p.seat | 0) * 3) % RING_N + RING_N) % RING_N;
+export const ringXY = (i) => { const a = -Math.PI / 2 + (i / RING_N) * Math.PI * 2; return { x: BEACON.x + RING_RX * Math.cos(a), y: BEACON.y + RING_RY * Math.sin(a) }; };
+export const ringCell = (p) => (ringStart(p) + (p.rs | 0)) % RING_N;
+export const isSafeCell = (c) => c % 3 === 0;                 // player radius
 export const CARRY_CAP = 24;
 export const GOLDEN_HOUR = 20;        // last N seconds bank double
 const BASE_SPEED = 178, PULSE_R = 96, PULSE_CD = 2.2, DASH_CD = 3.4, DASH_T = 0.22;
@@ -85,7 +93,7 @@ export function createWorld(seed = 1) {
 const nid = (w) => w.nid++;
 
 function mkPlayer(w, o) {
-  return { id: o.id ?? nid(w), name: o.name, color: o.color ?? 0, hat: o.hat ?? 0, bot: !!o.bot,
+  return { id: o.id ?? nid(w), name: o.name, color: o.color ?? 0, hat: o.hat ?? 0, seat: o.seat ?? 0, rs: 0, laps: 0, bot: !!o.bot,
     kind: o.kind || 'grabber', skill: o.skill ?? 0.7, x: BEACON.x, y: BEACON.y + 160, vx: 0, vy: 0, a: 0, dx: 0, dy: 1,
     carry: 0, score: 0, stun: 0, grace: 0, shield: 0, speed: 0, magnet: 0, pcd: 0, dcd: 0, dash: 0,
     inp: { mx: 0, my: 0, pulse: 0, dash: 0 }, bt: 0, tx: BEACON.x, ty: BEACON.y, tid: 0, emote: 0, emT: 0, stuns: 0, bankedMax: 0 };
@@ -96,7 +104,7 @@ export function fillBots(w) {
     const free = BOT_NAMES.filter((n) => !used.has(n));
     const name = free[Math.floor(rnd(w) * free.length)] || 'Bot' + w.nid;
     w.players.push(mkPlayer(w, { name, color: Math.floor(rnd(w) * COLORS.length), hat: Math.floor(rnd(w) * HATS.length),
-      bot: true, kind: KINDS[Math.floor(rnd(w) * KINDS.length)], skill: 0.55 + rnd(w) * 0.4 }));
+      seat: w.players.length, bot: true, kind: KINDS[Math.floor(rnd(w) * KINDS.length)], skill: 0.55 + rnd(w) * 0.4 }));
   }
 }
 export function humanJoin(w, { id, name, color, hat }) {
@@ -104,7 +112,7 @@ export function humanJoin(w, { id, name, color, hat }) {
   // a human takes the seat of the lowest-scoring bot, so the arena always stays full
   let idx = -1, best = Infinity;
   w.players.forEach((p, i) => { if (p.bot && p.score < best) { best = p.score; idx = i; } });
-  const pl = mkPlayer(w, { id, name, color, hat, bot: false });
+  const pl = mkPlayer(w, { id, name, color, hat, bot: false, seat: idx >= 0 ? w.players[idx].seat : w.players.length });
   const spot = freeSpot(w); pl.x = spot.x; pl.y = spot.y; pl.grace = 2;
   if (idx >= 0) w.players.splice(idx, 1, pl); else if (w.players.length < TOTAL + 2) w.players.push(pl);
 }
@@ -121,7 +129,7 @@ function newRound(w) {
   w.sparks = []; w.grem = []; w.pups = []; w.dark = null; w.stage = 0; w.nextDark = 20; w.nextPup = 7; w.nextGrem = 0; w.sv++;
   w.players.forEach((p, i) => {
     const a = (i / w.players.length) * Math.PI * 2, R = 230;
-    Object.assign(p, { x: BEACON.x + Math.cos(a) * R * 1.35, y: BEACON.y + Math.sin(a) * R, vx: 0, vy: 0, carry: 0, score: 0, stun: 0,
+    Object.assign(p, { x: BEACON.x + Math.cos(a) * R * 1.35, y: BEACON.y + Math.sin(a) * R, vx: 0, vy: 0, carry: 0, score: 0, stun: 0, rs: 0, laps: 0,
       grace: 1.5, shield: 0, speed: 0, magnet: 0, pcd: 0, dcd: 0, dash: 0, stuns: 0, bankedMax: 0 });
     pushOut(p, PR);
     if (p.name.startsWith('🤖') && false) p.name = p.name;
@@ -240,6 +248,7 @@ export function step(w, dt = DT) {
     return;
   }
   w.t += dt; w.left -= dt;
+  if (w.tut) w.left = ROUND_SECONDS;   // tutorial: the clock never runs out
   if (w.left <= 0) return endRound(w);
 
   // Blackout ("load-shedding") scheduling: one quarter of Kasi goes dark for a while
@@ -267,7 +276,7 @@ export function step(w, dt = DT) {
   }
   // sparks and power-ups
   const target = 38;
-  for (let i = 0; i < 2 && w.sparks.length < target; i++) if (rnd(w) < 0.5) spawnSpark(w);
+  for (let i = 0; i < 2 && !w.tut && w.sparks.length < target; i++) if (rnd(w) < 0.5) spawnSpark(w);
   w.nextPup -= dt;
   if (w.nextPup <= 0) {
     w.nextPup = rr(w, 8, 13);
@@ -279,7 +288,7 @@ export function step(w, dt = DT) {
     p.pcd = Math.max(0, p.pcd - dt); p.dcd = Math.max(0, p.dcd - dt); p.stun = Math.max(0, p.stun - dt);
     p.grace = Math.max(0, p.grace - dt); p.shield = Math.max(0, p.shield - dt); p.speed = Math.max(0, p.speed - dt);
     p.magnet = Math.max(0, p.magnet - dt); p.dash = Math.max(0, p.dash - dt); p.emT = Math.max(0, p.emT - dt);
-    if (p.bot) botThink(w, p, dt);
+    if (p.bot && !p.still) botThink(w, p, dt);
     if (p.stun <= 0 && p.inp.dash && p.dcd <= 0) { p.dash = DASH_T; p.dcd = DASH_CD; w.ev.push({ k: 'dash', p: p.id, x: p.x, y: p.y }); }
     p.inp.dash = 0;
     movePlayer(p, dt);
@@ -337,6 +346,7 @@ export function step(w, dt = DT) {
   // pickups, magnets, banking
   const mult = w.left <= GOLDEN_HOUR ? 2 : 1;
   for (const p of w.players) {
+    if (p.still) continue;   // tutorial practice dummy never picks anything up
     if (p.magnet > 0 && p.stun <= 0) for (const s of w.sparks) {
       const d = hyp(s.x - p.x, s.y - p.y);
       if (d < 175 && d > 1) { const m = Math.min(d, 270 * dt); s.x += ((p.x - s.x) / d) * m; s.y += ((p.y - s.y) / d) * m; w.sv++; }
@@ -368,7 +378,31 @@ function bank(w, p, mult, remote) {
   let gain = p.carry * mult; if (p.carry >= 10) gain += 3;
   p.score += gain; p.bankedMax = Math.max(p.bankedMax, p.carry);
   w.ev.push({ k: 'bank', p: p.id, x: remote ? p.x : BEACON.x, y: remote ? p.y : BEACON.y, n: gain, big: p.carry >= 10 });
+  const rolls = p.carry >= 10 ? 2 : 1;
   p.carry = 0;
+  rollRing(w, p, rolls);
+}
+// Roll `n` pairs of dice for p's runner (extra rolls for 6+6 and for booting someone; three 6+6 in a row forfeits).
+export function rollRing(w, p, n) {
+  let left = n, sixes = 0, guard = 0;
+  while (left > 0 && guard++ < 6) {
+    left--;
+    const a = 1 + Math.floor(rnd(w) * 6), b = 1 + Math.floor(rnd(w) * 6), from = p.rs;
+    if (a === 6 && b === 6) {
+      sixes++;
+      if (sixes >= 3) { w.ev.push({ k: 'roll', p: p.id, a, b, from, to: from, forfeit: 1 }); break; }
+      left++;
+    }
+    let to = from + a + b, lap = 0;
+    if (to >= RING_N) { to -= RING_N; lap = 1; p.laps++; p.score += LAP_BONUS; }
+    p.rs = to;
+    const cell = ringCell(p), boot = [];
+    if (!isSafeCell(cell)) {
+      for (const q of w.players) if (q !== p && !q.still && ringCell(q) === cell) { q.rs = 0; boot.push(q.id); }
+    }
+    if (boot.length) { left++; p.boots = (p.boots || 0) + boot.length; p.score += BOOT_BONUS * boot.length; }
+    w.ev.push({ k: 'roll', p: p.id, a, b, from, to, lap, boot });
+  }
 }
 function endRound(w) {
   w.phase = 'over'; w.over = 0; w.left = 0;
@@ -391,7 +425,7 @@ export function roster(w) { return w.players.map((p) => [p.id, p.name, p.color, 
 export function snapshot(w, withSparks = true) {
   const s = {
     m: [w.phase === 'play' ? 0 : 1, r1(w.left), w.round, w.stage, w.dark ? [w.dark.q, r1(w.dark.t), w.dark.stage] : 0, w.rs, w.nid, r1(w.nextDark), r1(w.nextPup), w.over ? r1(w.over) : 0, w.result],
-    p: w.players.map((p) => [p.id, r0(p.x), r0(p.y), r1(p.a), p.carry, p.score, r1(p.stun), r1(p.shield), r1(p.speed), r1(p.magnet), r1(p.pcd), r1(p.dcd), r1(p.dash), r1(p.grace), r0(p.vx), r0(p.vy), p.emote, r1(p.emT), p.bot ? 1 : 0]),
+    p: w.players.map((p) => [p.id, r0(p.x), r0(p.y), r1(p.a), p.carry, p.score, r1(p.stun), r1(p.shield), r1(p.speed), r1(p.magnet), r1(p.pcd), r1(p.dcd), r1(p.dash), r1(p.grace), r0(p.vx), r0(p.vy), p.emote, r1(p.emT), p.bot ? 1 : 0, p.rs, p.laps, p.seat]),
     g: w.grem.map((g) => [g.id, r0(g.x), r0(g.y), r0(g.vx), r0(g.vy), r1(g.st), g.loot]),
     u: w.pups.map((u) => [u.id, r0(u.x), r0(u.y), u.k]),
     e: w.ev,
@@ -410,7 +444,7 @@ export function applySnapshot(w, s, ros) {
     let p = byId.get(a[0]);
     if (!p) { const r = (ros || []).find((x) => x[0] === a[0]); p = mkPlayer(w, { id: a[0], name: r ? r[1] : '?', color: r ? r[2] : 0, hat: r ? r[3] : 0, bot: true }); }
     p.x = a[1]; p.y = a[2]; p.a = a[3]; p.carry = a[4]; p.score = a[5]; p.stun = a[6]; p.shield = a[7]; p.speed = a[8]; p.magnet = a[9];
-    p.pcd = a[10]; p.dcd = a[11]; p.dash = a[12]; p.grace = a[13]; p.vx = a[14]; p.vy = a[15]; p.emote = a[16]; p.emT = a[17]; p.bot = !!a[18];
+    p.pcd = a[10]; p.dcd = a[11]; p.dash = a[12]; p.grace = a[13]; p.vx = a[14]; p.vy = a[15]; p.emote = a[16]; p.emT = a[17]; p.bot = !!a[18]; p.rs = a[19] | 0; p.laps = a[20] | 0; p.seat = a[21] | 0;
     const r = (ros || []).find((x) => x[0] === a[0]); if (r) { p.name = r[1]; p.color = r[2]; p.hat = r[3]; }
     next.push(p);
   }
@@ -419,3 +453,23 @@ export function applySnapshot(w, s, ros) {
   w.pups = s.u.map((a) => ({ id: a[0], x: a[1], y: a[2], k: a[3] }));
   if (s.s) { w.sparks = s.s.map((a) => ({ id: a[0], x: a[1], y: a[2], v: a[3] })); w.sv++; }
 }
+
+// ---------- tutorial helpers (used by tutorial.js) ----------
+export const isBlocked = blocked;
+export const putSpark = (w, x, y, v = 1) => addSpark(w, x, y, v);
+export function makeTutorialWorld(meInfo) {
+  const w = createWorld(7);
+  w.players = []; w.sparks = []; w.pups = []; w.grem = []; w.dark = null; w.tut = true; w.ev = [];
+  w.nextDark = 1e9; w.nextPup = 1e9; w.nextGrem = 1e9;
+  humanJoin(w, meInfo);
+  const me = w.players[0]; me.x = BEACON.x; me.y = BEACON.y + 170; me.vx = me.vy = 0; me.grace = 0;
+  return w;
+}
+export function addDummy(w, name, x, y, carry) {
+  const p = mkPlayer(w, { name, color: 4, hat: 1, bot: true, kind: 'rookie', skill: 0.5 });
+  p.x = x; p.y = y; p.carry = carry; p.still = true; p.grace = 0; p.seat = 5; w.players.push(p); return p;
+}
+export function addGremlin(w, x, y) {
+  const g = { id: nid(w), x, y, vx: 0, vy: 0, st: 0, loot: 0, fl: 0, wt: 0, wx: 0, wy: 0 }; w.grem.push(g); return g;
+}
+export function addPowerup(w, x, y, k) { const u = { id: nid(w), x, y, k }; w.pups.push(u); return u; }
