@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { ludoSpeech, useLudoSpeakingId } from "./ludoVoice.js";
 import { sfx } from "./ludoSound.js";
+import { supabase } from "./supabaseClient.js";
 import {
   pick, CAPTURE_LINES, EXIT_LINES, FINISH_LINES, COMBINE_LINES, SAFE_LINES, PLAIN_LINES,
   FORCED_LINES, NO_MOVE_LINES, JUMP_LINES, FORFEIT_LINES, CAPTURE_LABELS, MULTI_CAPTURE_LABEL,
@@ -377,6 +378,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
   const [tokens, setTokens] = useState({});
   const [turnIdx, setTurnIdx] = useState(0);
+  const turnIdxRef = useRef(0); // always-current mirror of turnIdx, so timer-driven callbacks can read the real value instead of a stale closure
+  turnIdxRef.current = turnIdx;
   const [dice, setDice] = useState(null);
   const [diceUsed, setDiceUsed] = useState([false, false]);
   const [rolling, setRolling] = useState(false);
@@ -402,7 +405,16 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   const rollCapturedRef = useRef(false); // did THIS roll (current pair of dice) land a capture? drives the capture-bonus reroll
   const [yardChoice, setYardChoice] = useState(null); // {dice, tokens: [...yard tokenIds]} — double-6 with 2+ tokens waiting, asking the human how many to bring out
   const [buybackChoice, setBuybackChoice] = useState(null); // {dice, die, captors: [color...], chosenCaptor} — a six is available and this color has a captive token to maybe ransom back
+  const [bankedSix, setBankedSix] = useState({}); // { [color]: count } — a captor whose hostage just got ransomed away is owed a guaranteed 6 on their own next turn, as compensation
+  const bankedSixRef = useRef({}); // synchronous source of truth for bankedSix — a buyback that spends the last die advances the turn in the very same tick, before React would have committed the state update
+  const bumpBankedSix = (color, delta) => {
+    const cur = bankedSixRef.current[color] || 0;
+    bankedSixRef.current = { ...bankedSixRef.current, [color]: Math.max(0, cur + delta) };
+    setBankedSix(bankedSixRef.current);
+  };
+  const pendingForcedSixRef = useRef(null); // color currently owed that forced 6 on their NEXT roll (cleared the instant it's used)
   const buybackDeclinedRef = useRef(new Set()); // keys of (dice pair + die index) the player already said "wait" to, so we don't re-nag them about the same six
+  const [frozenTokenIds, setFrozenTokenIds] = useState(() => new Set()); // tokenIds that captured something THIS roll — locked out of acting again until the next roll, so a capture can't be chained into a second, unrelated move with the leftover die
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); if (shakeTimer.current) clearTimeout(shakeTimer.current); }, []);
   useEffect(() => { sfx.enabled = sfxOn; }, [sfxOn]);
   useEffect(() => () => ludoSpeech.stop(), []); // don't leave a voice talking after leaving the page
@@ -461,6 +473,12 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     order.forEach((c2) => { t[c2] = freshTokens(); });
     sfx.unlock();
     turnCapsRef.current = 0;
+    bankedSixRef.current = {};
+    setBankedSix({});
+    pendingForcedSixRef.current = null;
+    setFrozenTokenIds(new Set());
+    setBuybackChoice(null);
+    setYardChoice(null);
     epochRef.current += 1;
     setActive(order);
     setTokens(t);
@@ -476,6 +494,27 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setLog([]);
     setMessage(`${COLORS[order[0]].name}'s turn — roll the dice.`);
     setPhase("playing");
+    // Usage tracking: one row per game started, reusing the app's existing
+    // generic activity log rather than a new table. Best-effort only — a
+    // signed-out guest has no insert policy for this table, and any other
+    // failure here is silently swallowed, since a tracking hiccup should
+    // never interrupt someone's game.
+    (async () => {
+      try {
+        const { data: { user } = {} } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase.from("user_activity_log").insert({
+          user_id: user.id,
+          event_type: "ludo_game_started",
+          metadata: {
+            players: order.length,
+            vs_bots: order.filter((c2) => useRoles[c2] === "ai").length,
+          },
+        });
+      } catch {
+        // tracking is non-essential — never let it affect the game
+      }
+    })();
   };
 
   // One tap, straight into a game: you're Red, everyone else is a bot.
@@ -500,12 +539,26 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setRollAgainStreak(0);
     turnCapsRef.current = 0;
     setTurnCaptures(0);
-    setTurnIdx((i) => {
-      const next = (i + 1) % active.length;
-      setMessage(`${COLORS[active[next]].name}'s turn — roll the dice.`);
-      return next;
-    });
-  }, [active]);
+    // Computed OUTSIDE the state updater on purpose: the banked-six payout
+    // below logs, decrements a counter and sets a ref — none of which is
+    // safe to repeat, and React may run an updater function twice.
+    const next = (turnIdxRef.current + 1) % active.length;
+    const nextColor = active[next];
+    // Compensation for losing a hostage to a ransom while it was this
+    // color's captive: their very next roll is guaranteed a 6 on one
+    // die, flagged here and actually applied the moment that roll
+    // happens (see rollDice and the AI's own fresh-roll branch).
+    if ((bankedSixRef.current[nextColor] || 0) > 0) {
+      pendingForcedSixRef.current = nextColor;
+      bumpBankedSix(nextColor, -1);
+      pushLog(`🎲 ${COLORS[nextColor].name} has a six to play — saved from that ransom!`, {
+        big: { text: "YOU HAVE A SIX TO PLAY!", sub: `${COLORS[nextColor].name} gets a guaranteed 6`, color: nextColor, level: 0 },
+        color: nextColor, speak: true, spoken: `${COLORS[nextColor].name} has a six to play!`,
+      });
+    }
+    setMessage(`${COLORS[nextColor].name}'s turn — roll the dice.`);
+    setTurnIdx(next);
+  }, [active, pushLog]);
 
   // Only an actual 12 (which on two six-sided dice can only ever be 6+6)
   // earns another roll — not any other matching pair (2+2, 3+3, etc).
@@ -554,15 +607,25 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const me = COLORS[color].name;
     if (action.kind === "buyback") {
       const captorName = COLORS[action.captor].name;
-      const line = explain?.text || `${me} buys back their token from ${captorName}!`;
+      const line = explain?.text || `${me} pays the ransom — token back in the yard, needs a fresh 6 to get moving!`;
       pushLog(`🔓 ${line}`, {
-        big: { text: "BOUGHT BACK!", sub: `${me} frees a token held by ${captorName}`, color, level: 0 },
-        color, speak: true, spoken: explain?.spoken || `${me} buys their token back from ${captorName}!`,
+        big: { text: "RANSOM PAID!", sub: `${me} frees a token from ${captorName} — needs another 6 to exit`, color, level: 0 },
+        color, speak: true, spoken: explain?.spoken || `${me} buys their token back from ${captorName} — still needs a six to get out!`,
       });
       sfx.buyback();
+      // The captor loses their hostage, but they're owed a guaranteed 6 on
+      // their own next turn as compensation — banked here, paid out (and
+      // announced) in reallyAdvanceTurn once it's actually their turn.
+      if (active.includes(action.captor)) {
+        bumpBankedSix(action.captor, 1);
+      }
     } else if (captured) {
       shakeBoard();
       rollCapturedRef.current = true;
+      // This token already got its kill — it sits out the rest of the
+      // roll rather than chaining straight into a second, unrelated move
+      // with whichever die is left.
+      setFrozenTokenIds((s) => new Set(s).add(action.tokenId));
       setStats((s2) => ({ ...s2, captures: s2.captures + 1 }));
       turnCapsRef.current += 1;
       const n = turnCapsRef.current;
@@ -570,12 +633,16 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       const opp = COLORS[capturedColor].name;
       const label = n === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[n] || "RAMPAGE!");
       const line = explain?.text || pick(CAPTURE_LINES)(me, opp);
-      pushLog(`💥 ${line}`, {
+      const logId = pushLog(`💥 ${line}`, {
         big: { text: label, sub: `${me} ate ${opp} — held captive until bought back!`, color, level: n },
         color, speak: true, spoken: explain?.spoken || line,
       });
       sfx.whoosh();
       sfx.capture(n);
+      // A Dota2-style announcer cry on a real streak (2+ captures in one
+      // turn) — the short punchy label itself, queued right after the
+      // normal banter line so it reads as "...and ATE GREEN! ...DOUBLE KILL!"
+      if (n >= 2 && readAloud) ludoSpeech.speak(`announce-${logId}`, label, color);
     } else if (finished) {
       setStats((s2) => ({ ...s2, finishes: s2.finishes + 1 }));
       const line = explain?.text || pick(FINISH_LINES)(me);
@@ -605,7 +672,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       setPhase("won");
       setDice(null);
       setSelectedDice([]);
-      return { done: true, newUsed, nextTokens };
+      return { done: true, newUsed, nextTokens, captured, capturedTokenId: captured ? action.tokenId : null };
     }
 
     setDiceUsed(newUsed);
@@ -631,13 +698,14 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         resolveEndOfDice(snapshotDice);
       }
     }
-    return { done: false, newUsed: finalUsed, nextTokens };
+    return { done: false, newUsed: finalUsed, nextTokens, captured, capturedTokenId: captured ? action.tokenId : null };
   }, [active, resolveEndOfDice, pushLog, shakeBoard]);
 
   const rollDice = () => {
     if (rolling || dice != null || phase !== "playing" || aiBusy) return;
     rollCapturedRef.current = false;
     buybackDeclinedRef.current = new Set();
+    setFrozenTokenIds(new Set());
     sfx.roll();
     setRolling(true);
     setMessage("");
@@ -649,6 +717,13 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       if (ticks > 7) {
         clearInterval(spin);
         const d = [rollOne(), rollOne()];
+        // A banked six (owed for losing a hostage to a ransom) pays out on
+        // exactly this, the very first roll of this color's turn — not any
+        // bonus reroll later in the same turn.
+        if (pendingForcedSixRef.current === turnColor) {
+          d[0] = 6;
+          pendingForcedSixRef.current = null;
+        }
         setDice(d);
         setRolling(false);
         setDiceUsed([false, false]);
@@ -670,8 +745,13 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
   // ---- human interaction ----------------------------------------------
   const currentActions = useMemo(() => {
     if (dice == null || phase !== "playing") return [];
-    return computeActions(turnColor, dice, diceUsed, tokens);
-  }, [dice, diceUsed, tokens, turnColor, phase]);
+    const all = computeActions(turnColor, dice, diceUsed, tokens);
+    if (!frozenTokenIds.size) return all;
+    // A token that already captured once this roll sits out the rest of
+    // it — no chaining a kill into an unrelated second move with the
+    // leftover die. It's free to act again as soon as a new roll starts.
+    return all.filter((a) => !frozenTokenIds.has(a.tokenId));
+  }, [dice, diceUsed, tokens, turnColor, phase, frozenTokenIds]);
 
   // Selecting one die highlights the tokens that die alone can move.
   // Selecting both (tap the second die too) switches to combine mode —
@@ -805,7 +885,11 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     setBuybackChoice(null);
     if (!hostageToken) return;
     buybackDeclinedRef.current.add(key);
-    const action = { kind: "buyback", die, tokenId: hostageToken.id, captor: chosenCaptor, fromStep: -1, resultStep: 0, dist: 6 };
+    // resultStep stays -1: buying back only RELEASES the token to this
+    // color's own yard, same as a freshly captured token would have gone
+    // to its own yard in standard Ludo. It still needs its own fresh six
+    // later to actually exit onto the board — buying back isn't a free exit.
+    const action = { kind: "buyback", die, tokenId: hostageToken.id, captor: chosenCaptor, fromStep: -1, resultStep: -1, dist: 6 };
     commitAction(action, turnColor, tokens, d, diceUsed, null);
   };
   const declineBuyback = () => {
@@ -852,6 +936,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       if (d == null) {
         rollCapturedRef.current = false;
         buybackDeclinedRef.current = new Set();
+        setFrozenTokenIds(new Set());
         sfx.roll();
         setRolling(true);
         for (let i = 0; i < 6; i++) {
@@ -860,6 +945,10 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
           await wait(65);
         }
         d = [rollOne(), rollOne()];
+        if (pendingForcedSixRef.current === turnColor) {
+          d[0] = 6;
+          pendingForcedSixRef.current = null;
+        }
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
         setDice(d);
         setRolling(false);
@@ -878,6 +967,11 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       // commitAction never runs at all: the very first roll having zero
       // legal moves on either die.
       let alreadyResolved = false;
+      // Mirrors frozenTokenIds for the human: a token that captures sits
+      // out the rest of THIS roll rather than chaining into a second,
+      // unrelated move with the leftover die. Local to this roll since the
+      // AI loop works off its own workingTokens/used, not React state.
+      let aiFrozenIds = new Set();
       while (!(used[0] && used[1])) {
         if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
 
@@ -891,7 +985,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
           if (hostageToken) {
             await wait(550);
             if (cancelled || epochRef.current !== myEpoch) { setAiBusy(false); return; }
-            const action = { kind: "buyback", die: sixIdx, tokenId: hostageToken.id, captor: hostageToken.heldBy, fromStep: -1, resultStep: 0, dist: 6 };
+            const action = { kind: "buyback", die: sixIdx, tokenId: hostageToken.id, captor: hostageToken.heldBy, fromStep: -1, resultStep: -1, dist: 6 };
             const result = commitAction(action, turnColor, workingTokens, d, used, null);
             if (result.done) { setAiBusy(false); return; }
             workingTokens = result.nextTokens;
@@ -900,7 +994,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
           }
         }
 
-        const actions = computeActions(turnColor, d, used, workingTokens);
+        const actions = computeActions(turnColor, d, used, workingTokens).filter((a) => !aiFrozenIds.has(a.tokenId));
         if (actions.length === 0) {
           if (aiExplain) pushLog(pick(NO_MOVE_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
           sfx.pass();
@@ -919,6 +1013,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
         if (result.done) { setAiBusy(false); return; }
         workingTokens = result.nextTokens;
         used = result.newUsed;
+        if (result.captured) aiFrozenIds = new Set(aiFrozenIds).add(result.capturedTokenId);
         if (used[0] && used[1]) alreadyResolved = true;
         await wait(250);
       }
@@ -1041,7 +1136,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               const hex = COLORS[color].hex;
               return (
                 <button key={`${color}-${tokenId}`} onClick={() => canTap && onTokenTap(tokenId)} disabled={!canTap}
-                  className="ludo-runner" style={{
+                  className={phase === "won" ? "ludo-runner ludo-runner-celebrate" : "ludo-runner"} style={{
                     width: size, height: size, background: "transparent", border: "none", padding: 0,
                     filter: canTap ? `drop-shadow(0 0 2px ${hex}) drop-shadow(0 0 4px ${hex}aa)` : "none",
                     cursor: canTap ? "pointer" : "default",
@@ -1218,6 +1313,17 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
             .ludo-limb { transform-box: fill-box; transform-origin: 50% 0%; animation-duration: 0.46s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
             .ludo-limb-a { animation-name: ludoRunSwingA; }
             .ludo-limb-b { animation-name: ludoRunSwingB; }
+            /* Game over: EVERY token on the board celebrates, not just the
+               winner's — a bigger, bouncier jump instead of a steady jog,
+               with arms/legs swinging wider and faster. Same shapes, same
+               zero-asset approach, just a livelier keyframe set. */
+            @keyframes ludoCelebrateJump { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-22%) rotate(3deg); } }
+            @keyframes ludoCelebrateSwingA { 0%, 100% { transform: rotate(50deg); } 50% { transform: rotate(-50deg); } }
+            @keyframes ludoCelebrateSwingB { 0%, 100% { transform: rotate(-50deg); } 50% { transform: rotate(50deg); } }
+            .ludo-runner-celebrate { animation-name: ludoCelebrateJump; animation-duration: 0.38s; }
+            .ludo-runner-celebrate .ludo-limb { animation-duration: 0.38s; }
+            .ludo-runner-celebrate .ludo-limb-a { animation-name: ludoCelebrateSwingA; }
+            .ludo-runner-celebrate .ludo-limb-b { animation-name: ludoCelebrateSwingB; }
             @keyframes ludoSlam {
               0% { transform: scale(3.4) rotate(-7deg); opacity: 0; }
               16% { transform: scale(0.9) rotate(2deg); opacity: 1; }
@@ -1393,14 +1499,14 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
               <>
                 <div className="font-display text-lg mb-1" style={{ color: c.text }}>Rolled a 6!</div>
                 <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>
-                  {COLORS[turnColor].name}'s token is held by {COLORS[buybackChoice.chosenCaptor].name}. Buy it back now, or wait?
+                  {COLORS[turnColor].name}'s token is held by {COLORS[buybackChoice.chosenCaptor].name}. Spend this 6 to free it back to your yard — you'll still need another 6 later to actually bring it out. Or wait?
                 </div>
                 <div className="flex gap-2.5">
                   <button onClick={declineBuyback} className="flex-1 rounded-xl py-3 font-display text-base" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>
                     Wait
                   </button>
                   <button onClick={resolveBuyback} className="flex-1 rounded-xl py-3 font-display text-base flex items-center justify-center gap-1.5" style={{ background: COLORS[turnColor].hex, color: "#fff" }}>
-                    <Unlock size={16} /> Buy back
+                    <Unlock size={16} /> Free it
                   </button>
                 </div>
               </>
