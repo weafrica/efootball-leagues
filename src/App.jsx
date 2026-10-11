@@ -82,6 +82,8 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 const LudoPage = lazy(() => import("./Ludo.jsx"));
 const ChessPage = lazy(() => import("./ChessGame.jsx"));
 const GlowveldPage = lazy(() => import("./glowveld/GlowveldPage.jsx"));
+const PlanetEarthPage = lazy(() => import("./planetearth/PlanetEarthPage.jsx"));
+const PlanetEarthIcon = ({ size = 20, color = "currentColor", strokeWidth = 2 }) => (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>);
 const SesothoMatchPage = lazy(() => import("./SesothoMatch.jsx"));
 // Ladder (the platform-wide permanent ladder) is only opened by a signed-in
 // user tapping into it from the header or the home screen's LadderStrip
@@ -3729,7 +3731,7 @@ export default function App() {
   // means a refresh lands back on whichever screen the appNav effect below
   // last recorded, instead of always bouncing to Home.
   const [view, setView] = useState(() => (window.history.state?.appView ? window.history.state.view : null) || "home");
-  useEffect(() => { try { if (/^\/(glowveld|vediogame)\/?$/i.test(window.location.pathname)) setView("glowveld"); } catch (e) { /* ignore */ } }, []);
+  useEffect(() => { try { const pth = window.location.pathname; if (/^\/planet-?earth\/?$/i.test(pth)) setView("planetearth"); else if (/^\/(glowveld|vediogame)\/?$/i.test(pth)) setView("glowveld"); } catch (e) { /* ignore */ } }, []);
   // Quick actions dock — floating on every screen (see the root return
   // below), open/closed state lives here rather than inside Home now that
   // it's no longer scoped to a single screen.
@@ -8697,7 +8699,7 @@ export default function App() {
     // Ludo, Sesotho Match, and Stories are all little standalone games/
     // experiences distinct from the league/ladder utility tiles below.
     { icon: Swords, label: "Chess", onClick: () => setView("chess") },
-    { icon: Gamepad2, label: "Glowveld", tourId: "qa-glowveld", onClick: () => { setView("glowveld"); try { window.history.pushState({}, "", "/glowveld"); } catch (e) { /* ignore */ } } },
+    { icon: PlanetEarthIcon, label: "Planet Earth", tourId: "qa-planetearth", onClick: () => { setView("planetearth"); try { window.history.pushState({}, "", "/planetearth"); } catch (e) { /* ignore */ } } },
     { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
     { icon: BookOpen, label: "Sesotho Match", onClick: () => setView("sesothoMatch") },
     { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
@@ -8882,6 +8884,11 @@ export default function App() {
             {view === "ludo" && (
               <Suspense fallback={<Loader c={c} />}>
                 <LudoPage onBack={goBack} c={c} loggedIn={true} onFindOpponents={goBack} />
+              </Suspense>
+            )}
+            {view === "planetearth" && (
+              <Suspense fallback={<Loader c={c} />}>
+                <PlanetEarthPage c={c} session={session} profile={profile} onBack={goBack} showToast={showToast} />
               </Suspense>
             )}
             {view === "glowveld" && (
