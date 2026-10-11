@@ -100,6 +100,19 @@ export const BROWSER_VOICE_PARAMS_BY_PIECE = {
 let engine = null; // { tier, speak(text) -> Promise<Blob> }
 let loadPromise = null;
 
+// Speech generation runs strictly one at a time. The pipelined player
+// in chessVoice.js already only asks for one clip at once, but a line
+// being stopped and a new one starting can briefly overlap — and the
+// underlying ONNX runtime isn't guaranteed to tolerate two runs on the
+// same model at the same moment. Cheap to queue them here, so it never
+// has to.
+let synthChain = Promise.resolve();
+function serialized(fn) {
+  const run = synthChain.then(fn, fn);
+  synthChain = run.catch(() => {});
+  return run;
+}
+
 // loadNeuralVoice — downloads (first time only; both libraries cache the
 // model themselves after that — Piper via the browser's Origin Private
 // File System, Kokoro via its own model cache) and resolves to
@@ -121,10 +134,12 @@ export function loadNeuralVoice(onProgress) {
       });
       engine = {
         tier,
-        async speak(text, pieceType) {
+        speak(text, pieceType) {
           const voice = KOKORO_VOICE_BY_PIECE[pieceType] || "af_heart";
-          const raw = await tts.generate(text, { voice });
-          return { blob: await raw.toBlob(), playbackRate: 1 };
+          return serialized(async () => {
+            const raw = await tts.generate(text, { voice });
+            return { blob: await raw.toBlob(), playbackRate: 1 };
+          });
         },
       };
     } else {
@@ -134,9 +149,11 @@ export function loadNeuralVoice(onProgress) {
       });
       engine = {
         tier,
-        async speak(text, pieceType) {
-          const blob = await vits.predict({ text, voiceId: PIPER_VOICE_ID });
-          return { blob, playbackRate: PIPER_PLAYBACK_BY_PIECE[pieceType] || 1 };
+        speak(text, pieceType) {
+          return serialized(async () => {
+            const blob = await vits.predict({ text, voiceId: PIPER_VOICE_ID });
+            return { blob, playbackRate: PIPER_PLAYBACK_BY_PIECE[pieceType] || 1 };
+          });
         },
       };
     }

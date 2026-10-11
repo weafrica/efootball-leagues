@@ -62,6 +62,9 @@ export const chessSpeech = {
   stop() {
     this.queue = [];
     if (this.audioEl) { this.audioEl.pause(); this.audioEl.src = ""; this.audioEl = null; }
+    // Pausing a clip doesn't fire "ended", so without this the pipelined
+    // player below would sit waiting on a clip that will never finish.
+    if (this._releaseClip) { const r = this._releaseClip; this._releaseClip = null; r(); }
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
     this.speakingId = null;
     this.notify();
@@ -73,7 +76,7 @@ export const chessSpeech = {
     this.notify();
     if (this.queue.length > 0) {
       const next = this.queue.shift();
-      this._playNow(next.id, next.text, next.pieceType);
+      this._playNow(next.id, next.text, next.pieceType, next.prefetched);
     }
   },
   // Tapping the same thing again stops it outright — a direct request to
@@ -93,36 +96,38 @@ export const chessSpeech = {
       // Keep the queue short — a pile of ten-move-old commentary queued
       // up isn't useful, it's just noise arriving late.
       this.queue = [...this.queue.filter((q) => q.id !== id).slice(-2), { id, text, pieceType }];
+      if (this._onLastClip) this._prefetchNext();
       return;
     }
     this._playNow(id, text, pieceType);
   },
-  async _playNow(id, text, pieceType) {
+  async _playNow(id, text, pieceType, prefetched) {
     this.speakingId = id;
     this.speakingStartedAt = Date.now();
+    this._onLastClip = false;
     this.notify();
 
     if (isHdVoiceEnabled()) {
       try {
         const voiceEngine = await loadNeuralVoice();
         if (this.speakingId !== id) return; // stopped/superseded while the model was loading
-        const { blob, playbackRate } = await voiceEngine.speak(text, pieceType);
-        if (this.speakingId !== id) return;
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        // Piper's per-piece "voice" — speed changes pitch too when
-        // preservesPitch is off, same trick as a chipmunk/deep-voice
-        // filter. Kokoro doesn't need this (playbackRate stays 1) since
-        // it already has a real distinct voice per piece.
-        audio.preservesPitch = false;
-        audio.mozPreservesPitch = false;
-        audio.webkitPreservesPitch = false;
-        audio.playbackRate = playbackRate || 1;
-        this.audioEl = audio;
-        audio.onended = () => { URL.revokeObjectURL(url); if (this.speakingId === id) this._advance(); };
-        audio.onerror = () => { URL.revokeObjectURL(url); if (this.speakingId === id) this._advance(); };
-        await audio.play();
-        return;
+        // Pipelined, not all-at-once: the old way synthesized the WHOLE
+        // line before playing a single word, so the pause before speech
+        // started grew with how much there was to say. Now it's split
+        // into short sentences — the first one starts playing as soon as
+        // IT is ready, and the next sentence is already being generated
+        // while the current one plays, so there's (ideally) no gap
+        // between them and the wait before the first word is only as
+        // long as one short sentence takes, not the whole thing.
+        const chunks = splitIntoSpeechChunks(text);
+        const result = await this._playChunksPipelined(id, chunks, pieceType, voiceEngine, prefetched);
+        if (result.failedAt === undefined) {
+          if (result.finished && this.speakingId === id) this._advance();
+          return;
+        }
+        // Part-way failure: speak just the unspoken remainder with the
+        // built-in voice below.
+        text = chunks.slice(result.failedAt).join(" ");
       } catch (err) {
         // HD engine failed to load or synthesize (offline, unsupported
         // browser, model download interrupted) — fall through to the
@@ -170,8 +175,103 @@ export const chessSpeech = {
     // like a plausible cause of sentences cutting off with nothing
     // tapped, so it's removed rather than guessed at.
   },
+  // Starts generating the first sentence of whatever's queued next (once,
+  // and only while a line is playing) so there's no dead air between two
+  // back-to-back lines — e.g. your move's analysis, then the bot's reply.
+  _prefetchNext() {
+    const next = this.queue[0];
+    if (!next || next.prefetched || !this._engine) return;
+    const first = splitIntoSpeechChunks(next.text)[0];
+    if (!first) return;
+    const promise = this._engine.speak(first, next.pieceType);
+    promise.catch(() => {}); // a failure resurfaces when the line actually plays and awaits it
+    next.prefetched = { text: first, promise };
+  },
+  // Plays one synthesized audio clip start to finish; resolves when it
+  // ends (or fails — a broken clip shouldn't hang the whole line).
+  // Piper's per-piece "voice" is its playbackRate — speed changes pitch
+  // too when preservesPitch is off, same chipmunk/deep-voice trick as
+  // before. Kokoro leaves it at 1 since it has a real voice per piece.
+  _playOneClip(blob, playbackRate) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.preservesPitch = false;
+      audio.mozPreservesPitch = false;
+      audio.webkitPreservesPitch = false;
+      audio.playbackRate = playbackRate || 1;
+      this.audioEl = audio;
+      const done = () => { URL.revokeObjectURL(url); this._releaseClip = null; resolve(); };
+      this._releaseClip = done;
+      audio.onended = done;
+      audio.onerror = done;
+      audio.play().catch(done);
+    });
+  },
+  // Synthesize chunk i, start playing it, and kick off chunk i+1's
+  // synthesis the moment chunk i's audio exists — NOT after it finishes
+  // playing — so the next clip is usually ready (or nearly) by the time
+  // the current one ends. Returns true if it played through to the end,
+  // false if it was stopped/superseded partway (so the caller doesn't
+  // double-advance the queue).
+  async _playChunksPipelined(id, chunks, pieceType, voiceEngine, prefetched) {
+    if (chunks.length === 0) return { finished: true };
+    this._engine = voiceEngine;
+    // If this line's first sentence was already generated while the
+    // previous line was still playing, use that instead of starting over.
+    let pending = (prefetched && prefetched.text === chunks[0])
+      ? prefetched.promise
+      : voiceEngine.speak(chunks[0], pieceType);
+    for (let i = 0; i < chunks.length; i++) {
+      if (this.speakingId !== id) return { finished: false };
+      let clip;
+      try {
+        clip = await pending;
+      } catch (err) {
+        // This chunk failed to generate. Hand back which one, so the
+        // caller falls back to the built-in voice for only what hasn't
+        // been spoken yet instead of re-reading from the top.
+        console.warn("Chess HD voice chunk failed:", err);
+        return { finished: false, failedAt: i };
+      }
+      if (this.speakingId !== id) return { finished: false };
+      if (i + 1 < chunks.length) {
+        pending = voiceEngine.speak(chunks[i + 1], pieceType);
+        pending.catch(() => {}); // the real error is handled when this is awaited next loop
+      }
+      if (i === chunks.length - 1) {
+        // Final clip of this line is about to play — everything else for
+        // this line is generated, so the engine is free. Start on the
+        // NEXT queued line's first sentence now, so it's ready the
+        // moment this clip ends instead of being generated after.
+        this._onLastClip = true;
+        this._prefetchNext();
+      }
+      await this._playOneClip(clip.blob, clip.playbackRate);
+    }
+    return { finished: this.speakingId === id };
+  },
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
 };
+
+// splitIntoSpeechChunks — breaks a line into short sentences so the
+// first can start playing before the rest are generated. Fragments too
+// short to be worth their own synthesis call (a stray "cp." or "Ouch.")
+// get folded onto the previous chunk instead of becoming a near-empty
+// clip with its own startup cost.
+function splitIntoSpeechChunks(text) {
+  if (!text) return [];
+  // Deliberately NOT a lookbehind split (/(?<=[.!?])\s+/) — that syntax
+  // is a parse-time error on iOS before 16.4, which would stop this
+  // whole file (and with it the Chess screen) from loading at all.
+  const raw = (text.match(/[^.!?]+(?:[.!?]+|$)/g) || [text]).map((s) => s.trim()).filter(Boolean);
+  const chunks = [];
+  for (const part of raw) {
+    if (chunks.length > 0 && part.length < 12) chunks[chunks.length - 1] += " " + part;
+    else chunks.push(part);
+  }
+  return chunks.length > 0 ? chunks : [text];
+}
 
 // ---------------------------------------------------------------------
 // What each piece "says" about itself — in character, a few variants
