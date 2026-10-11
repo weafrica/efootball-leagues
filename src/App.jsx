@@ -11832,19 +11832,36 @@ function QuickActionsDock({ open, onToggle, items, c }) {
 }
 
 // Battles — Wildcard Match (random/open challenges) and Ladder Battles
-// (the personal 1v1 ranking) combined into one banner on request, instead
-// of two separate cards stacked with a gap between them. Both halves keep
-// 100% of their own original behavior — their own tap target, their own
-// buttons, their own state — this only changes the outer wrapping from
-// two <section>s to one shared card with a divider between them. Both are
-// completely free to use: sending/accepting either kind of challenge
-// always was, and joining the Ladder Battles ranking itself no longer
-// charges anything either (previously a one-time 5 Nets fee).
+// (the personal 1v1 ranking) as one genuinely single banner now, not two
+// cards sharing a border like the first pass. This compact card shows one
+// dynamic headline — whichever of the two actually has something going on
+// right now — and opens one shared modal with both sections inside, same
+// pattern as the merged "Up next" banner elsewhere on Home. Both halves
+// are completely free: sending/accepting either kind of challenge always
+// was, and joining the Ladder Battles ranking no longer charges anything
+// either (previously a one-time 5 Nets fee).
 function BattlesSpotlight({ openChallenges, session, memberAvatars, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onJoinLadder, showToast, c }) {
   const myId = session?.user?.id;
   const list = openChallenges || [];
   const grabbable = list.filter((ch) => ch.status === "open" && ch.creator_id !== myId);
   const myOpenBroadcast = list.find((ch) => ch.creator_id === myId && ch.status === "open");
+  const isMember = !!myLadderRank;
+  const [open, setOpen] = useState(false);
+
+  // One headline for the whole card, in order of urgency: a live
+  // grabbable wildcard beats everything (first-come-first-served, every
+  // second counts), then your own broadcast waiting to be grabbed, then
+  // your ladder rank if you're already on it, then a plain call to action
+  // for a newcomer to either.
+  const headline = grabbable.length > 0
+    ? (grabbable.length === 1 ? "1 wildcard is live" : `${grabbable.length} wildcards are live`)
+    : myOpenBroadcast ? "Your wildcard is live"
+    : isMember ? `You're #${myLadderRank.rank_position} in Ladder Battles`
+    : "Wildcard Match + Ladder Battles";
+  const sub = grabbable.length > 0 ? "First to accept wins it — tap in before someone else does"
+    : myOpenBroadcast ? "Broadcast to everyone, waiting for someone to grab it"
+    : isMember ? "Tap in for your next 1v1, or fire a wildcard to everyone"
+    : "One tap to challenge anyone — everything here is free";
 
   const avatarByUserId = useMemo(() => {
     const map = new Map();
@@ -11852,16 +11869,79 @@ function BattlesSpotlight({ openChallenges, session, memberAvatars, onOpenChalle
     return map;
   }, [memberAvatars]);
 
-  // Reads straight from the economy so this card can never drift out of
-  // sync with what a random_match actually pays (see economy.js).
+  return (
+    <section className="mt-6">
+      <button onClick={() => setOpen(true)} className="relative w-full rounded-2xl overflow-hidden p-4 text-left transition-transform active:scale-[0.99]"
+        style={{ background: `linear-gradient(135deg, ${LADDER_THEME.bg}, ${c.surface} 70%)`, border: `1px solid ${WILDCARD_AMBER}55` }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_TEAL, opacity: 0.2 }} />
+          <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16, animationDelay: "3s" }} />
+          {grabbable.length > 0 && (
+            <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_AMBER}3D 45%, #FFD70033 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
+          )}
+        </div>
+        <div className="relative flex items-center gap-2.5">
+          <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_AMBER}66` }}>
+            <Swords size={18} style={{ color: WILDCARD_AMBER }} />
+            {grabbable.length > 0 && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_AMBER, boxShadow: `0 0 0 2px ${c.surface}` }} />}
+          </span>
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>
+              Battles <span className="rounded-full px-1.5 py-0.5" style={{ background: `${c.greenText}22`, color: c.greenText }}>FREE</span>
+            </div>
+            <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
+          </div>
+          <ChevronRight size={16} style={{ color: c.textFaint }} className="shrink-0" />
+        </div>
+        <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_TEAL}40` }}>
+          {grabbable.length > 0 ? (
+            <div className="flex -space-x-2.5 shrink-0">
+              {grabbable.slice(0, 4).map((ch) => (
+                <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
+                  <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={26} c={c} />
+                </div>
+              ))}
+            </div>
+          ) : isMember && (ladder || []).length > 0 ? (
+            <div className="flex -space-x-2.5 shrink-0">
+              {(ladder || []).slice(0, 4).map((row) => (
+                <div key={row.user_id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
+                  <MemberAvatar url={null} username={row.username} size={26} c={c} />
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>{sub}</div>
+        </div>
+      </button>
+      {open && (
+        <BattlesModal openChallenges={openChallenges} session={session} memberAvatars={memberAvatars} onOpenChallenges={onOpenChallenges}
+          ladder={ladder} myLadderRank={myLadderRank} onOpenLadder={onOpenLadder} onJoinLadder={onJoinLadder} showToast={showToast}
+          onClose={() => setOpen(false)} c={c} />
+      )}
+    </section>
+  );
+}
+
+// The full Battles view, popped out from the compact banner above — one
+// shared sheet with both sections inside, Wildcard Match first (the more
+// time-sensitive of the two — a grabbable challenge can be taken by
+// someone else any second) then Ladder Battles below it.
+function BattlesModal({ openChallenges, session, memberAvatars, onOpenChallenges, ladder, myLadderRank, onOpenLadder, onJoinLadder, showToast, onClose, c }) {
+  const myId = session?.user?.id;
+  const list = openChallenges || [];
+  const grabbable = list.filter((ch) => ch.status === "open" && ch.creator_id !== myId);
+  const myOpenBroadcast = list.find((ch) => ch.creator_id === myId && ch.status === "open");
   const winNets = computeMatchNets("random_match", "win");
-
   const state = grabbable.length > 0 ? "grabbable" : myOpenBroadcast ? "waiting" : "idle";
-  const headline = state === "grabbable"
-    ? (grabbable.length === 1 ? "1 wildcard is live" : `${grabbable.length} wildcards are live`)
-    : state === "waiting" ? "Your wildcard is live" : "Fire one open to everyone";
 
-  const theme = LADDER_THEME; // the Ladder half always renders in the Ladder's own black/gold look
+  const avatarByUserId = useMemo(() => {
+    const map = new Map();
+    (memberAvatars || []).forEach((m) => { if (m.user_id) map.set(m.user_id, m.avatar_url || null); });
+    return map;
+  }, [memberAvatars]);
+
+  const theme = LADDER_THEME;
   const [rulesOpen, setRulesOpen] = useState(false);
   const [joining, setJoining] = useState(false);
   const top5 = (ladder || []).slice(0, 5);
@@ -11869,13 +11949,8 @@ function BattlesSpotlight({ openChallenges, session, memberAvatars, onOpenChalle
   const myRankColor = myLadderRank && myLadderRank.rank_position <= 3 ? rankColors[myLadderRank.rank_position - 1] : theme.accent;
   const isMember = !!myLadderRank;
   const canJoin = !!session && !isMember;
-  // Same "still show the Join card even with zero members" fix the
-  // standalone version had — only hide the Ladder half entirely if
-  // there's genuinely nothing useful in it (no members AND no Join card).
-  const showLadderHalf = top5.length > 0 || canJoin;
 
-  const handleJoin = async (e) => {
-    e.stopPropagation();
+  const handleJoin = async () => {
     if (joining) return;
     setJoining(true);
     try {
@@ -11888,155 +11963,112 @@ function BattlesSpotlight({ openChallenges, session, memberAvatars, onOpenChalle
   };
 
   return (
-    <section className="mt-6">
-      <div className="relative w-full rounded-2xl overflow-hidden" style={{ border: `1px solid ${WILDCARD_TEAL}55` }}>
-        {/* Wildcard half */}
-        <div role="button" tabIndex={0} onClick={onOpenChallenges} onKeyDown={(e) => { if (e.key === "Enter") onOpenChallenges(); }}
-          className="relative w-full p-4 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
-          style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}26, ${c.surface} 60%, ${WILDCARD_AMBER}14)` }}>
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: WILDCARD_TEAL, opacity: 0.22 }} />
-            <div className="animate-glow-drift absolute -bottom-16 -right-10 w-40 h-40 rounded-full blur-3xl" style={{ background: WILDCARD_AMBER, opacity: 0.18, animationDelay: "3s" }} />
-            {state === "grabbable" && (
-              <div className="animate-card-shine absolute inset-0" style={{ backgroundImage: `linear-gradient(120deg, transparent 30%, ${WILDCARD_AMBER}3D 45%, ${WILDCARD_TEAL}3D 55%, transparent 70%)`, backgroundSize: "250% 250%" }} />
-            )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl border" style={{ background: c.bg, borderColor: c.borderStrong }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+          <div className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider" style={{ color: WILDCARD_AMBER }}>
+            <Swords size={14} /> Battles <span className="rounded-full px-1.5 py-0.5" style={{ background: `${c.greenText}22`, color: c.greenText }}>FREE</span>
           </div>
+          <button aria-label="Close" onClick={onClose} style={{ color: c.textFaint }}><X size={18} /></button>
+        </div>
 
-          <div className="relative flex items-center gap-2.5">
-            <span className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_TEAL}66` }}>
-              <Shuffle size={18} style={{ color: WILDCARD_AMBER }} />
-              {state === "grabbable" && <span className="animate-pulse-dot absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full" style={{ background: WILDCARD_AMBER, boxShadow: `0 0 0 2px ${c.surface}` }} />}
+        {/* Wildcard Match section */}
+        <div role="button" tabIndex={0} onClick={() => { onClose(); onOpenChallenges(); }} onKeyDown={(e) => { if (e.key === "Enter") { onClose(); onOpenChallenges(); } }}
+          className="relative mx-4 mb-3 rounded-xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.98]"
+          style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}26, ${c.surface} 60%, ${WILDCARD_AMBER}14)`, border: `1px solid ${WILDCARD_TEAL}55` }}>
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: `${WILDCARD_TEAL}26`, border: `1px solid ${WILDCARD_TEAL}66` }}>
+              <Shuffle size={16} style={{ color: WILDCARD_AMBER }} />
             </span>
             <div className="flex-1 min-w-0 leading-tight">
-              <div className="font-mono text-[10px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>Wildcard Match</div>
-              <div className="font-extrabold uppercase tracking-tight text-base truncate" style={{ color: c.text }}>{headline}</div>
+              <div className="font-mono text-[9px] tracking-[0.25em] uppercase font-bold" style={{ color: WILDCARD_AMBER }}>Wildcard Match</div>
+              <div className="font-extrabold uppercase tracking-tight text-sm truncate" style={{ color: c.text }}>
+                {state === "grabbable" ? (grabbable.length === 1 ? "1 wildcard is live" : `${grabbable.length} wildcards are live`) : state === "waiting" ? "Your wildcard is live" : "Fire one open to everyone"}
+              </div>
             </div>
-            <span className="shrink-0 flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1"
-              style={{ background: `${WILDCARD_TEAL}22`, color: WILDCARD_TEAL, border: `1px solid ${WILDCARD_TEAL}55` }}>
-              <Sparkles size={10} /> +{winNets} Nets
+            <span className="shrink-0 flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-wide rounded-full px-1.5 py-1" style={{ background: `${WILDCARD_TEAL}22`, color: WILDCARD_TEAL }}>
+              <Sparkles size={9} /> +{winNets}
             </span>
           </div>
-
-          <div className="relative mt-3 pt-3 flex items-center gap-2.5" style={{ borderTop: `1px dashed ${WILDCARD_TEAL}40` }}>
-            {state === "grabbable" && (
-              <>
-                <div className="flex -space-x-2.5 shrink-0">
-                  {grabbable.slice(0, 4).map((ch) => (
-                    <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
-                      <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={28} c={c} />
-                    </div>
-                  ))}
-                  {grabbable.length > 4 && (
-                    <span className="w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold" style={{ background: c.surfaceHover, color: c.textFaint, boxShadow: `0 0 0 2px ${c.surface}` }}>+{grabbable.length - 4}</span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>First to accept wins it — before someone else does.</div>
-              </>
-            )}
-            {state === "waiting" && (
-              <>
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER }} />
-                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.3s" }} />
-                  <span className="animate-pulse-dot w-1.5 h-1.5 rounded-full" style={{ background: WILDCARD_AMBER, animationDelay: "0.6s" }} />
-                </span>
-                <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>Broadcast to everyone — waiting for someone to grab it.</div>
-              </>
-            )}
-            {state === "idle" && (
-              <div className="flex-1 min-w-0 font-body text-xs" style={{ color: c.textDim }}>One tap. Open to every player. First to accept it wins it.</div>
-            )}
-            <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide rounded-full px-3.5 py-2"
-              style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}, ${WILDCARD_AMBER})`, color: "#fff" }}>
-              {state === "grabbable" ? <>Grab it <ChevronRight size={12} /></> : state === "waiting" ? <>View <ChevronRight size={12} /></> : <><Shuffle size={13} /> Send</>}
-            </span>
+          {state === "grabbable" && (
+            <div className="mt-2.5 flex items-center gap-2">
+              <div className="flex -space-x-2 shrink-0">
+                {grabbable.slice(0, 4).map((ch) => (
+                  <div key={ch.id} className="rounded-full" style={{ boxShadow: `0 0 0 2px ${c.surface}` }}>
+                    <MemberAvatar url={avatarByUserId.get(ch.creator_id)} username={ch.creator_username} size={24} c={c} />
+                  </div>
+                ))}
+              </div>
+              <span className="font-body text-[11px]" style={{ color: c.textDim }}>First to accept wins it</span>
+            </div>
+          )}
+          <div className="mt-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5"
+            style={{ background: `linear-gradient(135deg, ${WILDCARD_TEAL}, ${WILDCARD_AMBER})`, color: "#fff" }}>
+            {state === "grabbable" ? "Grab it" : state === "waiting" ? "View it" : <><Shuffle size={11} /> Send a wildcard</>}
           </div>
         </div>
 
-        {/* Ladder Battles half */}
-        {showLadderHalf && (
-          <div role="button" tabIndex={0} onClick={onOpenLadder} onKeyDown={(e) => { if (e.key === "Enter") onOpenLadder(); }}
-            className="relative w-full p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.99]"
-            style={{ background: theme.bg, borderTop: `1px solid ${theme.border}` }}>
-            <div className="pointer-events-none absolute inset-0 overflow-hidden">
-              <div className="animate-glow-drift absolute -top-14 -left-10 w-36 h-36 rounded-full blur-3xl" style={{ background: "#FFD700", opacity: 0.16 }} />
-            </div>
-            <div className="relative flex items-center justify-between mb-3 gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <img src="/ladder-battles-badge.jpg" alt="" className="w-8 h-8 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${theme.borderStrong}` }} />
-                <div className="leading-tight min-w-0">
-                  <div className="font-mono text-[11px] tracking-[0.2em] uppercase font-bold" style={{ color: theme.accent }}>Ladder Battles</div>
-                  <div className="font-mono text-[9px] tracking-[0.3em] uppercase" style={{ color: theme.red }}>No Mercy</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                <RulesButton label="Ladder Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={theme} />
-                {isMember && (
-                  <button onClick={onOpenLadder} className="font-mono text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2.5 pr-2 py-1"
-                    style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
-                    {myLadderRank.rank_position <= 3 && <Crown size={10} />} You're #{myLadderRank.rank_position} <ChevronRight size={12} />
-                  </button>
-                )}
+        {/* Ladder Battles section */}
+        <div role="button" tabIndex={0} onClick={() => { onClose(); onOpenLadder(); }} onKeyDown={(e) => { if (e.key === "Enter") { onClose(); onOpenLadder(); } }}
+          className="relative mx-4 mb-5 rounded-xl p-3.5 text-left cursor-pointer overflow-hidden transition-transform active:scale-[0.98]"
+          style={{ background: theme.bg, border: `1px solid ${theme.border}` }}>
+          <div className="flex items-center justify-between mb-2.5 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <img src="/ladder-battles-badge.jpg" alt="" className="w-7 h-7 rounded-full object-cover shrink-0" style={{ boxShadow: `0 0 0 1px ${theme.borderStrong}` }} />
+              <div className="leading-tight min-w-0">
+                <div className="font-mono text-[10px] tracking-[0.2em] uppercase font-bold" style={{ color: theme.accent }}>Ladder Battles</div>
+                <div className="font-mono text-[8px] tracking-[0.3em] uppercase" style={{ color: theme.red }}>No Mercy</div>
               </div>
             </div>
-
-            {canJoin && (
-              <div className="relative flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 mb-3"
-                onClick={(e) => e.stopPropagation()}
-                style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
-                <div className="font-body text-xs min-w-0" style={{ color: theme.textDim }}>
-                  Not on the ladder yet — <span className="font-bold" style={{ color: theme.accent }}>free</span> to join.
-                </div>
-                <button onClick={handleJoin} disabled={joining}
-                  className="flex items-center gap-1.5 shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full disabled:opacity-50"
-                  style={{ background: theme.accent, color: theme.accentText }}>
-                  <Swords size={13} /> {joining ? "Joining..." : "Join"}
-                </button>
-              </div>
-            )}
-
-            <div className="relative no-scrollbar flex items-stretch gap-2.5 overflow-x-auto pb-1" onClick={(e) => e.stopPropagation()}>
-              {top5.length === 0 ? (
-                <div className="flex items-center shrink-0 rounded-xl px-3.5 py-2.5 font-body text-xs"
-                  style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
-                  No one's on the ladder yet — be the first.
-                </div>
-              ) : top5.map((row, i) => (
-                <div key={row.user_id} className="relative flex items-center gap-2 shrink-0 rounded-xl pl-2 pr-3.5 py-2 overflow-hidden"
-                  style={{
-                    background: i === 0 ? `linear-gradient(135deg, ${theme.accent}26, ${theme.surface})` : theme.surface,
-                    border: `1px solid ${i === 0 ? theme.accent + "55" : theme.border}`,
-                  }}>
-                  {i === 0 && (
-                    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                      <div className="animate-shine-sweep absolute top-0 -left-1/2 w-1/3 h-full" style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}3D, transparent)` }} />
-                    </div>
-                  )}
-                  {i < 3 ? (
-                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
-                      {i === 0 ? <Crown size={13} style={{ color: rankColors[0] }} /> : <Medal size={13} style={{ color: rankColors[i] }} />}
-                    </span>
-                  ) : (
-                    <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs font-bold" style={{ background: theme.surfaceHover, color: theme.textFaint }}>
-                      {i + 1}
-                    </span>
-                  )}
-                  <div className="flex flex-col leading-tight">
-                    <span className="font-body font-semibold text-sm truncate max-w-[110px]" style={{ color: theme.text }}>{row.username}</span>
-                    <span className="font-mono text-[10px]" style={{ color: theme.textFaint }}>{row.points}pts · {row.wins}W–{row.losses}L</span>
-                  </div>
-                </div>
-              ))}
-              <button onClick={onOpenLadder} className="flex items-center gap-1.5 shrink-0 font-mono text-[11px] rounded-xl px-3"
-                style={{ color: theme.accent, background: theme.surfaceHover, border: `1px dashed ${theme.borderStrong}` }}>
-                <Swords size={13} /> {isMember && myLadderRank.rank_position > 5 ? "Climb it" : "See full ladder"}
-              </button>
+            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <RulesButton label="Rules" onClick={(e) => { e.stopPropagation(); setRulesOpen(true); }} c={theme} />
+              {isMember && (
+                <span className="font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0 rounded-full pl-2 pr-1.5 py-1"
+                  style={{ background: `${myRankColor}1F`, color: myRankColor, border: `1px solid ${myRankColor}55` }}>
+                  {myLadderRank.rank_position <= 3 && <Crown size={9} />} #{myLadderRank.rank_position}
+                </span>
+              )}
             </div>
           </div>
-        )}
+          {canJoin && (
+            <div className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-2 mb-2.5" onClick={(e) => e.stopPropagation()}
+              style={{ background: theme.surfaceHover, border: `1px solid ${theme.accent}40` }}>
+              <div className="font-body text-[11px] min-w-0" style={{ color: theme.textDim }}>
+                Not on the ladder yet — <span className="font-bold" style={{ color: theme.accent }}>free</span> to join.
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); handleJoin(); }} disabled={joining}
+                className="flex items-center gap-1 shrink-0 font-body text-[11px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-50"
+                style={{ background: theme.accent, color: theme.accentText }}>
+                <Swords size={11} /> {joining ? "Joining..." : "Join"}
+              </button>
+            </div>
+          )}
+          <div className="no-scrollbar flex items-stretch gap-2 overflow-x-auto pb-0.5" onClick={(e) => e.stopPropagation()}>
+            {top5.length === 0 ? (
+              <div className="flex items-center shrink-0 rounded-lg px-3 py-2 font-body text-[11px]" style={{ background: theme.surface, border: `1px dashed ${theme.borderStrong}`, color: theme.textDim }}>
+                No one's on the ladder yet — be the first.
+              </div>
+            ) : top5.map((row, i) => (
+              <div key={row.user_id} className="flex items-center gap-1.5 shrink-0 rounded-lg pl-1.5 pr-2.5 py-1.5"
+                style={{ background: i === 0 ? `${theme.accent}1A` : theme.surface, border: `1px solid ${i === 0 ? theme.accent + "55" : theme.border}` }}>
+                {i < 3 ? (
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: `${rankColors[i]}22`, border: `1px solid ${rankColors[i]}66` }}>
+                    {i === 0 ? <Crown size={11} style={{ color: rankColors[0] }} /> : <Medal size={11} style={{ color: rankColors[i] }} />}
+                  </span>
+                ) : (
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 font-mono text-[10px] font-bold" style={{ background: theme.surfaceHover, color: theme.textFaint }}>{i + 1}</span>
+                )}
+                <div className="flex flex-col leading-tight">
+                  <span className="font-body font-semibold text-xs truncate max-w-[90px]" style={{ color: theme.text }}>{row.username}</span>
+                  <span className="font-mono text-[9px]" style={{ color: theme.textFaint }}>{row.points}pts</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
       {rulesOpen && <Suspense fallback={null}><RulesModal type="ladder" onClose={() => setRulesOpen(false)} c={theme} /></Suspense>}
-    </section>
+    </div>
   );
 }
 
