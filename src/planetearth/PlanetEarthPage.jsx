@@ -1,11 +1,14 @@
 // Planet Earth — the hub, the story, the lessons and the games. Written with React.createElement (no JSX) so plain Node can syntax-check it.
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { LEVELS, SOON, SHIP_CRYSTALS, flagAngle } from './lessons.js';
-import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
+import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawGreenhouse, drawTectonics, drawQuakeLab, drawEcosystem, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
 import { drawGlobe } from './earthmap.js';
 import { CITIES, city, clockTime, elevationAt, isMorning, fmtTime, dayLength, declination, fmtDay, TILT } from './sky.js';
 import { createWater, step as waterStep, counts } from './water.js';
 import { fire, RE } from './orbit.js';
+import { createClimate, stepClimate, eqTemp, toC, isStable, warmingVsBase } from './greenhouse.js';
+import { createPlates, stepPlates, createQuakeLab, stepQuakeLab, relSpeed } from './tectonics.js';
+import { createEco, stepEco, addAnts, addLions, removeLions, startDrought, avgGrass } from './ecosystem.js';
 import * as snd from './audio.js';
 
 const GlowveldPage = React.lazy(() => import('../glowveld/GlowveldPage.jsx'));
@@ -136,6 +139,74 @@ function CannonView({ report }) {
         h('button', { onClick: () => { st.history = []; st.flight = null; st.msg = ''; tick((n) => n + 1); }, style: { ...btn('#4a5580'), flex: 1, padding: '10px', fontSize: 14 } }, 'Clear'))));
 }
 
+
+// ---------- Level 5: the greenhouse lab ----------
+function GreenhouseView({ report }) {
+  const hold = useRef({ c: createClimate(), ph: [], acc: 0, speed: 5 }).current;
+  const [ui, setUi] = useState({ ppm: 280, base: 0.3 });
+  useEffect(() => { const id = setInterval(() => { const c = hold.c; report({ ppm: c.ppm, tempC: toC(c.T), stable: isStable(c), warming: warmingVsBase(c) }); }, 250); return () => clearInterval(id); }, []);
+  const draw = (ctx, w, hh, tm, dt) => { const c = hold.c; hold.acc += dt * hold.speed; let n = 0; while (hold.acc >= 0.2 && n < 30) { stepClimate(c, 0.2); hold.acc -= 0.2; n++; } hold.acc = Math.min(hold.acc, 0.2); drawGreenhouse(ctx, w, hh, tm, { c, ph: hold.ph, dt }); };
+  const warm = warmingVsBase(hold.c);
+  return h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    h('div', { style: { flex: 1, minHeight: 0 } }, h(CanvasView, { draw })),
+    h('div', { style: { ...panel, borderRadius: '18px 18px 0 0', padding: '8px 12px 10px' } },
+      slider('🏭 Greenhouse gases (280 = before factories, 420 = today)', ui.ppm, 0, 1200, 5, (v) => { hold.c.ppm = v; setUi((u) => ({ ...u, ppm: v })); }, (v) => v + ' ppm'),
+      slider('🪞 Surface: dark forests ← → white ice', ui.base, 0.1, 0.7, 0.01, (v) => { hold.c.base = v; setUi((u) => ({ ...u, base: v })); }, (v) => Math.round(v * 100) + '% reflected'),
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        h('div', { style: { flex: 2, fontSize: 14, fontWeight: 800, color: '#ffe27a' } }, (warm >= 0 ? '+' : '') + warm.toFixed(1) + '°C compared with 280 ppm'),
+        h('button', { onClick: () => { hold.c.ppm = 280; hold.c.base = 0.3; setUi({ ppm: 280, base: 0.3 }); snd.sfx.click(); }, style: { ...btn('#4a5580'), flex: 1, padding: '8px', fontSize: 14 } }, '🔄 Reset'))));
+}
+
+// ---------- Level 6: moving ground + the quake lab ----------
+function PlateView({ report }) {
+  const hold = useRef({ p: createPlates(3), q: createQuakeLab(9), mode: 'plates', playing: false, acc: 0, shake: 0 }).current;
+  const [ui, setUi] = useState({ mode: 'plates', left: 'cont', right: 'cont', vL: 0, vR: 0, playing: false, v: 50, sticky: 3 });
+  const set = (patch) => setUi((u) => ({ ...u, ...patch }));
+  useEffect(() => { const id = setInterval(() => { const p = hold.p, q = hold.q; report({ mount: p.maxMount, rift: p.maxRift, trench: p.maxTrench, arc: p.maxArc, maxMag: q.maxMag }); }, 250); return () => clearInterval(id); }, []);
+  const draw = (ctx, w, hh, tm, dt) => {
+    hold.shake = Math.max(0, hold.shake - dt * 1.5);
+    if (hold.mode === 'plates') { if (hold.playing) { hold.acc += dt; let n = 0; while (hold.acc >= 0.1 && n < 6) { stepPlates(hold.p, 0.1); hold.acc -= 0.1; n++; } hold.acc = Math.min(hold.acc, 0.1); } drawTectonics(ctx, w, hh, tm, { p: hold.p, shake: hold.shake }); }
+    else { hold.acc += dt * 10; let n = 0; while (hold.acc >= 0.1 && n < 30) { const r = stepQuakeLab(hold.q, 0.1); if (r) { hold.shake = 1; if (r.mag >= 6.8) snd.sfx.boom(); } hold.acc -= 0.1; n++; } hold.acc = Math.min(hold.acc, 0.1); drawQuakeLab(ctx, w, hh, tm, { q: hold.q }); }
+  };
+  const setPlate = (k, v) => { hold.p[k] = v; set({ [k]: v }); };
+  const speeds = (vL, vR) => { hold.p.vL = vL; hold.p.vR = vR; set({ vL, vR }); };
+  const tog = (id, label) => h('button', { key: id, onClick: () => { hold.mode = id; set({ mode: id }); snd.sfx.click(); }, style: { ...btn(ui.mode === id ? '#e0682a' : '#3a4580'), flex: 1, padding: '6px', fontSize: 13, boxShadow: 'none' } }, label);
+  const typ = (side, id, label) => h('button', { key: side + id, onClick: () => { setPlate(side, id); snd.sfx.click(); }, style: { ...btn(ui[side] === id ? '#2fc46b' : '#3a4580'), flex: 1, padding: '5px', fontSize: 12, boxShadow: 'none' } }, label);
+  const controls = ui.mode === 'plates' ? [
+    h('div', { key: 'p1', style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } }, h('span', { style: { fontSize: 12, fontWeight: 800 } }, 'Left:'), typ('left', 'cont', '🏔️ Continent'), typ('left', 'ocean', '🌊 Ocean'), h('span', { style: { fontSize: 12, fontWeight: 800 } }, 'Right:'), typ('right', 'cont', '🏔️ Continent'), typ('right', 'ocean', '🌊 Ocean')),
+    h('div', { key: 'p2', style: { display: 'flex', gap: 6, marginBottom: 6 } },
+      h('button', { onClick: () => { speeds(3, -3); snd.sfx.click(); }, style: { ...btn('#c9503a'), flex: 1, padding: '6px', fontSize: 13, boxShadow: 'none' } }, '💥 Push together'), h('button', { onClick: () => { speeds(-3, 3); snd.sfx.click(); }, style: { ...btn('#3a7bff'), flex: 1, padding: '6px', fontSize: 13, boxShadow: 'none' } }, '↔️ Pull apart'), h('button', { onClick: () => { speeds(0, 0); snd.sfx.click(); }, style: { ...btn('#4a5580'), flex: 1, padding: '6px', fontSize: 13, boxShadow: 'none' } }, '⏹ Stop')),
+    slider('Left plate speed (cm/yr, + moves right)', ui.vL, -10, 10, 0.5, (v) => { hold.p.vL = v; set({ vL: v }); }, (v) => v.toFixed(1)),
+    slider('Right plate speed (cm/yr, − moves left)', ui.vR, -10, 10, 0.5, (v) => { hold.p.vR = v; set({ vR: v }); }, (v) => v.toFixed(1)),
+    h('div', { key: 'p3', style: { display: 'flex', gap: 8 } },
+      h('button', { onClick: () => { hold.playing = !hold.playing; set({ playing: hold.playing }); snd.sfx.click(); }, style: { ...btn(ui.playing ? '#c9503a' : '#2fc46b'), flex: 2, padding: '8px', fontSize: 14 } }, ui.playing ? '⏸ Pause' : '▶ Play (1 s ≈ 1 million years)'),
+      h('button', { onClick: () => { const old = hold.p; const np = createPlates((Math.random() * 1e9) | 0); np.left = old.left; np.right = old.right; np.vL = old.vL; np.vR = old.vR; hold.p = np; snd.sfx.click(); }, style: { ...btn('#4a5580'), flex: 1, padding: '8px', fontSize: 14 } }, '🔄 Fresh')),
+  ] : [
+    slider('Plate push speed', ui.v, 10, 100, 1, (v) => { hold.q.v = v; set({ v }); }, (v) => (v / 10).toFixed(1) + ' cm/yr'),
+    slider('Stickiness of the rock (how much slip it can store)', ui.sticky, 0.3, 10, 0.1, (v) => { hold.q.sticky = v; set({ sticky: v }); }, (v) => v.toFixed(1) + ' m'),
+    h('button', { key: 'q', onClick: () => { const o = hold.q; hold.q = createQuakeLab((Math.random() * 1e9) | 0); hold.q.v = o.v; hold.q.sticky = o.sticky; hold.q.crit = o.sticky; snd.sfx.click(); }, style: { ...btn('#4a5580'), width: '100%', padding: '8px', fontSize: 14 } }, '🔄 Reset the lab (time runs 10 years per second)'),
+  ];
+  return h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    h('div', { style: { flex: 1, minHeight: 0 } }, h(CanvasView, { draw })),
+    h('div', { style: { ...panel, borderRadius: '18px 18px 0 0', padding: '8px 12px 10px' } }, h('div', { style: { display: 'flex', gap: 6, marginBottom: 6 } }, tog('plates', '⛰️ Time-lapse'), tog('quake', '💥 Quake Lab')), controls));
+}
+
+// ---------- Level 7: the savanna ----------
+function LifeView({ report }) {
+  const hold = useRef({ e: createEco((Math.random() * 1e9) | 0), acc: 0, speed: 3, hadRemoval: false }).current;
+  const [ui, setUi] = useState({ rain: 1, speed: 3 });
+  useEffect(() => { const id = setInterval(() => { const e = hold.e; report({ balancedFor: e.balancedFor, lions: e.lions.length, ants: e.ants.length, grass: avgGrass(e), hadRemoval: hold.hadRemoval }); }, 250); return () => clearInterval(id); }, []);
+  const draw = (ctx, w, hh, tm, dt) => { hold.acc += dt * hold.speed; let n = 0; while (hold.acc >= 0.1 && n < 24) { stepEco(hold.e, 0.1); hold.acc -= 0.1; n++; } hold.acc = Math.min(hold.acc, 0.1); drawEcosystem(ctx, w, hh, tm, { e: hold.e }); };
+  const act = (fn) => () => { fn(hold.e); snd.sfx.click(); setUi((u) => ({ ...u })); };
+  const b = (bg, label, fn) => h('button', { onClick: fn, style: { ...btn(bg), flex: '1 1 30%', padding: '7px 4px', fontSize: 13, boxShadow: 'none' } }, label);
+  return h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    h('div', { style: { flex: 1, minHeight: 0 } }, h(CanvasView, { draw })),
+    h('div', { style: { ...panel, borderRadius: '18px 18px 0 0', padding: '8px 12px 10px' } },
+      slider('🌧️ Rainfall (grass growth)', ui.rain, 0.2, 2, 0.05, (v) => { hold.e.rain = v; setUi((u) => ({ ...u, rain: v })); }, (v) => v.toFixed(2) + '×'),
+      h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 } }, b('#8a5a2a', '🦌 +10 antelope', act((e) => addAnts(e, 10))), b('#c98a1a', '🦁 +3 lions', act((e) => addLions(e, 3))), b('#c9503a', '🚫 Remove lions', act((e) => { removeLions(e); hold.hadRemoval = true; }))),
+      h('div', { style: { display: 'flex', gap: 6 } }, b('#d9822b', '☀️ Drought', act((e) => startDrought(e))), b('#7a5cff', '⏩ Speed ×' + ui.speed, () => { hold.speed = ui.speed === 1 ? 3 : ui.speed === 3 ? 6 : 1; setUi((u) => ({ ...u, speed: hold.speed })); }), b('#4a5580', '🔄 Fresh savanna', () => { hold.e = createEco((Math.random() * 1e9) | 0); hold.e.rain = ui.rain; hold.hadRemoval = false; snd.sfx.click(); }))));
+}
+
 // ---------- the lesson: story cards → hands-on missions → what you discovered ----------
 function LevelShell({ level, save, onExit, onDone, onNext }) {
   const [phase, setPhase] = useState('intro'), [ci, setCi] = useState(0), [mi, setMi] = useState(0), [msg, setMsg] = useState(null);
@@ -152,7 +223,7 @@ function LevelShell({ level, save, onExit, onDone, onNext }) {
     }, 250);
     return () => clearInterval(id);
   }, [phase, mi, hints, wrong]);
-  const View = { spin: SpinView, tilt: SeasonsView, water: WaterView, gravity: CannonView }[level.id];
+  const View = { spin: SpinView, tilt: SeasonsView, water: WaterView, gravity: CannonView, greenhouse: GreenhouseView, plates: PlateView, life: LifeView }[level.id];
   const head = h('div', { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.3)' } },
     h('button', { onClick: onExit, style: { ...btn('#4a5580'), padding: '6px 12px', fontSize: 14, boxShadow: 'none' } }, '← Map'),
     h('div', { style: { fontWeight: 900, fontSize: 17, flex: 1 } }, level.icon + ' Level ' + level.n + ': ' + level.title));

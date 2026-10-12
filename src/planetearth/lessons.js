@@ -3,6 +3,7 @@
 import { city, dayLength, declination, clockTime, elevationAt, isMorning, fmtTime, TILT } from './sky.js';
 import { circularSpeed, RE, ALT } from './orbit.js';
 import { FARM_A } from './water.js';
+import { toC } from './greenhouse.js';
 
 export const SHIP_CRYSTALS = 8;   // the alien ship needs 8 Discovery Crystals to fly home (one per level)
 const jhb = city('jhb'), tyo = city('tyo'), lon = city('lon'), tos = city('tos');
@@ -76,11 +77,54 @@ export const LEVELS = [
       { id: 'floatq', kind: 'choice', text: 'Why do astronauts float on the space station?', choices: ["There is no gravity in space", 'They and the station are constantly falling around Earth', 'The station spins to make them float', 'Space air pushes them up'], answer: 1, hint: 'Think about the cannon ball that never lands.', done: "Yes! They're in free-fall around the Earth, all day long." },
     ],
     codex: ['Gravity pulls everything toward the centre of Earth, and it weakens with distance.', 'An ORBIT is falling around a planet: about 7.8 km/s near Earth (28,000 km/h).', 'Faster than about 11.2 km/s and you ESCAPE Earth. Astronauts float because they are in free-fall.'] },
+
+  { id: 'greenhouse', n: 5, icon: '🏭', title: 'Greenhouse Earth', tagline: 'Why is Earth warm enough for life?', color: '#ff7a5a',
+    cards: [
+      { art: 'gh1', title: 'A freezing surprise', text: 'Sunlight warms Earth. But if Earth had NO atmosphere, it would be a frozen ball at about −18°C. Nothing could live in the oceans!', why: 'Earth gets rid of heat by sending invisible infrared light back to space. Heat in must equal heat out, and doing the sums gives −18°C. But the real average is about +15°C. Something adds 33°C!' },
+      { art: 'gh2', title: 'The invisible blanket', text: 'Some gases in the air (water vapour, carbon dioxide, methane) let sunlight IN but catch the heat trying to get OUT, sending some of it back down. That is the GREENHOUSE EFFECT.', why: "Greenhouse gases don't make heat. They slow down how fast heat escapes, like a blanket. Without them there would be no liquid oceans. More gas means a thicker blanket and a warmer planet." },
+      { art: 'gh3', title: 'Too much of a good thing', text: 'Burning coal, oil and gas adds extra carbon dioxide. Before factories the air held about 280 parts per million. Today it is over 420.', why: 'Scientists calculate that doubling CO₂ warms Earth by about 3°C in the long run. And warming melts ice. Ice reflects sunlight, so less ice means more heat is absorbed: a feedback that makes warming stronger. Understanding it is the first step to fixing it!' },
+    ],
+    hands: 'Move the sliders. Watch the sunlight (yellow), reflected light (white) and escaping heat (red). One second is about 5 years!',
+    missions: [
+      { id: 'freeze', text: 'Take away ALL the greenhouse gases. How cold does Earth get?', hint: 'Slide the greenhouse-gas slider to 0 and wait a few seconds for the oceans to cool.', check: (s) => s.ppm === 0 && s.tempC < -10, done: 'Brrr! Without the blanket Earth freezes, and white ice reflects even more sunlight. That is SNOWBALL Earth.' },
+      { id: 'justright', text: 'Bring life back: set the temperature between 10°C and 20°C and let it settle.', hint: 'Put the greenhouse gases back to around 280 to 420 ppm.', check: (s) => s.ppm > 0 && s.tempC >= 10 && s.tempC <= 20 && s.stable, done: 'Just right! The natural greenhouse effect keeps Earth at a comfortable 15°C or so.' },
+      { id: 'double', text: 'Double the CO₂ from 280 to about 560 ppm and let it settle. How much does Earth warm?', hint: 'Set the slider near 560 and look at the warming number.', check: (s) => s.ppm >= 520 && s.ppm <= 600 && s.stable, done: 'About +3°C. A small number for the whole planet, but it melts ice, raises seas and changes weather.' },
+      { id: 'blanketq', kind: 'choice', text: 'What does a greenhouse gas do?', choices: ['It makes new heat from nothing', 'It catches heat leaving Earth and sends some back down', 'It blocks sunlight from reaching Earth', 'It cools the planet'], answer: 1, hint: 'Think of a blanket.', done: 'Yes! It works like a blanket for heat.' },
+    ],
+    codex: ['Without greenhouse gases Earth would be about −18°C. They add about +33°C.', 'Greenhouse gases are a blanket: they slow heat escaping rather than making heat.', 'Doubling CO₂ warms Earth about 3°C in the long run, and melting ice makes warming stronger.'] },
+
+  { id: 'plates', n: 6, icon: '🌋', title: 'Moving Ground', tagline: 'Why do volcanoes and earthquakes happen?', color: '#e0682a',
+    cards: [
+      { art: 'plates1', title: 'Earth has layers', text: 'Earth is like a peach: a thin crust, a thick layer of hot mantle, and a metal core.', why: 'The crust is broken into giant slabs called TECTONIC PLATES. They float on the mantle, which is so hot that rock flows like very thick toothpaste, but only over millions of years.' },
+      { art: 'plates2', title: 'The plates move!', text: 'Plates creep about as fast as your fingernails grow (2 to 10 cm a year). South America and Africa used to be joined. The Atlantic Ocean is still getting wider!', why: 'Hot rock rises and cold rock sinks inside the mantle, dragging the plates along. A few centimetres a year adds up to thousands of kilometres over millions of years.' },
+      { art: 'plates3', title: 'Where plates meet', text: 'At the edges, plates can crash together, pull apart, or slide past each other. Each makes something different!', why: 'When an ocean plate meets a continent it dives under (SUBDUCTION), melts and feeds volcanoes. Two continents crumple into mountains like the Himalayas. Pulled apart, land splits into rift valleys. And earthquakes? Rock sticks, strain builds up, then it suddenly SLIPS.' },
+    ],
+    hands: 'Pick the plate types and set their speeds. Then press play: each second is about a million years! Also try the Quake Lab.',
+    missions: [
+      { id: 'mount', text: 'Build a mountain range: crash two CONTINENTS together until the mountains pass 5 km high.', hint: 'Set both plates to "Continent" and push them toward each other (left plate positive, right plate negative). Then press play.', check: (s) => s.mount >= 5, done: 'A new mountain range! This is how the Himalayas and the Alps were made.' },
+      { id: 'rift', text: 'Open a new ocean: pull two continents apart until the rift valley sinks 3 km.', hint: 'Both plates continent, left plate negative, right plate positive.', check: (s) => s.rift >= 3, done: 'A rift valley! East Africa is slowly splitting like this and one day a new ocean will fill the gap.' },
+      { id: 'trench', text: 'Make a deep ocean trench AND a chain of volcanoes: push an OCEAN plate into a continent.', hint: 'Left plate "Ocean", right plate "Continent", push them together. Watch the ocean plate dive!', check: (s) => s.trench >= 4 && s.arc >= 2, done: 'Subduction! The sinking plate melts and the magma feeds volcanoes, like the Andes and the Pacific Ring of Fire.' },
+      { id: 'bigquake', text: 'In the Quake Lab, make a BIG earthquake of magnitude 7.3 or more.', hint: 'Make the rock stickier (move the Stickiness slider up) so more strain stores up before it breaks.', check: (s) => s.maxMag >= 7.3, done: 'A great earthquake! The stickier the rock, the more strain stored and the bigger the quake.' },
+      { id: 'quakeq', kind: 'choice', text: 'Why do earthquakes happen SUDDENLY when plates move slowly?', choices: ['Plates suddenly speed up', 'Rock sticks, strain builds up, then it slips all at once', 'The mantle suddenly melts', 'Volcanoes make them'], answer: 1, hint: 'Remember the stretching spring in the Quake Lab.', done: 'Yes! Like a stretched rubber band that suddenly snaps.' },
+    ],
+    codex: ['Earth\'s crust is broken into plates that move a few centimetres a year, carried by the flowing mantle.', 'Plate edges make mountains (collision), volcanoes and trenches (subduction), and rift valleys (pulling apart).', 'Earthquakes happen when stuck rock stores strain and then suddenly slips.'] },
+
+  { id: 'life', n: 7, icon: '🦁', title: 'The Web of Life', tagline: 'How do plants and animals depend on each other?', color: '#4caf50',
+    cards: [
+      { art: 'eco1', title: 'Energy from the Sun', text: 'Grass uses sunlight to make its own food (photosynthesis). Antelope eat the grass. Lions eat the antelope.', why: 'That is a FOOD CHAIN. Energy flows from the Sun to plants to plant-eaters to meat-eaters. Each step passes on only about 10% of the energy, which is why there are far fewer lions than antelope, and far more grass than either.' },
+      { art: 'eco2', title: 'Boom and bust', text: 'More antelope means more food for lions, so lions multiply. Then lions eat too many antelope, the antelope crash, lions go hungry, and the cycle starts again.', why: 'Predator and prey numbers rise and fall in linked cycles. This wobble is how nature keeps its balance.' },
+      { art: 'eco3', title: 'Take away the lions...', text: 'What if all the lions disappeared one day? You will get to try it yourself in a moment!', why: 'With no predators, antelope boom, eat all the grass, then starve. In Yellowstone in the USA, wolves were removed in the 1920s and elk overgrazed the river banks. When wolves came back in 1995, plants and rivers recovered. Everything is connected!' },
+    ],
+    hands: 'Watch the savanna. Add or remove animals, change the rainfall, or cause a drought. Time runs 3 times faster than real life.',
+    missions: [
+      { id: 'balance', text: 'Keep the savanna balanced for 60 seconds: grass, antelope AND lions all alive.', hint: 'Leave it alone, or add a few animals if one group is dying out. Keep the rain steady.', check: (s) => s.balancedFor >= 60, done: 'A balanced ecosystem! Grass, antelope and lions keep each other in check.' },
+      { id: 'cascade', text: 'Remove ALL the lions and watch what happens: let the grass drop below 25%.', hint: 'Press "Remove lions" and wait. Be patient: first the antelope boom.', check: (s) => s.lions === 0 && s.grass < 0.25 && s.hadRemoval, done: 'A trophic cascade! No lions led to too many antelope, which ate nearly all the grass.' },
+      { id: 'heal', text: 'Heal the land: bring the lions back so the grass climbs above 30% with antelope and lions alive.', hint: 'Add antelope if they died out, add lions, and give the grass time to grow back.', check: (s) => s.lions >= 2 && s.ants >= 8 && s.grass >= 0.3 && s.hadRemoval, done: 'You restored the web of life! Predators protect the plants by keeping grazers in check.' },
+      { id: 'whyq', kind: 'choice', text: 'Why are predators like lions important for the grass?', choices: ['Lions fertilise the grass', 'They stop the antelope from eating all of it', 'Lions plant the seeds', 'They are not important'], answer: 1, hint: 'Remember what happened when you removed the lions.', done: 'Exactly: predators keep grazers in balance so plants survive.' },
+    ],
+    codex: ['A food chain moves energy from the Sun to plants, then plant-eaters, then meat-eaters. Only about 10% passes up each step.', 'Predator and prey numbers rise and fall in linked cycles.', 'Remove a predator and the whole web can collapse: this is called a trophic cascade.'] },
 ];
 export const SOON = [
-  { n: 5, icon: '🏭', title: 'Greenhouse Earth', tagline: 'Why is Earth warm enough for life?' },
-  { n: 6, icon: '🌋', title: 'Moving Ground', tagline: 'Why do volcanoes and earthquakes happen?' },
-  { n: 7, icon: '🦁', title: 'The Web of Life', tagline: 'How do plants, animals and weather depend on each other?' },
   { n: 8, icon: '🌪️', title: 'Wind & Weather', tagline: 'What makes the wind blow and storms form?' },
 ];
 export const levelById = (id) => LEVELS.find((l) => l.id === id);

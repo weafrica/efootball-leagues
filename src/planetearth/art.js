@@ -3,6 +3,9 @@ import { drawGlobe, cityScreen } from './earthmap.js';
 import { subsolarLon, sunElevation, declination, dayLength, orbitAngle, fmtTime, clockTime, CITIES, TILT } from './sky.js';
 import { WW, WH, SEA_X, FARM_A, FARM_B, groundY, cloudBase, surfaceTemp, dewPoint, airTemp } from './water.js';
 import { RE, ALT, at } from './orbit.js';
+import { tau, toC, noAtmosphereTemp, effAlbedo } from './greenhouse.js';
+import { N as TN, X0, heights, boundaryKind, relSpeed } from './tectonics.js';
+import { GW, GH, avgGrass } from './ecosystem.js';
 
 export const ALIEN_COLORS = ['#7be37b', '#8fd3ff', '#ff9de0', '#ffd36b', '#c9a2ff', '#ff9a7a'];
 export const ALIEN_NAMES = ['Zorp', 'Blip', 'Quark', 'Nebby', 'Zimble', 'Pixel', 'Orbo', 'Fizz', 'Glimmer', 'Wobble', 'Zeeb', 'Comet'];
@@ -67,6 +70,27 @@ export function cardArt(ctx, kind, w, h, tm) {
   else if (kind === 'gravity') { drawGlobe(ctx, cx, h * 1.15, h * 0.78, 28, 60, { grid: false }); ctx.fillStyle = '#e24b4b'; const y = h * 0.1 + ((tm * 0.8) % 1) * h * 0.2; ctx.beginPath(); ctx.arc(cx, y, 9, 0, 6.3); ctx.fill(); arrow(ctx, cx + 30, h * 0.2, cx + 30, h * 0.38, '#ffe27a'); label(ctx, 'gravity pulls DOWN', cx + 40, h * 0.3, 12, '#ffe27a', 'left'); }
   else if (kind === 'orbit2') { const ex = cx, ey = h * 1.1, er = h * 0.72; drawGlobe(ctx, ex, ey, er, 28, 90, { grid: false }); ctx.fillStyle = '#8a8f9c'; ctx.fillRect(ex - 6, ey - er - 14, 12, 14); ctx.fillStyle = '#444'; ctx.fillRect(ex, ey - er - 12, 22, 6); [['#9cf', 0.25], ['#ffe27a', 0.5], ['#ff9a7a', 1.0]].forEach(([c2, k], i) => { ctx.strokeStyle = c2; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(ex, ey, er + 14 + i * 1, -1.5708, -1.5708 + k * 1.6); ctx.stroke(); }); label(ctx, 'faster → farther → ORBIT', cx, h * 0.16, 12, '#ffe27a'); }
   else if (kind === 'iss') { drawGlobe(ctx, cx, h * 1.3, h * 0.95, 28, 40, { grid: false }); const a = tm * 0.5; const x = cx + Math.cos(a) * w * 0.3, y = h * 0.3 + Math.sin(a) * h * 0.08; ctx.fillStyle = '#cfd6e6'; ctx.fillRect(x - 24, y - 6, 48, 12); ctx.fillStyle = '#4a7fd6'; ctx.fillRect(x - 40, y - 12, 14, 24); ctx.fillRect(x + 26, y - 12, 14, 24); drawAlien(ctx, x + 70, y + 20 + Math.sin(tm * 2) * 5, h * 0.2, 0, tm, { x: 0, y: 0 }, 'wow'); label(ctx, 'falling together = floating', cx, h - 12, 12, '#ffe27a'); }
+  else if (kind === 'gh1' || kind === 'gh2' || kind === 'gh3') {
+    drawSun(ctx, w * 0.08, cy, h * 0.1, tm); const ex = w * 0.58, er = Math.min(w * 0.22, h * 0.34);
+    drawGlobe(ctx, ex, cy, er, 28, 10, { sun: { lon: 28 - 80, lat: 0 }, grid: false });
+    if (kind === 'gh3') { ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.save(); ctx.beginPath(); ctx.arc(ex, cy, er, 0, 6.3); ctx.clip(); ctx.fillRect(ex - er, cy - er, er * 2, er * 0.35); ctx.fillRect(ex - er, cy + er * 0.65, er * 2, er * 0.35); ctx.restore(); }
+    if (kind === 'gh2') { ctx.strokeStyle = 'rgba(255,170,90,0.55)'; ctx.lineWidth = er * 0.16; ctx.beginPath(); ctx.arc(ex, cy, er * 1.12, 0, 6.3); ctx.stroke(); }
+    for (let i = 0; i < 4; i++) { const y = cy - er * 0.9 + i * er * 0.6, t = (tm * 0.5 + i * 0.25) % 1; arrow(ctx, w * 0.17 + t * 20, y, w * 0.34 + t * 20, y, 'rgba(255,225,110,0.9)', 2.5); }
+    const ir = (a, k) => { const x1 = ex + Math.cos(a) * er * 1.0, y1 = cy + Math.sin(a) * er * 1.0, x2 = ex + Math.cos(a) * er * k, y2 = cy + Math.sin(a) * er * k; arrow(ctx, x1, y1, x2, y2, '#ff7a5a', 2.5); };
+    if (kind === 'gh1') { ir(-0.8, 1.7); ir(-0.3, 1.7); ir(0.4, 1.7); label(ctx, 'No blanket: −18°C', w * 0.58, h - 12, 14, '#9cf'); label(ctx, 'heat escapes to space', w * 0.82, cy - er * 1.3, 11, '#ff9a7a'); }
+    else if (kind === 'gh2') { ir(-0.5, 1.45); ctx.strokeStyle = '#ff7a5a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(ex + er * 0.9, cy - er * 0.5, er * 0.3, 3.5, 5.7); ctx.stroke(); arrow(ctx, ex + er * 1.25, cy + er * 0.1, ex + er * 0.85, cy + er * 0.45, '#ff7a5a', 2.5); label(ctx, 'Greenhouse gases = a blanket: +15°C', w * 0.58, h - 12, 14, '#ffe27a'); }
+    else { label(ctx, 'More CO₂: 280 → 420 ppm', w * 0.58, h - 12, 14, '#ffe27a'); label(ctx, 'ice melts → less reflection', w * 0.58, 20, 12, '#cfe'); }
+  }
+  else if (kind === 'plates1') { const R0 = Math.min(w, h) * 0.42; [['#6b4a2b', 1.0, 'crust'], ['#e0682a', 0.97, 'mantle'], ['#f6b042', 0.55, 'outer core'], ['#ffe27a', 0.25, 'inner core']].forEach(([c, k]) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(cx, cy, R0 * k, 0, 6.3); ctx.fill(); }); label(ctx, 'thin crust', cx + R0 * 0.78, cy - R0 * 0.78, 11); label(ctx, 'hot flowing mantle', cx - R0 * 0.1, cy - R0 * 0.62, 12, '#fff'); label(ctx, 'metal core', cx, cy + 4, 12, '#5a3000'); }
+  else if (kind === 'plates2') { drawGlobe(ctx, cx, cy, R, -22, 8, { grid: false }); arrow(ctx, cx - R * 0.55, cy + R * 0.05, cx - R * 0.95, cy + R * 0.05, '#ffe27a', 3); arrow(ctx, cx + R * 0.35, cy + R * 0.05, cx + R * 0.75, cy + R * 0.05, '#ffe27a', 3); label(ctx, 'Atlantic widens ~2.5 cm a year', cx, h - 10, 12, '#ffe27a'); }
+  else if (kind === 'plates3') { const bw = w * 0.26, y0 = cy + h * 0.1, bh = h * 0.2, put = (x, lab, f) => { f(x, y0); label(ctx, lab, x + bw / 2, y0 + bh + 18, 11, '#ffe27a'); };
+    put(w * 0.05, 'collide', (x, y) => { ctx.fillStyle = '#8a6a44'; ctx.fillRect(x, y, bw * 0.48, bh); ctx.fillRect(x + bw * 0.52, y, bw * 0.48, bh); ctx.fillStyle = '#9aa0ad'; ctx.beginPath(); ctx.moveTo(x + bw * 0.3, y); ctx.lineTo(x + bw * 0.5, y - bh * 0.9); ctx.lineTo(x + bw * 0.7, y); ctx.fill(); arrow(ctx, x - 4, y - 14, x + bw * 0.3, y - 14, '#fff', 2.5); arrow(ctx, x + bw + 4, y - 14, x + bw * 0.7, y - 14, '#fff', 2.5); });
+    put(w * 0.37, 'pull apart', (x, y) => { ctx.fillStyle = '#8a6a44'; ctx.fillRect(x, y, bw * 0.4, bh); ctx.fillRect(x + bw * 0.6, y, bw * 0.4, bh); ctx.fillStyle = '#e0682a'; ctx.fillRect(x + bw * 0.4, y + bh * 0.4, bw * 0.2, bh * 0.6); arrow(ctx, x + bw * 0.38, y - 14, x - 4, y - 14, '#fff', 2.5); arrow(ctx, x + bw * 0.62, y - 14, x + bw + 4, y - 14, '#fff', 2.5); });
+    put(w * 0.69, 'slide past', (x, y) => { ctx.fillStyle = '#8a6a44'; ctx.fillRect(x, y, bw * 0.48, bh); ctx.fillRect(x + bw * 0.52, y, bw * 0.48, bh); arrow(ctx, x + bw * 0.24, y - 20, x + bw * 0.24, y - 6, '#fff', 2.5); arrow(ctx, x + bw * 0.76, y + bh + 4, x + bw * 0.76, y + bh + 18 - 22, '#fff', 2.5); }); }
+  else if (kind === 'eco1') { const items = [['☀️', 0.1], ['🌿', 0.34], ['🦌', 0.58], ['🦁', 0.82]]; items.forEach(([e, x], i) => { ctx.font = `${Math.min(w * 0.12, h * 0.34)}px system-ui`; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(e, w * x, cy + h * 0.06); if (i < 3) arrow(ctx, w * (x + 0.07), cy, w * (x + 0.17), cy, '#ffe27a', 3); }); label(ctx, 'energy flows up the food chain', cx, h - 10, 13, '#ffe27a'); label(ctx, 'only ~10% passes on each step', cx, 20, 11, '#cfe'); }
+  else if (kind === 'eco2') { ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(w * 0.08, h * 0.85); ctx.lineTo(w * 0.95, h * 0.85); ctx.moveTo(w * 0.08, h * 0.12); ctx.lineTo(w * 0.08, h * 0.85); ctx.stroke();
+    [['#c8884a', 0, 'antelope'], ['#ffb020', 1.3, 'lions']].forEach(([c, ph, nm], k) => { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.beginPath(); for (let x = 0; x <= 1; x += 0.01) { const y = h * (0.5 - 0.28 * Math.sin(x * 12 - ph - tm)); x ? ctx.lineTo(w * (0.08 + x * 0.87), y) : ctx.moveTo(w * (0.08 + x * 0.87), y); } ctx.stroke(); label(ctx, nm, w * (0.2 + k * 0.3), h * 0.1 + k * 0, 12, c); }); label(ctx, 'time →', w * 0.9, h * 0.95, 11); }
+  else if (kind === 'eco3') { [[0.25, '#4caf50', 'with lions', 6], [0.75, '#b08a50', 'no lions', 26]].forEach(([x, c, t, n]) => { ctx.fillStyle = c; ctx.fillRect(w * (x - 0.22), h * 0.2, w * 0.44, h * 0.6); for (let i = 0; i < n; i++) { ctx.fillStyle = '#7a4a1e'; ctx.beginPath(); ctx.arc(w * (x - 0.2) + hash(i + x * 10) * w * 0.4, h * 0.25 + hash(i + 40 + x) * h * 0.5, 4, 0, 6.3); ctx.fill(); } label(ctx, t, w * x, h * 0.14, 13, '#fff'); }); label(ctx, 'everything is connected', cx, h - 8, 13, '#ffe27a'); }
   else { drawUfo(ctx, cx, cy, h * 0.6, tm, true); }
 }
 
@@ -148,4 +172,83 @@ export function drawCannon(ctx, w, h, tm, st) {
   if (st.flight) { const f = st.flight; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); let n = 0; for (const p of f.points) { if (p.t > st.t) break; const q = P(p.x, p.y); n ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); n++; } ctx.stroke(); const b = at(f, st.t), q = P(b.x, b.y); ctx.fillStyle = '#ff6a3d'; ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, 6.3); ctx.fill(); ctx.fillStyle = '#ffd27a'; ctx.beginPath(); ctx.arc(q.x - 1.5, q.y - 1.5, 2.3, 0, 6.3); ctx.fill(); }
   else { const a = st.angle * Math.PI / 180, L = 20 + st.speed * 8; arrow(ctx, mt.x, mt.y, mt.x + Math.cos(a) * L, mt.y - Math.sin(a) * L, '#ffe27a', 3); }
   label(ctx, st.speed.toFixed(2) + ' km/s', mt.x, mt.y - 22, 13, '#ffe27a');
+}
+
+// ---- Level 5: the greenhouse lab ----
+export function drawGreenhouse(ctx, w, h, tm, st) {
+  spaceBg(ctx, w, h, tm); const c = st.c, T = toC(c.T), cx = w * 0.43, cy = h * 0.52, R = Math.min(w * 0.26, h * 0.3), a = effAlbedo(c.base, c.T), ta = tau(c.ppm), dt = st.dt || 0.016;
+  drawSun(ctx, w * 0.04, cy, h * 0.07, tm, 0.4);
+  drawGlobe(ctx, cx, cy, R, 28, 12, { sun: { lon: 28 - 85, lat: 0 }, grid: false });
+  const ice = Math.max(0, Math.min(1, (273.15 - c.T) / 25)), hot = Math.max(0, Math.min(1, (T - 30) / 25));
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.3); ctx.clip(); if (ice > 0) { ctx.fillStyle = `rgba(245,250,255,${0.85 * ice})`; ctx.fillRect(cx - R, cy - R, R * 2, R * 2); } if (hot > 0) { ctx.fillStyle = `rgba(255,80,30,${0.45 * hot})`; ctx.fillRect(cx - R, cy - R, R * 2, R * 2); } ctx.restore();
+  ctx.strokeStyle = `rgba(255,170,90,${Math.min(0.75, 0.08 + ta * 0.32)})`; ctx.lineWidth = R * (0.05 + Math.min(0.2, ta * 0.12)); ctx.beginPath(); ctx.arc(cx, cy, R * 1.12, 0, 6.3); ctx.stroke();
+  // photons
+  const ph = st.ph; st.acc = (st.acc || 0) + dt * 6; while (st.acc >= 1 && ph.length < 160) { st.acc -= 1; ph.push({ k: 's', x: w * 0.09, y: cy + (Math.random() * 2 - 1) * R * 1.15, vx: 170, vy: 0, crossed: false }); } st.acc = Math.min(st.acc, 1);
+  for (let i = ph.length - 1; i >= 0; i--) {
+    const p = ph[i]; p.x += p.vx * dt; p.y += p.vy * dt; const d = Math.hypot(p.x - cx, p.y - cy);
+    if (p.k === 's' && d <= R) { if (Math.random() < a) { p.k = 'r'; p.vx = -90; p.vy = (Math.random() - 0.5) * 120; } else { const an = Math.atan2(p.y - cy, p.x - cx); p.k = 'i'; p.vx = Math.cos(an) * 70; p.vy = Math.sin(an) * 70; p.crossed = false; } }
+    else if (p.k === 'i' && !p.crossed && d >= R * 1.12) { p.crossed = true; if (Math.random() < 1 - Math.exp(-ta)) { const out = Math.random() < 0.5, an = Math.atan2(p.y - cy, p.x - cx) + (Math.random() - 0.5) * 1.6, sg = out ? 1 : -1; p.vx = Math.cos(an) * 70 * sg; p.vy = Math.sin(an) * 70 * sg; p.bounced = true; if (!out) p.crossed = true; } }
+    else if (p.k === 'i' && p.bounced && d <= R) { const an = Math.atan2(p.y - cy, p.x - cx); p.vx = Math.cos(an) * 70; p.vy = Math.sin(an) * 70; p.bounced = false; p.crossed = false; }
+    if (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) ph.splice(i, 1);
+  }
+  for (const p of ph) { ctx.fillStyle = p.k === 's' ? '#ffe27a' : p.k === 'r' ? '#ffffff' : '#ff6a4a'; ctx.beginPath(); ctx.arc(p.x, p.y, p.k === 'i' ? 2.8 : 2.4, 0, 6.3); ctx.fill(); }
+  // thermometer
+  const tx = w - 46, y0 = h * 0.1, y1 = h * 0.9, Y = (t) => y1 - ((Math.max(-60, Math.min(60, t)) + 60) / 120) * (y1 - y0);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(tx - 9, y0, 18, y1 - y0); [[-60, 0, '#6aaeff'], [0, 5, '#9fd0ff'], [5, 25, '#58c46a'], [25, 40, '#f0c040'], [40, 60, '#f06a3a']].forEach(([a0, a1, col]) => { ctx.fillStyle = col; ctx.globalAlpha = 0.6; ctx.fillRect(tx - 9, Y(a1), 18, Y(a0) - Y(a1)); }); ctx.globalAlpha = 1;
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(tx, Y(T), 8, 0, 6.3); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+  [[-18, 'no blanket'], [15, 'Earth'], [0, 'freezing']].forEach(([t, nm]) => { label(ctx, nm, tx - 14, Y(t) + 4, 10, 'rgba(255,255,255,0.8)', 'right'); });
+  label(ctx, T.toFixed(1) + '°C', 14, 28, 26, T < 0 ? '#9fd0ff' : T > 30 ? '#ff9a7a' : '#8dffb0', 'left'); label(ctx, 'average temperature of Earth', 14, 46, 11, '#fff', 'left');
+  label(ctx, 'Greenhouse effect: +' + (c.T - noAtmosphereTemp(c.base)).toFixed(0) + '°C', 14, 66, 12, '#ffe27a', 'left');
+  label(ctx, T < -10 ? '❄️ Snowball Earth!' : T < 5 ? 'Too cold for most life' : T < 25 ? '🌱 Just right for life' : T < 40 ? 'Getting hot' : '🔥 Too hot!', 14, h - 12, 15, '#fff', 'left');
+}
+
+// ---- Level 6: moving ground ----
+export function drawTectonics(ctx, w, h, tm, st) {
+  const p = st.p, hs = heights(p), kind = boundaryKind(p), seaY = h * 0.36, km = h * 0.027, X = (i) => (i / (TN - 1)) * w;
+  const sh = st.shake > 0 ? (Math.random() - 0.5) * 6 * st.shake : 0; ctx.save(); ctx.translate(sh, sh * 0.6);
+  const sky = ctx.createLinearGradient(0, 0, 0, seaY); sky.addColorStop(0, '#2a62c9'); sky.addColorStop(1, '#a9d8ff'); ctx.fillStyle = sky; ctx.fillRect(-10, -10, w + 20, seaY + 10);
+  const mantle = ctx.createLinearGradient(0, seaY + h * 0.3, 0, h); mantle.addColorStop(0, '#d9561f'); mantle.addColorStop(1, '#ffb03a'); ctx.fillStyle = mantle; ctx.fillRect(-10, seaY, w + 20, h);
+  ctx.fillStyle = '#1f6fd0'; ctx.globalAlpha = 0.9; ctx.fillRect(-10, seaY, w + 20, h * 0.34); ctx.globalAlpha = 1;
+  ctx.fillStyle = '#7b5a3a'; ctx.beginPath(); ctx.moveTo(-10, seaY + h * 0.4); for (let i = 0; i < TN; i++) ctx.lineTo(X(i), seaY - hs[i] * km); ctx.lineTo(w + 10, seaY + h * 0.4); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#4e9d4a'; ctx.lineWidth = 3; ctx.beginPath(); for (let i = 0; i < TN; i++) { const y = seaY - hs[i] * km; i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); } ctx.stroke();
+  ctx.fillStyle = '#eef6ff'; ctx.beginPath(); let on = false; for (let i = 0; i < TN; i++) { if (hs[i] > 6.2) { const y = seaY - hs[i] * km; on ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); on = true; } } for (let i = TN - 1; i >= 0; i--) if (hs[i] > 6.2) ctx.lineTo(X(i), seaY - (hs[i] - 0.9) * km); ctx.fill();
+  if (kind === 'subduction' || kind === 'islandarc') { const dir = p.left === 'ocean' ? -1 : 1, bx = X(X0) , by = seaY - hs[X0] * km, L = Math.min(w * 0.3, 40 + p.shortening * 0.25); ctx.fillStyle = 'rgba(40,25,15,0.85)'; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + dir * L * 0.9 * -1 + dir * 0, by); ctx.lineTo(bx + L * 0.8 * (p.left === 'ocean' ? 1 : -1), by + L * 0.8); ctx.lineTo(bx + L * 0.8 * (p.left === 'ocean' ? 1 : -1) - dir * -14, by + L * 0.8 + 10); ctx.closePath(); ctx.fill(); }
+  // eruptions at the highest arc / rift
+  if (p.t - p.lastErupt < 1.3 && p.eruptions > 0) { let mi = X0; for (let i = 0; i < TN; i++) if (Math.abs(i - X0) > 6 && hs[i] > hs[mi]) mi = i; const ex = X(kind === 'rift' ? X0 : mi), ey = seaY - (kind === 'rift' ? hs[X0] : hs[mi]) * km; for (let k = 0; k < 14; k++) { const t = (tm * 2 + k / 14) % 1; ctx.fillStyle = k % 3 ? `rgba(255,${120 + k * 6},40,${1 - t})` : `rgba(90,90,90,${0.8 - t * 0.8})`; ctx.beginPath(); ctx.arc(ex + Math.sin(k * 2.1) * t * 26, ey - t * 60 - 3, 3 + (k % 3) * 2, 0, 6.3); ctx.fill(); } label(ctx, '🌋 ERUPTION!', ex, ey - 78, 13, '#ffcf6a'); }
+  // plate arrows
+  const arr = (x, v, y) => { if (Math.abs(v) < 0.2) return; arrow(ctx, x, y, x + Math.sign(v) * (14 + Math.abs(v) * 7), y, '#fff', 4); label(ctx, Math.abs(v).toFixed(1) + ' cm/yr', x + Math.sign(v) * 30, y - 8, 11); };
+  arr(w * 0.2, p.vL, seaY - 4.6 * km - 20); arr(w * 0.8, p.vR, seaY - 4.6 * km - 20);
+  label(ctx, p.left === 'cont' ? 'continent' : 'ocean plate', w * 0.17, h - 10, 12, '#fff'); label(ctx, p.right === 'cont' ? 'continent' : 'ocean plate', w * 0.83, h - 10, 12, '#fff'); label(ctx, 'hot flowing mantle', w * 0.5, h - 10, 12, '#fff3d0');
+  const MSG = { collision: 'Collision! Continents crumple into mountains', subduction: 'Subduction: the ocean plate dives under, melts and feeds volcanoes', islandarc: 'Ocean meets ocean: a trench and a chain of volcanic islands', rift: 'Rift! The land stretches, sinks and splits', ridge: 'Mid-ocean ridge: new seafloor is made', transform: 'Sliding past: no mountains, but earthquakes!' };
+  label(ctx, MSG[kind], w / 2, 18, 13, '#fff'); label(ctx, p.t.toFixed(1) + ' million years  ·  highest: ' + Math.max(0, Math.max(...hs)).toFixed(1) + ' km  ·  deepest: ' + Math.min(0, Math.min(...hs)).toFixed(1) + ' km', w / 2, 36, 11, '#ffe27a');
+  ctx.restore();
+}
+export function drawQuakeLab(ctx, w, h, tm, st) {
+  const q = st.q, sh = q.flash > 0.6 ? (Math.random() - 0.5) * 14 * q.flash : 0; ctx.save(); ctx.translate(sh, sh * 0.5);
+  const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#2a62c9'); g.addColorStop(0.45, '#a9d8ff'); g.addColorStop(0.46, '#7b5a3a'); g.addColorStop(1, '#4a3320'); ctx.fillStyle = g; ctx.fillRect(-10, -10, w + 20, h + 20);
+  const gy = h * 0.46, bw = w * 0.3, bx = w * 0.5 - bw / 2 + Math.min(1, q.lastSlip / 8) * 0 + (q.flash > 0 ? 6 * q.flash : 0), by = gy - h * 0.14, px = w * 0.06 + Math.min(1, q.deficit / 9) * w * 0.16;
+  ctx.fillStyle = '#9a7650'; ctx.fillRect(bx - w * 0.1, gy - 4, bw + w * 0.2, 8); ctx.fillStyle = '#5a7d9a'; ctx.fillRect(bx, by, bw, h * 0.14); ctx.fillStyle = '#e8d29a'; ctx.fillRect(px - 14, by + h * 0.02, 28, h * 0.1);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); const sx = px + 14, ex = bx, n = 14; ctx.moveTo(sx, by + h * 0.07); for (let i = 1; i < n; i++) ctx.lineTo(sx + ((ex - sx) * i) / n, by + h * 0.07 + (i % 2 ? -8 : 8) * Math.min(1, 1.2 - q.deficit / 10)); ctx.lineTo(ex, by + h * 0.07); ctx.stroke();
+  arrow(ctx, px - 10, by - 14, px + 22, by - 14, '#fff', 3); label(ctx, 'plate pushed at ' + (q.v / 10).toFixed(1) + ' cm/yr', px, by - 24, 11, '#fff', 'left'); label(ctx, 'rock (stuck!)', bx + bw / 2, by + h * 0.085, 12, '#fff');
+  const fill = Math.min(1, q.deficit / Math.max(0.1, q.crit)); ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(w * 0.08, h * 0.62, w * 0.5, 16); ctx.fillStyle = fill > 0.85 ? '#ff6a3a' : '#ffd93b'; ctx.fillRect(w * 0.08, h * 0.62, w * 0.5 * fill, 16); label(ctx, 'Strain stored: ' + q.deficit.toFixed(2) + ' m of slip', w * 0.08, h * 0.62 - 6, 12, '#fff', 'left');
+  label(ctx, q.flash > 0.3 ? '💥 EARTHQUAKE! M' + (q.quakes.length ? q.quakes[q.quakes.length - 1].mag.toFixed(1) : '') : 'Strain building…', w * 0.7, h * 0.64, 16, q.flash > 0.3 ? '#ff9a7a' : '#fff', 'left'); label(ctx, 'Biggest so far: M' + (q.maxMag || 0).toFixed(1), w * 0.7, h * 0.7, 13, '#ffe27a', 'left');
+  const gx = w * 0.06, gw = w * 0.88, gh0 = h * 0.2, gb = h * 0.96; ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.moveTo(gx, gb); ctx.lineTo(gx + gw, gb); ctx.stroke();
+  const shown = q.quakes.slice(-30); shown.forEach((e, i) => { const bh = Math.max(3, (e.mag - 5.5) * gh0 * 0.55); ctx.fillStyle = e.mag >= 7.2 ? '#ff6a3a' : e.mag >= 6.5 ? '#ffb03a' : '#7fe9ff'; ctx.fillRect(gx + (i + 0.5) * (gw / 30) - 5, gb - bh, 10, bh); });
+  label(ctx, 'Earthquakes (taller = bigger)', gx, gb - gh0 - 4, 11, '#fff', 'left'); ctx.restore();
+}
+
+// ---- Level 7: the savanna food web ----
+export function drawEcosystem(ctx, w, h, tm, st) {
+  const e = st.e, mh = h * 0.68, cs = Math.min(w / GW, mh / GH), ox = (w - cs * GW) / 2, oy = 4;
+  ctx.fillStyle = '#12204a'; ctx.fillRect(0, 0, w, h);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) { const g = e.grass[y * GW + x]; ctx.fillStyle = `rgb(${Math.round(196 - g * 140)},${Math.round(160 + g * 20)},${Math.round(100 - g * 40)})`; ctx.fillRect(ox + x * cs, oy + y * cs, cs + 0.5, cs + 0.5); }
+  for (const a of e.ants) { const x = ox + a.x * cs, y = oy + a.y * cs; ctx.fillStyle = '#7a4a1e'; ctx.beginPath(); ctx.arc(x, y, Math.max(2, cs * 0.3), 0, 6.3); ctx.fill(); ctx.strokeStyle = '#3a2410'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x - 1, y - cs * 0.3); ctx.lineTo(x - 3, y - cs * 0.6); ctx.moveTo(x + 1, y - cs * 0.3); ctx.lineTo(x + 3, y - cs * 0.6); ctx.stroke(); }
+  for (const l of e.lions) { const x = ox + l.x * cs, y = oy + l.y * cs; ctx.fillStyle = '#b86a10'; ctx.beginPath(); ctx.arc(x, y, Math.max(4, cs * 0.5), 0, 6.3); ctx.fill(); ctx.fillStyle = '#ffc040'; ctx.beginPath(); ctx.arc(x, y, Math.max(3, cs * 0.34), 0, 6.3); ctx.fill(); }
+  if (e.drought > 0) { ctx.fillStyle = `rgba(255,170,40,${0.12 + 0.05 * Math.sin(tm * 3)})`; ctx.fillRect(ox, oy, cs * GW, cs * GH); label(ctx, '☀️ DROUGHT', w / 2, oy + 24, 20, '#ffe27a'); }
+  // population graph
+  const gx = 10, gy = mh + 18, gw = w - 20, gh = h - mh - 30; ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(gx, gy, gw, gh);
+  const line = (key, max, col) => { ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); e.hist.forEach((p, i) => { const x = gx + (i / 160) * gw, y = gy + gh - Math.min(1, p[key] / max) * gh; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); };
+  line('g', 1, '#6fe06f'); line('a', 300, '#d6924a'); line('l', 14, '#ffc040');
+  label(ctx, 'grass', gx + 6, gy + 14, 11, '#6fe06f', 'left'); label(ctx, 'antelope', gx + 56, gy + 14, 11, '#d6924a', 'left'); label(ctx, 'lions', gx + 126, gy + 14, 11, '#ffc040', 'left');
+  label(ctx, '🌿 ' + Math.round(avgGrass(e) * 100) + '%   🦌 ' + e.ants.length + '   🦁 ' + e.lions.length, w - 8, gy - 4, 13, '#fff', 'right');
 }
