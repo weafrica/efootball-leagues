@@ -442,6 +442,9 @@ const PLURALS = {
   naleli: "linaleli", pula: "lipula", sefate: "lifate", bosiu: "masiu",
   morena: "marena", tichere: "litichere", ngaka: "lingaka", mooki: "baoki", molemi: "balemi", moeti: "baeti",
 };
+const BOOK_COMPLETE_KEY = "sesothoMatch:bookComplete:v1";
+const NKHONO_CLOSING_WRITTEN = "You've done it, child. Every page is safe again, and the Wind of Forgetting has nothing left to take from us. Because of you, our words will be spoken for generations still to come. Kea leboha \u2014 thank you.";
+const NKHONO_CLOSING_SPOKEN = "You've done it, child. Every page is safe again, and the Wind of Forgetting has nothing left to take from us. Because of you, our words will be spoken for generations still to come. Thank you.";
 const DISCOVERED_KEY = "sesothoMatch:discovered:v1";
 function loadDiscovered() { try { return new Set(JSON.parse(localStorage.getItem(DISCOVERED_KEY) || "[]")); } catch { return new Set(); } }
 function saveDiscovered(set) { try { localStorage.setItem(DISCOVERED_KEY, JSON.stringify(Array.from(set))); } catch { /* fine, just won't remember across sessions */ } }
@@ -813,6 +816,8 @@ export default function SesothoMatchPage({ onBack, c }) {
   const lessonThresholdRef = useRef(3 + Math.floor(Math.random() * 2)); // 3 or 4
   const [isPractice, setIsPractice] = useState(false);
   const practiceMasteredRef = useRef(false);
+  const [showPages, setShowPages] = useState(false);
+  const [justCompletedBook, setJustCompletedBook] = useState(false);
   const [hypeToast, setHypeToast] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [walkTo, setWalkTo] = useState(null);
@@ -964,15 +969,22 @@ export default function SesothoMatchPage({ onBack, c }) {
     if (outcome === "won") {
       play(SFX.win);
       const earned = starsFor(score, level.target);
-      setProgress((prev) => {
-        const next = {
-          unlocked: Math.max(prev.unlocked, Math.min(levelIdx + 1, LEVELS.length - 1)),
-          bestScore: { ...prev.bestScore, [level.id]: Math.max(prev.bestScore[level.id] || 0, score) },
-          stars: { ...prev.stars, [level.id]: Math.max(prev.stars[level.id] || 0, earned) },
-        };
-        saveProgress(next);
-        return next;
-      });
+      const next = {
+        unlocked: Math.max(progress.unlocked, Math.min(levelIdx + 1, LEVELS.length - 1)),
+        bestScore: { ...progress.bestScore, [level.id]: Math.max(progress.bestScore[level.id] || 0, score) },
+        stars: { ...progress.stars, [level.id]: Math.max(progress.stars[level.id] || 0, earned) },
+      };
+      saveProgress(next);
+      setProgress(next);
+      // Every page recovered for the first time ever -> flag it so the
+      // Continue button leads to Nkhono's closing speech, not just the map.
+      const allDone = LEVELS.every((lv) => next.stars[lv.id] != null);
+      let alreadySeen = false;
+      try { alreadySeen = !!localStorage.getItem(BOOK_COMPLETE_KEY); } catch { /* treat as not seen */ }
+      if (allDone && !alreadySeen) {
+        try { localStorage.setItem(BOOK_COMPLETE_KEY, "1"); } catch { /* fine, may show again next time */ }
+        setJustCompletedBook(true);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outcome]);
@@ -994,6 +1006,11 @@ export default function SesothoMatchPage({ onBack, c }) {
 
   const backToMap = () => {
     if (outcome === "won" && walkTo == null) setWalkTo(Math.min(levelIdx + 1, LEVELS.length - 1));
+    if (justCompletedBook) {
+      setJustCompletedBook(false);
+      setScreen("bookComplete");
+      return;
+    }
     setScreen("map");
   };
 
@@ -1015,8 +1032,19 @@ export default function SesothoMatchPage({ onBack, c }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, storyStep]);
 
+  // Nkhono's closing speech for finishing the whole book. The spoken
+  // version leaves out the Sesotho phrase (an English voice mangles it),
+  // the written version on screen keeps it.
+  useEffect(() => {
+    if (screen === "bookComplete") {
+      if (soundOn) wordSpeech.speak(NKHONO_CLOSING_SPOKEN, { onHdProgress: setHdLoading });
+      play(SFX.win);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   const tokenAt = walkTo != null ? walkTo : progress.unlocked;
-  const dangerLevel = level ? 1 - movesLeft / level.moves : 0; // 0 = safe, 1 = Wind about to catch you
+  const dangerLevel = isPractice || !level ? 0 : 1 - movesLeft / level.moves; // 0 = safe, 1 = Wind about to catch you
 
   // ---- Story screen ----
   if (screen === "story") {
@@ -1046,6 +1074,29 @@ export default function SesothoMatchPage({ onBack, c }) {
     );
   }
 
+  // ---- Whole book recovered: Nkhono's closing words ----
+  if (screen === "bookComplete") {
+    return (
+      <div className="max-w-md mx-auto px-4 pt-10 pb-16 flex flex-col items-center text-center min-h-[70vh] justify-center">
+        <GameStyles />
+        <div className="flex justify-center gap-1 mb-3">
+          {[0, 1, 2].map((s) => <Star key={s} size={22} fill="#E8B923" color="#E8B923" />)}
+        </div>
+        <Nkhono size={120} />
+        <div className="font-display text-2xl mt-3 mb-4" style={{ color: c.text }}>Every page is safe</div>
+        <div className="font-body text-base leading-relaxed mb-8" style={{ color: c.textDim }}>
+          {NKHONO_CLOSING_WRITTEN}
+        </div>
+        <button
+          onClick={() => { wordSpeech.stop(); setScreen("map"); }}
+          className="rounded-xl px-8 py-3 font-display text-base w-full max-w-[240px]"
+          style={{ background: c.accent, color: c.accentText || "#fff" }}>
+          Return to the village
+        </button>
+      </div>
+    );
+  }
+
   // ---- Pre-level "page" intro (the suspense beat before each puzzle) ----
   if (preLevel != null) {
     const lv = LEVELS[preLevel];
@@ -1063,9 +1114,12 @@ export default function SesothoMatchPage({ onBack, c }) {
               // exact click means every later automatic read during play
               // (which fires from a timer, not a tap) reliably plays too.
               if (soundOn) wordSpeech.speak(`Page ${preLevel + 1}. ${lv.title}. ${lv.blurb}`, { onHdProgress: setHdLoading });
-              setPreLevel(null); startLevel(preLevel);
+              setPreLevel(null); startLevel(preLevel, false);
             }} className="w-full rounded-xl py-3 font-display text-base" style={{ background: CAT_COLORS[lv.id], color: "#fff" }}>
               Chase the page
+            </button>
+            <button onClick={() => { setPreLevel(null); startLevel(preLevel, true); }} className="w-full rounded-xl py-3 font-semibold" style={{ background: "transparent", border: `1.5px solid ${CAT_COLORS[lv.id]}`, color: CAT_COLORS[lv.id] }}>
+              Practice (no move limit)
             </button>
             <button onClick={() => setPreLevel(null)} className="rounded-xl py-3 font-semibold" style={{ background: c.surfaceHover || c.surface, border: `1px solid ${c.border}` }}>
               Not yet
@@ -1099,9 +1153,12 @@ export default function SesothoMatchPage({ onBack, c }) {
           </div>
         </div>
         <div className="mb-1 font-display text-2xl" style={{ color: c.text }}>Sesotho Match</div>
-        <div className="mb-6 font-body text-sm" style={{ color: c.textDim }}>
+        <div className="mb-3 font-body text-sm" style={{ color: c.textDim }}>
           Recover the scattered pages before the Wind of Forgetting does.
         </div>
+        <button onClick={() => setShowPages(true)} className="flex items-center gap-1.5 mb-6 font-body text-xs font-bold" style={{ color: c.accent }}>
+          <Sparkles size={13} /> My recovered pages ({Object.keys(progress.stars).length}/{LEVELS.length})
+        </button>
 
         <div className="relative">
           {LEVELS.map((lv, i) => {
@@ -1149,6 +1206,38 @@ export default function SesothoMatchPage({ onBack, c }) {
             );
           })}
         </div>
+
+        {showPages && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setShowPages(false)}>
+            <div className="rounded-2xl p-5 max-w-xs w-full" onClick={(e) => e.stopPropagation()} style={{ background: c.surface, border: `1px solid ${c.border}` }}>
+              <div className="font-display text-lg mb-1" style={{ color: c.text }}>Recovered pages</div>
+              <div className="font-body text-xs mb-4" style={{ color: c.textFaint }}>
+                {Object.keys(progress.stars).length} of {LEVELS.length} pages safe so far
+              </div>
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {LEVELS.map((lv) => {
+                  const have = progress.stars[lv.id] != null;
+                  return (
+                    <div key={lv.id} className="flex flex-col items-center gap-1">
+                      <div style={{
+                        width: 52, height: 52, borderRadius: 14,
+                        background: have ? CAT_COLORS[lv.id] + "22" : c.surfaceHover,
+                        border: `2px solid ${have ? CAT_COLORS[lv.id] : c.border}`,
+                        display: "flex", alignItems: "center", justifyContent: "center", opacity: have ? 1 : 0.4,
+                      }}>
+                        {have ? <CandyTile level={lv.id} word={lv.words[0].id} colorIndex={0} size={28} /> : <Lock size={16} style={{ color: c.textFaint }} />}
+                      </div>
+                      <div className="font-body text-[9px] text-center leading-tight" style={{ color: c.textFaint }}>{lv.title}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={() => setShowPages(false)} className="w-full rounded-xl py-2.5 font-semibold" style={{ background: c.surfaceHover || c.surface, border: `1px solid ${c.border}` }}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1185,7 +1274,7 @@ export default function SesothoMatchPage({ onBack, c }) {
         </div>
         <div className="text-right">
           <div className="font-display text-lg" style={{ color: CAT_COLORS[level.id] }}>{score}</div>
-          <div className="font-body text-xs" style={{ color: c.textFaint }}>{movesLeft} moves left</div>
+          <div className="font-body text-xs" style={{ color: c.textFaint }}>{isPractice ? "practicing \u2014 no move limit" : `${movesLeft} moves left`}</div>
         </div>
       </div>
 
@@ -1193,12 +1282,17 @@ export default function SesothoMatchPage({ onBack, c }) {
         <div style={{ width: `${Math.min(100, (score / level.target) * 100)}%`, height: "100%", background: CAT_COLORS[level.id], transition: "width 0.3s" }} />
       </div>
 
-      {/* The Wind of Forgetting closing in as moves run out — tension bar, not just a countdown. */}
+      {/* The Wind of Forgetting closing in as moves run out — tension bar, not just a countdown. Hidden in practice, where there's no Wind to outrun. */}
       <div className="flex items-center gap-2 mb-4">
-        <Wind size={13} style={{ color: dangerLevel > 0.6 ? "#E0433D" : c.textFaint }} />
-        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.border }}>
-          <div style={{ width: `${dangerLevel * 100}%`, height: "100%", background: dangerLevel > 0.6 ? "#E0433D" : "#8a8a8a", transition: "width 0.3s" }} />
-        </div>
+        {!isPractice && (
+          <>
+            <Wind size={13} style={{ color: dangerLevel > 0.6 ? "#E0433D" : c.textFaint }} />
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: c.border }}>
+              <div style={{ width: `${dangerLevel * 100}%`, height: "100%", background: dangerLevel > 0.6 ? "#E0433D" : "#8a8a8a", transition: "width 0.3s" }} />
+            </div>
+          </>
+        )}
+        {isPractice && <div className="flex-1 font-body text-xs italic" style={{ color: c.textFaint }}>No pressure, just practicing.</div>}
         <button onClick={useHint} className="flex items-center gap-1 font-body text-xs" style={{ color: c.accent }}>
           <Lightbulb size={13} /> Hint
         </button>
@@ -1296,7 +1390,8 @@ export default function SesothoMatchPage({ onBack, c }) {
                 </div>
                 <PlayerCharacter pose="celebrate" kitColor={CAT_COLORS[level.id]} size={90} />
                 <div className="font-display text-xl mt-2 mb-1" style={{ color: c.text }}>Page recovered!</div>
-                <div className="font-body text-sm mb-5" style={{ color: c.textDim }}>{score} points</div>
+                <div className="font-body text-sm mb-1" style={{ color: c.textDim }}>{score} points</div>
+                <div className="font-body text-xs mb-5 italic" style={{ color: CAT_COLORS[level.id] }}>"{level.title}" joins your recovered pages.</div>
               </>
             ) : (
               <>
