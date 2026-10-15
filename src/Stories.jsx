@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX, Download } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Stage from "./Stage.jsx";
 import PenaltyGame from "./PenaltyGame.jsx";
@@ -11,6 +11,7 @@ import PenaltyGame from "./PenaltyGame.jsx";
 // valid, complete experience, narration is an enhancement on top.
 const AUDIO_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-audio";
 const SFX_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-sfx";
+const AUDIOBOOK_BASE = "https://jobgzxljuczzqljwavyq.supabase.co/storage/v1/object/public/story-audiobooks";
 const NARRATION_PREF_KEY = "storyGame:narrationOn";
 const AUDIO_CACHE_NAME = "story-audio-cache-v1";
 const DATA_CACHE_NAME = "story-data-cache-v1";
@@ -53,7 +54,7 @@ async function writeDataCache(key, value) {
 // Nothing is cached "just in case" beyond that one-hop lookahead, so a big
 // story with dozens of unexplored side-branches doesn't balloon offline
 // storage for content nobody's heard yet.
-async function cachedAudioUrl(url) {
+async function cachedAudioUrl(url, strict = false) {
   if (!("caches" in window)) {
     // No Cache Storage support (rare) — just use the URL directly, same
     // as before; browser HTTP cache still helps somewhat, offline won't.
@@ -64,19 +65,35 @@ async function cachedAudioUrl(url) {
     let response = await cache.match(url);
     if (!response) {
       const fresh = await fetch(url);
-      if (!fresh.ok) return url; // 404 (not synthesized yet) — let the caller's own fallback handle it
+      if (!fresh.ok) return strict ? null : url; // 404 (not synthesized yet) — let the caller's own fallback handle it
       await cache.put(url, fresh.clone());
       response = fresh;
     }
     return URL.createObjectURL(await response.blob());
   } catch {
-    return url; // cache storage failed for some reason — fall back to a direct fetch
+    return strict ? null : url; // cache storage failed for some reason — fall back to a direct fetch
   }
 }
 
 // Warms the cache for a URL without needing the audio right now — used
 // for the one-hop-ahead prefetch, so a later cachedAudioUrl() call for the
 // same URL is an instant cache hit instead of a network wait.
+// Newer locations may not have their own ambience recording yet. Rather
+// than go silent, fall back to a close existing one — drop a dedicated
+// file into the story-sfx bucket later and it takes over automatically.
+const SFX_ALIAS = {
+  airport: "street_light_traffic", rain_pitch: "stadium_training", village_rain: "street_light_traffic",
+  pub_evening: "canteen_chatter", boardroom: "coaches_office", radio_studio: "coaches_office",
+  tea_room: "canteen_chatter", hotel_room: "kit_room_quiet",
+};
+async function sfxUrl(tag) {
+  const primary = `${SFX_BASE}/${tag}.mp3`;
+  const found = await cachedAudioUrl(primary, true);
+  if (found) return found;
+  const alias = SFX_ALIAS[tag];
+  return alias ? cachedAudioUrl(`${SFX_BASE}/${alias}.mp3`) : primary;
+}
+
 async function warmAudioCache(url) {
   if (!("caches" in window)) return;
   try {
@@ -146,7 +163,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     const fetchStoryList = async () => {
       const { data, error } = await supabase
         .from("game_stories")
-        .select("id, slug, default_title, emoji, languages")
+        .select("id, slug, default_title, emoji, languages, audiobook_path")
         .order("sort_order", { ascending: true });
       return error ? null : data;
     };
@@ -284,7 +301,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     }
     let cancelled = false;
     (async () => {
-      const playableUrl = await cachedAudioUrl(`${SFX_BASE}/${node.ambience}.mp3`);
+      const playableUrl = await sfxUrl(node.ambience);
       if (cancelled) return;
       currentAmbienceTagRef.current = node.ambience;
       ambience.src = playableUrl;
@@ -305,7 +322,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
     if (!node?.sfx?.length) return;
     let cancelled = false;
     node.sfx.forEach(async (tag, i) => {
-      const playableUrl = await cachedAudioUrl(`${SFX_BASE}/${tag}.mp3`);
+      const playableUrl = await sfxUrl(tag);
       if (cancelled) return;
       const el = new Audio(playableUrl);
       el.volume = 0.5;
@@ -562,7 +579,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
               this node on screen too, on a background matching `ambience`
               (the same tag already driving sound). Keeps writing a story a
               purely-text task; the scene assembles itself from that. */}
-          <Stage node={node} playerPose={node.scene?.pose} accentColor={c.accent} />
+          <Stage node={node} playerPose={node.scene?.pose} accentColor={c.accent} playerId={content.graph.player || "player"} />
         </div>
         <div className="rounded-2xl p-5 mb-4" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
           <p className="text-base leading-relaxed text-center">
@@ -636,7 +653,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           {stories.map((story) => {
             const progress = progressByStory[story.id];
             return (
-              <button key={story.id} onClick={() => openStory(story)}
+              <div key={story.id} className="flex flex-col gap-1.5">
+              <button onClick={() => openStory(story)}
                 className="flex items-center gap-3 rounded-2xl p-4 text-left"
                 style={{ background: c.surface, border: `1px solid ${c.border}` }}>
                 <span className="w-11 h-11 rounded-full flex items-center justify-center text-xl shrink-0" style={{ background: c.surfaceHover }}>
@@ -650,6 +668,19 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
                 </span>
                 <Play size={16} style={{ color: c.accent }} />
               </button>
+              {/* A sibling link, not nested inside the button above —
+                  interactive content can't live inside a <button>, and a
+                  tap here shouldn't also open the story. Only shown once
+                  an audiobook has actually been built and uploaded for
+                  this story (audiobook_path set by upload_audiobook.py). */}
+              {story.audiobook_path && (
+                <a href={`${AUDIOBOOK_BASE}/${story.audiobook_path}`} download
+                  className="flex items-center justify-center gap-1.5 text-xs font-semibold py-1.5"
+                  style={{ color: c.accent }}>
+                  <Download size={13} /> Download the audiobook (listen as a book)
+                </a>
+              )}
+              </div>
             );
           })}
         </div>

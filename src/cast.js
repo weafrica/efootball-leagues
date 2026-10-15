@@ -27,10 +27,39 @@ export const CAST = {
   reporter2:{ name: "Reporter", skin: "#5f3b22", hair: "#111111", hairStyle: "afro",
              kitColor: "#8e44ad", sleeve: "#8e44ad", pants: "#1b1b1b", accessory: "mic" },
   dog:     { name: "", animal: "dog" },
+
+  // ---- Mossbridge United (story 2) ----
+  // "you" in that story is the American coach; the story sets
+  // graph.player = "coach_you" and Stage dresses the player slot with this.
+  coach_you: { name: "You", skin: "#d9a066", hair: "#8a8a8a", hairStyle: "cap", accent: "#c0392b",
+               kitColor: "#1f5f8b", sleeve: "#1f5f8b", pants: "#2b3a4a", accessory: ["whistle"] },
+  maggie:  { name: "Maggie Thornfield", skin: "#f1c9a5", hair: "#7a2e1d", hairStyle: "bob",
+             kitColor: "#6d1f3a", sleeve: "#6d1f3a", pants: "#1b1b1b", shoes: "#111", accessory: ["pearls"] },
+  priya:   { name: "Priya", skin: "#a8693f", hair: "#0d0d0d", hairStyle: "long", accent: "#e63946",
+             kitColor: "#1d3557", sleeve: "#1d3557", pants: "#1d3557", accessory: ["lanyard", "clipboard"] },
+  stu:     { name: "Big Stu", skin: "#e2b48f", hair: "#5a3a22", hairStyle: "short", build: "broad",
+             kitColor: "#b3202a", pants: "#f1f1f1", shoes: "#111" },
+  femi:    { name: "Femi", skin: "#4a2c1a", hair: "#0e0e0e", hairStyle: "short", build: "slim",
+             kitColor: "#b3202a", pants: "#f1f1f1", shoes: "#111" },
+  doreen:  { name: "Doreen", skin: "#e8c4a0", hair: "#cfcfcf", hairStyle: "bun",
+             kitColor: "#b0668a", pants: "#4a4a58", accessory: ["mug", "glasses"] },
+  gideon:  { name: "Gideon", skin: "#f0c8a0", hair: "#3a3a3a", hairStyle: "short", build: "broad", accent: "#d4af37",
+             kitColor: "#1a1a22", sleeve: "#1a1a22", pants: "#1a1a22", shoes: "#0d0d0d", accessory: ["tie"] },
+  wilf:    { name: "Wilf", skin: "#e2b48f", hair: "#a8a8a8", hairStyle: "short", build: "broad",
+             kitColor: "#2e9e57", sleeve: "#2e9e57", pants: "#1d1d1d", shoes: "#111", accessory: ["gloves"] },
+  fan:     { name: "Local", skin: "#946235", hair: "#222222", hairStyle: "afro", accent: "#b3202a",
+             kitColor: "#2b2b33", pants: "#34495e", accessory: ["scarf"] },
+  fan2:    { name: "Local", skin: "#e8c4a0", hair: "#9a9a9a", hairStyle: "cap", accent: "#7f8c8d",
+             kitColor: "#5d6d4a", pants: "#3b3b3b", accessory: ["scarf"] },
 };
 
 // Which story voice belongs to which cast member. The narrator IS "you".
-const VOICE_TO_CAST = { narrator: "player", marcus: "marcus", chidi: "chidi", coach: "coach", mystery: "mystery", keeper: "keeper" };
+const VOICE_TO_CAST = {
+  narrator: "player", marcus: "marcus", chidi: "chidi", coach: "coach", mystery: "mystery", keeper: "keeper",
+  // Mossbridge United
+  maggie: "maggie", priya: "priya", stu: "stu", femi: "femi", doreen: "doreen", gideon: "gideon", wilf: "wilf",
+  keith: "keith", // radio host — heard, never seen (no CAST entry on purpose, so castForNode drops him)
+};
 
 // Who is physically standing in this scene?
 //  - node.cast (explicit list) wins — needed for phone calls, where
