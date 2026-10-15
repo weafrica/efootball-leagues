@@ -207,6 +207,19 @@ function forcedAction(color, dice, actions, tokensByColor, active) {
   return { ...chosen, forced: true, jumped };
 }
 
+// Which announcer call fits a capture, Dota-style: a multi-kill in one turn
+// beats a running tally of kills for that color, which beats "first blood"
+// (the first capture of the whole game), which beats the plain call.
+function captureCallKey(n, totalKills, firstBlood) {
+  if (n >= 5) return "rampage";
+  if (n === 4) return "ultra_kill";
+  if (n === 3) return "triple_kill";
+  if (n === 2) return "double_kill";
+  const spree = { 3: "killing_spree", 5: "dominating", 7: "unstoppable", 10: "godlike", 15: "beyond_godlike" }[totalKills];
+  if (spree) return spree;
+  return firstBlood ? "first_blood" : "prisoner_taken";
+}
+
 // Each color's a little personality, spliced onto the end of a spoken line
 // now and then (rarely — the old 35% made the voice repeat itself).
 const PERSONALITY_ASIDE = {
@@ -412,6 +425,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     bankedSixRef.current = { ...bankedSixRef.current, [color]: Math.max(0, cur + delta) };
     setBankedSix(bankedSixRef.current);
   };
+  const firstBloodRef = useRef(false); // has ANY capture happened yet this game (for the "first blood" call)
+  const colorKillsRef = useRef({}); // captures per color this game, for the killing-spree style calls
   const pendingForcedSixRef = useRef(null); // color currently owed that forced 6 on their NEXT roll (cleared the instant it's used)
   const buybackDeclinedRef = useRef(new Set()); // keys of (dice pair + die index) the player already said "wait" to, so we don't re-nag them about the same six
   const [frozenTokenIds, setFrozenTokenIds] = useState(() => new Set()); // tokenIds that captured something THIS roll — locked out of acting again until the next roll, so a capture can't be chained into a second, unrelated move with the leftover die
@@ -474,6 +489,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     sfx.unlock();
     turnCapsRef.current = 0;
     bankedSixRef.current = {};
+    firstBloodRef.current = false;
+    colorKillsRef.current = {};
     setBankedSix({});
     pendingForcedSixRef.current = null;
     setFrozenTokenIds(new Set());
@@ -551,9 +568,11 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     if ((bankedSixRef.current[nextColor] || 0) > 0) {
       pendingForcedSixRef.current = nextColor;
       bumpBankedSix(nextColor, -1);
+      sfx.sixBanked();
+      const said = sfx.announce("six_to_play", { delay: 0.55 });
       pushLog(`🎲 ${COLORS[nextColor].name} has a six to play — saved from that ransom!`, {
         big: { text: "YOU HAVE A SIX TO PLAY!", sub: `${COLORS[nextColor].name} gets a guaranteed 6`, color: nextColor, level: 0 },
-        color: nextColor, speak: true, spoken: `${COLORS[nextColor].name} has a six to play!`,
+        color: nextColor, speak: !said, spoken: `${COLORS[nextColor].name} has a six to play!`,
       });
     }
     setMessage(`${COLORS[nextColor].name}'s turn — roll the dice.`);
@@ -573,7 +592,8 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       setRollAgainStreak((s) => {
         const next = s + 1;
         if (next >= 3) {
-          pushLog(pick(FORFEIT_LINES)(COLORS[turnColor].name), { color: turnColor, speak: true });
+          const said = sfx.announce("forfeit", { delay: 0.35 });
+          pushLog(pick(FORFEIT_LINES)(COLORS[turnColor].name), { color: turnColor, speak: !said });
           sfx.forfeit();
           setMessage("Three 6-6 rolls in a row — turn forfeited!");
           setTimeout(() => reallyAdvanceTurn(), 700);
@@ -608,9 +628,12 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     if (action.kind === "buyback") {
       const captorName = COLORS[action.captor].name;
       const line = explain?.text || `${me} pays the ransom — token back in the yard, needs a fresh 6 to get moving!`;
+      // If the pre-rendered announcer call plays, it IS the spoken moment —
+      // don't also read the same event out with the browser voice on top.
+      const said = sfx.announce("ransom_paid", { delay: 0.6 });
       pushLog(`🔓 ${line}`, {
         big: { text: "RANSOM PAID!", sub: `${me} frees a token from ${captorName} — needs another 6 to exit`, color, level: 0 },
-        color, speak: true, spoken: explain?.spoken || `${me} buys their token back from ${captorName} — still needs a six to get out!`,
+        color, speak: !said, spoken: explain?.spoken || `${me} buys their token back from ${captorName} — still needs a six to get out!`,
       });
       sfx.buyback();
       // The captor loses their hostage, but they're owed a guaranteed 6 on
@@ -633,16 +656,27 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
       const opp = COLORS[capturedColor].name;
       const label = n === 1 ? pick(SINGLE_CAPTURE_LABELS) : (MULTI_CAPTURE_LABEL[n] || "RAMPAGE!");
       const line = explain?.text || pick(CAPTURE_LINES)(me, opp);
+      // Announcer: multi-kill > killing spree > first blood > plain "prisoner
+      // taken". The plain call is skipped while the browser voice is reading
+      // the banter (it'd just talk over it); the notable calls always play,
+      // and when one does it takes the place of the spoken banter line, the
+      // way a game announcer takes over for the big moments.
+      const kills = (colorKillsRef.current[color] = (colorKillsRef.current[color] || 0) + 1);
+      const wasFirstBlood = !firstBloodRef.current;
+      firstBloodRef.current = true;
+      const callKey = captureCallKey(n, kills, wasFirstBlood);
+      const notable = callKey !== "prisoner_taken";
+      const said = (notable || !readAloud) ? sfx.announce(callKey, { delay: 0.55 }) : false;
       const logId = pushLog(`💥 ${line}`, {
         big: { text: label, sub: `${me} ate ${opp} — held captive until bought back!`, color, level: n },
-        color, speak: true, spoken: explain?.spoken || line,
+        color, speak: !(said && notable), spoken: explain?.spoken || line,
       });
       sfx.whoosh();
       sfx.capture(n);
-      // A Dota2-style announcer cry on a real streak (2+ captures in one
-      // turn) — the short punchy label itself, queued right after the
-      // normal banter line so it reads as "...and ATE GREEN! ...DOUBLE KILL!"
-      if (n >= 2 && readAloud) ludoSpeech.speak(`announce-${logId}`, label, color);
+      // No pre-rendered audio available (still loading / Data Saver / files
+      // missing): fall back to speaking the streak label with the browser
+      // voice, as before.
+      if (!said && n >= 2 && readAloud) ludoSpeech.speak(`announce-${logId}`, label, color);
     } else if (finished) {
       setStats((s2) => ({ ...s2, finishes: s2.finishes + 1 }));
       const line = explain?.text || pick(FINISH_LINES)(me);
@@ -668,6 +702,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
     const allHome = (nextTokens[color] || []).every((t) => t.step === HOME_STEP);
     if (allHome) {
       sfx.win();
+      sfx.announce("victory", { delay: 1.6 });
       setWinner(color);
       setPhase("won");
       setDice(null);

@@ -1,7 +1,17 @@
-// Ludo sound effects — all synthesised with the Web Audio API, so there are
-// no audio files to download or host. Every sound is a few oscillators and
-// some filtered noise. Browsers only allow audio after a tap, so the first
-// call (a dice roll / Start button) quietly unlocks it.
+// Ludo sound. Two layers, one API:
+//
+//   1. PRE-RENDERED audio (ludoAudio.js) — layered, produced-sounding effects
+//      and Piper announcer calls from scripts/ludo-audio/. Used whenever the
+//      files are available (they cache on the device after the first load).
+//   2. The ORIGINAL synthesised sounds below — a few oscillators and some
+//      filtered noise, generated live with the Web Audio API. These are the
+//      automatic fallback if a file is missing, still loading, or the player
+//      is on Data Saver, so the game always has sound and never depends on
+//      the files.
+//
+// Browsers only allow audio after a tap, so the first call (a dice roll /
+// Start button) quietly unlocks it.
+import * as samples from "./ludoAudio.js";
 
 let ctx = null;
 let master = null;
@@ -16,6 +26,7 @@ function ac() {
       master = ctx.createGain();
       master.gain.value = 0.55;
       master.connect(ctx.destination);
+      samples.bindContext(ctx, master);
     } catch { return null; }
   }
   if (ctx.state === "suspended") ctx.resume().catch(() => {});
@@ -72,16 +83,18 @@ function noise(a, { t = 0, dur = 0.2, vol = 0.3, freq = 1000, type = "lowpass", 
 
 export const sfx = {
   enabled: true,
-  unlock() { ac(); },
+  unlock() { if (ac()) samples.preload(); },
 
   click() {
     const a = ac(); if (!a) return;
+    if (samples.play("click", { volume: 0.8, jitter: 0.06 })) return;
     tone(a, { type: "square", f0: 900, f1: 700, dur: 0.04, vol: 0.08 });
   },
 
   // Dice rattling in a cup: a run of little wooden clicks that speed up.
   roll() {
     const a = ac(); if (!a) return;
+    if (samples.play("roll", { jitter: 0.02 })) return;
     let t = 0;
     for (let i = 0; i < 9; i++) {
       noise(a, { t, dur: 0.035, vol: 0.28, freq: 1800 + Math.random() * 2200, type: "bandpass", q: 3 });
@@ -92,17 +105,20 @@ export const sfx = {
 
   step() {
     const a = ac(); if (!a) return;
+    if (samples.play("step", { volume: 0.9, jitter: 0.08 })) return;
     tone(a, { type: "triangle", f0: 560, f1: 360, dur: 0.1, vol: 0.22 });
   },
 
   safe() {
     const a = ac(); if (!a) return;
+    if (samples.play("safe")) return;
     tone(a, { type: "sine", f0: 880, dur: 0.22, vol: 0.2 });
     tone(a, { type: "sine", f0: 1175, t: 0.09, dur: 0.3, vol: 0.18 });
   },
 
   exit() {
     const a = ac(); if (!a) return;
+    if (samples.play("exit")) return;
     [392, 523, 659, 784].forEach((f, i) => tone(a, { type: "triangle", f0: f, t: i * 0.065, dur: 0.16, vol: 0.22 }));
     noise(a, { dur: 0.3, vol: 0.12, freq: 600, type: "highpass", sweepTo: 5000 });
   },
@@ -112,6 +128,11 @@ export const sfx = {
   // rising siren so a rampage really sounds like one.
   capture(level = 1) {
     const a = ac(); if (!a) return;
+    if (samples.play(`capture_${Math.min(3, Math.max(1, level))}`, { jitter: 0.02 })) {
+      // the iron cell-door clang: this capture takes a PRISONER, it doesn't just send a token home
+      samples.play("imprison", { volume: 0.7, delay: 0.35 });
+      return;
+    }
     tone(a, { type: "sine", f0: 240, f1: 38, dur: 0.55, vol: 0.85 });
     noise(a, { dur: 0.4, vol: 0.55, freq: 900, type: "lowpass", sweepTo: 120 });
     [0, 0.05, 0.11].forEach((t) => noise(a, { t, dur: 0.07, vol: 0.4, freq: 2600, type: "highpass" }));
@@ -132,12 +153,14 @@ export const sfx = {
 
   home() {
     const a = ac(); if (!a) return;
+    if (samples.play("home")) return;
     [523, 659, 784, 1047].forEach((f, i) => tone(a, { type: "triangle", f0: f, t: i * 0.09, dur: 0.35, vol: 0.24 }));
     tone(a, { type: "sine", f0: 2093, t: 0.36, dur: 0.6, vol: 0.1 });
   },
 
   win() {
     const a = ac(); if (!a) return;
+    if (samples.play("win", { jitter: 0 })) { samples.play("crowd", { delay: 1.4, jitter: 0 }); return; }
     const notes = [[523, 0], [523, 0.14], [523, 0.28], [659, 0.42], [784, 0.7], [1047, 1.0]];
     notes.forEach(([f, t]) => tone(a, { type: "square", f0: f, t, dur: 0.22, vol: 0.16, filter: 3000 }));
     [523, 659, 784, 1047].forEach((f) => tone(a, { type: "triangle", f0: f, t: 1.05, dur: 1.1, vol: 0.16 }));
@@ -147,6 +170,7 @@ export const sfx = {
   // fanfare — the "ransom paid, you're free" moment.
   buyback() {
     const a = ac(); if (!a) return;
+    if (samples.play("buyback")) return;
     noise(a, { dur: 0.045, vol: 0.3, freq: 2400, type: "bandpass", q: 6 });
     noise(a, { t: 0.05, dur: 0.05, vol: 0.28, freq: 1800, type: "bandpass", q: 5 });
     tone(a, { type: "triangle", f0: 200, f1: 90, t: 0.08, dur: 0.12, vol: 0.18 });
@@ -158,23 +182,42 @@ export const sfx = {
   // buyback prompt first appears, before the player taps anything.
   ransomAlert() {
     const a = ac(); if (!a) return;
+    if (samples.play("ransom_alert")) return;
     tone(a, { type: "sine", f0: 740, dur: 0.1, vol: 0.16 });
     tone(a, { type: "sine", f0: 988, t: 0.11, dur: 0.14, vol: 0.14 });
   },
 
+  // Rising chime: a guaranteed six has just been banked for you.
+  sixBanked() {
+    const a = ac(); if (!a) return;
+    if (samples.play("six_banked")) return;
+    [523, 659, 784, 1047, 1319].forEach((f, i) => tone(a, { type: "triangle", f0: f, t: i * 0.08, dur: 0.3, vol: 0.2 }));
+  },
+
+  // Announcer call ("Double kill!", "Ransom paid!" ...). Returns true if a
+  // pre-rendered call actually played, false if not — so the caller can fall
+  // back to the browser voice instead of leaving the moment silent.
+  announce(key, { delay = 0, volume = 1 } = {}) {
+    const a = ac(); if (!a) return false;
+    return samples.play(`say_${key}`, { delay, volume, jitter: 0.015 });
+  },
+
   forfeit() {
     const a = ac(); if (!a) return;
+    if (samples.play("forfeit")) return;
     tone(a, { type: "sawtooth", f0: 140, f1: 90, dur: 0.45, vol: 0.28, filter: 1200 });
     tone(a, { type: "sawtooth", f0: 105, f1: 70, t: 0.22, dur: 0.5, vol: 0.28, filter: 1200 });
   },
 
   pass() {
     const a = ac(); if (!a) return;
+    if (samples.play("pass")) return;
     tone(a, { type: "sine", f0: 420, f1: 190, dur: 0.22, vol: 0.2 });
   },
 
   whoosh() {
     const a = ac(); if (!a) return;
+    if (samples.play("whoosh")) return;
     noise(a, { dur: 0.35, vol: 0.25, freq: 400, type: "bandpass", q: 1.2, sweepTo: 3500 });
   },
 };
