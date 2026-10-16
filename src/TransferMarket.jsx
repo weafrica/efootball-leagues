@@ -299,6 +299,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       description: description || null,
     });
     if (error) { showToast(`Couldn't list your club: ${error.message}`); return false; }
+    logActivity("market_listing_created", { market: "club" });
     showToast("Club listed in The Kit Room.");
     await loadListingsLive();
     setTab("mine");
@@ -310,6 +311,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       listing_id: listing.id, buyer_id: myId, amount: Number(amount), message: message || null,
     });
     if (error) { showToast(`Couldn't send offer: ${error.message}`); return false; }
+    logActivity("market_offer_sent", { market: "club", amount: Number(amount) });
     showToast("Offer sent.");
     setOfferModal(null);
     return true;
@@ -325,6 +327,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   const acceptOffer = async (offer) => {
     const { error } = await supabase.rpc("accept_transfer_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
+    logActivity("market_deal_done", { market: "club" });
     showToast("Deal done — the club has been transferred.");
     await loadListingsLive();
     if (offer.listing_id) loadOffersFor(offer.listing_id);
@@ -388,6 +391,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       photo_urls,
     });
     if (error) { showToast(`Couldn't list your team: ${error.message}`); return false; }
+    logActivity("market_listing_created", { market: "team" });
     showToast("Team listed in The Kit Room.");
     await loadTeamListingsLive();
     setTeamTab("mine");
@@ -399,6 +403,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       listing_id: listing.id, buyer_id: myId, amount: Number(amount), message: message || null,
     });
     if (error) { showToast(`Couldn't send offer: ${error.message}`); return false; }
+    logActivity("market_offer_sent", { market: "team", amount: Number(amount) });
     showToast("Offer sent.");
     setTeamOfferModal(null);
     return true;
@@ -414,6 +419,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   const acceptTeamOffer = async (offer) => {
     const { error } = await supabase.rpc("accept_team_sale_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
+    logActivity("market_deal_done", { market: "team" });
     showToast("Deal accepted — you can now coordinate the handover.");
     await loadTeamListingsLive();
     if (offer.listing_id) loadTeamOffersFor(offer.listing_id);
@@ -476,6 +482,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       description: description || null,
     });
     if (error) { showToast(`Couldn't list your item: ${error.message}`); return false; }
+    logActivity("market_listing_created", { market: "item" });
     showToast("Item listed in The Kit Room.");
     await loadItemListingsLive();
     setItemTab("mine");
@@ -487,6 +494,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
       listing_id: listing.id, buyer_id: myId, amount: Number(amount), message: message || null,
     });
     if (error) { showToast(`Couldn't send offer: ${error.message}`); return false; }
+    logActivity("market_offer_sent", { market: "item", amount: Number(amount) });
     showToast("Offer sent.");
     setItemOfferModal(null);
     return true;
@@ -502,6 +510,7 @@ export default function TransferMarket({ c, session, profile, leagues, onBack, s
   const acceptItemOffer = async (offer) => {
     const { error } = await supabase.rpc("accept_item_offer", { p_offer_id: offer.id });
     if (error) { showToast(`Couldn't accept offer: ${error.message}`); return; }
+    logActivity("market_deal_done", { market: "item" });
     showToast("Deal done — Nets have been settled.");
     await loadItemListingsLive();
     if (offer.listing_id) loadItemOffersFor(offer.listing_id);

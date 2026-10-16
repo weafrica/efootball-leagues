@@ -1,4 +1,5 @@
 import React from "react";
+import { logActivity } from "./activityLog";
 
 // React only lets a class component catch render/lifecycle errors thrown by
 // its children (getDerivedStateFromError + componentDidCatch have no hook
@@ -50,6 +51,13 @@ export class ErrorBoundary extends React.Component {
     // if/when one gets wired up — for now this at least leaves a trace in
     // the browser console instead of silently going blank.
     console.error("Caught by ErrorBoundary:", error, info?.componentStack);
+
+    // Real errors only get recorded — a stale tab after a deploy (handled
+    // by the reload below) is expected, not a bug. Message is cut short and
+    // no stack is stored, so the log stays small and free of page contents.
+    if (!STALE_CHUNK_ERROR.test(error?.message || "")) {
+      logActivity("client_error", { message: String(error?.message || error).slice(0, 200), screen: String(this.props.resetKey ?? "") });
+    }
 
     if (STALE_CHUNK_ERROR.test(error?.message || "") && !sessionStorage.getItem(RELOAD_FLAG)) {
       sessionStorage.setItem(RELOAD_FLAG, "1");

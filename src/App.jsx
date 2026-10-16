@@ -3836,6 +3836,7 @@ export default function App() {
   }, [session]);
   const [accounts, setAccounts] = useState(null); // admin-only: every profile on the platform
   const [activityLog, setActivityLog] = useState(null); // admin-only: recent user_activity_log rows
+  const [activitySummary, setActivitySummary] = useState(null); // admin-only: get_activity_summary() totals/chart/top events
   const [challengeMembers, setChallengeMembers] = useState(null); // every other member, for the challenge picker
   const [allAchievements, setAllAchievements] = useState(null); // every earned badge, every member — feeds the Wall of Fame
   const [ladderChampions, setLadderChampions] = useState(null); // every League 1 Sunday-cutoff winner (ladder_wall_of_fame, tier 1 only) — feeds the Wall of Fame's ladder_champion badge + titles, same public/no-RLS-hassle shape as allAchievements
@@ -4001,10 +4002,16 @@ export default function App() {
       if (window.location.hash.includes("access_token")) {
         window.history.replaceState({}, "", window.location.pathname + window.location.search);
       }
-      // Step 1 of activity tracking — just sign-in/sign-out for now, more
-      // event types get added incrementally from here (see activityLog.js).
-      if (event === "SIGNED_IN") logActivity("sign_in");
-      if (event === "SIGNED_OUT") logActivity("sign_out");
+      // Sign-in is logged once per browser session. Supabase fires
+      // SIGNED_IN again on tab refocus and token refresh, which had
+      // inflated the count to ~22 "sign-ins" per active player per week.
+      // Sign-out is NOT logged here: by the time SIGNED_OUT fires the
+      // session is already gone, so the write was silently dropped every
+      // time (zero sign_out rows ever recorded) — see signOut() below.
+      if (event === "SIGNED_IN" && !sessionStorage.getItem("matchday_signin_logged")) {
+        sessionStorage.setItem("matchday_signin_logged", "1");
+        logActivity("sign_in");
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -4057,7 +4064,15 @@ export default function App() {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
   };
 
-  const signOut = async () => { await supabase.auth.signOut(); clearAllAuthStorage(); setView("home"); };
+  const signOut = async () => {
+    // Log first, while there is still a session to attribute it to. Capped
+    // at 1.5s so a bad connection can never hold up signing out.
+    await Promise.race([logActivity("sign_out"), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    sessionStorage.removeItem("matchday_signin_logged");
+    await supabase.auth.signOut();
+    clearAllAuthStorage();
+    setView("home");
+  };
 
   // This is the single source of truth for every league across the whole
   // signed-in app (Home, league lists, LeagueDetail, achievements, admin
@@ -4288,6 +4303,8 @@ export default function App() {
   // so the admin check happens server-side and this table never needs a
   // client-readable RLS policy at all.
   const loadActivityLog = useCallback(async () => {
+    // The summary is separate so a problem with it never hides the log.
+    supabase.rpc("get_activity_summary").then(({ data, error }) => setActivitySummary(error ? null : data));
     const { data, error } = await supabase.rpc("get_activity_log", { p_limit: 200 });
     if (error) { showToast("Couldn't load the activity log."); setActivityLog([]); return; }
     setActivityLog(data || []);
@@ -8745,7 +8762,7 @@ export default function App() {
             onMarkReminder={markAccountReminder} onClearReminder={clearAccountReminder} onClearAllReminders={clearAllAccountReminders}
             onBack={goBack} showToast={showToast} c={c} />
         ) : view === "activity" && isAdmin ? (
-          <ActivityLogPanel activityLog={activityLog} onBack={goBack} c={c} />
+          <ActivityLogPanel activityLog={activityLog} summary={activitySummary} onBack={goBack} c={c} />
         ) : view === "challenges" ? (
           <Suspense fallback={<Loader c={c} />}>
           <ChallengesScreen session={session} members={challengeMembers} challenges={challenges} openChallenges={openChallenges} recentResults={recentResults}
@@ -10315,7 +10332,70 @@ function csvEscape(val) {
 // filtering or grouping yet, just the most recent 200 events, newest
 // first. Filters/search/grouping are a good "next small step" once this
 // is confirmed to be capturing the right things.
-function ActivityLogPanel({ activityLog, onBack, c }) {
+// Totals, a 14-day chart and the busiest events, from get_activity_summary()
+// (admin-only, computed on the fly from the raw log). Renders nothing until
+// the summary arrives, or if it fails, so the log below always still works.
+function ActivitySummaryCard({ summary, c }) {
+  if (!summary) return null;
+  const daily = summary.daily || [];
+  const top = summary.top_events_7d || [];
+  const maxUsers = Math.max(1, ...daily.map((d) => d.users));
+  const maxCount = Math.max(1, ...top.map((t) => t.count));
+  const tiles = [
+    ["Active today", summary.active_today],
+    ["Active, 7 days", summary.active_7d],
+    ["Active, 30 days", summary.active_30d],
+    ["New accounts, 7 days", summary.new_accounts_7d],
+    ["Came back after 2+ weeks away", summary.returned_7d],
+  ];
+  return (
+    <div className="mb-6 space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {tiles.map(([label, value], i) => (
+          <div key={label} className={`border rounded-xl px-3.5 py-3 ${i === tiles.length - 1 ? "col-span-2" : ""}`} style={{ background: c.surface, borderColor: c.border }}>
+            <div className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>{label}</div>
+            <div className="text-2xl font-extrabold leading-tight" style={{ color: c.text }}>{value ?? 0}</div>
+          </div>
+        ))}
+      </div>
+      <div className="border rounded-xl px-3.5 py-3" style={{ background: c.surface, borderColor: c.border }}>
+        <div className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: c.textFaint }}>Active players per day, last 14 days</div>
+        <div className="flex items-end gap-1 h-24">
+          {daily.map((d) => (
+            <div key={d.day} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.day}: ${d.users} players, ${d.events} events`}>
+              <div className="font-mono text-[9px]" style={{ color: c.textFaint }}>{d.users || ""}</div>
+              <div className="w-full rounded-sm" style={{ height: `${Math.max(3, (d.users / maxUsers) * 100)}%`, background: d.users ? c.accent : c.border }} />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-1 mt-1">
+          {daily.map((d) => (
+            <div key={d.day} className="flex-1 text-center font-mono text-[9px]" style={{ color: c.textFaint }}>{d.day.slice(8)}</div>
+          ))}
+        </div>
+      </div>
+      {top.length > 0 && (
+        <div className="border rounded-xl px-3.5 py-3" style={{ background: c.surface, borderColor: c.border }}>
+          <div className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: c.textFaint }}>Busiest events, last 7 days</div>
+          <div className="space-y-1.5">
+            {top.map((t) => (
+              <div key={t.event_type}>
+                <div className="flex justify-between font-body text-xs" style={{ color: c.text }}>
+                  <span>{t.event_type.replace(/_/g, " ")}</span><span className="font-mono">{t.count}</span>
+                </div>
+                <div className="h-1 rounded-full" style={{ background: c.border }}>
+                  <div className="h-1 rounded-full" style={{ width: `${(t.count / maxCount) * 100}%`, background: c.accent }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityLogPanel({ activityLog, summary, onBack, c }) {
   if (activityLog === null) return <div className="pt-8"><Loader c={c} /></div>;
 
   const formatEvent = (type) => type.replace(/_/g, " ");
@@ -10333,6 +10413,8 @@ function ActivityLogPanel({ activityLog, onBack, c }) {
       <div className="font-mono text-xs mb-5" style={{ color: c.textFaint }}>
         Most recent {activityLog.length} event{activityLog.length === 1 ? "" : "s"}
       </div>
+
+      <ActivitySummaryCard summary={summary} c={c} />
 
       {activityLog.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body" style={{ borderColor: c.borderStrong, color: c.textDim }}>
