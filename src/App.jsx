@@ -115,6 +115,10 @@ import {
 import NetCoinIcon, { NetsAmount } from "./NetCoinIcon";
 
 const THEME_KEY = "efootball-theme-v1";
+// Set right before the Google redirect when a guest signs in FROM the shop,
+// read once after they come back so shoppers land back in the shop (and skip
+// the game-profile gate) instead of being dropped on the league Home.
+const SHOPPER_SIGNIN_KEY = "weafrica-shopper-signin-v1";
 const ACCENT_KEY = "efootball-accent-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -4050,8 +4054,14 @@ export default function App() {
   // client at load time — the Google sign-in flow leaves the page and
   // comes back, so the preference has to already be sitting in
   // localStorage by the time the returning page reads the session back out.
-  const signInWithGoogle = async (stay = true) => {
+  const signInWithGoogle = async (stay = true, fromShop = false) => {
     setStaySignedInPreference(stay);
+    // Always written (set or cleared) so a flag left behind by an abandoned
+    // shop sign-in can never hijack a later sign-in from somewhere else.
+    try {
+      if (fromShop) localStorage.setItem(SHOPPER_SIGNIN_KEY, "1");
+      else localStorage.removeItem(SHOPPER_SIGNIN_KEY);
+    } catch (e) { /* storage unavailable — they just land on Home */ }
     // redirectTo must be a clean URL with no leftover hash fragment. If a
     // previous OAuth attempt failed to parse (or the user simply has an
     // old #access_token=... sitting in the address bar), window.location.href
@@ -5446,6 +5456,18 @@ export default function App() {
   useEffect(() => {
     if (shopDeepLinkProductId && session) setView("shop");
   }, [shopDeepLinkProductId, session]);
+
+  // A guest who signed in from the shop (see SHOPPER_SIGNIN_KEY) goes back to
+  // the shop, not the league Home. Read-and-clear, so it only applies once.
+  useEffect(() => {
+    if (!session) return;
+    let fromShop = false;
+    try {
+      fromShop = localStorage.getItem(SHOPPER_SIGNIN_KEY) === "1";
+      if (fromShop) localStorage.removeItem(SHOPPER_SIGNIN_KEY);
+    } catch (e) { /* storage unavailable */ }
+    if (fromShop) setView("shop");
+  }, [session]);
 
   // Browser tab title reflects where the shopper actually is.
   useEffect(() => {
@@ -8583,7 +8605,7 @@ export default function App() {
     return (
       <>
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
-          onSignIn={(stay) => signInWithGoogle(stay)}
+          onSignIn={(stay, fromShop) => signInWithGoogle(stay, fromShop)}
           onRequireAuth={(reason) => setAuthPrompt(reason)}
           initialShopProductId={shopDeepLinkProductId} />
         {authPrompt && (
@@ -8602,7 +8624,24 @@ export default function App() {
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: c.bg }}><Loader c={c} /></div>;
   }
-  if (profile === null) return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} userEmail={session.user.email} onSignOut={signOut} />;
+  if (profile === null) {
+    // Shoppers only need an email (their Google account) — no game username,
+    // phone or age. While they're in the shop, show just the shop; the
+    // profile gate only appears if they head into the game side (the shop's
+    // "Matchday" link), where a username genuinely is needed.
+    if (view === "shop") {
+      return (
+        <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
+          <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
+            <Suspense fallback={<Loader c={c} />}>
+              <ShopPage c={c} session={session} profile={null} isAdmin={false} onBack={() => setView("home")} initialProductId={shopDeepLinkProductId} />
+            </Suspense>
+          </main>
+        </div>
+      );
+    }
+    return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} userEmail={session.user.email} onSignOut={signOut} />;
+  }
 
   // loadRecentResults and loadBoardComments aren't called here even though
   // this is "opening" the screen — the effects that poll them already fire
@@ -9279,7 +9318,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
                 : <Moon key="moon" size={14} color="#6366F1" className="animate-theme-icon" />}
             </button>
             {(guestLeaguesRevealed || shopOpen) && (
-              <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
+              <button onClick={() => onSignIn(staySignedIn, shopOpen)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
                 <GoogleIcon small /> Sign in
               </button>
             )}
