@@ -35,6 +35,7 @@ import { RulesButton, timeAgo, ShareRangeModal } from "./App.jsx";
 const RulesModal = lazy(() => import("./Rules.jsx"));
 import { NetsAmount } from "./NetCoinIcon";
 import CountdownBadge from "./CountdownBadge.jsx";
+import FixtureChatModal from "./FixtureChatModal.jsx";
 import { FacebookHighlightsIcon } from "./FacebookHighlightsPrompt.jsx";
 import { WhatsAppLink, WhatsAppCallLink, waLink, WHATSAPP_GREEN } from "./App.jsx";
 import { CommentsSection } from "./LeagueDetail.jsx";
@@ -1059,6 +1060,10 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
   // nothing, so the screen isn't empty on first open.
   const [activeWidget, setActiveWidget] = useState("fixtures");
   const [rulesOpen, setRulesOpen] = useState(false);
+  // chatFixture — the fixture whose in-app message thread is open (a
+  // ladder_fixtures row), or null. Only the fixture's own two players can
+  // open one; RLS on ladder_fixture_messages enforces the same server-side.
+  const [chatFixture, setChatFixture] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [cycle, setCycle] = useState(null); // { current_week, fixtures_locked, bidding_open }
   // displayWeek — the week whose fixtures this screen actually shows.
@@ -1726,6 +1731,16 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
                     it. Opens the identical leagueLadder RulesModal (shared
                     rulesOpen state), not a separate instance per row. */}
                 <RulesButton label="Help" onClick={() => setRulesOpen(true)} c={c} bright />
+                {/* In-app messages with your opponent for this fixture —
+                    participants only (admins aren't in the thread). */}
+                {isParticipant(f) && (
+                  <button onClick={() => setChatFixture(f)} title={`Message ${opponentFor(f)?.efootball_username || "your opponent"}`}
+                    aria-label="Open fixture chat"
+                    className="flex items-center gap-1 font-mono text-[10px] uppercase px-2 py-1 rounded"
+                    style={{ background: c.surface, color: c.accent, border: `1px solid ${c.border}` }}>
+                    <MessageCircle size={12} /> Chat
+                  </button>
+                )}
               </div>
 
               {(f.status === "played" || f.status === "forfeited") && (correctingId === f.id ? (
@@ -2069,6 +2084,12 @@ export default function LeagueLadderDetail({ leagueId, session, isAdmin, onBack,
         <Suspense fallback={null}>
           <RulesModal type="leagueLadder" onClose={() => setRulesOpen(false)} c={c} />
         </Suspense>
+      )}
+
+      {chatFixture && session?.user?.id && (
+        <FixtureChatModal fixtureId={chatFixture.id} myId={session.user.id}
+          counterpartUsername={opponentFor(chatFixture)?.efootball_username}
+          onClose={() => setChatFixture(null)} showToast={showToast} c={c} />
       )}
 
       {!isMember && (
