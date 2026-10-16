@@ -8724,6 +8724,7 @@ export default function App() {
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
     { icon: Award, label: "Completed Leagues", onClick: openCompletedLeaguesScreen },
+    { icon: ShoppingBag, label: "Shop", onClick: () => setView("shop") },
     { icon: Repeat, label: "The Kit Room", tourId: "qa-kitroom", external: true, onClick: () => setView("transferMarket") },
     { icon: MessageCircle, label: "Suggest something", onClick: () => setSuggestionOpen(true) },
     { icon: theme === "dark" ? Sun : Moon, label: theme === "dark" ? "Light mode" : "Dark mode", onClick: toggleTheme },
@@ -9302,15 +9303,16 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         ) : (
           <>
         {/* Quick actions — the first thing shown on the guest page now, per
-            request. "Ladder"/"Leagues" both reveal the league/ladder content
-            below (unmounted, not just hidden, until then); the two
-            account-gated tiles still just prompt sign-in as before. */}
-        <section className="grid grid-cols-4 gap-2 mt-4">
-          <GuestMenuTile icon={TrendingUp} label="Ladder" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
-          <GuestMenuTile icon={Gamepad2} label="Leagues" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
+            request. "eFootball" reveals the league/ladder content below
+            (unmounted, not just hidden, until then); Shop opens the guest
+            shop, and the one account-gated tile (Random) still just prompts
+            sign-in as before. The separate Ladder and New league tiles were
+            removed per request — five tiles, so a five-column row. */}
+        <section className="grid grid-cols-5 gap-2 mt-4">
+          <GuestMenuTile icon={Gamepad2} label="eFootball" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
+          <GuestMenuTile icon={ShoppingBag} label="Shop" onClick={() => setShopOpen(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
           <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
-          <GuestMenuTile icon={Plus} label="New league" locked onClick={() => onRequireAuth("Sign in to create your own league.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
         </section>
 
