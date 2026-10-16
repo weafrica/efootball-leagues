@@ -9021,7 +9021,12 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => window.removeEventListener("keydown", onKey);
   }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
-  const [shopOpen, setShopOpen] = useState(!!initialShopProductId);
+  // Guests (weafrica.co.za, www.weafrica.co.za) land straight on the shop
+  // homepage, not the quick-actions/login page. The shop's "Matchday" link
+  // (onBack below) still takes them to that page for Chess, Ludo, eFootball
+  // and sign-in. A shared /shop/<id> link opens the shop on that product via
+  // initialShopProductId, as before.
+  const [shopOpen, setShopOpen] = useState(true);
   const [ludoOpen, setLudoOpen] = useState(false);
   // Chess gets the same guest-playable treatment as Ludo — practice
   // board only (no account, no Nets, no RPCs needed for that part).
@@ -9273,7 +9278,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
                 ? <Sun key="sun" size={14} color="#F59E0B" className="animate-theme-icon" />
                 : <Moon key="moon" size={14} color="#6366F1" className="animate-theme-icon" />}
             </button>
-            {guestLeaguesRevealed && (
+            {(guestLeaguesRevealed || shopOpen) && (
               <button onClick={() => onSignIn(staySignedIn)} className="flex items-center gap-1.5 px-3.5 h-8 rounded-full font-body text-xs font-semibold" style={{ background: c.accent, color: c.accentText }}>
                 <GoogleIcon small /> Sign in
               </button>
