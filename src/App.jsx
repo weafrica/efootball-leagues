@@ -3892,6 +3892,10 @@ export default function App() {
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
+  // True when the page was opened at plain /shop (the shop's front door, e.g.
+  // www.weafrica.co.za/shop) — read once at load, URL left as-is.
+  const [shopHomeLink] = useState(() => /^\/shop\/?$/.test(window.location.pathname));
+  const shopHomeHandledRef = useRef(false);
   const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
   const c = useMemo(() => withAccent(THEMES[theme], theme, accentKey), [theme, accentKey]);
@@ -5456,6 +5460,14 @@ export default function App() {
   useEffect(() => {
     if (shopDeepLinkProductId && session) setView("shop");
   }, [shopDeepLinkProductId, session]);
+
+  // Signed-in visitors to plain /shop go to the shop too — once only, so a
+  // later token refresh can't pull them back out of wherever they've gone.
+  useEffect(() => {
+    if (!shopHomeLink || !session || shopHomeHandledRef.current) return;
+    shopHomeHandledRef.current = true;
+    setView("shop");
+  }, [shopHomeLink, session]);
 
   // A guest who signed in from the shop (see SHOPPER_SIGNIN_KEY) goes back to
   // the shop, not the league Home. Read-and-clear, so it only applies once.
@@ -8607,7 +8619,7 @@ export default function App() {
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
           onSignIn={(stay, fromShop) => signInWithGoogle(stay, fromShop)}
           onRequireAuth={(reason) => setAuthPrompt(reason)}
-          initialShopProductId={shopDeepLinkProductId} />
+          initialShopProductId={shopDeepLinkProductId} startInShop={shopHomeLink} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
             onCancel={() => setAuthPrompt(null)}
@@ -9047,7 +9059,7 @@ export default function App() {
 // does on its own is offer Google sign-in — every actual action (joining a
 // league, sending a challenge, climbing the ladder) is gated by onRequireAuth,
 // which the parent turns into the AuthPromptModal.
-function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId }) {
+function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onRequireAuth, initialShopProductId, startInShop }) {
   // Accent color (used for primary buttons/highlights throughout this page)
   // is picked from ACCENTS and lives in the app root now — see the comment
   // by accentKey's useState in App() — so whatever a guest picks here is
@@ -9060,12 +9072,12 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
     return () => window.removeEventListener("keydown", onKey);
   }, [accentPickerOpen]);
   const [staySignedIn, setStaySignedIn] = useState(true);
-  // Guests (weafrica.co.za, www.weafrica.co.za) land straight on the shop
-  // homepage, not the quick-actions/login page. The shop's "Matchday" link
-  // (onBack below) still takes them to that page for Chess, Ludo, eFootball
-  // and sign-in. A shared /shop/<id> link opens the shop on that product via
-  // initialShopProductId, as before.
-  const [shopOpen, setShopOpen] = useState(true);
+  // The plain site (weafrica.co.za, www.weafrica.co.za) shows the quick-
+  // actions/login page. Visiting /shop (startInShop) opens the shop homepage
+  // instead, and /shop/<id> opens it on that product (initialShopProductId).
+  // Either way the shop's "Matchday" link (onBack below) still leads to the
+  // quick-actions page for Chess, Ludo, eFootball and sign-in.
+  const [shopOpen, setShopOpen] = useState(!!initialShopProductId || !!startInShop);
   const [ludoOpen, setLudoOpen] = useState(false);
   // Chess gets the same guest-playable treatment as Ludo — practice
   // board only (no account, no Nets, no RPCs needed for that part).
