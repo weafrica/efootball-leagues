@@ -9358,6 +9358,11 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           </Suspense>
         ) : (
           <>
+        {/* Big WeAfrica Shop banner — the very top of the guest/login page,
+            above quick actions. Tap anywhere to open the shop (no account
+            needed). The smaller ShopBanner further down is separate. */}
+        <ShopHeroBanner onOpen={() => setShopOpen(true)} c={c} />
+
         {/* Quick actions — the first thing shown on the guest page now, per
             request. "eFootball" reveals the league/ladder content below
             (unmounted, not just hidden, until then); Shop opens the guest
@@ -10149,6 +10154,37 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+// Big, bold "WeAfrica Shop" banner for the very top of the guest/login page.
+// Same gold store identity as ShopBanner (SHOP_GOLD) but much larger and
+// title-led, so the shop is the first thing a visitor sees. The whole card
+// is the tap target; open to guests, no account needed.
+function ShopHeroBanner({ onOpen, c }) {
+  return (
+    <section onClick={onOpen} role="button" tabIndex={0} aria-label={`Open ${SHOP_NAME}`}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      className="relative mt-4 rounded-3xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+      style={{ background: `linear-gradient(135deg, ${SHOP_GOLD}55, ${SHOP_GOLD}1A 55%, ${c.surface})`, border: `1.5px solid ${SHOP_GOLD}99` }}>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="animate-glow-drift absolute -top-20 -right-12 w-56 h-56 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.35 }} />
+        <div className="animate-glow-drift absolute -bottom-24 -left-16 w-48 h-48 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.18, animationDelay: "2s" }} />
+        <ShoppingBag size={22} className="animate-product-float absolute top-4 right-6" style={{ color: SHOP_GOLD, animationDelay: "0s" }} />
+        <Shirt size={26} className="animate-product-float absolute top-16 right-16" style={{ color: SHOP_GOLD, animationDelay: "0.5s" }} />
+        <Package size={20} className="animate-product-float absolute bottom-5 right-8" style={{ color: SHOP_GOLD, animationDelay: "1s" }} />
+      </div>
+      <div className="relative px-5 py-7 sm:py-9">
+        <div className="font-mono text-[11px] tracking-[0.25em] uppercase mb-2" style={{ color: SHOP_GOLD }}>Official store</div>
+        <div className="font-extrabold uppercase tracking-tight leading-[0.95] text-[2.6rem] sm:text-6xl" style={{ color: c.text }}>
+          WeAfrica<br /><span style={{ color: SHOP_GOLD }}>Shop</span>
+        </div>
+        <p className="font-body text-sm sm:text-base mt-3 max-w-xs" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone, no account needed.</p>
+        <span className="inline-flex items-center gap-2 mt-5 font-body text-sm font-bold px-6 py-3 rounded-full shadow-lg" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+          Shop now <ChevronRight size={16} />
+        </span>
+      </div>
     </section>
   );
 }
