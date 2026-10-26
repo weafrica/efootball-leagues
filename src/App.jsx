@@ -9076,13 +9076,28 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
   // actions/login page. Visiting /shop (startInShop) opens the shop homepage
   // instead, and /shop/<id> opens it on that product (initialShopProductId).
   // Either way the shop's "Matchday" link (onBack below) still leads to the
-  // quick-actions page for Chess, Ludo, eFootball and sign-in.
+  // quick-actions page (the shop's "Other apps" link) for the other apps and sign-in.
   const [shopOpen, setShopOpen] = useState(!!initialShopProductId || !!startInShop);
   const [ludoOpen, setLudoOpen] = useState(false);
   // Chess gets the same guest-playable treatment as Ludo — practice
   // board only (no account, no Nets, no RPCs needed for that part).
   const [chessOpen, setChessOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  // Other guest-playable apps (Planet Earth, Sesotho Match) share one piece of
+  // state instead of one per app: null, "planetearth" or "sesothoMatch". Opening
+  // one pushes a history entry; going back to any entry that isn't an open app
+  // closes it (so the back gesture returns to the quick-actions page). It
+  // deliberately doesn't rewrite the initial history entry, which the shop /
+  // Ludo / Chess effects above already manage.
+  const [guestApp, setGuestApp] = useState(null);
+  useEffect(() => {
+    if (guestApp) { try { window.history.pushState({ guestAppOpen: true, guestApp }, ""); } catch (e) { /* ignore */ } }
+  }, [guestApp]);
+  useEffect(() => {
+    const onPopState = (e) => { if (!(e.state && e.state.guestAppOpen)) setGuestApp(null); };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   // Guest page starts showing only the quick-actions row — no league/ladder
   // content until "Ladder" or "Leagues" is tapped, per request. Local to
   // this component so every fresh visit/reload starts collapsed again.
@@ -9339,7 +9354,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
       </header>
 
       <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
-        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}-${ludoOpen}-${chessOpen}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); setLudoOpen(false); setChessOpen(false); }}>
+        <ErrorBoundary resetKey={`${shopOpen}-${termsOpen}-${ludoOpen}-${chessOpen}-${guestApp}`} onGoHome={() => { setShopOpen(false); setTermsOpen(false); setLudoOpen(false); setChessOpen(false); setGuestApp(null); }}>
         {shopOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <ShopPage c={c} session={null} profile={null} isAdmin={false} onBack={() => setShopOpen(false)} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
@@ -9351,6 +9366,14 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
         ) : chessOpen ? (
           <Suspense fallback={<Loader c={c} />}>
             <ChessPage c={c} session={null} onBack={() => setChessOpen(false)} startInPractice />
+          </Suspense>
+        ) : guestApp === "planetearth" ? (
+          <Suspense fallback={<Loader c={c} />}>
+            <PlanetEarthPage c={c} session={null} profile={null} onBack={() => setGuestApp(null)} showToast={() => {}} />
+          </Suspense>
+        ) : guestApp === "sesothoMatch" ? (
+          <Suspense fallback={<Loader c={c} />}>
+            <SesothoMatchPage onBack={() => setGuestApp(null)} c={c} />
           </Suspense>
         ) : termsOpen ? (
           <Suspense fallback={<Loader c={c} />}>
@@ -9368,12 +9391,18 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
             (unmounted, not just hidden, until then); Shop opens the guest
             shop, and the one account-gated tile (Random) still just prompts
             sign-in as before. The separate Ladder and New league tiles were
-            removed per request — five tiles, so a five-column row. */}
-        <section className="grid grid-cols-5 gap-2 mt-4">
+            removed per request. Now lists every app: the playable ones open
+            straight away (Chess, Ludo, Planet Earth, Sesotho Match), and the
+            two that need an account (Stories, Random) prompt sign-in. Eight
+            tiles = two tidy rows of four. */}
+        <section className="grid grid-cols-4 gap-2 mt-4">
           <GuestMenuTile icon={Gamepad2} label="eFootball" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={ShoppingBag} label="Shop" onClick={() => setShopOpen(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
           <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
+          <GuestMenuTile icon={PlanetEarthIcon} label="Planet Earth" onClick={() => setGuestApp("planetearth")} c={c} />
+          <GuestMenuTile icon={BookOpen} label="Sesotho Match" onClick={() => setGuestApp("sesothoMatch")} c={c} />
+          <GuestMenuTile icon={Volume2} label="Stories" locked onClick={() => onRequireAuth("Sign in to listen to stories and save your progress.")} c={c} />
           <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
         </section>
 
