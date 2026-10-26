@@ -25,6 +25,10 @@ try {
   ok(true, 'Level 6 plate boundaries, eruptions and the Quake Lab draw');
   { const E = await import('../src/planetearth/ecosystem.js'); const e = E.createEco(4); for (const [w, h] of sizes) { for (let i = 0; i < 400; i++) E.stepEco(e, 0.1); art.drawEcosystem(ctx, w, h, 1, { e }); } E.startDrought(e); art.drawEcosystem(ctx, 400, 500, 2, { e }); E.removeLions(e); for (let i = 0; i < 600; i++) E.stepEco(e, 0.1); art.drawEcosystem(ctx, 400, 500, 3, { e }); }
   ok(true, 'Level 7 savanna draws (balanced, drought, no lions)');
+  { const S = await import('../src/planetearth/story.js'); const kinds = [...new Set([...S.PROLOGUE.map((x) => x.art), 'title', 'transmission'])];
+    for (const k of kinds) for (const [w, h] of sizes) for (const st of [{}, { ex: 'he', react: 'b', speaker: 'elder' }, { ex: 'she', react: 'a', speaker: 'bleep', launching: true, launchT: 1.4, form: 'cactus', burst: true }, { speaker: 'narrator', react: 'c' }]) for (const tm of [0, 2.5, 8]) art.sceneArt(ctx, k, w, h, tm, { color: 3, ...st });
+    for (const f of S.FORMS) for (const ci of [0, 4]) for (const tm of [0, 1.3]) art.drawForm(ctx, f.id, 100, 100, 90, tm, ci); }
+  ok(true, 'every storyline scene (title, home, café, sofa, council, power, Blend Lab, launch, crash, transmission) and all 7 shape-shift forms draw');
   for (let ci = 0; ci < art.ALIEN_COLORS.length; ci++) { art.drawAlien(ctx, 100, 100, 80, ci, 1.2, { x: 1, y: -1 }, ci % 2 ? 'wow' : 'happy'); }
   art.drawUfo(ctx, 100, 100, 100, 2, true); art.drawSun(ctx, 50, 50, 12, 1, 1); art.spaceBg(ctx, 300, 300, 4);
   ok(true, 'alien (all colours), UFO and sun draw');
