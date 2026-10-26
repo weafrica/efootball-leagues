@@ -142,6 +142,8 @@ function languageLabel(code) {
 }
 
 export default function StoriesPage({ session, showToast, onBack, c }) {
+  // Guests (session == null) can listen and play; progress just isn't saved.
+  const userId = session?.user?.id || null;
   const [stories, setStories] = useState(null); // null = loading
   const [screen, setScreen] = useState("list"); // list | language | play
   const [activeStory, setActiveStory] = useState(null); // row from game_stories
@@ -186,17 +188,18 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       // and stale progress ("in progress" / "completed" labels) offline
       // isn't worth the complexity. If this fails offline, the list
       // above still renders fine, just without those labels yet.
+      if (!userId) return; // guest: no saved progress to load
       const { data: progressRows } = await supabase
         .from("game_story_progress")
         .select("story_id, language, current_node_id, completed, ending_id")
-        .eq("user_id", session.user.id);
+        .eq("user_id", userId);
       if (cancelled) return;
       const byStory = {};
       (progressRows || []).forEach((p) => { byStory[p.story_id] = p; });
       setProgressByStory(byStory);
     })();
     return () => { cancelled = true; };
-  }, [session.user.id]);
+  }, [userId]);
 
   const openStory = (story) => {
     setActiveStory(story);
@@ -266,8 +269,8 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   const saveProgress = useCallback(async (story, lang, id, node, existingFlags) => {
     const isEnding = !!node.ending;
     const flags = node.win ? { ...existingFlags, [node.win.flag]: true } : existingFlags;
-    await supabase.from("game_story_progress").upsert({
-      user_id: session.user.id,
+    if (userId) await supabase.from("game_story_progress").upsert({
+      user_id: userId,
       story_id: story.id,
       language: lang,
       current_node_id: id,
@@ -281,7 +284,7 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
       [story.id]: { story_id: story.id, language: lang, current_node_id: id, completed: isEnding, ending_id: isEnding ? node.ending : null, flags },
     }));
     return flags;
-  }, [session.user.id]);
+  }, [userId]);
 
   // Ambience: a quiet looping background sound keyed by the node's
   // `ambience` tag (e.g. "stadium_training", "locker_room"). Many nodes

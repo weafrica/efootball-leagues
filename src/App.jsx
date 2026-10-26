@@ -119,6 +119,8 @@ const THEME_KEY = "efootball-theme-v1";
 // read once after they come back so shoppers land back in the shop (and skip
 // the game-profile gate) instead of being dropped on the league Home.
 const SHOPPER_SIGNIN_KEY = "weafrica-shopper-signin-v1";
+// Set when a guest taps "New league": after signing in they go straight to the create-league screen.
+const CREATE_LEAGUE_SIGNIN_KEY = "weafrica-create-league-signin-v1";
 const ACCENT_KEY = "efootball-accent-v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -5481,6 +5483,18 @@ export default function App() {
     if (fromShop) setView("shop");
   }, [session]);
 
+  // A guest who tapped "New league" lands on the create-league screen once
+  // signed in. Read-and-clear, so it only applies once.
+  useEffect(() => {
+    if (!session) return;
+    let wantsCreate = false;
+    try {
+      wantsCreate = localStorage.getItem(CREATE_LEAGUE_SIGNIN_KEY) === "1";
+      if (wantsCreate) localStorage.removeItem(CREATE_LEAGUE_SIGNIN_KEY);
+    } catch (e) { /* storage unavailable */ }
+    if (wantsCreate) setView("create");
+  }, [session]);
+
   // Browser tab title reflects where the shopper actually is.
   useEffect(() => {
     document.title = view === "shop" ? "Department Store" : "Matchday — eFootball Leagues";
@@ -8622,7 +8636,7 @@ export default function App() {
           initialShopProductId={shopDeepLinkProductId} startInShop={shopHomeLink} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
-            onCancel={() => setAuthPrompt(null)}
+            onCancel={() => { try { localStorage.removeItem(CREATE_LEAGUE_SIGNIN_KEY); } catch (e) { /* ignore */ } setAuthPrompt(null); }}
             onSignIn={(stay) => signInWithGoogle(stay)} />
         )}
         {/* No app-install nag on the guest/landing page — appPromoOpen is
@@ -9371,6 +9385,10 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           <Suspense fallback={<Loader c={c} />}>
             <PlanetEarthPage c={c} session={null} profile={null} onBack={() => setGuestApp(null)} showToast={() => {}} />
           </Suspense>
+        ) : guestApp === "stories" ? (
+          <Suspense fallback={<Loader c={c} />}>
+            <StoriesPage session={null} showToast={() => {}} onBack={() => setGuestApp(null)} c={c} />
+          </Suspense>
         ) : guestApp === "sesothoMatch" ? (
           <Suspense fallback={<Loader c={c} />}>
             <SesothoMatchPage onBack={() => setGuestApp(null)} c={c} />
@@ -9402,8 +9420,8 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
           <GuestMenuTile icon={PlanetEarthIcon} label="Planet Earth" onClick={() => setGuestApp("planetearth")} c={c} />
           <GuestMenuTile icon={BookOpen} label="Sesotho Match" onClick={() => setGuestApp("sesothoMatch")} c={c} />
-          <GuestMenuTile icon={Volume2} label="Stories" locked onClick={() => onRequireAuth("Sign in to listen to stories and save your progress.")} c={c} />
-          <GuestMenuTile icon={Shuffle} label="Random" locked onClick={() => onRequireAuth("Sign in to grab a random challenge.")} c={c} />
+          <GuestMenuTile icon={Volume2} label="Stories" onClick={() => setGuestApp("stories")} c={c} />
+          <GuestMenuTile icon={Plus} label="New league" locked onClick={() => { try { localStorage.setItem(CREATE_LEAGUE_SIGNIN_KEY, "1"); } catch (e) { /* ignore */ } onRequireAuth("Sign in to create your own league."); }} c={c} />
         </section>
 
         {guestLeaguesRevealed && (
