@@ -10248,7 +10248,7 @@ function BouncingProducts() {
   const count = useIcons ? 4 : products.length;
   const ICON_SIZES = [22, 26, 20, 24];
   const PHOTO = 56;
-  const PHOTO_H = PHOTO + 12; // photo + overlapping price tag
+  const PHOTO_H = PHOTO + 22; // photo + price tag underneath
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -10280,7 +10280,13 @@ function BouncingProducts() {
           else if (it.y >= maxY) { it.y = maxY; it.vy = -Math.abs(it.vy); }
         }
         const rot = useIcons ? clock * 40 + it.phase * 57 : Math.sin(clock * 1.6 + it.phase) * 9;
-        it.el.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${rot}deg)`;
+        if (useIcons) {
+          it.el.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${rot}deg)`;
+        } else {
+          // Only the photo tilts; the price tag stays level so it reads clearly.
+          it.el.style.transform = `translate(${it.x}px, ${it.y}px)`;
+          if (it.el.firstChild) it.el.firstChild.style.transform = `rotate(${rot}deg)`;
+        }
       });
       if (!reduce) raf = requestAnimationFrame(tick);
     };
@@ -10299,15 +10305,15 @@ function BouncingProducts() {
     );
   }
   return (
-    <div ref={wrapRef} className="absolute inset-0">
+    <div ref={wrapRef} className="absolute inset-0" style={{ zIndex: 5 }}>
       {products.map((p) => (
         <div key={p.id} className="absolute top-0 left-0" style={{ width: PHOTO, height: PHOTO_H, willChange: "transform" }}>
           <img src={toProxiedUrl(p.image_url)} alt="" draggable={false}
             className="object-cover rounded-xl"
             style={{ width: PHOTO, height: PHOTO, border: `2px solid ${SHOP_GOLD}`, boxShadow: `0 4px 14px rgba(0,0,0,0.35), 0 0 12px ${SHOP_GOLD}66` }} />
           {p.price != null && (
-            <span className="absolute left-1/2 whitespace-nowrap font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ bottom: 0, transform: "translateX(-50%)", background: SHOP_GOLD, color: "#1a1200", boxShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
+            <span className="absolute left-1/2 whitespace-nowrap font-mono text-[12px] font-extrabold leading-none px-2 py-1 rounded-full"
+              style={{ top: PHOTO + 4, transform: "translateX(-50%)", background: SHOP_GOLD, color: "#1a1200", boxShadow: "0 2px 8px rgba(0,0,0,0.5)" }}>
               {`R${Number(p.price).toLocaleString("en-ZA")}`}
             </span>
           )}
