@@ -10205,64 +10205,94 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   );
 }
 
-// Product icons that drift and bounce off every edge of the hero banner, in
-// all directions (DVD-screensaver style), spinning gently as they go. Driven
-// by requestAnimationFrame writing transforms straight to the DOM, so React
-// doesn't re-render 60 times a second. Sits behind the banner text; pointer
-// events are off so the whole card stays one tap target. Honors
-// prefers-reduced-motion by leaving the icons still.
+// Real shop products (photos) that drift and bounce off every edge of the
+// hero banner, in all directions (DVD-screensaver style), with a slight tilt.
+// Pulls a random handful of active products that have a photo; until they
+// load (or if there are none / the fetch fails) it shows the gold icons
+// instead. Driven by requestAnimationFrame writing transforms straight to the
+// DOM, so React doesn't re-render 60 times a second. Sits behind the banner
+// text; pointer events are off so the whole card stays one tap target.
+// Honors prefers-reduced-motion by leaving them still.
 function BouncingProducts() {
   const wrapRef = useRef(null);
+  const [products, setProducts] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.from("shop_products")
+          .select("id, name, image_url").eq("active", true).not("image_url", "is", null).limit(40);
+        const withPhoto = (data || []).filter((p) => p.image_url);
+        // Fisher-Yates shuffle, then keep a handful.
+        for (let i = withPhoto.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [withPhoto[i], withPhoto[j]] = [withPhoto[j], withPhoto[i]];
+        }
+        if (!cancelled) setProducts(withPhoto.slice(0, 5));
+      } catch (e) { if (!cancelled) setProducts([]); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const useIcons = !products || products.length === 0;
+  const count = useIcons ? 4 : products.length;
+  const ICON_SIZES = [22, 26, 20, 24];
+  const PHOTO = 56;
+
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const els = Array.from(wrap.children);
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const SIZES = [22, 26, 20, 24];
     const items = els.map((el, i) => {
       const ang = Math.random() * Math.PI * 2;
-      const speed = 38 + Math.random() * 30; // px per second
+      const speed = 34 + Math.random() * 28; // px per second
       return {
-        el, size: SIZES[i % SIZES.length],
+        el, size: useIcons ? ICON_SIZES[i % ICON_SIZES.length] : PHOTO,
         x: 0, y: 0, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
-        rot: Math.random() * 360, vr: (Math.random() < 0.5 ? -1 : 1) * (25 + Math.random() * 35),
-        placed: false,
+        phase: Math.random() * Math.PI * 2, placed: false,
       };
     });
-    let raf = 0, last = 0;
-    const place = (it, w, h) => {
-      it.x = Math.random() * Math.max(1, w - it.size);
-      it.y = Math.random() * Math.max(1, h - it.size);
-      it.placed = true;
-    };
-    const draw = (it) => { it.el.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot}deg)`; };
+    let raf = 0, last = 0, clock = 0;
     const tick = (t) => {
       const w = wrap.clientWidth, h = wrap.clientHeight;
       const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
-      last = t;
+      last = t; clock += dt;
       items.forEach((it) => {
-        if (!it.placed) place(it, w, h);
+        const maxX = Math.max(0, w - it.size), maxY = Math.max(0, h - it.size);
+        if (!it.placed) { it.x = Math.random() * maxX; it.y = Math.random() * maxY; it.placed = true; }
         if (!reduce) {
-          it.x += it.vx * dt; it.y += it.vy * dt; it.rot += it.vr * dt;
-          const maxX = Math.max(0, w - it.size), maxY = Math.max(0, h - it.size);
+          it.x += it.vx * dt; it.y += it.vy * dt;
           if (it.x <= 0) { it.x = 0; it.vx = Math.abs(it.vx); }
           else if (it.x >= maxX) { it.x = maxX; it.vx = -Math.abs(it.vx); }
           if (it.y <= 0) { it.y = 0; it.vy = Math.abs(it.vy); }
           else if (it.y >= maxY) { it.y = maxY; it.vy = -Math.abs(it.vy); }
         }
-        draw(it);
+        const rot = useIcons ? clock * 40 + it.phase * 57 : Math.sin(clock * 1.6 + it.phase) * 9;
+        it.el.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${rot}deg)`;
       });
       if (!reduce) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
-  const icons = [ShoppingBag, Shirt, Package, Tag];
-  const sizes = [22, 26, 20, 24];
+  }, [useIcons, count]);
+
+  if (useIcons) {
+    const icons = [ShoppingBag, Shirt, Package, Tag];
+    return (
+      <div ref={wrapRef} className="absolute inset-0">
+        {icons.map((Icon, i) => (
+          <Icon key={i} size={ICON_SIZES[i]} className="absolute top-0 left-0" style={{ color: SHOP_GOLD, opacity: 0.85, filter: `drop-shadow(0 0 6px ${SHOP_GOLD}99)`, willChange: "transform" }} />
+        ))}
+      </div>
+    );
+  }
   return (
     <div ref={wrapRef} className="absolute inset-0">
-      {icons.map((Icon, i) => (
-        <Icon key={i} size={sizes[i]} className="absolute top-0 left-0" style={{ color: SHOP_GOLD, opacity: 0.85, filter: `drop-shadow(0 0 6px ${SHOP_GOLD}99)`, willChange: "transform" }} />
+      {products.map((p) => (
+        <img key={p.id} src={toProxiedUrl(p.image_url)} alt="" draggable={false}
+          className="absolute top-0 left-0 object-cover rounded-xl"
+          style={{ width: PHOTO, height: PHOTO, border: `2px solid ${SHOP_GOLD}`, boxShadow: `0 4px 14px rgba(0,0,0,0.35), 0 0 12px ${SHOP_GOLD}66`, willChange: "transform" }} />
       ))}
     </div>
   );
