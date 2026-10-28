@@ -119,6 +119,8 @@ const THEME_KEY = "efootball-theme-v1";
 // read once after they come back so shoppers land back in the shop (and skip
 // the game-profile gate) instead of being dropped on the league Home.
 const SHOPPER_SIGNIN_KEY = "weafrica-shopper-signin-v1";
+// Product ids the guest-page banner showed last visit, so the next visit picks different ones.
+const BANNER_SEEN_KEY = "weafrica-banner-products-v1";
 // Set when a guest taps "New league": after signing in they go straight to the create-league screen.
 const CREATE_LEAGUE_SIGNIN_KEY = "weafrica-create-league-signin-v1";
 const ACCENT_KEY = "efootball-accent-v1";
@@ -10221,14 +10223,22 @@ function BouncingProducts() {
     (async () => {
       try {
         const { data } = await supabase.from("shop_products")
-          .select("id, name, image_url").eq("active", true).not("image_url", "is", null).limit(40);
+          .select("id, name, image_url").eq("active", true).not("image_url", "is", null).limit(300);
         const withPhoto = (data || []).filter((p) => p.image_url);
-        // Fisher-Yates shuffle, then keep a handful.
+        // Fisher-Yates shuffle.
         for (let i = withPhoto.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [withPhoto[i], withPhoto[j]] = [withPhoto[j], withPhoto[i]];
         }
-        if (!cancelled) setProducts(withPhoto.slice(0, 5));
+        // Show a different set on every visit: products shown last time go to
+        // the back of the line (a stable sort keeps the shuffle otherwise), so
+        // as long as there are enough products none repeat back-to-back.
+        let lastShown = [];
+        try { lastShown = JSON.parse(localStorage.getItem(BANNER_SEEN_KEY) || "[]"); } catch (e) { /* ignore */ }
+        withPhoto.sort((a, b) => (lastShown.includes(a.id) ? 1 : 0) - (lastShown.includes(b.id) ? 1 : 0));
+        const picked = withPhoto.slice(0, 5);
+        try { localStorage.setItem(BANNER_SEEN_KEY, JSON.stringify(picked.map((p) => p.id))); } catch (e) { /* ignore */ }
+        if (!cancelled) setProducts(picked);
       } catch (e) { if (!cancelled) setProducts([]); }
     })();
     return () => { cancelled = true; };
