@@ -6,7 +6,7 @@ import { uploadToR2 } from "./utils/r2Upload";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
-  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy,
+  Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
   AlertTriangle,
 } from "lucide-react";
 
@@ -422,12 +422,9 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {subview === "browse" && (
         <>
-          <div className="mb-5">
-            <div className="flex items-center gap-2">
-              <ShoppingBag size={20} style={{ color: SHOP_GOLD }} />
-              <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">WeAfrica Shop</h1>
-            </div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.2em] mt-1.5" style={{ color: c.textFaint }}>Step onto the floor · every department, one store</div>
+          <div className="mb-4">
+            <h1 className="text-[1.75rem] font-extrabold tracking-tight leading-none">WeAfrica Shop</h1>
+            <p className="font-body text-sm mt-1.5" style={{ color: c.textDim }}>Clothing, bags, gear, toys and more. Order in minutes, no account needed.</p>
           </div>
           <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
@@ -616,8 +613,23 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
 
   return (
     <div>
-      {selected === "all" && !q && (
-        <DepartmentShowcase groups={grouped} uncategorizedCount={uncategorized.length} onSelect={selectDept} deptNum={deptNum} c={c} />
+      {/* Search leads: it is the fastest way to a product. */}
+      <div className="relative mb-5">
+        <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products"
+          className="w-full border rounded-xl pl-10 pr-10 py-3 font-body text-sm outline-none focus:ring-2" style={{ background: c.surface, borderColor: c.border, color: c.text, "--tw-ring-color": SHOP_GOLD }} />
+        {query && (
+          <button onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
+            <X size={14} />
+          </button>
+        )}
+      </div>
+
+      {selected === "all" && !q && grouped.length > 0 && (
+        <DepartmentStrip groups={grouped} onSelect={selectDept} deptNum={deptNum} c={c} />
+      )}
+      {selected === "all" && !q && sort === "default" && !inStockOnly && searchable.length >= 6 && (
+        <NewArrivals products={searchable.slice(0, 8)} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
       )}
 
       {selected !== "all" && selected !== "uncategorized" && departments.some((d) => d.id === selected) && (() => {
@@ -635,47 +647,34 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
               ‹ All departments
             </button>
             <div className="relative">
-              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/85">Department{num ? ` ${num}` : ""} · you're inside</div>
-              <div className="text-white font-extrabold uppercase tracking-tight text-4xl leading-[0.95] mt-1" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>{dept.name}</div>
-              <div className="text-white/90 font-mono text-[11px] mt-2">
-                {deptItems.length} item{deptItems.length === 1 ? "" : "s"}{deptCategories.length > 0 ? ` · ${deptCategories.length} categor${deptCategories.length === 1 ? "y" : "ies"}` : ""}{from != null ? ` · from ${formatMoney(from)}` : ""}
+              <div className="text-white font-extrabold tracking-tight text-4xl leading-[1]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>{dept.name}</div>
+              <div className="text-white/90 font-body text-sm mt-1.5">
+                {deptItems.length} item{deptItems.length === 1 ? "" : "s"}{deptCategories.length > 0 ? `, ${deptCategories.length} categor${deptCategories.length === 1 ? "y" : "ies"}` : ""}{from != null ? `, from ${formatMoney(from)}` : ""}
               </div>
             </div>
           </div>
         );
       })()}
 
-      <div className="relative mb-3">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the shop..."
-          className="w-full border rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
-        {query && (
-          <button onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
-            <X size={13} />
-          </button>
-        )}
-      </div>
-
       <div className="flex items-center gap-1.5 mb-4 overflow-x-auto no-scrollbar">
-        <select value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-mono text-[11px] font-semibold pl-2.5 pr-1.5 py-1.5 rounded-full outline-none" style={{ background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
-          <option value="default">Sort: Featured</option>
-          <option value="price_asc">Price: Low to High</option>
-          <option value="price_desc">Price: High to Low</option>
-          <option value="name">Name: A–Z</option>
+        <select value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
+          <option value="default">Sort: Newest</option>
+          <option value="price_asc">Price: low to high</option>
+          <option value="price_desc">Price: high to low</option>
+          <option value="name">Name: A to Z</option>
         </select>
-        <button onClick={() => setInStockOnly((v) => !v)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase"
-          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+        <button onClick={() => setInStockOnly((v) => !v)} aria-pressed={inStockOnly} className="shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
+          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
           In stock only
         </button>
       </div>
 
-      {departments.length > 0 && (
-        <div className="sticky top-0 z-10 -mx-4 px-4 pb-1 pt-1" style={{ background: c.bg }}>
+      {departments.length > 0 && (selected !== "all" || q) && (
+        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 pt-1" style={{ background: c.bg }}>
           <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-            <span className="shrink-0 self-center font-mono text-[10px] font-bold uppercase tracking-[0.2em] pr-1" style={{ color: SHOP_GOLD }}>Departments</span>
             {chips.map((d) => (
-              <button key={d.id} onClick={() => selectDept(d.id)} className="shrink-0 font-mono text-[11px] font-semibold px-3 py-1.5 rounded-full uppercase flex items-center gap-1.5"
-                style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+              <button key={d.id} onClick={() => selectDept(d.id)} aria-pressed={selected === d.id} className="shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5"
+                style={selected === d.id ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
                 {d.name} <span style={{ opacity: 0.6 }}>{d.count}</span>
               </button>
             ))}
@@ -701,7 +700,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
       )}
 
       {childCats.length > 0 && selected !== "all" && selected !== "uncategorized" && (
-        <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: c.textFaint }}>
+        <div className="font-body text-sm font-semibold mb-2" style={{ color: c.textDim }}>
           Categories in {currentCatId ? categories.find((cc) => cc.id === currentCatId)?.name : departments.find((d) => d.id === selected)?.name}
         </div>
       )}
@@ -733,11 +732,10 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
           {grouped.map(({ dept, items }) => (
             <div key={dept.id}>
               {departments.length > 0 && (
-                <div className="flex items-center gap-2 mb-2.5">
-                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded tracking-[0.15em]" style={{ background: SHOP_GOLD, color: "#1a1200" }}>DEPT {deptNum.get(dept.id)}</span>
-                  <span className="font-extrabold uppercase tracking-tight text-lg leading-none" style={{ color: c.text }}>{dept.name}</span>
-                  <span className="font-mono text-[11px]" style={{ color: c.textFaint }}>({items.length})</span>
-                  <button onClick={() => selectDept(dept.id)} className="ml-auto shrink-0 font-mono text-[10px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ border: `1px solid ${SHOP_GOLD}`, color: SHOP_GOLD }}>Visit department ›</button>
+                <div className="flex items-baseline gap-2 mb-3">
+                  <h2 className="font-extrabold tracking-tight text-xl leading-none" style={{ color: c.text }}>{dept.name}</h2>
+                  <span className="font-body text-xs" style={{ color: c.textFaint }}>{items.length} item{items.length === 1 ? "" : "s"}</span>
+                  <button onClick={() => selectDept(dept.id)} className="ml-auto shrink-0 font-body text-sm font-semibold flex items-center gap-0.5" style={{ color: SHOP_GOLD }}>See all <ChevronRight size={15} /></button>
                 </div>
               )}
               <ProductGrid products={items} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
@@ -746,8 +744,8 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
           {uncategorized.length > 0 && (
             <div>
               {departments.length > 0 && (
-                <div className="font-mono text-xs uppercase tracking-[0.2em] mb-2.5 flex items-baseline gap-1.5" style={{ color: c.textFaint }}>
-                  Other items <span style={{ opacity: 0.6 }}>({uncategorized.length})</span>
+                <div className="font-extrabold tracking-tight text-xl leading-none mb-3 flex items-baseline gap-2" style={{ color: c.text }}>
+                  Other items <span className="font-body text-xs font-normal" style={{ color: c.textFaint }}>{uncategorized.length} item{uncategorized.length === 1 ? "" : "s"}</span>
                 </div>
               )}
               <ProductGrid products={uncategorized} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
@@ -758,6 +756,64 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
         <div className="mt-2"><ProductGrid products={currentItems} loading={false} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} /></div>
       )}
     </div>
+  );
+}
+
+// "Shop by department": one horizontal row of photo cards instead of a wall
+// of full-width tiles, so the catalogue starts within the first screen. Each
+// card uses a photo from that department, or its tint when it has none.
+function DepartmentStrip({ groups, onSelect, deptNum, c }) {
+  return (
+    <section className="mb-6" aria-label="Shop by department">
+      <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">Shop by department</h2>
+      <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
+        {groups.map(({ dept, items }) => {
+          const photo = items.find((it) => it.image_url)?.image_url;
+          const tint = DEPT_TINTS[((parseInt(deptNum.get(dept.id), 10) || 1) - 1) % DEPT_TINTS.length];
+          return (
+            <button key={dept.id} onClick={() => onSelect(dept.id)} className="shrink-0 w-[104px] text-left snap-start" aria-label={`${dept.name}, ${items.length} items`}>
+              <span className="block w-[104px] h-[104px] rounded-2xl overflow-hidden relative" style={{ background: tint }}>
+                {photo && <img src={toProxiedUrl(photo)} alt="" loading="lazy" className="w-full h-full object-cover" />}
+              </span>
+              <span className="block font-body text-[13px] font-semibold leading-tight mt-2 line-clamp-2" style={{ color: c.text }}>{dept.name}</span>
+              <span className="block font-body text-xs mt-0.5" style={{ color: c.textFaint }}>{items.length} item{items.length === 1 ? "" : "s"}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// Newest products across every department, as a swipeable row.
+function NewArrivals({ products, onOpen, onQuickAdd, c }) {
+  return (
+    <section className="mb-7" aria-label="New arrivals">
+      <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">New arrivals</h2>
+      <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
+        {products.map((p) => {
+          const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0;
+          return (
+            <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
+              className="shrink-0 w-[150px] snap-start rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="aspect-square relative" style={{ background: c.surfaceHover }}>
+                {p.image_url && <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" className="w-full h-full object-cover" />}
+                {canQuickAdd && (
+                  <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
+                    className="absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+                    <Plus size={18} />
+                  </button>
+                )}
+              </div>
+              <div className="p-3">
+                <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
+                <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{formatMoney(p.price)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -948,16 +1004,17 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
               {p.image_url ? <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
               {canQuickAdd && (
                 <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
-                  className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
-                  <Plus size={14} />
+                  className="absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+                  <Plus size={18} />
                 </button>
               )}
             </div>
-            <div className="p-2.5">
-              <div className="font-body text-xs font-semibold truncate">{p.name}</div>
-              <div className="font-mono text-xs mt-0.5" style={{ color: SHOP_GOLD }}>{formatMoney(p.price)}</div>
-              {!p.active && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.textFaint }}>Hidden</div>}
-              {p.active && p.stock_qty === 0 && <div className="font-mono text-[9px] uppercase mt-1" style={{ color: c.red }}>Out of stock</div>}
+            <div className="p-3">
+              <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
+              <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{formatMoney(p.price)}</div>
+              {!p.active && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Hidden from shoppers</div>}
+              {p.active && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
+              {p.active && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
             </div>
           </div>
         );
