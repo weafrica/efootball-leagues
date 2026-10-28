@@ -1152,7 +1152,7 @@ export default function SesothoMatchPage({ onBack, c }) {
             </button>
           </div>
         </div>
-        <div className="mb-1 font-display text-2xl" style={{ color: c.text }}>Sesotho Match</div>
+        <div className="mb-1 font-display text-2xl" style={{ color: c.text }}>Language Learning</div>
         <div className="mb-3 font-body text-sm" style={{ color: c.textDim }}>
           Recover the scattered pages before the Wind of Forgetting does.
         </div>
