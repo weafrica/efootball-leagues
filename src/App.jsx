@@ -10205,6 +10205,69 @@ function ShopBanner({ onOpen, picks, onOpenPick, c }) {
   );
 }
 
+// Product icons that drift and bounce off every edge of the hero banner, in
+// all directions (DVD-screensaver style), spinning gently as they go. Driven
+// by requestAnimationFrame writing transforms straight to the DOM, so React
+// doesn't re-render 60 times a second. Sits behind the banner text; pointer
+// events are off so the whole card stays one tap target. Honors
+// prefers-reduced-motion by leaving the icons still.
+function BouncingProducts() {
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const els = Array.from(wrap.children);
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const SIZES = [22, 26, 20, 24];
+    const items = els.map((el, i) => {
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 38 + Math.random() * 30; // px per second
+      return {
+        el, size: SIZES[i % SIZES.length],
+        x: 0, y: 0, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+        rot: Math.random() * 360, vr: (Math.random() < 0.5 ? -1 : 1) * (25 + Math.random() * 35),
+        placed: false,
+      };
+    });
+    let raf = 0, last = 0;
+    const place = (it, w, h) => {
+      it.x = Math.random() * Math.max(1, w - it.size);
+      it.y = Math.random() * Math.max(1, h - it.size);
+      it.placed = true;
+    };
+    const draw = (it) => { it.el.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot}deg)`; };
+    const tick = (t) => {
+      const w = wrap.clientWidth, h = wrap.clientHeight;
+      const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
+      last = t;
+      items.forEach((it) => {
+        if (!it.placed) place(it, w, h);
+        if (!reduce) {
+          it.x += it.vx * dt; it.y += it.vy * dt; it.rot += it.vr * dt;
+          const maxX = Math.max(0, w - it.size), maxY = Math.max(0, h - it.size);
+          if (it.x <= 0) { it.x = 0; it.vx = Math.abs(it.vx); }
+          else if (it.x >= maxX) { it.x = maxX; it.vx = -Math.abs(it.vx); }
+          if (it.y <= 0) { it.y = 0; it.vy = Math.abs(it.vy); }
+          else if (it.y >= maxY) { it.y = maxY; it.vy = -Math.abs(it.vy); }
+        }
+        draw(it);
+      });
+      if (!reduce) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const icons = [ShoppingBag, Shirt, Package, Tag];
+  const sizes = [22, 26, 20, 24];
+  return (
+    <div ref={wrapRef} className="absolute inset-0">
+      {icons.map((Icon, i) => (
+        <Icon key={i} size={sizes[i]} className="absolute top-0 left-0" style={{ color: SHOP_GOLD, opacity: 0.85, filter: `drop-shadow(0 0 6px ${SHOP_GOLD}99)`, willChange: "transform" }} />
+      ))}
+    </div>
+  );
+}
+
 // Big, bold "WeAfrica Shop" banner for the very top of the guest/login page.
 // Same gold store identity as ShopBanner (SHOP_GOLD) but much larger and
 // title-led, so the shop is the first thing a visitor sees. The whole card
@@ -10218,9 +10281,7 @@ function ShopHeroBanner({ onOpen, c }) {
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-20 -right-12 w-56 h-56 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.35 }} />
         <div className="animate-glow-drift absolute -bottom-24 -left-16 w-48 h-48 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.18, animationDelay: "2s" }} />
-        <ShoppingBag size={22} className="animate-product-float absolute top-4 right-6" style={{ color: SHOP_GOLD, animationDelay: "0s" }} />
-        <Shirt size={26} className="animate-product-float absolute top-16 right-16" style={{ color: SHOP_GOLD, animationDelay: "0.5s" }} />
-        <Package size={20} className="animate-product-float absolute bottom-5 right-8" style={{ color: SHOP_GOLD, animationDelay: "1s" }} />
+        <BouncingProducts />
       </div>
       <div className="relative px-5 py-7 sm:py-9">
         <div className="font-mono text-[11px] tracking-[0.25em] uppercase mb-2" style={{ color: SHOP_GOLD }}>Official store</div>
