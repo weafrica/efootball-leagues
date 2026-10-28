@@ -10223,7 +10223,7 @@ function BouncingProducts() {
     (async () => {
       try {
         const { data } = await supabase.from("shop_products")
-          .select("id, name, image_url").eq("active", true).not("image_url", "is", null).limit(300);
+          .select("id, name, price, image_url").eq("active", true).not("image_url", "is", null).limit(300);
         const withPhoto = (data || []).filter((p) => p.image_url);
         // Fisher-Yates shuffle.
         for (let i = withPhoto.length - 1; i > 0; i--) {
@@ -10248,6 +10248,7 @@ function BouncingProducts() {
   const count = useIcons ? 4 : products.length;
   const ICON_SIZES = [22, 26, 20, 24];
   const PHOTO = 56;
+  const PHOTO_H = PHOTO + 12; // photo + overlapping price tag
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -10258,7 +10259,7 @@ function BouncingProducts() {
       const ang = Math.random() * Math.PI * 2;
       const speed = 34 + Math.random() * 28; // px per second
       return {
-        el, size: useIcons ? ICON_SIZES[i % ICON_SIZES.length] : PHOTO,
+        el, size: useIcons ? ICON_SIZES[i % ICON_SIZES.length] : PHOTO, sizeH: useIcons ? ICON_SIZES[i % ICON_SIZES.length] : PHOTO_H,
         x: 0, y: 0, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
         phase: Math.random() * Math.PI * 2, placed: false,
       };
@@ -10269,7 +10270,7 @@ function BouncingProducts() {
       const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
       last = t; clock += dt;
       items.forEach((it) => {
-        const maxX = Math.max(0, w - it.size), maxY = Math.max(0, h - it.size);
+        const maxX = Math.max(0, w - it.size), maxY = Math.max(0, h - it.sizeH);
         if (!it.placed) { it.x = Math.random() * maxX; it.y = Math.random() * maxY; it.placed = true; }
         if (!reduce) {
           it.x += it.vx * dt; it.y += it.vy * dt;
@@ -10300,9 +10301,17 @@ function BouncingProducts() {
   return (
     <div ref={wrapRef} className="absolute inset-0">
       {products.map((p) => (
-        <img key={p.id} src={toProxiedUrl(p.image_url)} alt="" draggable={false}
-          className="absolute top-0 left-0 object-cover rounded-xl"
-          style={{ width: PHOTO, height: PHOTO, border: `2px solid ${SHOP_GOLD}`, boxShadow: `0 4px 14px rgba(0,0,0,0.35), 0 0 12px ${SHOP_GOLD}66`, willChange: "transform" }} />
+        <div key={p.id} className="absolute top-0 left-0" style={{ width: PHOTO, height: PHOTO_H, willChange: "transform" }}>
+          <img src={toProxiedUrl(p.image_url)} alt="" draggable={false}
+            className="object-cover rounded-xl"
+            style={{ width: PHOTO, height: PHOTO, border: `2px solid ${SHOP_GOLD}`, boxShadow: `0 4px 14px rgba(0,0,0,0.35), 0 0 12px ${SHOP_GOLD}66` }} />
+          {p.price != null && (
+            <span className="absolute left-1/2 whitespace-nowrap font-mono text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ bottom: 0, transform: "translateX(-50%)", background: SHOP_GOLD, color: "#1a1200", boxShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
+              {`R${Number(p.price).toLocaleString("en-ZA")}`}
+            </span>
+          )}
+        </div>
       ))}
     </div>
   );
