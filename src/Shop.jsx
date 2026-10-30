@@ -21,15 +21,11 @@ import {
 // checkout option entirely.
 export const SHOP_WHATSAPP_NUMBER = "+27694362789";
 
-// Shown to buyers who choose manual EFT/bank-transfer checkout. Replace
-// with your real banking details before going live.
-export const SHOP_BANK_DETAILS = `Bank: <your bank>
-Account name: <your account name>
-Account number: <your account number>
-Branch code: <your branch code>
-Reference: your order number (shown after you submit)`;
+// EFT / bank-transfer details are no longer hard-coded: the admin edits them
+// in Orders > "Bank details shown at checkout" and they're stored in the
+// shop_settings table (key "eft_details"). Blank = the bank block is hidden.
 
-// Shown alongside SHOP_BANK_DETAILS as an alternative way to pay manually.
+// Shown next to the EFT details as an alternative way to pay manually.
 export const SHOP_MUKURU_DETAILS = `Receiver name: Saul
 Receiver phone: +27694362789
 Reference: your order number (shown after you submit)`;
@@ -56,7 +52,7 @@ const CART_KEY = "efootball-shop-cart-v1";
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, shop_order_items(id, qty, product_name, unit_price)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, shop_order_items(id, qty, product_name, unit_price)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -109,14 +105,18 @@ const STATUS_META = {
   rejected: { label: "Rejected", icon: XCircle, color: "#C4293A" },
   whatsapp_sent: { label: "Sent via WhatsApp", icon: MessageCircle, color: "#25D366" },
   fulfilled: { label: "Fulfilled", icon: Truck, color: "#2D6A4F" },
+  packed: { label: "Packed", icon: Package, color: "#1B6C8F" },
+  shipped: { label: "Shipped", icon: Truck, color: "#7B3FA0" },
+  delivered: { label: "Delivered", icon: CheckCircle2, color: "#2D6A4F" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "#888" },
+  refunded: { label: "Refunded", icon: XCircle, color: "#888" },
 };
 
 function StatusBadge({ status, c }) {
   const meta = STATUS_META[status] || { label: status, icon: Clock, color: c.textDim };
   const Icon = meta.icon;
   return (
-    <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold px-2 py-1 rounded-full" style={{ background: `${meta.color}22`, color: meta.color }}>
+    <span className="inline-flex items-center gap-1 font-body text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: `${meta.color}22`, color: meta.color }}>
       <Icon size={11} /> {meta.label}
     </span>
   );
@@ -165,6 +165,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [cart, setCart] = useState(loadCart);
   const [activeProduct, setActiveProduct] = useState(null);
   const [myOrders, setMyOrders] = useState(null);
+  const [lastOrderNumber, setLastOrderNumber] = useState(null);
+  const [eftDetails, setEftDetails] = useState("");
   const [toast, setToast] = useState(null);
   // Guards deleting a product, department, or category behind several
   // sequential confirmations — same requestConfirm/advanceConfirm shape
@@ -351,6 +353,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
   useEffect(() => { loadCategories(); }, []);
 
+  const loadSettings = async () => {
+    const { data } = await supabase.from("shop_settings").select("key, value").eq("key", "eft_details");
+    setEftDetails((data || []).find((r) => r.key === "eft_details")?.value || "");
+  };
+  useEffect(() => { loadSettings(); }, []);
+
   const loadMyOrders = async () => {
     if (!session) return;
     const { data, error } = await supabase.from("shop_orders").select(SHOP_ORDER_SELECT)
@@ -399,6 +407,10 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
           </button>
         )}
         <div className="flex items-center gap-2">
+          <button onClick={() => setSubview("track")} title="Track an order" aria-label="Track an order"
+            className="w-8 h-8 flex items-center justify-center rounded-full" style={subview === "track" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+            <Truck size={14} />
+          </button>
           {session && (
             <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} title="My orders"
               className="w-8 h-8 flex items-center justify-center rounded-full" style={subview === "my-orders" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
@@ -437,25 +449,34 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {subview === "checkout" && (
-        <CheckoutView cart={cart} total={cartTotal} session={session} profile={profile}
-          onDone={() => { clearCart(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
+        <CheckoutView cart={cart} total={cartTotal} session={session} profile={profile} eftDetails={eftDetails} onStockChanged={loadProducts}
+          onDone={(order) => { setLastOrderNumber(order?.order_number || null); clearCart(); loadProducts(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
       )}
 
       {subview === "confirm" && (
         <div className="pt-10 text-center">
           <CheckCircle2 size={40} style={{ color: c.greenText }} className="mx-auto mb-3" />
-          <div className="font-extrabold uppercase tracking-tight text-xl mb-1.5">Order placed</div>
-          <p className="font-body text-sm mb-6" style={{ color: c.textDim }}>
-            {session ? `We've got it — check "My orders" for status updates.` : "We've got it — we'll reach out on the contact number you gave us."}
+          <div className="font-extrabold tracking-tight text-2xl mb-1.5">Order placed</div>
+          {lastOrderNumber && (
+            <div className="inline-block rounded-xl px-4 py-2 mb-3 border" style={{ background: c.surface, borderColor: c.border }}>
+              <div className="font-body text-xs" style={{ color: c.textFaint }}>Your order number</div>
+              <div className="font-mono text-xl font-bold tracking-wide" style={{ color: SHOP_GOLD }}>{lastOrderNumber}</div>
+            </div>
+          )}
+          <p className="font-body text-sm mb-6 max-w-xs mx-auto" style={{ color: c.textDim }}>
+            Keep this number. Use it with your phone number or email to track the order{session ? ", or open My orders" : ""}.
           </p>
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <button onClick={() => setSubview("track")} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>Track order</button>
             <button onClick={() => setSubview("browse")} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>Keep browsing</button>
             {session && (
-              <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.accent, color: c.accentText }}>My orders</button>
+              <button onClick={() => { setSubview("my-orders"); loadMyOrders(); }} className="font-body text-sm font-semibold px-4 py-2 rounded-full" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>My orders</button>
             )}
           </div>
         </div>
       )}
+
+      {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} c={c} />}
 
       {subview === "my-orders" && <MyOrders orders={myOrders} c={c} />}
 
@@ -463,7 +484,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} requestConfirm={requestConfirm} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} c={c} />
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} c={c} />
       )}
 
       {activeProduct && (
@@ -1110,12 +1131,13 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
 // CHECKOUT — three methods, buyer picks one
 // ════════════════════════════════════════════════════════════════════
 
-function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast, c }) {
+function CheckoutView({ cart, total, session, profile, eftDetails, onStockChanged, onDone, onBack, showToast, c }) {
   const [method, setMethod] = useState(SHOP_IKHOKHA_LINK ? "ikhokha" : (SHOP_WHATSAPP_NUMBER ? "whatsapp" : "manual_proof"));
   const [submitting, setSubmitting] = useState(false);
   const [proofFile, setProofFile] = useState(null);
   const [note, setNote] = useState("");
   const [contactPhone, setContactPhone] = useState(profile?.phone || "");
+  const [email, setEmail] = useState(session?.user?.email || "");
   const [guestName, setGuestName] = useState("");
 
   const buyerUsername = profile?.efootball_username || session?.user?.email || guestName.trim() || "Shopper";
@@ -1129,29 +1151,49 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
   const orderLines = () => cart.map((it) => `${it.qty}x ${it.name} — ${formatMoney(it.qty * it.price)}`).join("\n");
 
   const missingGuestName = !session && !guestName.trim();
+  // Guests need some way to find their order again: a phone number or email.
+  const missingContact = !contactPhone.trim() && !email.trim();
+
+  // Orders are created on the server (place_shop_order): it re-checks prices
+  // and stock, saves the order and reserves the stock in one step. Returns
+  // { order } or { error }.
+  const placeOrder = async (checkoutMethod, proofPath) => {
+    const { data, error } = await supabase.rpc("place_shop_order", {
+      p_items: cart.map((it) => ({ product_id: it.productId, qty: it.qty })),
+      p_method: checkoutMethod,
+      p_buyer_name: buyerUsername,
+      p_phone: contactPhone.trim() || null,
+      p_email: email.trim() || null,
+      p_note: note.trim() || null,
+      p_proof_path: proofPath || null,
+    });
+    if (error) {
+      onStockChanged && onStockChanged(); // stock may have changed under the shopper
+      return { error: error.message };
+    }
+    return { order: data };
+  };
+
+  const precheck = () => {
+    if (missingGuestName) { showToast("Let us know your name before ordering."); return false; }
+    if (missingContact) { showToast("Add a phone number or email so we can reach you and you can track the order."); return false; }
+    return true;
+  };
 
   const submitWhatsapp = async () => {
     if (!SHOP_WHATSAPP_NUMBER) { showToast("WhatsApp ordering isn't set up yet."); return; }
-    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
+    if (!precheck()) return;
     setSubmitting(true);
-    const { error: orderErr } = await supabase.from("shop_orders").insert({
-      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
-      checkout_method: "whatsapp", status: "whatsapp_sent", subtotal: total, contact_phone: contactPhone || null, delivery_note: note || null,
-    }).select().single().then(async ({ data, error }) => {
-      if (error || !data) return { error };
-      const items = cart.map((it) => ({ order_id: data.id, product_id: it.productId, product_name: it.name, unit_price: it.price, qty: it.qty }));
-      const { error: itemsErr } = await supabase.from("shop_order_items").insert(items);
-      return { error: itemsErr };
-    });
+    const { order, error } = await placeOrder("whatsapp");
     setSubmitting(false);
-    if (orderErr) { showToast(`Couldn't submit order: ${orderErr.message}`); return; }
-    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\n${orderLines()}\n\nTotal: ${formatMoney(total)}\n\nName: ${buyerUsername}`;
+    if (error) { showToast(error); return; }
+    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}\n\nTotal: ${formatMoney(order.subtotal)}\n\nName: ${buyerUsername}`;
     window.open(waLink(SHOP_WHATSAPP_NUMBER, msg), "_blank", "noopener,noreferrer");
-    onDone();
+    onDone(order);
   };
 
   const submitManualProof = async () => {
-    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
+    if (!precheck()) return;
     if (!proofFile) { showToast("Attach your proof of payment before submitting."); return; }
     setSubmitting(true);
     const compressedProof = await compressImage(proofFile, { maxDimension: 1600, quality: 0.85 });
@@ -1159,50 +1201,23 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
     const path = `${session?.user?.id || `guest-${guestFolderId.current}`}/order-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from("shop-payment-proofs").upload(path, compressedProof, { cacheControl: "31536000" });
     if (uploadErr) { setSubmitting(false); showToast(`Couldn't upload proof: ${uploadErr.message}`); return; }
-
-    const { data: order, error: orderErr } = await supabase.from("shop_orders").insert({
-      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
-      checkout_method: "manual_proof", status: "pending_review", subtotal: total,
-      contact_phone: contactPhone || null, delivery_note: note || null, payment_proof_path: path,
-    }).select().single();
-    if (orderErr || !order) { setSubmitting(false); showToast(`Couldn't submit order: ${orderErr?.message || "unknown error"}`); return; }
-
-    const items = cart.map((it) => ({ order_id: order.id, product_id: it.productId, product_name: it.name, unit_price: it.price, qty: it.qty }));
-    const { error: itemsErr } = await supabase.from("shop_order_items").insert(items);
+    const { order, error } = await placeOrder("manual_proof", path);
     setSubmitting(false);
-    if (itemsErr) { showToast(`Couldn't save order items: ${itemsErr.message}`); return; }
-    showToast("Order submitted — pending payment review.");
-    onDone();
+    if (error) { showToast(error); return; }
+    showToast("Order submitted. We'll check your payment shortly.");
+    onDone(order);
   };
 
   const submitIkhokha = async () => {
     if (!SHOP_IKHOKHA_LINK) { showToast("Card payments aren't set up yet."); return; }
-    if (missingGuestName) { showToast("Let us know your name before ordering."); return; }
+    if (!precheck()) return;
     setSubmitting(true);
-    const { error: orderErr } = await supabase.from("shop_orders").insert({
-      user_id: session?.user?.id || null, buyer_username: buyerUsername, buyer_phone: contactPhone || null,
-      checkout_method: "ikhokha_link", status: "pending_review", subtotal: total, contact_phone: contactPhone || null, delivery_note: note || null,
-    }).select().single().then(async ({ data, error }) => {
-      if (error || !data) return { error };
-      const items = cart.map((it) => ({ order_id: data.id, product_id: it.productId, product_name: it.name, unit_price: it.price, qty: it.qty }));
-      const { error: itemsErr } = await supabase.from("shop_order_items").insert(items);
-      return { error: itemsErr };
-    });
+    const { order, error } = await placeOrder("ikhokha_link");
     setSubmitting(false);
-    if (orderErr) { showToast(`Couldn't submit order: ${orderErr.message}`); return; }
+    if (error) { showToast(error); return; }
     window.open(SHOP_IKHOKHA_LINK, "_blank", "noopener,noreferrer");
-    showToast(`Order submitted — pay ${formatMoney(total)} on the card checkout page, then we'll confirm it.`);
-    onDone();
-  };
-
-  const submitGateway = async () => {
-    setSubmitting(true);
-    const result = await payWithGateway();
-    setSubmitting(false);
-    if (!result.success) { showToast("Card payments aren't set up yet."); return; }
-    // Once payWithGateway() is real, insert the order here the same way
-    // submitManualProof does, with checkout_method: "gateway", status: "paid",
-    // gateway_reference: result.reference.
+    showToast(`Order ${order.order_number} saved. Pay ${formatMoney(order.subtotal)} on the card page and use ${order.order_number} as the reference.`);
+    onDone(order);
   };
 
   return (
@@ -1243,9 +1258,14 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
         </div>
       )}
 
+      <div className="mb-3">
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Phone number</label>
+        <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Where can we reach you about this order?" inputMode="tel" autoComplete="tel"
+          className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
       <div className="mb-4">
-        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Contact number</label>
-        <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Where can we reach you about this order?"
+        <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Email (optional if you gave a phone number)</label>
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="For your order receipt" inputMode="email" autoComplete="email" type="email"
           className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
       </div>
 
@@ -1263,16 +1283,18 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
 
       {method === "manual_proof" && (
         <div className="space-y-3">
-          <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
-            <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain mb-2" />
-            {SHOP_BANK_DETAILS}
-          </div>
+          {eftDetails && (
+            <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
+              <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain mb-2" />
+              {eftDetails}
+            </div>
+          )}
           <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
             <img src="/mukuru-logo.png" alt="Mukuru" className="h-4 w-auto object-contain mb-2" />
             {SHOP_MUKURU_DETAILS}
           </div>
           <div>
-            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery / pickup note (optional)</label>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery or collection note (optional)</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
               className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
           </div>
@@ -1295,7 +1317,7 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
           </p>
           <CardBrandsBadge c={c} />
           <div>
-            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery / pickup note (optional)</label>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery or collection note (optional)</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
               className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
           </div>
@@ -1315,6 +1337,80 @@ function CheckoutView({ cart, total, session, profile, onDone, onBack, showToast
 // MY ORDERS
 // ════════════════════════════════════════════════════════════════════
 
+function TrackOrder({ initialNumber, c }) {
+  const [number, setNumber] = useState(initialNumber || "");
+  const [contact, setContact] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(undefined); // undefined = not searched, null = not found
+  const find = async (e) => {
+    e && e.preventDefault();
+    if (!number.trim() || !contact.trim()) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("lookup_shop_order", { p_order_number: number, p_contact: contact });
+    setBusy(false);
+    setResult(error ? null : data);
+  };
+  const inputCls = "w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none";
+  const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <Truck size={20} style={{ color: SHOP_GOLD }} />
+        <h1 className="text-2xl font-extrabold tracking-tight leading-none">Track an order</h1>
+      </div>
+      <p className="font-body text-sm mb-5" style={{ color: c.textDim }}>Enter your order number and the phone number or email you used at checkout.</p>
+      <form onSubmit={find} className="space-y-3 mb-5">
+        <div>
+          <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Order number</label>
+          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="WA-10001" autoCapitalize="characters" className={inputCls} style={inputStyle} />
+        </div>
+        <div>
+          <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Phone number or email</label>
+          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="The one you gave when ordering" className={inputCls} style={inputStyle} />
+        </div>
+        <button type="submit" disabled={busy || !number.trim() || !contact.trim()} className="w-full font-body text-sm font-semibold py-3 rounded-full"
+          style={{ background: SHOP_GOLD, color: "#1a1200", opacity: (busy || !number.trim() || !contact.trim()) ? 0.6 : 1 }}>
+          {busy ? "Looking..." : "Find my order"}
+        </button>
+      </form>
+      {result === null && (
+        <div className="border border-dashed rounded-xl p-5 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
+          We couldn't find that order. Check the order number and use the same phone number or email you gave at checkout.
+        </div>
+      )}
+      {result && (
+        <div className="rounded-xl p-4 border" style={{ background: c.surface, borderColor: c.border }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-mono text-base font-bold" style={{ color: SHOP_GOLD }}>{result.order_number}</span>
+            <StatusBadge status={result.status} c={c} />
+          </div>
+          <div className="font-body text-xs mb-3" style={{ color: c.textFaint }}>Placed {new Date(result.created_at).toLocaleDateString()}</div>
+          {(result.items || []).map((it, i) => (
+            <div key={i} className="font-body text-sm flex items-center justify-between" style={{ color: c.textDim }}>
+              <span>{it.qty}x {it.product_name}</span>
+              <span>{formatMoney(it.qty * it.unit_price)}</span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
+            <span className="font-body text-sm font-semibold">Total</span>
+            <span className="font-mono text-base font-bold">{formatMoney(result.subtotal)}</span>
+          </div>
+          {(result.history || []).length > 0 && (
+            <ol className="mt-4 space-y-1.5">
+              {result.history.map((h, i) => (
+                <li key={i} className="flex items-center justify-between font-body text-xs" style={{ color: c.textDim }}>
+                  <span>{(STATUS_META[h.status]?.label) || h.status}</span>
+                  <span style={{ color: c.textFaint }}>{new Date(h.at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MyOrders({ orders, c }) {
   if (orders === null) return <Spinner c={c} />;
   return (
@@ -1330,7 +1426,7 @@ function MyOrders({ orders, c }) {
           {orders.map((o) => (
             <div key={o.id} className="rounded-xl p-3 border" style={{ background: c.surface, borderColor: c.border }}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="font-mono text-[10px]" style={{ color: c.textFaint }}>{new Date(o.created_at).toLocaleDateString()}</span>
+                <span className="font-body text-xs" style={{ color: c.textFaint }}><span className="font-mono font-bold" style={{ color: c.text }}>{o.order_number}</span> · {new Date(o.created_at).toLocaleDateString()}</span>
                 <StatusBadge status={o.status} c={c} />
               </div>
               {(o.shop_order_items || []).map((it) => (
@@ -1864,16 +1960,27 @@ function CategoryRow({ cat, depth, deptCategories, countFor, renamingId, renameV
 // ADMIN — ORDERS
 // ════════════════════════════════════════════════════════════════════
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, c }) {
+const ADMIN_OPEN_STATUSES = ["pending_review", "whatsapp_sent", "paid", "packed", "shipped"];
+const ADMIN_FILTERS = [
+  ["open", "To handle"], ["pending_review", "Pending review"], ["whatsapp_sent", "WhatsApp"], ["paid", "Paid"],
+  ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
+];
+
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, c }) {
   const [orders, setOrders] = useState(null);
-  const [filter, setFilter] = useState("pending_review");
+  const [filter, setFilter] = useState("open");
+  const [search, setSearch] = useState("");
   const [proofUrls, setProofUrls] = useState({});
+  const [bankOpen, setBankOpen] = useState(false);
+  const [bankDraft, setBankDraft] = useState(eftDetails || "");
+  const [savingBank, setSavingBank] = useState(false);
 
   const load = async () => {
     const { data, error } = await supabase.from("shop_orders").select(SHOP_ORDER_SELECT).order("created_at", { ascending: false });
     if (!error) setOrders(data || []);
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => { setBankDraft(eftDetails || ""); }, [eftDetails]);
 
   const viewProof = async (order) => {
     if (!order.payment_proof_path) return;
@@ -1882,43 +1989,83 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, c }
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
-  const decrementStock = async (order) => {
-    for (const item of order.shop_order_items || []) {
-      if (!item.product_id) continue;
-      const { data: prod } = await supabase.from("shop_products").select("stock_qty").eq("id", item.product_id).maybeSingle();
-      if (prod) await supabase.from("shop_products").update({ stock_qty: Math.max(0, prod.stock_qty - item.qty) }).eq("id", item.product_id);
-    }
-    onReloadProducts && onReloadProducts();
-  };
-
-  const review = async (order, status) => {
-    const { error } = await supabase.from("shop_orders").update({
-      status, admin_reviewed_by: session.user.id, admin_reviewed_at: new Date().toISOString(),
-    }).eq("id", order.id);
+  // Status changes go through the server: it also puts stock back when an
+  // order is rejected, cancelled or refunded (and reserves it for old orders
+  // that never did), so stock can't drift out of sync with orders.
+  const setStatus = async (order, status) => {
+    if ((status === "cancelled" || status === "rejected") && !window.confirm(`Mark ${order.order_number} as ${status}? Its items go back into stock.`)) return;
+    const { error } = await supabase.rpc("admin_set_shop_order_status", { p_order_id: order.id, p_status: status });
     if (error) { showToast(`Couldn't update order: ${error.message}`); return; }
-    if (status === "paid") await decrementStock(order);
-    showToast(status === "paid" ? "Order approved." : `Order marked ${status}.`);
+    showToast(`${order.order_number} marked ${STATUS_META[status]?.label.toLowerCase() || status}.`);
+    onReloadProducts && onReloadProducts();
     await load();
   };
 
+  const saveBank = async () => {
+    setSavingBank(true);
+    const { error } = await supabase.from("shop_settings").upsert({ key: "eft_details", value: bankDraft.trim(), updated_at: new Date().toISOString() });
+    setSavingBank(false);
+    if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+    showToast(bankDraft.trim() ? "Bank details saved." : "Bank details cleared. They won't show at checkout.");
+    onEftSaved && onEftSaved();
+  };
+
   if (orders === null) return <Spinner c={c} />;
-  const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+  const q = search.trim().toLowerCase();
+  const byFilter = filter === "all" ? orders : filter === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)) : orders.filter((o) => o.status === filter);
+  const filtered = q ? byFilter.filter((o) => [o.order_number, o.buyer_username, o.contact_phone].some((v) => (v || "").toLowerCase().includes(q))) : byFilter;
+  const countFor = (f) => f === "all" ? orders.length : f === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)).length : orders.filter((o) => o.status === f).length;
+
+  // What can happen next to an order, in the order a parcel moves.
+  const actionsFor = (o) => {
+    switch (o.status) {
+      case "pending_review": return [["paid", "Approve payment", "good"], ["rejected", "Reject", "bad"]];
+      case "whatsapp_sent": return [["paid", "Mark paid", "good"], ["cancelled", "Cancel", "bad"]];
+      case "paid": return [["packed", "Mark packed", "good"], ["cancelled", "Cancel", "bad"]];
+      case "packed": return [["shipped", "Mark shipped", "good"], ["cancelled", "Cancel", "bad"]];
+      case "shipped": return [["delivered", "Mark delivered", "good"]];
+      default: return [];
+    }
+  };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <ClipboardList size={20} style={{ color: SHOP_GOLD }} />
-          <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Orders</h1>
+          <h1 className="text-2xl font-extrabold tracking-tight leading-none">Orders</h1>
         </div>
         <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>
       </div>
 
-      <div className="flex gap-1.5 mb-4 overflow-x-auto">
-        {["pending_review", "paid", "whatsapp_sent", "fulfilled", "rejected", "all"].map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className="shrink-0 font-mono text-[10px] font-semibold px-2.5 py-1.5 rounded-full uppercase"
-            style={filter === f ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
-            {f.replace("_", " ")}
+      <div className="rounded-xl border mb-4" style={{ background: c.surface, borderColor: c.border }}>
+        <button onClick={() => setBankOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2.5 font-body text-sm font-semibold" aria-expanded={bankOpen}>
+          <span>Bank details shown at checkout {!eftDetails && <span className="font-normal" style={{ color: c.red }}>(not set, hidden from shoppers)</span>}</span>
+          {bankOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+        </button>
+        {bankOpen && (
+          <div className="px-3 pb-3 space-y-2">
+            <textarea value={bankDraft} onChange={(e) => setBankDraft(e.target.value)} rows={6}
+              placeholder={"Bank: ...\nAccount name: ...\nAccount number: ...\nBranch code: ...\nReference: your order number"}
+              className="w-full border rounded-lg px-3 py-2.5 font-mono text-xs outline-none" style={{ background: c.bg, borderColor: c.border, color: c.text }} />
+            <button onClick={saveBank} disabled={savingBank} className="font-body text-xs font-semibold px-4 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: savingBank ? 0.6 : 1 }}>
+              {savingBank ? "Saving..." : "Save bank details"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="relative mb-3">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by order number, name or phone" aria-label="Search orders"
+          className="w-full border rounded-lg pl-9 pr-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+
+      <div className="flex gap-1.5 mb-4 overflow-x-auto no-scrollbar">
+        {ADMIN_FILTERS.map(([f, label]) => (
+          <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f} className="shrink-0 font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+            style={filter === f ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
+            {label} <span style={{ opacity: 0.6 }}>{countFor(f)}</span>
           </button>
         ))}
       </div>
@@ -1929,11 +2076,12 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, c }
         <div className="space-y-2.5">
           {filtered.map((o) => (
             <div key={o.id} className="rounded-xl p-3 border" style={{ background: c.surface, borderColor: c.border }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="font-body text-xs font-semibold">{o.buyer_username}</span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono text-sm font-bold" style={{ color: SHOP_GOLD }}>{o.order_number}</span>
                 <StatusBadge status={o.status} c={c} />
               </div>
-              <div className="font-mono text-[10px] mb-1.5" style={{ color: c.textFaint }}>
+              <div className="font-body text-sm font-semibold">{o.buyer_username}</div>
+              <div className="font-body text-xs mb-1.5" style={{ color: c.textFaint }}>
                 {new Date(o.created_at).toLocaleString()} · {o.checkout_method.replace("_", " ")}
                 {o.contact_phone && ` · ${o.contact_phone}`}
               </div>
@@ -1951,17 +2099,14 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, c }
 
               <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                 {o.payment_proof_path && (
-                  <button onClick={() => viewProof(o)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
+                  <button onClick={() => viewProof(o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
                 )}
-                {o.status === "pending_review" && (
-                  <>
-                    <button onClick={() => review(o, "paid")} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.greenSoft, color: c.greenText }}><CheckCircle2 size={11} /> Approve</button>
-                    <button onClick={() => review(o, "rejected")} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.redSoft, color: c.red }}><XCircle size={11} /> Reject</button>
-                  </>
-                )}
-                {(o.status === "paid" || o.status === "whatsapp_sent") && (
-                  <button onClick={() => review(o, "fulfilled")} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.surfaceHover, color: c.text }}><Truck size={11} /> Mark fulfilled</button>
-                )}
+                {actionsFor(o).map(([status, label, tone]) => (
+                  <button key={status} onClick={() => setStatus(o, status)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full"
+                    style={tone === "good" ? { background: c.greenSoft, color: c.greenText } : { background: c.redSoft, color: c.red }}>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           ))}
