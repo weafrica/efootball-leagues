@@ -1,8 +1,25 @@
 {
+  "redirects": [
+    { "source": "/ludo", "destination": "/ludo/", "permanent": true }
+  ],
   "rewrites": [
     { "source": "/shop", "destination": "/api/shop-link" },
     { "source": "/shop/:id", "destination": "/api/shop-link?id=:id" },
     { "source": "/shop-app", "destination": "/shop-app/index.html" },
+    { "source": "/ludo/(.*)", "destination": "/ludo/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/ludo/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/ludo/" }
+      ]
+    },
+    {
+      "source": "/ludo/manifest.webmanifest",
+      "headers": [{ "key": "Content-Type", "value": "application/manifest+json" }]
+    }
   ]
 }

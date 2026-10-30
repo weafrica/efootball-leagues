@@ -13,7 +13,7 @@
 // this falls back to is the same one chess itself uses 95% of the time.
 
 import { useState, useEffect } from "react";
-import { pickBestVoice } from "./utils/pickBestVoice";
+import { pickBestVoice } from "../utils/pickBestVoice";
 
 const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 

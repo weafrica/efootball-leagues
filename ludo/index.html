@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Ludo — WeAfrica</title>
+    <meta name="description" content="Play Ludo free: race your tokens home, capture rivals, pay ransoms. Bots, pass-and-play, works offline." />
+    <link rel="canonical" href="https://www.weafrica.co.za/ludo/" />
+
+    <!-- Social preview -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Ludo — WeAfrica" />
+    <meta property="og:description" content="Race home, capture rivals, pay ransoms. Free, works offline." />
+    <meta property="og:url" content="https://www.weafrica.co.za/ludo/" />
+    <meta property="og:image" content="https://www.weafrica.co.za/ludo/icons/icon-512.png" />
+
+    <!-- PWA: Ludo is its own installable app, separate from Matchday. Its
+         manifest is scoped to /ludo/ and its service worker (/ludo/sw.js,
+         generated at build time) only ever controls /ludo/. -->
+    <link rel="manifest" href="/ludo/manifest.webmanifest" />
+    <meta name="theme-color" content="#100A2B" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/ludo/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/ludo/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Ludo" />
+
+    <!-- Launch splash: inline CSS only, so it paints instantly on an
+         installed launch (no blank/white flash) while the JS loads. Faded out
+         by src/ludo/main.jsx once the app has actually painted. -->
+    <style>
+      html, body { margin: 0; background: #100A2B; }
+      #splash { position: fixed; inset: 0; z-index: 9999; background: #100A2B; display: flex; align-items: center; justify-content: center; transition: opacity .35s ease; }
+      #splash.splash-hidden { opacity: 0; pointer-events: none; }
+      #splash .dots { display: grid; grid-template-columns: repeat(2, 22px); gap: 8px; animation: ludoSplashSpin 1.2s ease-in-out infinite; }
+      #splash .dots i { display: block; width: 22px; height: 22px; border-radius: 7px; }
+      @keyframes ludoSplashSpin { 0%,100% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(90deg) scale(1.12); } }
+    </style>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="splash"><div class="dots"><i style="background:#E63946"></i><i style="background:#2DBE7A"></i><i style="background:#3A86FF"></i><i style="background:#FFC933"></i></div></div>
+    <div id="root"></div>
+    <noscript><p style="color:#F6F3FF;font-family:sans-serif;text-align:center;padding:2rem">Ludo needs JavaScript to run.</p></noscript>
+    <script type="module" src="/src/ludo/main.jsx"></script>
+  </body>
+</html>

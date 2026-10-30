@@ -2,6 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+
+    <!-- Ludo sign-in bounce. Ludo (/ludo/) signs in with the same Google
+         accounts as Matchday. Supabase only redirects back to URLs on the
+         project's allow-list; if /ludo/ isn't on it, it falls back to this
+         homepage instead — with the new session in the URL. Ludo leaves a
+         short-lived marker in localStorage just before the Google redirect, so
+         if that marker is fresh and we've just come back from an OAuth login,
+         forward the person (and their session) on to /ludo/. Runs before
+         anything else; does nothing at all for normal visits. -->
+    <script>
+      (function () {
+        try {
+          var t = Number(localStorage.getItem("ludo-signin-return") || 0);
+          var h = window.location.hash, q = window.location.search;
+          if (t && Date.now() - t < 180000 && window.location.pathname === "/" &&
+              (h.indexOf("access_token=") !== -1 || /[?&]code=/.test(q))) {
+            window.location.replace("/ludo/" + q + h);
+          }
+        } catch (e) { /* storage unavailable — carry on as normal */ }
+      })();
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Matchday — eFootball Leagues</title>
 

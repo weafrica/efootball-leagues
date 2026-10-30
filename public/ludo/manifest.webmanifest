@@ -1,0 +1,28 @@
+{
+  "id": "/ludo/",
+  "name": "WeAfrica Ludo",
+  "short_name": "Ludo",
+  "description": "Race your tokens home, capture rivals and pay ransoms. Free, with bots and pass-and-play. Works offline.",
+  "lang": "en",
+  "start_url": "/ludo/?source=pwa",
+  "scope": "/ludo/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#100A2B",
+  "theme_color": "#100A2B",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "/ludo/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/ludo/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ludo/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play now",
+      "short_name": "Play",
+      "description": "Jump straight into a game",
+      "url": "/ludo/?action=play&source=shortcut",
+      "icons": [{ "src": "/ludo/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

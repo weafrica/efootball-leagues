@@ -252,9 +252,18 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Only clean up THIS worker's own old shell caches. This used to delete
+  // every cache on the origin that wasn't CACHE_NAME, which also wiped caches
+  // belonging to other features sharing this domain — the Ludo app's offline
+  // files (/ludo/) and its sound kit, story audio — each time this worker
+  // updated, quietly breaking their offline support until re-downloaded.
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((k) => k.startsWith("matchday-shell-") && k !== CACHE_NAME)
+          .map((k) => caches.delete(k))
+      )
     )
   );
   self.clients.claim();

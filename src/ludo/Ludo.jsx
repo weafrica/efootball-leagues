@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { ludoSpeech, useLudoSpeakingId } from "./ludoVoice.js";
 import { sfx } from "./ludoSound.js";
-import { supabase } from "./supabaseClient.js";
+import { supabase } from "../supabaseClient.js";
 import {
   pick, CAPTURE_LINES, EXIT_LINES, FINISH_LINES, COMBINE_LINES, SAFE_LINES, PLAIN_LINES,
   FORCED_LINES, NO_MOVE_LINES, JUMP_LINES, FORFEIT_LINES, CAPTURE_LABELS, MULTI_CAPTURE_LABEL,
@@ -380,7 +380,7 @@ function LudoHelpModal({ onClose, c }) {
   );
 }
 
-export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpponents }) {
+export default function LudoPage({ onBack, c, loggedIn, onRequireAuth }) {
   const [phase, setPhase] = useState("setup"); // setup | playing | won
   const [active, setActive] = useState([]);
   const [roles, setRoles] = useState({}); // color -> 'human' | 'ai'
@@ -1260,20 +1260,20 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
 
       {phase === "setup" && (
         <div>
-          {/* This pass-and-play setup below needs no account at all — a
-              guest can play right now. This banner is the only place that
-              cares whether anyone's signed in: it's the "want real
-              opponents instead of the people next to you" upsell, not a
-              gate on the game itself. */}
+          {/* The game needs no account at all — a guest can play right now.
+              This banner is the only place that cares whether anyone's
+              signed in, and it's only a nudge, never a gate. (It used to
+              advertise a "Ludo lobby" with real Matchday opponents; no such
+              lobby exists, so it now says only what's actually true.) */}
           {loggedIn ? (
-            <button onClick={onFindOpponents} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-3 font-body text-sm text-left" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
-              <Bot size={16} style={{ color: c.accent }} className="shrink-0" />
-              Looking for real Matchday opponents instead? Head back to Home — the Ludo lobby is waiting there.
-            </button>
+            <div className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-3 font-body text-sm text-left" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
+              <User size={16} style={{ color: c.accent }} className="shrink-0" />
+              Signed in — your games are linked to your Matchday account.
+            </div>
           ) : (
             <button onClick={onRequireAuth} className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 mb-3 font-body text-sm text-left" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }}>
               <User size={16} style={{ color: c.accent }} className="shrink-0" />
-              Playing as a guest — sign in to find real Matchday opponents and play together instead of pass-and-play.
+              Playing as a guest — sign in to link your games to your Matchday account.
             </button>
           )}
           {!Object.keys(roles).length && (
@@ -1318,7 +1318,7 @@ export default function LudoPage({ onBack, c, loggedIn, onRequireAuth, onFindOpp
             <span className="flex items-center gap-2">{readAloud ? <Volume2 size={14} style={{ color: c.textFaint }} /> : <VolumeX size={14} style={{ color: c.textFaint }} />} Read the battle log aloud</span>
             <span className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase" style={{ background: readAloud ? c.accent : c.border, color: readAloud ? c.accentText : c.textFaint }}>{readAloud ? "On" : "Off"}</span>
           </button>
-          <button onClick={startGame} disabled={Object.keys(roles).length < 2} className="w-full rounded-xl py-3 font-display text-base disabled:opacity-40" style={{ background: c.accent, color: c.accentText }}>
+          <button onClick={() => startGame()} disabled={Object.keys(roles).length < 2} className="w-full rounded-xl py-3 font-display text-base disabled:opacity-40" style={{ background: c.accent, color: c.accentText }}>
             {Object.keys(roles).length < 2 ? "Pick at least 2 colors" : `Start (${Object.keys(roles).length} players)`}
           </button>
         </div>

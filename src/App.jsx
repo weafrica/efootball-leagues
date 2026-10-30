@@ -79,7 +79,13 @@ const CreateLeague = lazy(() => import("./CreateLeague.jsx"));
 // StandingsPanel and the home screen's LeaderboardStrip preview also need
 // them.)
 const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
-const LudoPage = lazy(() => import("./Ludo.jsx"));
+// Ludo is its own app now (src/ludo/, served at /ludo/ with its own homepage,
+// sign-in and installable PWA), so Matchday links to it instead of embedding it.
+// The two Ludo entry points below call openLudoApp. LudoPage is a stub kept only
+// so the old embedded-view branches further down still compile; nothing can
+// reach them any more and they can be deleted whenever convenient.
+const openLudoApp = () => { window.location.assign("/ludo/"); };
+const LudoPage = () => null;
 const ChessPage = lazy(() => import("./ChessGame.jsx"));
 const GlowveldPage = lazy(() => import("./glowveld/GlowveldPage.jsx"));
 const PlanetEarthPage = lazy(() => import("./planetearth/PlanetEarthPage.jsx"));
@@ -8784,7 +8790,7 @@ export default function App() {
     // experiences distinct from the league/ladder utility tiles below.
     { icon: Swords, label: "Chess", onClick: () => setView("chess") },
     { icon: PlanetEarthIcon, label: "Planet Earth", tourId: "qa-planetearth", onClick: () => { setView("planetearth"); try { window.history.pushState({}, "", "/planetearth"); } catch (e) { /* ignore */ } } },
-    { icon: Gamepad2, label: "Ludo", onClick: () => setView("ludo") },
+    { icon: Gamepad2, label: "Ludo", onClick: openLudoApp },
     { icon: BookOpen, label: "Language Learning", onClick: () => setView("sesothoMatch") },
     { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
@@ -9419,7 +9425,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           <GuestMenuTile icon={Gamepad2} label="eFootball" onClick={() => setGuestLeaguesRevealed(true)} c={c} />
           <GuestMenuTile icon={ShoppingBag} label="Shop" onClick={() => setShopOpen(true)} c={c} />
           <GuestMenuTile icon={Swords} label="Chess" onClick={() => setChessOpen(true)} c={c} />
-          <GuestMenuTile icon={Dice5} label="Ludo" onClick={() => setLudoOpen(true)} c={c} />
+          <GuestMenuTile icon={Dice5} label="Ludo" onClick={openLudoApp} c={c} />
           <GuestMenuTile icon={PlanetEarthIcon} label="Planet Earth" onClick={() => setGuestApp("planetearth")} c={c} />
           <GuestMenuTile icon={BookOpen} label="Language Learning" onClick={() => setGuestApp("sesothoMatch")} c={c} />
           <GuestMenuTile icon={Volume2} label="Stories" onClick={() => setGuestApp("stories")} c={c} />
