@@ -47,12 +47,22 @@ const CURRENCY_PREFIX = "R"; // South African Rand — change if selling elsewhe
 const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA")}`;
 
 const CART_KEY = "efootball-shop-cart-v1";
+const DELIVERY_LABELS = { collection: "Collect from us", courier: "Courier to your door", pudo: "Pudo locker", paxi: "PAXI at a PEP store" };
+// One short line describing where an order is going.
+function deliverySummary(o) {
+  if (!o.delivery_method) return "";
+  const label = DELIVERY_LABELS[o.delivery_method] || o.delivery_method;
+  const a = o.delivery_address;
+  const where = a ? [a.street, a.suburb, a.city, a.province, a.postal_code].filter(Boolean).join(", ") : (o.delivery_point || "");
+  return where ? `${label}: ${where}` : label;
+}
+const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v));
 
 // Postgres egress fix (postgres-egress-fix-plan.md Step 2) — the order
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, shop_order_items(id, qty, product_name, unit_price)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -330,7 +340,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   const loadProducts = async () => {
     const { data, error } = await supabase.from("shop_products")
-      .select("id, name, description, price, stock_qty, image_url, active, department_id, category_id")
+      .select("id, name, description, price, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
       .order("created_at", { ascending: false });
     if (!error) setProducts(data || []);
   };
@@ -1139,6 +1149,30 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   const [contactPhone, setContactPhone] = useState(profile?.phone || "");
   const [email, setEmail] = useState(session?.user?.email || "");
   const [guestName, setGuestName] = useState("");
+  // Delivery: options are priced by the server for this exact cart. An empty
+  // list means no delivery method is switched on, so the step is skipped.
+  const [deliveryOptions, setDeliveryOptions] = useState(null); // null = loading
+  const [deliveryMethod, setDeliveryMethod] = useState("");
+  const [addr, setAddr] = useState({ street: "", suburb: "", city: "", province: "", postal_code: "" });
+  const [point, setPoint] = useState("");
+
+  const cartKey = cart.map((it) => `${it.productId}:${it.qty}`).join(",");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("shop_delivery_options", { p_items: cart.map((it) => ({ product_id: it.productId, qty: it.qty })) });
+      if (cancelled) return;
+      const list = !error && Array.isArray(data) ? data : [];
+      setDeliveryOptions(list);
+      setDeliveryMethod((cur) => (list.some((o) => o.method === cur && o.available) ? cur : (list.find((o) => o.available)?.method || "")));
+    })();
+    return () => { cancelled = true; };
+  }, [cartKey]);
+
+  const chosenOption = (deliveryOptions || []).find((o) => o.method === deliveryMethod && o.available) || null;
+  const deliveryFee = chosenOption ? Number(chosenOption.fee) || 0 : 0;
+  const grandTotal = total + deliveryFee;
+  const deliveryRequired = (deliveryOptions || []).length > 0;
 
   const buyerUsername = profile?.efootball_username || session?.user?.email || guestName.trim() || "Shopper";
   // Anonymous shoppers don't have an auth-issued id, so proof uploads for
@@ -1166,6 +1200,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       p_email: email.trim() || null,
       p_note: note.trim() || null,
       p_proof_path: proofPath || null,
+      p_delivery: deliveryRequired ? { method: deliveryMethod, address: deliveryMethod === "courier" ? addr : null, point: point.trim() || null } : null,
     });
     if (error) {
       onStockChanged && onStockChanged(); // stock may have changed under the shopper
@@ -1175,6 +1210,12 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   };
 
   const precheck = () => {
+    if (deliveryOptions === null) { showToast("Checking delivery options, one moment."); return false; }
+    if (deliveryRequired) {
+      if (!chosenOption) { showToast("Choose how you want to receive your order."); return false; }
+      if (deliveryMethod === "courier" && (!addr.street.trim() || !addr.city.trim() || !addr.postal_code.trim())) { showToast("Enter your street address, city and postal code."); return false; }
+      if ((deliveryMethod === "pudo" || deliveryMethod === "paxi") && !point.trim()) { showToast(deliveryMethod === "pudo" ? "Enter the Pudo locker you want to collect from." : "Enter the PAXI point you want to collect from."); return false; }
+    }
     if (missingGuestName) { showToast("Let us know your name before ordering."); return false; }
     if (missingContact) { showToast("Add a phone number or email so we can reach you and you can track the order."); return false; }
     return true;
@@ -1187,7 +1228,8 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     const { order, error } = await placeOrder("whatsapp");
     setSubmitting(false);
     if (error) { showToast(error); return; }
-    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}\n\nTotal: ${formatMoney(order.subtotal)}\n\nName: ${buyerUsername}`;
+    const delivLine = chosenOption ? `\nDelivery: ${chosenOption.label}${deliveryMethod === "courier" ? ` to ${[addr.street, addr.suburb, addr.city, addr.postal_code].filter(Boolean).join(", ")}` : (point.trim() ? ` (${point.trim()})` : "")} — ${Number(order.delivery_fee) ? formatMoney(order.delivery_fee) : "free"}` : "";
+    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${delivLine}\n\nTotal: ${formatMoney(order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
     window.open(waLink(SHOP_WHATSAPP_NUMBER, msg), "_blank", "noopener,noreferrer");
     onDone(order);
   };
@@ -1216,7 +1258,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     setSubmitting(false);
     if (error) { showToast(error); return; }
     window.open(SHOP_IKHOKHA_LINK, "_blank", "noopener,noreferrer");
-    showToast(`Order ${order.order_number} saved. Pay ${formatMoney(order.subtotal)} on the card page and use ${order.order_number} as the reference.`);
+    showToast(`Order ${order.order_number} saved. Pay ${formatMoney(order.total ?? order.subtotal)} on the card page and use ${order.order_number} as the reference.`);
     onDone(order);
   };
 
@@ -1231,6 +1273,17 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         <span className="font-body text-sm font-semibold" style={{ color: c.textDim }}>{cart.reduce((s, it) => s + it.qty, 0)} item(s)</span>
         <span className="font-mono text-lg font-bold">{formatMoney(total)}</span>
       </div>
+      {deliveryFee > 0 && (
+        <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }}>
+          <span>Delivery</span><span className="font-mono">{formatMoney(deliveryFee)}</span>
+        </div>
+      )}
+      {deliveryRequired && (
+        <div className="flex items-center justify-between mb-4 px-1 pt-1 border-t" style={{ borderColor: c.border }}>
+          <span className="font-body text-sm font-semibold">Total to pay</span>
+          <span className="font-mono text-lg font-bold" style={{ color: SHOP_GOLD }}>{formatMoney(grandTotal)}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
         <button onClick={() => SHOP_IKHOKHA_LINK && setMethod("ikhokha")} disabled={!SHOP_IKHOKHA_LINK}
@@ -1269,6 +1322,50 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
           className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
       </div>
 
+      {deliveryRequired && (
+        <fieldset className="mb-5">
+          <legend className="font-body text-sm font-semibold mb-2" style={{ color: c.text }}>How do you want to receive it?</legend>
+          <div className="space-y-2">
+            {deliveryOptions.map((o) => {
+              const selected = deliveryMethod === o.method;
+              return (
+                <label key={o.method} className="flex items-start gap-3 rounded-xl border p-3 cursor-pointer"
+                  style={{ background: c.surface, borderColor: selected ? SHOP_GOLD : c.border, opacity: o.available ? 1 : 0.5 }}>
+                  <input type="radio" name="delivery" className="mt-1" checked={selected} disabled={!o.available} onChange={() => setDeliveryMethod(o.method)} />
+                  <span className="flex-1 min-w-0">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="font-body text-sm font-semibold">{o.label}</span>
+                      <span className="font-mono text-sm font-bold">{!o.available ? "" : Number(o.fee) > 0 ? formatMoney(o.fee) : "Free"}</span>
+                    </span>
+                    {o.available && o.days && <span className="block font-body text-xs" style={{ color: c.textFaint }}>{o.days}</span>}
+                    {o.note && <span className="block font-body text-xs whitespace-pre-line" style={{ color: o.available ? c.textDim : c.red }}>{o.note}</span>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {deliveryMethod === "courier" && (
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {[["street", "Street address", 2], ["suburb", "Suburb", 1], ["city", "City", 1], ["province", "Province", 1], ["postal_code", "Postal code", 1]].map(([k, label, span]) => (
+                <input key={k} value={addr[k]} onChange={(e) => setAddr((a) => ({ ...a, [k]: e.target.value }))} placeholder={label} aria-label={label}
+                  autoComplete={k === "postal_code" ? "postal-code" : k === "street" ? "street-address" : undefined} inputMode={k === "postal_code" ? "numeric" : undefined}
+                  className={`border rounded-lg px-3 py-2.5 font-body text-sm outline-none ${span === 2 ? "col-span-2" : ""}`} style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+              ))}
+            </div>
+          )}
+          {(deliveryMethod === "pudo" || deliveryMethod === "paxi") && (
+            <div className="mt-3">
+              <input value={point} onChange={(e) => setPoint(e.target.value)} aria-label={deliveryMethod === "pudo" ? "Pudo locker" : "PAXI point"}
+                placeholder={deliveryMethod === "pudo" ? "Pudo locker name or code, and town" : "PEP store (PAXI point) name or code, and town"}
+                className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+              <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>
+                {deliveryMethod === "pudo" ? "Pick a locker near you on the Pudo website or app and type its name here." : "Find a PAXI point at paxi.co.za and type the store name here."}
+              </p>
+            </div>
+          )}
+        </fieldset>
+      )}
+
       {method === "whatsapp" && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
@@ -1295,7 +1392,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
           </div>
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery or collection note (optional)</label>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Anything we should know, such as gate codes or a preferred time"
               className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
           </div>
           <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-3 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: proofFile ? c.text : c.textDim }}>
@@ -1313,17 +1410,17 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       {method === "ikhokha" && SHOP_IKHOKHA_LINK && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
-            You'll be taken to a secure card checkout page to pay {formatMoney(total)}. Once you've paid, come back here — we'll confirm your order shortly after.
+            You'll be taken to a secure card checkout page to pay {formatMoney(grandTotal)}. Once you've paid, come back here — we'll confirm your order shortly after.
           </p>
           <CardBrandsBadge c={c} />
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery or collection note (optional)</label>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Address, or pickup preference..."
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Anything we should know, such as gate codes or a preferred time"
               className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
           </div>
           <button onClick={submitIkhokha} disabled={submitting || missingGuestName}
             className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: c.accent, color: c.accentText, opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
-            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(total)}`}
+            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(grandTotal)}`}
           </button>
         </div>
       )}
@@ -1391,10 +1488,26 @@ function TrackOrder({ initialNumber, c }) {
               <span>{formatMoney(it.qty * it.unit_price)}</span>
             </div>
           ))}
+          {Number(result.delivery_fee) > 0 && (
+            <div className="font-body text-sm flex items-center justify-between" style={{ color: c.textDim }}>
+              <span>Delivery</span><span>{formatMoney(result.delivery_fee)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
             <span className="font-body text-sm font-semibold">Total</span>
-            <span className="font-mono text-base font-bold">{formatMoney(result.subtotal)}</span>
+            <span className="font-mono text-base font-bold">{formatMoney(Number(result.subtotal) + Number(result.delivery_fee || 0))}</span>
           </div>
+          {result.delivery_method && (
+            <div className="font-body text-xs mt-3" style={{ color: c.textDim }}>
+              {DELIVERY_LABELS[result.delivery_method]}{result.delivery_point ? `: ${result.delivery_point}` : ""}
+            </div>
+          )}
+          {result.tracking_number && (
+            <div className="rounded-lg px-3 py-2 mt-3 font-body text-sm" style={{ background: c.bg, border: `1px solid ${c.border}` }}>
+              <span style={{ color: c.textFaint }}>{result.courier_name ? `${result.courier_name} tracking number` : "Tracking number"}</span>
+              <div className="font-mono font-bold select-all">{result.tracking_number}</div>
+            </div>
+          )}
           {(result.history || []).length > 0 && (
             <ol className="mt-4 space-y-1.5">
               {result.history.map((h, i) => (
@@ -1435,10 +1548,15 @@ function MyOrders({ orders, c }) {
                   <span>{formatMoney(it.qty * it.unit_price)}</span>
                 </div>
               ))}
+              {Number(o.delivery_fee) > 0 && (
+                <div className="font-body text-xs flex items-center justify-between" style={{ color: c.textDim }}><span>Delivery</span><span>{formatMoney(o.delivery_fee)}</span></div>
+              )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
                 <span className="font-body text-xs font-semibold">Total</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(o.subtotal)}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) + Number(o.delivery_fee || 0))}</span>
               </div>
+              {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
+              {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
             </div>
           ))}
         </div>
@@ -1477,7 +1595,8 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       }
       image_url = publicUrl;
     }
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null };
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
+      weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     const { error } = editing?.id
       ? await supabase.from("shop_products").update(payload).eq("id", editing.id)
       : await supabase.from("shop_products").insert(payload);
@@ -1562,6 +1681,10 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [active, setActive] = useState(product.active ?? true);
   const [departmentId, setDepartmentId] = useState(product.department_id || "");
   const [categoryId, setCategoryId] = useState(product.category_id || "");
+  const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
+  const [lengthCm, setLengthCm] = useState(product.length_cm ?? "");
+  const [widthCm, setWidthCm] = useState(product.width_cm ?? "");
+  const [heightCm, setHeightCm] = useState(product.height_cm ?? "");
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -1577,7 +1700,8 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const submit = async () => {
     if (!name.trim() || !price) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null }, file);
+    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file);
     setSaving(false);
     if (ok) onClose();
   };
@@ -1626,6 +1750,16 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               </select>
             </div>
           )}
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Parcel weight and size (for delivery)</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[["kg", weightKg, setWeightKg, "0.1"], ["L cm", lengthCm, setLengthCm, "1"], ["W cm", widthCm, setWidthCm, "1"], ["H cm", heightCm, setHeightCm, "1"]].map(([ph, val, set, step]) => (
+                <input key={ph} type="number" min="0" step={step} value={val} onChange={(e) => set(e.target.value)} placeholder={ph} aria-label={ph}
+                  className="w-full border rounded-lg px-2 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+              ))}
+            </div>
+            <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Used to price delivery and to check the parcel fits a PAXI bag. Leave blank to use the default weight.</p>
+          </div>
           <label className="flex items-center gap-2 border border-dashed rounded-lg px-3 py-3 cursor-pointer font-body text-sm" style={{ borderColor: c.borderStrong, color: file ? c.text : c.textDim }}>
             <Upload size={15} /> {file ? file.name : "Product photo"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
@@ -1960,6 +2094,136 @@ function CategoryRow({ cat, depth, deptCategories, countFor, renamingId, renameV
 // ADMIN — ORDERS
 // ════════════════════════════════════════════════════════════════════
 
+// Courier name + tracking number for an order, saved straight on the order.
+// Shoppers see them on the track page.
+function TrackingEditor({ order, showToast, onSaved, c }) {
+  const [courier, setCourier] = useState(order.courier_name || (order.delivery_method === "paxi" ? "PAXI" : order.delivery_method === "pudo" ? "Pudo" : order.delivery_method === "courier" ? "The Courier Guy" : ""));
+  const [tracking, setTracking] = useState(order.tracking_number || "");
+  const [saving, setSaving] = useState(false);
+  const dirty = (courier.trim() || null) !== (order.courier_name || null) || (tracking.trim() || null) !== (order.tracking_number || null);
+  const save = async () => {
+    setSaving(true);
+    const { error } = await supabase.from("shop_orders").update({ courier_name: courier.trim() || null, tracking_number: tracking.trim() || null }).eq("id", order.id);
+    setSaving(false);
+    if (error) { showToast(`Couldn't save tracking: ${error.message}`); return; }
+    showToast("Tracking saved.");
+    onSaved && onSaved();
+  };
+  return (
+    <div className="grid grid-cols-[1fr_1.4fr_auto] gap-1.5 mt-2.5">
+      <input value={courier} onChange={(e) => setCourier(e.target.value)} placeholder="Courier" aria-label="Courier"
+        className="border rounded-lg px-2.5 py-2 font-body text-xs outline-none min-w-0" style={{ background: c.bg, borderColor: c.border, color: c.text }} />
+      <input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="Tracking number" aria-label="Tracking number"
+        className="border rounded-lg px-2.5 py-2 font-body text-xs outline-none min-w-0" style={{ background: c.bg, borderColor: c.border, color: c.text }} />
+      <button onClick={save} disabled={!dirty || saving} className="font-body text-xs font-semibold px-3 rounded-lg" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: (!dirty || saving) ? 0.5 : 1 }}>{saving ? "..." : "Save"}</button>
+    </div>
+  );
+}
+
+const DEFAULT_DELIVERY_CONFIG = {
+  default_weight_kg: 0.5, free_over: 0,
+  collection: { enabled: false, address: "", hours: "" },
+  courier: { enabled: false, fee: 0, days: "2 to 4 working days" },
+  pudo: { enabled: false, fee: 0, days: "2 to 4 working days" },
+  paxi: { enabled: false, standard_fee: 109.95, large_fee: 139.95, days: "3 to 5 working days" },
+};
+
+// Module-level on purpose: defining these inside DeliverySettings would give
+// them a new identity on every render and drop input focus on each keystroke.
+function DField({ label, c, children }) {
+  return <label className="block"><span className="font-body text-xs" style={{ color: c.textDim }}>{label}</span>{children}</label>;
+}
+function DToggle({ checked, onChange, label }) {
+  return (
+    <label className="flex items-center gap-2 font-body text-sm font-semibold cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {label}
+    </label>
+  );
+}
+
+// Admin: which delivery methods are on and what they cost. Stored as JSON in
+// shop_settings ("delivery_config"); the server prices every order from it.
+function DeliverySettings({ showToast, c }) {
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open || cfg) return;
+    (async () => {
+      const { data } = await supabase.from("shop_settings").select("value").eq("key", "delivery_config").maybeSingle();
+      let parsed = {};
+      try { parsed = data?.value ? JSON.parse(data.value) : {}; } catch { parsed = {}; }
+      const merged = { ...DEFAULT_DELIVERY_CONFIG, ...parsed };
+      for (const k of ["collection", "courier", "pudo", "paxi"]) merged[k] = { ...DEFAULT_DELIVERY_CONFIG[k], ...(parsed[k] || {}) };
+      setCfg(merged);
+    })();
+  }, [open]);
+  const setMethod = (m, patch) => setCfg((x) => ({ ...x, [m]: { ...x[m], ...patch } }));
+  const save = async () => {
+    setSaving(true);
+    const clean = { ...cfg, default_weight_kg: Number(cfg.default_weight_kg) || 0.5, free_over: Number(cfg.free_over) || 0,
+      courier: { ...cfg.courier, fee: Number(cfg.courier.fee) || 0 }, pudo: { ...cfg.pudo, fee: Number(cfg.pudo.fee) || 0 },
+      paxi: { ...cfg.paxi, standard_fee: Number(cfg.paxi.standard_fee) || 0, large_fee: Number(cfg.paxi.large_fee) || 0 } };
+    const { error } = await supabase.from("shop_settings").upsert({ key: "delivery_config", value: JSON.stringify(clean), updated_at: new Date().toISOString() });
+    setSaving(false);
+    if (error) { showToast(`Couldn't save: ${error.message}`); return; }
+    showToast("Delivery settings saved.");
+  };
+  const inputCls = "w-full border rounded-lg px-2.5 py-2 font-body text-sm outline-none";
+  const inputStyle = { background: c.bg, borderColor: c.border, color: c.text };
+  return (
+    <div className="rounded-xl border mb-4" style={{ background: c.surface, borderColor: c.border }}>
+      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2.5 font-body text-sm font-semibold" aria-expanded={open}>
+        <span>Delivery methods and prices</span>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+      </button>
+      {open && !cfg && <div className="px-3 pb-3"><Spinner c={c} /></div>}
+      {open && cfg && (
+        <div className="px-3 pb-3 space-y-4">
+          <p className="font-body text-xs" style={{ color: c.textFaint }}>Switch on the methods you offer. With none switched on, checkout has no delivery step. These are fixed prices you set; they are not live courier quotes.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <DField c={c} label="Free delivery above (R, 0 = never)"><input type="number" min="0" value={cfg.free_over} onChange={(e) => setCfg((x) => ({ ...x, free_over: e.target.value }))} className={inputCls} style={inputStyle} /></DField>
+            <DField c={c} label="Weight if a product has none (kg)"><input type="number" min="0" step="0.1" value={cfg.default_weight_kg} onChange={(e) => setCfg((x) => ({ ...x, default_weight_kg: e.target.value }))} className={inputCls} style={inputStyle} /></DField>
+          </div>
+
+          <div className="space-y-2">
+            <DToggle checked={!!cfg.collection.enabled} onChange={(v) => setMethod("collection", { enabled: v })} label="Collect from us" />
+            {cfg.collection.enabled && (<>
+              <DField c={c} label="Collection address"><input value={cfg.collection.address} onChange={(e) => setMethod("collection", { address: e.target.value })} className={inputCls} style={inputStyle} /></DField>
+              <DField c={c} label="Collection hours"><input value={cfg.collection.hours} onChange={(e) => setMethod("collection", { hours: e.target.value })} placeholder="Mon to Fri, 9am to 5pm" className={inputCls} style={inputStyle} /></DField>
+            </>)}
+          </div>
+
+          {[["courier", "Courier to the door (The Courier Guy)"], ["pudo", "Pudo locker"]].map(([m, label]) => (
+            <div key={m} className="space-y-2">
+              <DToggle checked={!!cfg[m].enabled} onChange={(v) => setMethod(m, { enabled: v })} label={label} />
+              {cfg[m].enabled && (
+                <div className="grid grid-cols-2 gap-2">
+                  <DField c={c} label="Fee (R)"><input type="number" min="0" step="0.01" value={cfg[m].fee} onChange={(e) => setMethod(m, { fee: e.target.value })} className={inputCls} style={inputStyle} /></DField>
+                  <DField c={c} label="Time shown to shopper"><input value={cfg[m].days} onChange={(e) => setMethod(m, { days: e.target.value })} className={inputCls} style={inputStyle} /></DField>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div className="space-y-2">
+            <DToggle checked={!!cfg.paxi.enabled} onChange={(v) => setMethod("paxi", { enabled: v })} label="PAXI at a PEP store" />
+            {cfg.paxi.enabled && (
+              <div className="grid grid-cols-2 gap-2">
+                <DField c={c} label="Standard bag fee (R, up to 5 kg)"><input type="number" min="0" step="0.01" value={cfg.paxi.standard_fee} onChange={(e) => setMethod("paxi", { standard_fee: e.target.value })} className={inputCls} style={inputStyle} /></DField>
+                <DField c={c} label="Large bag fee (R, up to 10 kg)"><input type="number" min="0" step="0.01" value={cfg.paxi.large_fee} onChange={(e) => setMethod("paxi", { large_fee: e.target.value })} className={inputCls} style={inputStyle} /></DField>
+                <div className="col-span-2"><DField c={c} label="Time shown to shopper"><input value={cfg.paxi.days} onChange={(e) => setMethod("paxi", { days: e.target.value })} className={inputCls} style={inputStyle} /></DField></div>
+                <p className="col-span-2 font-body text-xs" style={{ color: c.textFaint }}>Check current prices with PAXI; they change. Parcels over 10 kg or longer than 60 cm are not offered PAXI.</p>
+              </div>
+            )}
+          </div>
+
+          <button onClick={save} disabled={saving} className="font-body text-xs font-semibold px-4 py-2 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: saving ? 0.6 : 1 }}>{saving ? "Saving..." : "Save delivery settings"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const ADMIN_OPEN_STATUSES = ["pending_review", "whatsapp_sent", "paid", "packed", "shipped"];
 const ADMIN_FILTERS = [
   ["open", "To handle"], ["pending_review", "Pending review"], ["whatsapp_sent", "WhatsApp"], ["paid", "Paid"],
@@ -2055,6 +2319,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
         )}
       </div>
 
+      <DeliverySettings showToast={showToast} c={c} />
+
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by order number, name or phone" aria-label="Search orders"
@@ -2092,10 +2358,18 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
                 </div>
               ))}
               {o.delivery_note && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Note: {o.delivery_note}</div>}
+              {o.delivery_method && (
+                <div className="font-body text-xs mt-1.5 rounded-lg px-2.5 py-1.5" style={{ background: c.bg, color: c.textDim }}>
+                  {deliverySummary(o)}{Number(o.delivery_fee) > 0 ? ` · ${formatMoney(o.delivery_fee)}` : " · free"}
+                </div>
+              )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
-                <span className="font-body text-xs font-semibold">Total</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(o.subtotal)}</span>
+                <span className="font-body text-xs font-semibold">Total{Number(o.delivery_fee) > 0 ? " (with delivery)" : ""}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) + Number(o.delivery_fee || 0))}</span>
               </div>
+              {["packed", "shipped", "delivered"].includes(o.status) && o.delivery_method && o.delivery_method !== "collection" && (
+                <TrackingEditor order={o} showToast={showToast} onSaved={load} c={c} />
+              )}
 
               <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                 {o.payment_proof_path && (
