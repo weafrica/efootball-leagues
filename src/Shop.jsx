@@ -74,8 +74,11 @@ function waLink(phone, text) {
 // than a query string, so they read like a real page and not like a param
 // dump. Requires the SPA fallback rewrite in vercel.json so any /shop/<id>
 // path still serves index.html.
+// Always the public address, even when shared from the installed shop app or
+// a preview URL, so every link people send lands on https://weafrica.co.za/shop.
+const SHOP_PUBLIC_URL = "https://weafrica.co.za/shop";
 function buildProductLink(product) {
-  return `${window.location.origin}/shop/${product.id}`;
+  return `${SHOP_PUBLIC_URL}/${product.id}`;
 }
 
 function loadCart() {
