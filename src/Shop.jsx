@@ -46,6 +46,34 @@ const SHOP_GOLD = "#D4A017";
 const CURRENCY_PREFIX = "R"; // South African Rand — change if selling elsewhere
 const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA")}`;
 
+// Options (variants), quantity prices and photos. The server re-prices every
+// order with the same rules (shop_unit_price), this only mirrors them for display.
+const activeVariants = (p) => (p?.variants || []).filter((v) => v.active);
+const lineKey = (it) => `${it.productId}:${it.variantId || ""}`;
+const unitPriceFor = (product, variantId, totalQty) => {
+  const v = variantId ? (product.variants || []).find((x) => x.id === variantId) : null;
+  let unit = Number(v?.price ?? product.price);
+  const best = (product.breaks || []).filter((b) => b.min_qty <= totalQty).sort((a, b) => b.min_qty - a.min_qty)[0];
+  if (best) unit = Math.min(unit, Number(best.unit_price));
+  return unit;
+};
+const productPhotos = (p) => {
+  const urls = [p.image_url, ...(p.images || []).map((i) => i.url)].filter(Boolean);
+  return urls.filter((u, i) => urls.indexOf(u) === i);
+};
+// Cart lines with the current price (variant + quantity price) and full name.
+const priceCartLines = (cart, products) => {
+  const byId = new Map((products || []).map((p) => [p.id, p]));
+  const qtyOf = new Map();
+  cart.forEach((it) => qtyOf.set(it.productId, (qtyOf.get(it.productId) || 0) + it.qty));
+  return cart.map((it) => {
+    const p = byId.get(it.productId);
+    const price = p ? unitPriceFor(p, it.variantId, qtyOf.get(it.productId)) : it.price;
+    return { ...it, key: lineKey(it), price, listPrice: p ? Number((p.variants || []).find((v) => v.id === it.variantId)?.price ?? p.price) : it.price,
+      name: it.variantName ? `${it.name} (${it.variantName})` : it.name };
+  });
+};
+
 const CART_KEY = "efootball-shop-cart-v1";
 const DELIVERY_LABELS = { collection: "Collect from us", courier: "Courier to your door", pudo: "Pudo locker", paxi: "PAXI at a PEP store" };
 // One short line describing where an order is going.
@@ -252,7 +280,15 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => {
     const onPopState = (e) => {
       const state = e.state;
-      if (!state) return;
+      if (!state) {
+        // The page's very first history entry has no state (e.g. the shop app
+        // opened directly): that is the shop root, so close whatever is open.
+        setSubview("browse");
+        setShopDept("all");
+        setShopCatPath([]);
+        setActiveProduct(null);
+        return;
+      }
       if (state.shopNav) {
         setSubview(state.shopSubview || "browse");
         setShopDept(state.shopDept || "all");
@@ -342,10 +378,18 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
 
   const loadProducts = async () => {
-    const { data, error } = await supabase.from("shop_products")
-      .select("id, name, description, price, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
-      .order("created_at", { ascending: false });
-    if (!error) setProducts(data || []);
+    const [prod, vars, brks, imgs] = await Promise.all([
+      supabase.from("shop_products")
+        .select("id, name, description, price, compare_at_price, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
+        .order("created_at", { ascending: false }),
+      supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
+      supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
+      supabase.from("shop_product_images").select("id, product_id, url, position").order("position"),
+    ]);
+    if (prod.error) return;
+    const group = (res) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r); }); return m; };
+    const gv = group(vars), gb = group(brks), gi = group(imgs);
+    setProducts((prod.data || []).map((p) => ({ ...p, variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [] })));
   };
   useEffect(() => { loadProducts(); }, []);
 
@@ -381,23 +425,26 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   const visibleProducts = isAdmin ? (products || []) : (products || []).filter((p) => p.active);
 
-  const addToCart = (product, qty) => {
+  const addToCart = (product, qty, variant = null) => {
+    const vid = variant?.id || null;
     setCart((prev) => {
-      const existing = prev.find((it) => it.productId === product.id);
-      const cap = product.stock_qty ?? 99;
-      if (existing) return prev.map((it) => it.productId === product.id ? { ...it, qty: Math.min(it.qty + qty, cap) } : it);
-      return [...prev, { productId: product.id, name: product.name, price: product.price, image_url: product.image_url, qty: Math.min(qty, cap) }];
+      const key = `${product.id}:${vid || ""}`;
+      const existing = prev.find((it) => lineKey(it) === key);
+      const cap = (variant ? variant.stock_qty : product.stock_qty) ?? 99;
+      if (existing) return prev.map((it) => lineKey(it) === key ? { ...it, qty: Math.min(it.qty + qty, cap) } : it);
+      return [...prev, { productId: product.id, variantId: vid, variantName: variant?.name || null, name: product.name, price: product.price, image_url: product.image_url, qty: Math.min(qty, cap) }];
     });
-    showToast(`Added ${product.name} to cart.`);
+    showToast(`Added ${product.name}${variant ? ` (${variant.name})` : ""} to cart.`);
   };
-  const updateQty = (productId, qty) => {
-    setCart((prev) => qty <= 0 ? prev.filter((it) => it.productId !== productId) : prev.map((it) => it.productId === productId ? { ...it, qty } : it));
+  const updateQty = (key, qty) => {
+    setCart((prev) => qty <= 0 ? prev.filter((it) => lineKey(it) !== key) : prev.map((it) => lineKey(it) === key ? { ...it, qty } : it));
   };
-  const removeFromCart = (productId) => setCart((prev) => prev.filter((it) => it.productId !== productId));
+  const removeFromCart = (key) => setCart((prev) => prev.filter((it) => lineKey(it) !== key));
   const clearCart = () => setCart([]);
 
+  const pricedCart = priceCartLines(cart, products);
   const cartCount = cart.reduce((sum, it) => sum + it.qty, 0);
-  const cartTotal = cart.reduce((sum, it) => sum + it.qty * it.price, 0);
+  const cartTotal = pricedCart.reduce((sum, it) => sum + it.qty * it.price, 0);
 
   const goCheckout = () => {
     if (cart.length === 0) { showToast("Your cart is empty."); return; }
@@ -453,16 +500,16 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
           </div>
           <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
-            onOpen={setActiveProduct} onQuickAdd={(p) => addToCart(p, 1)} c={c} />
+            onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
         </>
       )}
 
       {subview === "cart" && (
-        <CartView cart={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onCheckout={goCheckout} onContinue={shopGoBack} c={c} />
+        <CartView cart={pricedCart} onUpdateQty={updateQty} onRemove={removeFromCart} onCheckout={goCheckout} onContinue={shopGoBack} c={c} />
       )}
 
       {subview === "checkout" && (
-        <CheckoutView cart={cart} total={cartTotal} session={session} profile={profile} eftDetails={eftDetails} onStockChanged={loadProducts}
+        <CheckoutView cart={pricedCart} total={cartTotal} session={session} profile={profile} eftDetails={eftDetails} onStockChanged={loadProducts}
           onDone={(order) => { setLastOrderNumber(order?.order_number || null); clearCart(); loadProducts(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
       )}
 
@@ -501,7 +548,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty) => { addToCart(activeProduct, qty); shopGoBack(); }} onShare={() => shareProduct(activeProduct)} c={c} />
+        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)} c={c} />
       )}
 
       {subview === "browse" && cartCount > 0 && (
@@ -1045,7 +1092,11 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
             </div>
             <div className="p-3">
               <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
-              <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{formatMoney(p.price)}</div>
+              <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>
+                {(() => { const vp = activeVariants(p).map((v) => Number(v.price ?? p.price)); const lo = vp.length ? Math.min(...vp) : Number(p.price);
+                  return <>{vp.length && Math.max(...vp) > lo ? "From " : ""}{formatMoney(lo)}{p.compare_at_price > lo && <span className="ml-1.5 text-xs font-semibold line-through" style={{ color: c.textFaint }}>{formatMoney(p.compare_at_price)}</span>}</>; })()}
+              </div>
+              {(p.breaks || []).length > 0 && <div className="font-body text-xs mt-0.5" style={{ color: SHOP_GOLD }}>Buy more, pay less</div>}
               {!p.active && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Hidden from shoppers</div>}
               {p.active && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
               {p.active && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
@@ -1059,19 +1110,69 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
 
 function ProductModal({ product, onClose, onAdd, onShare, c }) {
   const [qty, setQty] = useState(1);
+  const variants = activeVariants(product);
+  const [variantId, setVariantId] = useState(null);
+  const [photoIdx, setPhotoIdx] = useState(0);
+  const variant = variants.find((v) => v.id === variantId) || null;
+  const photos = productPhotos(product);
+  const stock = variants.length ? (variant ? variant.stock_qty : null) : (product.stock_qty ?? 0);
   const outOfStock = (product.stock_qty ?? 0) === 0;
+  const unit = unitPriceFor(product, variantId, qty);
+  const listUnit = Number(variant?.price ?? product.price);
+  const breaks = (product.breaks || []).slice().sort((a, b) => a.min_qty - b.min_qty);
+  const cap = stock ?? 99;
+  const pick = (v) => { setVariantId(v.id); setQty((q) => Math.min(q, Math.max(1, v.stock_qty))); };
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div className="w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl overflow-hidden max-h-[85vh] overflow-y-auto" style={{ background: c.bg }} onClick={(e) => e.stopPropagation()}>
         <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
-          {product.image_url ? <img src={toProxiedUrl(product.image_url)} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
+          {photos[photoIdx] ? <img src={toProxiedUrl(photos[photoIdx])} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
           <button onClick={onShare} aria-label="Share this product" title="Share this product" className="absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><Share2 size={15} /></button>
           <button onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><X size={16} /></button>
         </div>
+        {photos.length > 1 && (
+          <div className="flex gap-2 px-4 pt-3 overflow-x-auto" data-testid="gallery">
+            {photos.map((u, i) => (
+              <button key={u} onClick={() => setPhotoIdx(i)} aria-label={`Photo ${i + 1}`} className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border-2" style={{ borderColor: i === photoIdx ? SHOP_GOLD : "transparent" }}>
+                <img src={toProxiedUrl(u)} alt="" loading="lazy" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
         <div className="p-4">
           <div className="font-extrabold uppercase tracking-tight text-lg leading-tight">{product.name}</div>
-          <div className="font-mono text-sm font-semibold mt-1" style={{ color: SHOP_GOLD }}>{formatMoney(product.price)}</div>
+          <div className="font-mono text-sm font-semibold mt-1" style={{ color: SHOP_GOLD }}>
+            {formatMoney(unit)}
+            {unit < listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(listUnit)}</span>}
+            {unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
+          </div>
           {product.description && <p className="font-body text-sm mt-2.5" style={{ color: c.textDim }}>{product.description}</p>}
+
+          {variants.length > 0 && (
+            <div className="mt-3.5" data-testid="variants">
+              <div className="font-body text-xs font-semibold mb-1.5" style={{ color: c.textDim }}>Choose an option</div>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((v) => {
+                  const sold = v.stock_qty <= 0; const on = v.id === variantId;
+                  return (
+                    <button key={v.id} disabled={sold} onClick={() => pick(v)} aria-pressed={on}
+                      className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border"
+                      style={{ background: on ? SHOP_GOLD : c.surface, color: on ? "#1a1200" : c.text, borderColor: on ? SHOP_GOLD : c.border, opacity: sold ? 0.4 : 1, textDecoration: sold ? "line-through" : "none" }}>
+                      {v.name}{v.price != null && Number(v.price) !== Number(product.price) ? ` · ${formatMoney(v.price)}` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              {variant && variant.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1.5" style={{ color: SHOP_GOLD }}>Only {variant.stock_qty} left</div>}
+            </div>
+          )}
+
+          {breaks.length > 0 && (
+            <div className="mt-3.5 rounded-lg p-2.5 font-body text-xs" style={{ background: c.surface, color: c.textDim }} data-testid="breaks">
+              <div className="font-semibold mb-1" style={{ color: c.text }}>Buy more, pay less</div>
+              {breaks.map((b) => <div key={b.id || b.min_qty}>{b.min_qty}+ items: {formatMoney(b.unit_price)} each</div>)}
+            </div>
+          )}
 
           {outOfStock ? (
             <div className="mt-4 font-body text-sm text-center py-2.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Out of stock</div>
@@ -1080,9 +1181,12 @@ function ProductModal({ product, onClose, onAdd, onShare, c }) {
               <div className="flex items-center justify-center gap-4 mt-4">
                 <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Minus size={14} /></button>
                 <span className="font-mono font-bold text-base w-6 text-center">{qty}</span>
-                <button onClick={() => setQty((q) => Math.min(product.stock_qty || 99, q + 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Plus size={14} /></button>
+                <button onClick={() => setQty((q) => Math.min(cap || 99, q + 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Plus size={14} /></button>
               </div>
-              <button onClick={() => onAdd(qty)} className="w-full mt-4 font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>Add to cart</button>
+              <button onClick={() => onAdd(qty, variant)} disabled={variants.length > 0 && !variant}
+                className="w-full mt-4 font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: variants.length > 0 && !variant ? 0.5 : 1 }}>
+                {variants.length > 0 && !variant ? "Choose an option" : `Add to cart · ${formatMoney(unit * qty)}`}
+              </button>
             </>
           )}
         </div>
@@ -1112,19 +1216,19 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
         <>
           <div className="space-y-2 mb-5">
             {cart.map((it) => (
-              <div key={it.productId} className="flex items-center gap-3 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
+              <div key={it.key} className="flex items-center gap-3 rounded-xl p-2.5 border" style={{ background: c.surface, borderColor: c.border }}>
                 <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.surfaceHover }}>
                   {it.image_url ? <img src={toProxiedUrl(it.image_url)} alt="" loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={16} style={{ color: c.textFaint }} />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-body text-xs font-semibold truncate">{it.name}</div>
-                  <div className="font-mono text-xs" style={{ color: SHOP_GOLD }}>{formatMoney(it.price)}</div>
+                  <div className="font-mono text-xs" style={{ color: SHOP_GOLD }}>{formatMoney(it.price)}{it.price < it.listPrice && <span className="ml-1.5 line-through" style={{ color: c.textFaint }}>{formatMoney(it.listPrice)}</span>}</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => onUpdateQty(it.productId, it.qty - 1)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.text }}><Minus size={11} /></button>
+                  <button onClick={() => onUpdateQty(it.key, it.qty - 1)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.text }}><Minus size={11} /></button>
                   <span className="font-mono text-xs font-bold w-4 text-center">{it.qty}</span>
-                  <button onClick={() => onUpdateQty(it.productId, it.qty + 1)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.text }}><Plus size={11} /></button>
-                  <button onClick={() => onRemove(it.productId)} className="w-6 h-6 rounded-full flex items-center justify-center ml-1" style={{ color: c.red }}><Trash2 size={13} /></button>
+                  <button onClick={() => onUpdateQty(it.key, it.qty + 1)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: c.surfaceHover, color: c.text }}><Plus size={11} /></button>
+                  <button onClick={() => onRemove(it.key)} className="w-6 h-6 rounded-full flex items-center justify-center ml-1" style={{ color: c.red }}><Trash2 size={13} /></button>
                 </div>
               </div>
             ))}
@@ -1159,11 +1263,11 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   const [addr, setAddr] = useState({ street: "", suburb: "", city: "", province: "", postal_code: "" });
   const [point, setPoint] = useState("");
 
-  const cartKey = cart.map((it) => `${it.productId}:${it.qty}`).join(",");
+  const cartKey = cart.map((it) => `${it.productId}:${it.variantId || ""}:${it.qty}`).join(",");
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase.rpc("shop_delivery_options", { p_items: cart.map((it) => ({ product_id: it.productId, qty: it.qty })) });
+      const { data, error } = await supabase.rpc("shop_delivery_options", { p_items: cart.map((it) => ({ product_id: it.productId, variant_id: it.variantId || null, qty: it.qty })) });
       if (cancelled) return;
       const list = !error && Array.isArray(data) ? data : [];
       setDeliveryOptions(list);
@@ -1196,7 +1300,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   // { order } or { error }.
   const placeOrder = async (checkoutMethod, proofPath) => {
     const { data, error } = await supabase.rpc("place_shop_order", {
-      p_items: cart.map((it) => ({ product_id: it.productId, qty: it.qty })),
+      p_items: cart.map((it) => ({ product_id: it.productId, variant_id: it.variantId || null, qty: it.qty })),
       p_method: checkoutMethod,
       p_buyer_name: buyerUsername,
       p_phone: contactPhone.trim() || null,
@@ -1583,7 +1687,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
   const deptById = new Map(departments.map((d) => [d.id, d]));
   const catById = new Map(categories.map((cat) => [cat.id, cat]));
 
-  const saveProduct = async (form, rawFile) => {
+  const saveProduct = async (form, rawFile, extras = {}) => {
     let image_url = editing?.image_url || null;
     if (rawFile) {
       const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
@@ -1598,12 +1702,47 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       }
       image_url = publicUrl;
     }
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, stock_qty: Number(form.stock_qty) || 0, active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
+    const hasVariants = (extras.variants || []).length > 0;
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
-    const { error } = editing?.id
-      ? await supabase.from("shop_products").update(payload).eq("id", editing.id)
-      : await supabase.from("shop_products").insert(payload);
+    let productId = editing?.id;
+    let error;
+    if (productId) {
+      ({ error } = await supabase.from("shop_products").update(payload).eq("id", productId));
+    } else {
+      const res = await supabase.from("shop_products").insert(hasVariants ? { ...payload, stock_qty: 0 } : payload).select("id").single();
+      error = res.error; productId = res.data?.id;
+    }
     if (error) { showToast(`Couldn't save product: ${error.message}`); return false; }
+
+    // Options, quantity prices and extra photos.
+    const fail = (what, e) => { showToast(`Product saved, but ${what} failed: ${e.message}`); return false; };
+    const keepVar = (extras.variants || []).filter((v) => v.id).map((v) => v.id);
+    const oldVar = (editing?.variants || []).map((v) => v.id).filter((id) => !keepVar.includes(id));
+    if (oldVar.length) { const { error: e } = await supabase.from("shop_product_variants").delete().in("id", oldVar); if (e) return fail("removing options", e); }
+    let pos = 0;
+    for (const v of extras.variants || []) {
+      const row = { product_id: productId, name: v.name.trim(), price: numOrNull(v.price), stock_qty: Math.max(0, Number(v.stock_qty) || 0), active: v.active !== false, position: pos++ };
+      const { error: e } = v.id ? await supabase.from("shop_product_variants").update(row).eq("id", v.id) : await supabase.from("shop_product_variants").insert(row);
+      if (e) return fail("saving options", e);
+    }
+    if (editing?.id) { const { error: e } = await supabase.from("shop_price_breaks").delete().eq("product_id", productId); if (e) return fail("quantity prices", e); }
+    const breakRows = (extras.breaks || []).filter((b) => Number(b.min_qty) >= 2 && b.unit_price !== "" && b.unit_price != null)
+      .map((b) => ({ product_id: productId, min_qty: Math.floor(Number(b.min_qty)), unit_price: Number(b.unit_price) }));
+    if (breakRows.length) { const { error: e } = await supabase.from("shop_price_breaks").insert(breakRows); if (e) return fail("quantity prices", e); }
+    const keepImg = (extras.keptImages || []).map((i) => i.id);
+    const oldImg = (editing?.images || []).map((i) => i.id).filter((id) => !keepImg.includes(id));
+    if (oldImg.length) { const { error: e } = await supabase.from("shop_product_images").delete().in("id", oldImg); if (e) return fail("removing photos", e); }
+    let ipos = keepImg.length;
+    for (const raw of extras.newImages || []) {
+      try {
+        const file2 = await compressImage(raw, { maxDimension: 1000, quality: 0.85 });
+        const ext2 = (file2.name.split(".").pop() || "jpg").toLowerCase();
+        const url = await uploadToR2("shop-photos", `${Date.now()}-${ipos}.${ext2}`, file2);
+        const { error: e } = await supabase.from("shop_product_images").insert({ product_id: productId, url, position: ipos++ });
+        if (e) return fail("saving photos", e);
+      } catch (err) { return fail("uploading photos", err); }
+    }
     showToast(editing?.id ? "Product updated." : "Product added.");
     await onReload();
     return true;
@@ -1690,6 +1829,17 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [heightCm, setHeightCm] = useState(product.height_cm ?? "");
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [compareAt, setCompareAt] = useState(product.compare_at_price ?? "");
+  const [variants, setVariants] = useState((product.variants || []).map((v) => ({ id: v.id, name: v.name, price: v.price ?? "", stock_qty: v.stock_qty, active: v.active })));
+  const [breaks, setBreaks] = useState((product.breaks || []).map((b) => ({ min_qty: b.min_qty, unit_price: b.unit_price })));
+  const [keptImages, setKeptImages] = useState(product.images || []);
+  const [newImages, setNewImages] = useState([]);
+  const setVar = (i, patch) => setVariants((vs) => vs.map((v, j) => j === i ? { ...v, ...patch } : v));
+  const setBrk = (i, patch) => setBreaks((bs) => bs.map((b, j) => j === i ? { ...b, ...patch } : b));
+  const hasVariants = variants.length > 0;
+  const varStockTotal = variants.filter((v) => v.active).reduce((n, v) => n + (Number(v.stock_qty) || 0), 0);
+  const inputCls = "w-full border rounded-lg px-2.5 py-2 font-body text-sm outline-none";
+  const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
   // Categories are scoped to a department — switching departments (or
   // clearing it) drops any category that no longer belongs to it. The tree
@@ -1702,9 +1852,10 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
 
   const submit = async () => {
     if (!name.trim() || !price) return;
+    if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file);
+    const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file, { variants, breaks, keptImages, newImages });
     setSaving(false);
     if (ok) onClose();
   };
@@ -1732,8 +1883,43 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
             </div>
             <div>
               <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Stock</label>
-              <input type="number" min="0" value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+              {hasVariants
+                ? <div className="w-full border rounded-lg px-3 py-2.5 font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>{varStockTotal} (from options)</div>
+                : <input type="number" min="0" value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />}
             </div>
+          </div>
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Old price ({CURRENCY_PREFIX}) — shown crossed out</label>
+            <input type="number" min="0" step="0.01" value={compareAt} onChange={(e) => setCompareAt(e.target.value)} placeholder="Leave blank if not on sale" className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          </div>
+          <div data-testid="variant-editor">
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Options (size, colour...)</label>
+            <div className="space-y-2">
+              {variants.map((v, i) => (
+                <div key={v.id || `n${i}`} className="grid grid-cols-[1fr_4.5rem_4rem_auto] gap-1.5 items-center">
+                  <input value={v.name} onChange={(e) => setVar(i, { name: e.target.value })} placeholder="e.g. Large / Black" aria-label="Option name" className={inputCls} style={inputStyle} />
+                  <input type="number" min="0" step="0.01" value={v.price} onChange={(e) => setVar(i, { price: e.target.value })} placeholder="Price" aria-label="Option price" className={inputCls} style={inputStyle} />
+                  <input type="number" min="0" value={v.stock_qty} onChange={(e) => setVar(i, { stock_qty: e.target.value })} placeholder="Stock" aria-label="Option stock" className={inputCls} style={inputStyle} />
+                  <button type="button" onClick={() => setVariants((vs) => vs.filter((_, j) => j !== i))} aria-label="Remove option" className="w-7 h-7 flex items-center justify-center" style={{ color: c.red }}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={() => setVariants((vs) => [...vs, { name: "", price: "", stock_qty: 0, active: true }])} className="mt-2 font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.surface, color: c.textDim }}><Plus size={12} /> Add option</button>
+            <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Each option has its own stock. Price is optional; blank uses the product price.</p>
+          </div>
+          <div data-testid="break-editor">
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Quantity prices</label>
+            <div className="space-y-2">
+              {breaks.map((b, i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-center">
+                  <input type="number" min="2" value={b.min_qty} onChange={(e) => setBrk(i, { min_qty: e.target.value })} placeholder="Buy at least" aria-label="Minimum quantity" className={inputCls} style={inputStyle} />
+                  <input type="number" min="0" step="0.01" value={b.unit_price} onChange={(e) => setBrk(i, { unit_price: e.target.value })} placeholder={`Each (${CURRENCY_PREFIX})`} aria-label="Price each" className={inputCls} style={inputStyle} />
+                  <button type="button" onClick={() => setBreaks((bs) => bs.filter((_, j) => j !== i))} aria-label="Remove quantity price" className="w-7 h-7 flex items-center justify-center" style={{ color: c.red }}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={() => setBreaks((bs) => [...bs, { min_qty: "", unit_price: "" }])} className="mt-2 font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.surface, color: c.textDim }}><Plus size={12} /> Add quantity price</button>
+            <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Example: buy at least 3, R90 each. Counts all options of this product together.</p>
           </div>
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Department</label>
@@ -1767,6 +1953,27 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
             <Upload size={15} /> {file ? file.name : "Product photo"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </label>
+          <div data-testid="photo-editor">
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>More photos</label>
+            <div className="flex flex-wrap gap-2">
+              {keptImages.map((im) => (
+                <div key={im.id} className="relative w-14 h-14 rounded-lg overflow-hidden">
+                  <img src={toProxiedUrl(im.url)} alt="" className="w-full h-full object-cover" />
+                  <button type="button" onClick={() => setKeptImages((l) => l.filter((x) => x.id !== im.id))} aria-label="Remove photo" className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}><X size={11} /></button>
+                </div>
+              ))}
+              {newImages.map((f2, i) => (
+                <div key={i} className="relative w-14 h-14 rounded-lg flex items-center justify-center font-body text-[10px] text-center px-1 overflow-hidden" style={{ background: c.surface, color: c.textDim }}>
+                  {f2.name.slice(0, 14)}
+                  <button type="button" onClick={() => setNewImages((l) => l.filter((_, j) => j !== i))} aria-label="Remove photo" className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}><X size={11} /></button>
+                </div>
+              ))}
+              <label className="w-14 h-14 rounded-lg border border-dashed flex items-center justify-center cursor-pointer" style={{ borderColor: c.borderStrong, color: c.textDim }} aria-label="Add photos">
+                <Plus size={18} />
+                <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) setNewImages((l) => [...l, ...fs]); e.target.value = ""; }} />
+              </label>
+            </div>
+          </div>
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: active ? c.accent : "transparent", border: `1px solid ${active ? c.accent : c.borderStrong}` }}>
               <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
