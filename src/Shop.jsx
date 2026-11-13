@@ -4,6 +4,7 @@ import { compressImage } from "./utils/imageCompress";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
+import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
@@ -379,18 +380,21 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
 
   const loadProducts = async () => {
-    const [prod, vars, brks, imgs] = await Promise.all([
+    const [prod, vars, brks, imgs, rats] = await Promise.all([
       supabase.from("shop_products")
         .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
       supabase.from("shop_product_images").select("id, product_id, url, position").order("position"),
+      supabase.from("shop_product_rating_summary").select("product_id, rating_avg, rating_count"),
     ]);
     if (prod.error) return;
     const group = (res) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r); }); return m; };
     const gv = group(vars), gb = group(brks), gi = group(imgs);
-    setProducts((prod.data || []).map((p) => ({ ...p, variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [] })));
+    const rs = new Map((rats.data || []).map((r) => [r.product_id, r]));
+    setProducts((prod.data || []).map((p) => ({ ...p, variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [],
+      rating_avg: Number(rs.get(p.id)?.rating_avg || 0), rating_count: rs.get(p.id)?.rating_count || 0 })));
   };
   useEffect(() => { loadProducts(); }, []);
 
@@ -551,7 +555,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)} c={c} />
+        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
+          session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth} showToast={showToast} onRatingsChanged={loadProducts} c={c} />
       )}
 
       {subview === "browse" && cartCount > 0 && (
@@ -1137,6 +1142,12 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
                 {(() => { const vp = activeVariants(p).map((v) => Number(v.price ?? p.price)); const lo = vp.length ? Math.min(...vp) : Number(p.price);
                   return <>{vp.length && Math.max(...vp) > lo ? "From " : ""}{formatMoney(lo)}{p.compare_at_price > lo && <span className="ml-1.5 text-xs font-semibold line-through" style={{ color: c.textFaint }}>{formatMoney(p.compare_at_price)}</span>}</>; })()}
               </div>
+              {p.rating_count > 0 && (
+                <div className="flex items-center gap-1 mt-0.5" data-testid="card-rating">
+                  <StarRow value={p.rating_avg} size={11} />
+                  <span className="font-body text-[11px]" style={{ color: c.textFaint }}>{p.rating_avg.toFixed(1)} ({p.rating_count})</span>
+                </div>
+              )}
               {(p.breaks || []).length > 0 && <div className="font-body text-xs mt-0.5" style={{ color: SHOP_GOLD }}>Buy more, pay less</div>}
               {!p.active && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Hidden from shoppers</div>}
               {p.active && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
@@ -1149,7 +1160,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   );
 }
 
-function ProductModal({ product, onClose, onAdd, onShare, c }) {
+function ProductModal({ product, onClose, onAdd, onShare, session, profile, isAdmin, onRequireAuth, showToast, onRatingsChanged, c }) {
   const [qty, setQty] = useState(1);
   const variants = activeVariants(product);
   const [variantId, setVariantId] = useState(null);
@@ -1236,6 +1247,9 @@ function ProductModal({ product, onClose, onAdd, onShare, c }) {
               </button>
             </>
           )}
+
+          <ProductReviews product={product} session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth}
+            showToast={showToast} onRatingsChanged={onRatingsChanged} c={c} />
         </div>
       </div>
     </div>
