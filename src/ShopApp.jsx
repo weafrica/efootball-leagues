@@ -152,11 +152,10 @@ export default function ShopApp() {
           <div className="py-24 text-center text-sm" style={{ color: c.textFaint }}>Loading…</div>
         ) : (
           <Suspense fallback={<div className="py-24 text-center text-sm" style={{ color: c.textFaint }}>Loading…</div>}>
-            {/* onBack is only reachable from the shop's root-screen "Matchday"
-                link — it hands off to the league app, which is a separate
-                app, so it's a plain navigation rather than a router move. */}
+            {/* No onBack: the standalone shop app doesn't show the "Other apps"
+                (quick actions) link — it is just the store. */}
             <ShopPage c={c} session={session} profile={profile} isAdmin={isAdmin}
-              onBack={() => window.location.assign("/")} onRequireAuth={signIn} initialProductId={null} />
+              onRequireAuth={signIn} initialProductId={null} />
           </Suspense>
         )}
       </main>

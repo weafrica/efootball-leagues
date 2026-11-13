@@ -3,11 +3,12 @@ import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
+import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
-  AlertTriangle,
+  AlertTriangle, Facebook,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -380,7 +381,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -456,7 +457,9 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   return (
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
-        {atShopRoot ? (
+        {atShopRoot && !onBack ? (
+          <div />
+        ) : atShopRoot ? (
           <button onClick={onBack} className="flex items-center gap-1.5" title="Back to the other apps">
             <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: c.green }}><LayoutGrid size={11} color={c.accent} /></div>
             <div className="text-xs font-extrabold tracking-tight uppercase" style={{ color: c.textDim }}>Other apps</div>
@@ -694,10 +697,17 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
 
   return (
     <div>
+      {/* The same big banner as the login page, on top of the shop home. */}
+      {selected === "all" && !query.trim() && (
+        <div className="-mt-1 mb-5">
+          <ShopHeroBanner c={c} cta="Start shopping"
+            onOpen={() => document.getElementById("shop-search")?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+        </div>
+      )}
       {/* Search leads: it is the fastest way to a product. */}
       <div className="relative mb-5">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products"
+        <input id="shop-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products"
           className="w-full border rounded-xl pl-10 pr-10 py-3 font-body text-sm outline-none focus:ring-2" style={{ background: c.surface, borderColor: c.border, color: c.text, "--tw-ring-color": SHOP_GOLD }} />
         {query && (
           <button onClick={() => setQuery("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full" style={{ color: c.textFaint }}>
@@ -844,10 +854,41 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
 // of full-width tiles, so the catalogue starts within the first screen. Each
 // card uses a photo from that department, or its tint when it has none.
 function DepartmentStrip({ groups, onSelect, deptNum, c }) {
+  // Drifts slowly to the right, pauses at the end, then drifts back, so it is
+  // obvious the row can be scrolled. Stops the moment someone touches, drags,
+  // scrolls or tabs into it and picks up again a few seconds after they let go.
+  const stripRef = useRef(null);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const SPEED = 16; // px per second
+    let raf = 0, last = 0, x = el.scrollLeft, dir = 1, resumeAt = performance.now() + 1500, holdUntil = 0;
+    const pause = (ms) => { resumeAt = performance.now() + ms; el.style.scrollSnapType = ""; };
+    const onUser = () => pause(6000);
+    const tick = (t) => {
+      const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
+      last = t;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max > 4 && t >= resumeAt && t >= holdUntil) {
+        el.style.scrollSnapType = "none";
+        if (Math.abs(el.scrollLeft - x) > 2) x = el.scrollLeft;
+        x += dir * SPEED * dt;
+        if (x >= max) { x = max; dir = -1; holdUntil = t + 1800; }
+        else if (x <= 0) { x = 0; dir = 1; holdUntil = t + 1800; }
+        el.scrollLeft = x;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    const evs = ["pointerdown", "touchstart", "wheel", "keydown", "focusin"];
+    evs.forEach((e) => el.addEventListener(e, onUser, { passive: true }));
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); evs.forEach((e) => el.removeEventListener(e, onUser)); el.style.scrollSnapType = ""; };
+  }, [groups.length]);
   return (
     <section className="mb-6" aria-label="Shop by department">
       <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">Shop by department</h2>
-      <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
+      <div ref={stripRef} className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
         {groups.map(({ dept, items }) => {
           const photo = items.find((it) => it.image_url)?.image_url;
           const tint = DEPT_TINTS[((parseInt(deptNum.get(dept.id), 10) || 1) - 1) % DEPT_TINTS.length];
@@ -1147,6 +1188,12 @@ function ProductModal({ product, onClose, onAdd, onShare, c }) {
             {unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
           </div>
           {product.description && <p className="font-body text-sm mt-2.5" style={{ color: c.textDim }}>{product.description}</p>}
+          {/^https:\/\//i.test(product.facebook_url || "") && (
+            <a href={product.facebook_url} target="_blank" rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-2 font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={{ background: "#1877F2", color: "#fff" }}>
+              <Facebook size={14} /> See this on Facebook
+            </a>
+          )}
 
           {variants.length > 0 && (
             <div className="mt-3.5" data-testid="variants">
@@ -1703,7 +1750,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       image_url = publicUrl;
     }
     const hasVariants = (extras.variants || []).length > 0;
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
     let error;
@@ -1830,6 +1877,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [compareAt, setCompareAt] = useState(product.compare_at_price ?? "");
+  const [facebookUrl, setFacebookUrl] = useState(product.facebook_url || "");
   const [variants, setVariants] = useState((product.variants || []).map((v) => ({ id: v.id, name: v.name, price: v.price ?? "", stock_qty: v.stock_qty, active: v.active })));
   const [breaks, setBreaks] = useState((product.breaks || []).map((b) => ({ min_qty: b.min_qty, unit_price: b.unit_price })));
   const [keptImages, setKeptImages] = useState(product.images || []);
@@ -1854,7 +1902,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (!name.trim() || !price) return;
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
+    const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
       weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file, { variants, breaks, keptImages, newImages });
     setSaving(false);
     if (ok) onClose();
@@ -1891,6 +1939,11 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Old price ({CURRENCY_PREFIX}) — shown crossed out</label>
             <input type="number" min="0" step="0.01" value={compareAt} onChange={(e) => setCompareAt(e.target.value)} placeholder="Leave blank if not on sale" className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          </div>
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Facebook link for this product</label>
+            <input type="url" value={facebookUrl} onChange={(e) => setFacebookUrl(e.target.value)} placeholder="https://www.facebook.com/..." className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+            <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Link to this product's post on your Facebook page. Shoppers get a Facebook button that opens it. Blank hides the button.</p>
           </div>
           <div data-testid="variant-editor">
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Options (size, colour...)</label>
