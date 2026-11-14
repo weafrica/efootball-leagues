@@ -325,6 +325,101 @@
    "ext": "mp3",
    "h": "8deb0ba59c",
    "bytes": 26740
+  },
+  "x1_1": {
+   "ext": "mp3",
+   "h": "7bf881583d",
+   "bytes": 32408
+  },
+  "x1_2": {
+   "ext": "mp3",
+   "h": "87ee00f638",
+   "bytes": 59106
+  },
+  "x1_3": {
+   "ext": "mp3",
+   "h": "8cfa4cb26f",
+   "bytes": 30946
+  },
+  "x2_1": {
+   "ext": "mp3",
+   "h": "d31dd6149a",
+   "bytes": 31677
+  },
+  "x2_ra": {
+   "ext": "mp3",
+   "h": "5e3061fbae",
+   "bytes": 34968
+  },
+  "x2_rb": {
+   "ext": "mp3",
+   "h": "cb35b47a03",
+   "bytes": 30214
+  },
+  "x2_rc": {
+   "ext": "mp3",
+   "h": "13fb90a5ea",
+   "bytes": 28203
+  },
+  "x3_1.he": {
+   "ext": "mp3",
+   "h": "26fb302993",
+   "bytes": 44294
+  },
+  "x3_1.she": {
+   "ext": "mp3",
+   "h": "96781497c8",
+   "bytes": 43746
+  },
+  "x3_ra": {
+   "ext": "mp3",
+   "h": "5cd501eee0",
+   "bytes": 28203
+  },
+  "x3_rb": {
+   "ext": "mp3",
+   "h": "c026fbdc45",
+   "bytes": 24180
+  },
+  "x3_rc.he": {
+   "ext": "mp3",
+   "h": "c82e263d87",
+   "bytes": 27837
+  },
+  "x3_rc.she": {
+   "ext": "mp3",
+   "h": "58e78ae9eb",
+   "bytes": 27837
+  },
+  "x4_1": {
+   "ext": "mp3",
+   "h": "d8c082cc57",
+   "bytes": 39357
+  },
+  "x4_2": {
+   "ext": "mp3",
+   "h": "f455ef5215",
+   "bytes": 41551
+  },
+  "weather_i1": {
+   "ext": "mp3",
+   "h": "934e7f2811",
+   "bytes": 56180
+  },
+  "weather_i2": {
+   "ext": "mp3",
+   "h": "80206e0461",
+   "bytes": 37894
+  },
+  "weather_o1": {
+   "ext": "mp3",
+   "h": "31cd72c81e",
+   "bytes": 45208
+  },
+  "weather_o2": {
+   "ext": "mp3",
+   "h": "b552736f7c",
+   "bytes": 42283
   }
  }
 }
