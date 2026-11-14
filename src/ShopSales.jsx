@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Download, AlertTriangle } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { RECEIPT_STATUSES } from "./ShopDocuments.jsx";
+import CustomersList from "./ShopCustomers.jsx";
 
 const GOLD = "#D4A017";
 const money = (n) => `R${Number(n || 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -52,6 +53,7 @@ export function lowStockItems(products, threshold) {
 
 export default function AdminSales({ products, onOpenOrders, onOpenProducts, showToast, c }) {
   const [orders, setOrders] = useState(null);
+  const [tab, setTab] = useState("overview");
   const [period, setPeriod] = useState("30");
   const [threshold, setThreshold] = useState(() => { try { return Number(localStorage.getItem("weafrica_shop_low_stock")) || 5; } catch { return 5; } });
   useEffect(() => { try { localStorage.setItem("weafrica_shop_low_stock", String(threshold)); } catch { /* ignore */ } }, [threshold]);
@@ -116,6 +118,15 @@ export default function AdminSales({ products, onOpenOrders, onOpenProducts, sho
         </div>
       </div>
 
+      <div className="flex gap-2 mb-4" role="tablist">
+        {[["overview", "Overview"], ["customers", "Customers"]].map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className="font-body text-sm font-semibold px-4 py-1.5 rounded-full" style={chip(tab === k)}>{l}</button>
+        ))}
+      </div>
+
+      {tab === "customers" && (orders === null ? <div className="py-10 text-center font-body text-sm" style={{ color: c.textDim }}>Loading…</div> : <CustomersList orders={orders} showToast={showToast} c={c} />)}
+
+      {tab === "overview" && <>
       <div className="flex flex-wrap gap-2 mb-3">
         {PERIODS.map((p) => <button key={p.key} onClick={() => setPeriod(p.key)} aria-pressed={period === p.key} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={chip(period === p.key)}>{p.label}</button>)}
       </div>
@@ -186,6 +197,7 @@ export default function AdminSales({ products, onOpenOrders, onOpenProducts, sho
       <button onClick={exportCsv} disabled={!stats} className="w-full mt-4 font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: GOLD, color: "#1a1200", opacity: stats ? 1 : 0.6 }}>
         <Download size={15} /> Download orders as CSV ({PERIODS.find((p) => p.key === period).label.toLowerCase()})
       </button>
+      </>}
     </div>
   );
 }
