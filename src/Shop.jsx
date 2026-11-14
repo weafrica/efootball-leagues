@@ -5,11 +5,12 @@ import { toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
+import BackgroundRemover from "./BackgroundRemover.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
-  AlertTriangle, Facebook,
+  AlertTriangle, Facebook, Wand2,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -51,6 +52,10 @@ const formatMoney = (n) => `${CURRENCY_PREFIX}${Number(n).toLocaleString("en-ZA"
 // Options (variants), quantity prices and photos. The server re-prices every
 // order with the same rules (shop_unit_price), this only mirrors them for display.
 const activeVariants = (p) => (p?.variants || []).filter((v) => v.active);
+// A product can sit in several departments and categories (dept_ids / cat_ids,
+// filled in by loadProducts); department_id / category_id are its main ones.
+const productDepts = (p) => p.dept_ids || (p.department_id ? [p.department_id] : []);
+const productCats = (p) => p.cat_ids || (p.category_id ? [p.category_id] : []);
 const lineKey = (it) => `${it.productId}:${it.variantId || ""}`;
 const unitPriceFor = (product, variantId, totalQty) => {
   const v = variantId ? (product.variants || []).find((x) => x.id === variantId) : null;
@@ -380,7 +385,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
 
   const loadProducts = async () => {
-    const [prod, vars, brks, imgs, rats] = await Promise.all([
+    const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
         .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
         .order("created_at", { ascending: false }),
@@ -388,12 +393,17 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
       supabase.from("shop_product_images").select("id, product_id, url, position").order("position"),
       supabase.from("shop_product_rating_summary").select("product_id, rating_avg, rating_count"),
+      supabase.from("shop_product_departments").select("product_id, department_id"),
+      supabase.from("shop_product_categories").select("product_id, category_id"),
     ]);
     if (prod.error) return;
     const group = (res) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r); }); return m; };
     const gv = group(vars), gb = group(brks), gi = group(imgs);
     const rs = new Map((rats.data || []).map((r) => [r.product_id, r]));
-    setProducts((prod.data || []).map((p) => ({ ...p, variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [],
+    const idsOf = (res, key) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r[key]); }); return m; };
+    const gd = idsOf(pdeps, "department_id"), gc = idsOf(pcats, "category_id");
+    const union = (list, main) => [...new Set([...(main ? [main] : []), ...(list || [])])];
+    setProducts((prod.data || []).map((p) => ({ ...p, dept_ids: union(gd.get(p.id), p.department_id), cat_ids: union(gc.get(p.id), p.category_id), variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [],
       rating_avg: Number(rs.get(p.id)?.rating_avg || 0), rating_count: rs.get(p.id)?.rating_count || 0 })));
   };
   useEffect(() => { loadProducts(); }, []);
@@ -662,12 +672,12 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   // "Dept 01", "Dept 02"... — numbered from the full (unsearched) product
   // list, so a department keeps its number and colour while filtering.
   const deptNum = new Map(
-    departments.filter((d) => products.some((p) => p.department_id === d.id)).map((d, i) => [d.id, String(i + 1).padStart(2, "0")])
+    departments.filter((d) => products.some((p) => productDepts(p).includes(d.id))).map((d, i) => [d.id, String(i + 1).padStart(2, "0")])
   );
   const grouped = departments
-    .map((d) => ({ dept: d, items: searchable.filter((p) => p.department_id === d.id) }))
+    .map((d) => ({ dept: d, items: searchable.filter((p) => productDepts(p).includes(d.id)) }))
     .filter((g) => g.items.length > 0);
-  const uncategorized = searchable.filter((p) => !p.department_id || !deptIds.has(p.department_id));
+  const uncategorized = searchable.filter((p) => !productDepts(p).some((id) => deptIds.has(id)));
   // Chips (and directory tiles) only ever show departments that actually
   // have something in them right now — no dead-end aisles.
   const chips = [
@@ -679,14 +689,18 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   // When a real department is selected, walk however deep the category tree
   // at the current breadcrumb position goes. currentCatId is the category
   // we're "inside" (null = department root, not inside any category yet).
-  const deptItems = searchable.filter((p) => p.department_id === selected);
+  const deptItems = searchable.filter((p) => productDepts(p).includes(selected));
   const deptCategories = categories.filter((cat) => cat.department_id === selected);
   const currentCatId = catPath.length ? catPath[catPath.length - 1] : null;
   const itemsForCat = (catId) => {
     const ids = new Set([catId, ...categoryDescendantIds(deptCategories, catId)]);
-    return deptItems.filter((p) => p.category_id && ids.has(p.category_id));
+    return deptItems.filter((p) => productCats(p).some((id) => ids.has(id)));
   };
-  const directItems = deptItems.filter((p) => (p.category_id || null) === currentCatId);
+  const deptCatIds = new Set(deptCategories.map((cat) => cat.id));
+  const directItems = deptItems.filter((p) => {
+    const here = productCats(p).filter((id) => deptCatIds.has(id));
+    return currentCatId === null ? here.length === 0 : here.includes(currentCatId);
+  });
   const childCats = categoryChildren(deptCategories, currentCatId);
   // "All" is just the default state (nothing to tap for it), so the only
   // real filter chip left once subcategories get their own tiles below is
@@ -732,7 +746,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
         const dept = departments.find((d) => d.id === selected);
         const num = deptNum.get(dept.id);
         const tint = DEPT_TINTS[((parseInt(num, 10) || 1) - 1) % DEPT_TINTS.length];
-        const all = products.filter((p) => p.department_id === dept.id);
+        const all = products.filter((p) => productDepts(p).includes(dept.id));
         const photos = [...new Set(all.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
         const from = deptFromPrice(all);
         return (
@@ -1737,6 +1751,12 @@ function MyOrders({ orders, c }) {
 // ADMIN — PRODUCTS
 // ════════════════════════════════════════════════════════════════════
 
+// The category saved in the legacy single column: prefer one inside the main department.
+function mainCategory(catIds, mainDeptId, categories) {
+  const inMain = catIds.find((id) => categories.find((cat) => cat.id === id)?.department_id === mainDeptId);
+  return inMain || catIds[0] || null;
+}
+
 function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, requestConfirm, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
   const [managingDepts, setManagingDepts] = useState(false);
@@ -1751,7 +1771,9 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
   const saveProduct = async (form, rawFile, extras = {}) => {
     let image_url = editing?.image_url || null;
     if (rawFile) {
-      const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85 });
+      // A photo cut out by the background remover is a PNG with transparency:
+      // keep it PNG, a JPEG would turn the clear areas black.
+      const file = await compressImage(rawFile, { maxDimension: 1000, quality: 0.85, mimeType: rawFile.name.startsWith("nobg-") ? "image/png" : "image/jpeg" });
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${Date.now()}.${ext}`;
       let publicUrl;
@@ -1764,7 +1786,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       image_url = publicUrl;
     }
     const hasVariants = (extras.variants || []).length > 0;
-    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: form.department_id || null, category_id: form.category_id || null,
+    const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
     let error;
@@ -1775,6 +1797,18 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       error = res.error; productId = res.data?.id;
     }
     if (error) { showToast(`Couldn't save product: ${error.message}`); return false; }
+
+    // Every department and category the product is listed under.
+    const deptRows = (extras.departmentIds || []).map((id) => ({ product_id: productId, department_id: id }));
+    const catRows = (extras.categoryIds || []).map((id) => ({ product_id: productId, category_id: id }));
+    for (const [table, rows] of [["shop_product_departments", deptRows], ["shop_product_categories", catRows]]) {
+      const { error: e1 } = await supabase.from(table).delete().eq("product_id", productId);
+      if (e1) { showToast(`Product saved, but updating where it is listed failed: ${e1.message}`); return false; }
+      if (rows.length) {
+        const { error: e2 } = await supabase.from(table).insert(rows);
+        if (e2) { showToast(`Product saved, but updating where it is listed failed: ${e2.message}`); return false; }
+      }
+    }
 
     // Options, quantity prices and extra photos.
     const fail = (what, e) => { showToast(`Product saved, but ${what} failed: ${e.message}`); return false; };
@@ -1861,8 +1895,14 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
                 {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}
-                {p.department_id && deptById.has(p.department_id) && ` · ${deptById.get(p.department_id).name}`}
-                {p.category_id && catById.has(p.category_id) && ` › ${categoryPathName(categories, p.category_id)}`}
+                {(() => {
+                  const ds = productDepts(p).filter((id) => deptById.has(id));
+                  const cs = productCats(p).filter((id) => catById.has(id));
+                  return <>
+                    {ds.length > 0 && ` · ${deptById.get(ds[0]).name}${ds.length > 1 ? ` +${ds.length - 1}` : ""}`}
+                    {cs.length > 0 && ` › ${categoryPathName(categories, cs[0])}${cs.length > 1 ? ` +${cs.length - 1}` : ""}`}
+                  </>;
+                })()}
               </div>
             </div>
             <button onClick={() => setEditing(p)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full shrink-0" style={{ background: c.surfaceHover, color: c.text }}>Edit</button>
@@ -1882,8 +1922,9 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [price, setPrice] = useState(product.price ?? "");
   const [stockQty, setStockQty] = useState(product.stock_qty ?? 0);
   const [active, setActive] = useState(product.active ?? true);
-  const [departmentId, setDepartmentId] = useState(product.department_id || "");
-  const [categoryId, setCategoryId] = useState(product.category_id || "");
+  const [deptIds, setDeptIds] = useState(productDepts(product));
+  const [catIds, setCatIds] = useState(productCats(product));
+  const [removerSource, setRemoverSource] = useState(null); // { kind: "main" | number (index in newImages), source }
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
   const [lengthCm, setLengthCm] = useState(product.length_cm ?? "");
   const [widthCm, setWidthCm] = useState(product.width_cm ?? "");
@@ -1903,21 +1944,23 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const inputCls = "w-full border rounded-lg px-2.5 py-2 font-body text-sm outline-none";
   const inputStyle = { background: c.surface, borderColor: c.border, color: c.text };
 
-  // Categories are scoped to a department — switching departments (or
-  // clearing it) drops any category that no longer belongs to it. The tree
-  // can go arbitrarily deep, so it's flattened with indentation for the
-  // <select>, rather than assuming any fixed number of levels.
-  const deptCategories = departmentId ? flattenCategoryTree(categories.filter((cat) => cat.department_id === departmentId)) : [];
-  useEffect(() => {
-    if (categoryId && !deptCategories.some((cat) => cat.id === categoryId)) setCategoryId("");
-  }, [departmentId]);
+  // Categories belong to a department. A product can be in several
+  // departments, and in categories of each; un-ticking a department drops
+  // the categories that belonged to it. Each department's category tree is
+  // flattened with indentation (it can go arbitrarily deep).
+  const toggleDept = (id) => setDeptIds((ids) => {
+    if (!ids.includes(id)) return [...ids, id];
+    setCatIds((cs) => cs.filter((cid) => categories.find((cat) => cat.id === cid)?.department_id !== id));
+    return ids.filter((d) => d !== id);
+  });
+  const toggleCat = (id) => setCatIds((cs) => (cs.includes(id) ? cs.filter((x) => x !== id) : [...cs, id]));
 
   const submit = async () => {
     if (!name.trim() || !price) return;
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active, department_id: departmentId || null, category_id: categoryId || null,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file, { variants, breaks, keptImages, newImages });
+    const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -1988,24 +2031,39 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
             <button type="button" onClick={() => setBreaks((bs) => [...bs, { min_qty: "", unit_price: "" }])} className="mt-2 font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ background: c.surface, color: c.textDim }}><Plus size={12} /> Add quantity price</button>
             <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Example: buy at least 3, R90 each. Counts all options of this product together.</p>
           </div>
-          <div>
-            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Department</label>
-            <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
-              <option value="">Uncategorized</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          {departmentId && deptCategories.length > 0 && (
-            <div>
-              <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Category</label>
-              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
-                <option value="">Uncategorized</option>
-                {deptCategories.map((cat) => <option key={cat.id} value={cat.id}>{"\u00A0\u00A0\u00A0\u00A0".repeat(cat.depth)}{cat.depth > 0 ? "↳ " : ""}{cat.name}</option>)}
-              </select>
+          <div data-testid="dept-picker">
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Departments (pick all that apply)</label>
+            <div className="flex flex-wrap gap-2">
+              {departments.map((d) => {
+                const on = deptIds.includes(d.id);
+                return (
+                  <button key={d.id} type="button" onClick={() => toggleDept(d.id)} aria-pressed={on}
+                    className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border"
+                    style={{ background: on ? SHOP_GOLD : c.surface, color: on ? "#1a1200" : c.text, borderColor: on ? SHOP_GOLD : c.border }}>{d.name}</button>
+                );
+              })}
+              {departments.length === 0 && <span className="font-body text-xs" style={{ color: c.textFaint }}>No departments yet — the product will show under “Other”.</span>}
             </div>
-          )}
+            {deptIds.length > 1 && <p className="font-body text-xs mt-1" style={{ color: c.textFaint }}>The first one you picked is its main department.</p>}
+          </div>
+          {deptIds.map((did) => {
+            const dept = departments.find((d) => d.id === did);
+            const tree = flattenCategoryTree(categories.filter((cat) => cat.department_id === did));
+            if (!dept || tree.length === 0) return null;
+            return (
+              <div key={did} data-testid="cat-picker">
+                <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Categories in {dept.name}</label>
+                <div className="rounded-lg border p-2 space-y-1" style={{ background: c.surface, borderColor: c.border }}>
+                  {tree.map((cat) => (
+                    <label key={cat.id} className="flex items-center gap-2 cursor-pointer font-body text-sm" style={{ paddingLeft: cat.depth * 16 }}>
+                      <input type="checkbox" checked={catIds.includes(cat.id)} onChange={() => toggleCat(cat.id)} />
+                      <span>{cat.depth > 0 ? "↳ " : ""}{cat.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Parcel weight and size (for delivery)</label>
             <div className="grid grid-cols-4 gap-2">
@@ -2020,6 +2078,12 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
             <Upload size={15} /> {file ? file.name : "Product photo"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </label>
+          {(file || product.image_url) && (
+            <button type="button" onClick={() => setRemoverSource({ kind: "main", source: file || product.image_url })}
+              className="font-body text-xs font-semibold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>
+              <Wand2 size={13} /> Remove background from photo
+            </button>
+          )}
           <div data-testid="photo-editor">
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>More photos</label>
             <div className="flex flex-wrap gap-2">
@@ -2032,6 +2096,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               {newImages.map((f2, i) => (
                 <div key={i} className="relative w-14 h-14 rounded-lg flex items-center justify-center font-body text-[10px] text-center px-1 overflow-hidden" style={{ background: c.surface, color: c.textDim }}>
                   {f2.name.slice(0, 14)}
+                  <button type="button" onClick={() => setRemoverSource({ kind: i, source: f2 })} aria-label="Remove background" className="absolute bottom-0.5 left-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}><Wand2 size={11} /></button>
                   <button type="button" onClick={() => setNewImages((l) => l.filter((_, j) => j !== i))} aria-label="Remove photo" className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}><X size={11} /></button>
                 </div>
               ))}
@@ -2053,6 +2118,16 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
           </button>
         </div>
       </div>
+      {removerSource && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <BackgroundRemover source={removerSource.source} c={c} onClose={() => setRemoverSource(null)}
+            onDone={(f) => {
+              if (removerSource.kind === "main") setFile(f);
+              else setNewImages((l) => l.map((x, j) => (j === removerSource.kind ? f : x)));
+              setRemoverSource(null);
+            }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -2068,7 +2143,7 @@ function AdminDepartments({ departments, categories, products, onReload, onReloa
   const [renameValue, setRenameValue] = useState("");
   const [managingCatsFor, setManagingCatsFor] = useState(null); // department object, or null
 
-  const countFor = (deptId) => products.filter((p) => p.department_id === deptId).length;
+  const countFor = (deptId) => products.filter((p) => productDepts(p).includes(deptId)).length;
   const catCountFor = (deptId) => categories.filter((cat) => cat.department_id === deptId).length;
 
   const addDepartment = async () => {
@@ -2201,7 +2276,7 @@ function AdminCategories({ department, categories, products, onReload, showToast
 
   const deptCategories = categories.filter((cat) => cat.department_id === department.id);
   const topLevel = categoryChildren(deptCategories, null);
-  const countFor = (catId) => products.filter((p) => p.category_id === catId).length;
+  const countFor = (catId) => products.filter((p) => productCats(p).includes(catId)).length;
 
   const addCategory = async (parentId, name) => {
     if (!name.trim()) return false;
