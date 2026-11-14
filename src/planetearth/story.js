@@ -88,6 +88,9 @@ export const LEVEL_STORY = {
   plates: {
     intro: [L('plates_i1', 'elder', 'Mystery six: the ground itself is moving. Continents crash, drift, and break up.'), L('plates_i2', 'bleep', 'Pangaea was the original breakup. One big continent, split into seven.')],
     outro: [L('plates_o1', 'narrator', 'Field report: plates creep a few centimetres a year, building mountains, volcanoes and earthquakes where they meet.'), L('plates_o2', 'elder', 'So even continents break up. And Earth survived. Hmm.')] },
+  weather: {
+    intro: [L('weather_i1', 'elder', 'Final mystery! Why does the air itself go wandering? Hot, cold, hot, cold. Very indecisive.'), L('weather_i2', 'bleep', 'Also, this planet has storms where the sky shouts and flashes. I am hiding under the ship.')],
+    outro: [L('weather_o1', 'narrator', 'Field report: wind is air flowing from high pressure to low pressure, and Earth’s spin bends it.'), L('weather_o2', 'elder', 'Even the wind comes back to the sea every single day. Hmm. We are... noting this.')] },
   life: {
     intro: [L('life_i1', 'elder', 'Final mystery: living things. Some partner for life. Some eat their partner. Earth is a soap opera.'), L('life_i2', 'bleep', 'Fun fact: male seahorses carry the babies. Respect.')],
     outro: [L('life_o1', 'narrator', 'Field report: living things depend on each other. Remove one, and the whole web wobbles.'), L('life_o2', 'bleep', 'Connections matter. Even for lions. And penguins. Always penguins.')] },
@@ -96,14 +99,36 @@ export const LEVEL_STORY = {
 // The Heart-o-meter: your frozen heart slowly thaws as you discover how connected the world is.
 export const HEART_STAGES = [
   '🧊 Heart: frozen like a comet.', '🌡️ A tiny bit warmer. Probably a solar flare.', '😒 Still angry, but... curious.', '🤔 Okay, the Moon is pretty loyal.',
-  '😳 Wait, are my antennae blushing?', '🥹 Even rocks and rivers keep coming back.', '💗 Maybe, just maybe, it is not a scam.', '❤️ Fine. LOVE EXISTS. Please tell nobody.',
+  '😳 Wait, are my antennae blushing?', '🥹 Even rocks and rivers keep coming back.', '💗 Maybe, just maybe, it is not a scam.', '💞 Okay. Love is a LITTLE bit real.', '❤️ Fine. LOVE EXISTS. Please tell nobody.',
 ];
 export const heartStage = (crystals) => HEART_STAGES[Math.max(0, Math.min(HEART_STAGES.length - 1, crystals))];
+
+// ---- the ending: after the 8th Discovery Crystal ----
+export const EPILOGUE = [
+  { id: 'ship', art: 'launch', stx: { back: true }, lines: [
+    L('x1_1', 'bleep', 'Eight crystals! Ship power: one hundred percent. Brakes: still unknown.'),
+    L('x1_2', 'narrator', 'You have found out how Earth spins, tilts, rains, falls, warms, cracks, lives and blows. Time to go home and file your report.') ],
+    after: { type: 'launch', button: '🚀 Fly home!', reply: L('x1_3', 'narrator', 'Four point two light-years later, you are home. You are definitely not nervous.') } },
+  { id: 'report', art: 'council', lines: [L('x2_1', 'elder', 'Citizen! You return! Tell us the truth. Is love a scam?')],
+    after: { type: 'choice', prompt: 'Your report?', options: [
+      { id: 'a', text: '❤️ It is real. I checked.', reply: L('x2_ra', 'elder', 'Excellent. Wait. Are you crying? ...Hay fever. Of course.') },
+      { id: 'b', text: '🧊 Total scam. But the Moon is nice.', reply: L('x2_rb', 'elder', 'The evidence disagrees with you. But we respect your denial.') },
+      { id: 'c', text: '🐄 More research needed. I am keeping the cow.', reply: L('x2_rc', 'elder', 'Granted. The cow is now an official scientist.') } ] } },
+  { id: 'ex', art: 'cafe', lines: [L('x3_1', 'narrator', 'Then {ex} turns up at your door. "I made a mistake," says {ex}. "The toaster was cold inside."', 0.9)],
+    after: { type: 'choice', prompt: 'What do you do?', options: [
+      { id: 'a', text: '😌 Forgive (slowly)', reply: L('x3_ra', 'narrator', 'You forgive. Slowly. Like a glacier. The toaster is not invited.') },
+      { id: 'b', text: '🚪 Close the door', reply: L('x3_rb', 'narrator', 'The door closes. Somewhere, a toaster pops sadly.') },
+      { id: 'c', text: '🐄 Introduce them to the cow', reply: L('x3_rc', 'narrator', 'The cow stares. {ex} runs. You have never felt so protected.') } ] } },
+  { id: 'end', art: 'home', lines: [
+    L('x4_1', 'narrator', 'The Council passes new laws: every citizen must visit Earth, and all toasters are banned.'),
+    L('x4_2', 'narrator', 'Your heart? Warm. Your antennae? Still visible. And Earth still has so many secrets left to find.') ] },
+];
 
 // ---- every spoken line, for the voice-recording script ----
 export function allLines() {
   const out = [];
   for (const sc of PROLOGUE) { out.push(...sc.lines); if (sc.after) { if (sc.after.reply) out.push(sc.after.reply); for (const o of sc.after.options || []) out.push(o.reply); } }
+  for (const sc of EPILOGUE) { out.push(...sc.lines); if (sc.after) { if (sc.after.reply) out.push(sc.after.reply); for (const o of sc.after.options || []) out.push(o.reply); } }
   for (const f of FORMS) out.push(f.line);
   for (const lv of Object.values(LEVEL_STORY)) out.push(...lv.intro, ...lv.outro);
   return out;
@@ -121,4 +146,4 @@ export function voiceJobs() {
 export const wordCount = (t) => t.trim().split(/\s+/).length;
 
 // Little sound effects that go with some lines (comedy timing!). Names match audio.js.
-export const LINE_SFX = { s2_1: 'sting', s2_2: 'sting', s2_3: 'pop', s2_ra: 'scream', s2_rb: 'boing', s2_rc: 'clap', s3_3: 'wah', e_3: 'sting', e_rb: 'wah', s5_2: 'ok', s6_2: 'whoosh', s7_1: 'crash' };
+export const LINE_SFX = { s2_1: 'sting', s2_2: 'sting', s2_3: 'pop', s2_ra: 'scream', s2_rb: 'boing', s2_rc: 'clap', s3_3: 'wah', e_3: 'sting', e_rb: 'wah', s5_2: 'ok', s6_2: 'whoosh', s7_1: 'crash', x1_3: 'whoosh', x2_ra: 'ok', x2_rb: 'wah', x2_rc: 'boing', x3_1: 'sting', x3_rb: 'wah', x3_rc: 'boing', x4_1: 'clap' };

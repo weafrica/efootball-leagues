@@ -1,9 +1,10 @@
 // Planet Earth — the hub, the story, the lessons and the games. Written with React.createElement (no JSX) so plain Node can syntax-check it.
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { LEVELS, SOON, SHIP_CRYSTALS, flagAngle } from './lessons.js';
-import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawGreenhouse, drawTectonics, drawQuakeLab, drawEcosystem, sceneArt, drawForm, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
-import { PROLOGUE, LEVEL_STORY, CAST, FORMS, VARIANTS, LINE_SFX, fill, voiceKey, heartStage } from './story.js';
+import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawGreenhouse, drawTectonics, drawQuakeLab, drawEcosystem, drawBreeze, drawSpinLab, sceneArt, drawForm, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
+import { PROLOGUE, EPILOGUE, LEVEL_STORY, CAST, FORMS, VARIANTS, LINE_SFX, fill, voiceKey, heartStage } from './story.js';
 import { playLine, stopVoice, setVoiceMuted, preload } from './voice.js';
+import { createBreeze, stepBreeze, windSpeed, throwBall } from './weather.js';
 import { drawGlobe } from './earthmap.js';
 import { CITIES, city, clockTime, elevationAt, isMorning, fmtTime, dayLength, declination, fmtDay, TILT } from './sky.js';
 import { createWater, step as waterStep, counts } from './water.js';
@@ -18,8 +19,8 @@ const h = React.createElement;
 const SAVE_KEY = 'planetearth-save-v1';
 const rname = () => ALIEN_NAMES[Math.floor(Math.random() * ALIEN_NAMES.length)];
 function loadSave() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || rname(), color: s.color ?? 0, levels: s.levels || {}, story: !!s.story, prologue: !!s.prologue, ex: s.ex === 'he' ? 'he' : 'she', mute: !!s.mute }; }
-  catch { return { name: rname(), color: 0, levels: {}, story: false, prologue: false, ex: 'she', mute: false }; }
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || rname(), color: s.color ?? 0, levels: s.levels || {}, story: !!s.story, prologue: !!s.prologue, epilogue: !!s.epilogue, ex: s.ex === 'he' ? 'he' : 'she', mute: !!s.mute }; }
+  catch { return { name: rname(), color: 0, levels: {}, story: false, prologue: false, epilogue: false, ex: 'she', mute: false }; }
 }
 const store = (s) => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } };
 const btn = (bg, fg = '#fff') => ({ background: bg, color: fg, border: 'none', borderRadius: 16, padding: '12px 18px', fontSize: 17, fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 0 rgba(0,0,0,0.25)', fontFamily: 'inherit', touchAction: 'manipulation' });
@@ -261,11 +262,11 @@ function BlendLab({ save, need, onDone }) {
       h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 } }, FORMS.map((f) => h('button', { key: f.id, onClick: () => pick(f), style: { ...btn(tried.includes(f.id) ? '#2f7d5a' : '#3a4580'), flex: '1 1 22%', padding: '8px 2px', fontSize: 13, boxShadow: 'none' } }, f.emoji + ' ' + f.name))),
       ready ? h('button', { onClick: onDone, style: { ...btn('#2fc46b'), width: '100%' } }, 'Blend Drive ready ▶') : null));
 }
-function Prologue({ save, onDone }) {
+function Prologue({ save, onDone, scenes = PROLOGUE, title = 'Chapter 1: Heartbreak on Proxima b' }) {
   const [si, setSi] = useState(0), [stage, setStage] = useState('lines'), [reply, setReply] = useState(null), [me, setMe] = useState({ name: save.name, color: save.color, ex: save.ex || 'she' });
   const st = useRef({ react: null, launching: false, launchT: 0 }).current;
-  const sc = PROLOGUE[si], view = { ...save, ...me };
-  const next = () => { stopVoice(); if (si + 1 >= PROLOGUE.length) onDone(me); else { setSi(si + 1); setStage('lines'); setReply(null); } };
+  const sc = scenes[si], view = { ...save, ...me }; st.back = !!(sc.stx && sc.stx.back);
+  const next = () => { stopVoice(); if (si + 1 >= scenes.length) onDone(me); else { setSi(si + 1); setStage('lines'); setReply(null); } };
   const toReply = (line) => { setReply(line); setStage('reply'); };
   const pane = (children) => h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
     h('div', { style: { flex: 1, minHeight: 0 } }, h(CanvasView, { draw: (ctx, w, hh, tm, dt) => { if (st.launching) st.launchT += dt; sceneArt(ctx, sc.art, w, hh, tm, { ...st, color: view.color, ex: view.ex }); } })),
@@ -283,10 +284,38 @@ function Prologue({ save, onDone }) {
   }
   return h('div', { style: shell },
     h('div', { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.3)' } },
-      h('div', { style: { fontWeight: 900, fontSize: 16, flex: 1 } }, '🎬 Chapter 1: Heartbreak on Proxima b'),
-      h('div', { style: { display: 'flex', gap: 4 } }, PROLOGUE.map((p, i) => h('div', { key: p.id, style: { width: 8, height: 8, borderRadius: 4, background: i <= si ? '#ffe27a' : 'rgba(255,255,255,0.25)' } }))),
+      h('div', { style: { fontWeight: 900, fontSize: 16, flex: 1 } }, '🎬 ' + title),
+      h('div', { style: { display: 'flex', gap: 4 } }, scenes.map((p, i) => h('div', { key: p.id, style: { width: 8, height: 8, borderRadius: 4, background: i <= si ? '#ffe27a' : 'rgba(255,255,255,0.25)' } }))),
       h('button', { onClick: () => { stopVoice(); onDone(me); }, style: { ...btn('#4a5580'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, 'Skip story ⏭')),
     body);
+}
+
+// ---------- Level 8: wind & weather (Breeze Lab + Spin Lab) ----------
+function WeatherView({ report, alien }) {
+  const hold = useRef({ b: createBreeze(), parcels: [], acc: 0, playing: false, speed: 1, tab: 'breeze', lat: 45, aim: 0, flight: null, t: 0, last: null }).current;
+  const [ui, setUi] = useState({ tab: 'breeze', sun: 1, lat: 45, aim: 0, playing: false, speed: 1 });
+  const set = (p) => setUi((u) => ({ ...u, ...p }));
+  useEffect(() => { const id = setInterval(() => { report({ wind: windSpeed(hold.b), hour: hold.b.hour, hit: !!(hold.last && hold.last.hit), hitLat: hold.last ? hold.last.lat : 0 }); }, 250); return () => clearInterval(id); }, []);
+  const advance = (hours) => { let left = hours; while (left > 1e-9) { const d = Math.min(0.1, left); stepBreeze(hold.b, d); left -= d; } };
+  const draw = (ctx, w, hh, tm, dt) => {
+    if (hold.tab === 'breeze') { if (hold.playing) { hold.acc += dt * hold.speed; let n = 0; while (hold.acc >= 0.1 && n < 40) { stepBreeze(hold.b, 0.1); hold.acc -= 0.1; n++; } hold.acc = Math.min(hold.acc, 0.1); } drawBreeze(ctx, w, hh, tm, { b: hold.b, parcels: hold.parcels, dt }); }
+    else { if (hold.flight) { const end = hold.flight.pts[hold.flight.pts.length - 1].t; if (hold.t < end) { hold.t += dt * 1.2; if (hold.t >= end) { hold.t = end; hold.last = hold.flight; if (hold.flight.hit) snd.sfx.ok(); else snd.sfx.bad(); } } } drawSpinLab(ctx, w, hh, tm, { lat: hold.lat, aim: hold.aim, flight: hold.flight, t: hold.t, color: alien }); }
+  };
+  const tab = (id, label) => h('button', { key: id, onClick: () => { hold.tab = id; set({ tab: id }); snd.sfx.click(); }, style: { ...btn(ui.tab === id ? '#5ac8fa' : '#3a4580', ui.tab === id ? '#06223a' : '#fff'), flex: 1, padding: '6px', fontSize: 13, boxShadow: 'none' } }, label);
+  const controls = ui.tab === 'breeze' ? [
+    slider('☀️ Sun strength (clouds ← → clear sky)', ui.sun, 0, 1, 0.05, (v) => { hold.b.sun = v; set({ sun: v }); }, (v) => Math.round(v * 100) + '%'),
+    h('div', { key: 'bb', style: { display: 'flex', gap: 8 } },
+      h('button', { onClick: () => { hold.playing = !hold.playing; set({ playing: hold.playing }); snd.sfx.click(); }, style: { ...btn(ui.playing ? '#c9503a' : '#2fc46b'), flex: 2, padding: '8px', fontSize: 14 } }, ui.playing ? '⏸ Pause' : '▶ Play (1 hour per second)'),
+      h('button', { onClick: () => { advance(3); snd.sfx.click(); set({}); }, style: { ...btn('#7a5cff'), flex: 1, padding: '8px', fontSize: 14 } }, '⏭ +3 h'),
+      h('button', { onClick: () => { hold.speed = ui.speed === 1 ? 3 : 1; set({ speed: hold.speed }); }, style: { ...btn('#4a5580'), flex: 1, padding: '8px', fontSize: 14 } }, '⏩ ×' + ui.speed)),
+  ] : [
+    slider('🌍 Latitude (north + / south −)', ui.lat, -90, 90, 1, (v) => { hold.lat = v; hold.flight = null; set({ lat: v }); }, (v) => Math.abs(v) + '°' + (v >= 0 ? 'N' : 'S')),
+    slider('🎯 Aim (left − / right +)', ui.aim, -45, 45, 0.5, (v) => { hold.aim = v; hold.flight = null; set({ aim: v }); }, (v) => v.toFixed(1) + '°'),
+    h('button', { key: 'th', onClick: () => { snd.unlock(); hold.flight = throwBall(hold.lat, hold.aim); hold.t = 0; snd.sfx.fire(); set({}); }, style: { ...btn('#ff6a3d'), width: '100%', padding: '10px', fontSize: 18 } }, '🔥 THROW!'),
+  ];
+  return h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    h('div', { style: { flex: 1, minHeight: 0 } }, h(CanvasView, { draw })),
+    h('div', { style: { ...panel, borderRadius: '18px 18px 0 0', padding: '8px 12px 10px' } }, h('div', { style: { display: 'flex', gap: 6, marginBottom: 6 } }, tab('breeze', '🏖️ Breeze Lab'), tab('spin', '🌀 Spin Lab')), controls));
 }
 
 // ---------- the lesson: story cards → hands-on missions → what you discovered ----------
@@ -305,7 +334,7 @@ function LevelShell({ level, save, onExit, onDone, onNext }) {
     }, 250);
     return () => clearInterval(id);
   }, [phase, mi, hints, wrong]);
-  const View = { spin: SpinView, tilt: SeasonsView, water: WaterView, gravity: CannonView, greenhouse: GreenhouseView, plates: PlateView, life: LifeView }[level.id];
+  const View = { spin: SpinView, tilt: SeasonsView, water: WaterView, gravity: CannonView, greenhouse: GreenhouseView, plates: PlateView, life: LifeView, weather: WeatherView }[level.id];
   const head = h('div', { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.3)' } },
     h('button', { onClick: onExit, style: { ...btn('#4a5580'), padding: '6px 12px', fontSize: 14, boxShadow: 'none' } }, '← Map'),
     h('div', { style: { fontWeight: 900, fontSize: 17, flex: 1 } }, level.icon + ' Level ' + level.n + ': ' + level.title));
@@ -356,7 +385,7 @@ function LevelShell({ level, save, onExit, onDone, onNext }) {
 }
 
 // ---------- the hub ----------
-function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onName, onStory }) {
+function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onName, onStory, onEpilogue }) {
   const c = crystals(save), hold = useRef({ form: null, t: 0, i: 0 }).current, [joke, setJoke] = useState('');
   const draw = (ctx, w, hh, tm, dt) => { if (hold.form) { hold.t -= dt || 0; if (hold.t <= 0) hold.form = null; } spaceBg(ctx, w, hh, tm); const R = Math.min(78, hh * 0.38), cx = w * 0.5, cy = hh * 0.55; drawSun(ctx, w * 0.93, hh * 0.25, 10, tm, 0.3); drawGlobe(ctx, cx, cy, R, -tm * 6, 15, { sun: { lon: -tm * 6 + 90, lat: 0 }, grid: false }); (hold.form ? drawForm(ctx, hold.form, w * 0.17, hh * 0.68, 76, tm, save.color) : drawAlien(ctx, w * 0.17, hh * 0.68, 62, save.color, tm, { x: 1, y: -0.3 })); drawUfo(ctx, w * 0.82, hh * 0.58, 80, tm, c < SHIP_CRYSTALS); };
   return h('div', { style: shell },
@@ -372,6 +401,7 @@ function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onName, onStory
           h('div', { style: { margin: '2px 0 6px', fontSize: 13, fontWeight: 800, color: '#ffb3c8' } }, '💘 ' + heartStage(c)),
           joke ? h('div', { style: { margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: '#7fe9ff' } }, joke) : null,
           h('div', { style: { height: 12, borderRadius: 6, background: 'rgba(255,255,255,0.18)', overflow: 'hidden' } }, h('div', { style: { height: 12, background: 'linear-gradient(90deg,#7fe9ff,#ffe27a)', width: (c / SHIP_CRYSTALS * 100) + '%', transition: 'width .4s' } }))),
+        crystals(save) >= SHIP_CRYSTALS ? h('button', { onClick: onEpilogue, style: { ...panel, display: 'block', width: '100%', textAlign: 'left', border: 'none', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit', background: 'linear-gradient(90deg,#ff6a8d,#ffb020)', color: '#2a0a1a' } }, h('div', { style: { fontSize: 12, fontWeight: 900, opacity: 0.8 } }, save.epilogue ? '🏆 MISSION COMPLETE' : '🚀 YOUR SHIP IS FULLY POWERED!'), h('div', { style: { fontSize: 19, fontWeight: 900 } }, '🎬 ' + (save.epilogue ? 'Watch the ending again' : 'Chapter 3: Going Home')), h('div', { style: { fontSize: 14, fontWeight: 700 } }, save.epilogue ? 'You can keep exploring: more secrets are coming soon.' : 'Time to file your report... and face the toaster situation.')) : null,
         LEVELS.map((l) => { const open = unlocked(save, l), s = save.levels[l.id] ? save.levels[l.id].stars : 0;
           return h('button', { key: l.id, disabled: !open, onClick: () => onLevel(l.id), style: { ...panel, display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', border: 'none', marginBottom: 10, opacity: open ? 1 : 0.5, cursor: open ? 'pointer' : 'not-allowed', fontFamily: 'inherit', borderLeft: '6px solid ' + l.color } },
             h('div', { style: { fontSize: 34, width: 48, textAlign: 'center' } }, open ? l.icon : '🔒'),
@@ -400,6 +430,7 @@ export default function PlanetEarthPage({ onBack, showToast }) {
   const leave = () => { try { if (/^\/planet/i.test(window.location.pathname)) window.history.pushState({}, '', '/'); } catch { /* */ } if (onBack) onBack(); };
   const level = LEVELS.find((l) => l.id === levelId);
   if (screen === 'prologue') return h(Prologue, { save, onDone: (me) => { patch({ ...me, prologue: true, story: true }); setScreen('hub'); } });
+  if (screen === 'epilogue') return h(Prologue, { save, scenes: EPILOGUE, title: 'Chapter 3: Going Home', onDone: () => { patch({ epilogue: true }); setScreen('hub'); } });
   if (screen === 'rename') return h(SetupScreen, { save, onDone: (me) => { patch(me); setScreen('hub'); } });
   if (screen === 'codex') return h(Codex, { save, onClose: () => setScreen('hub') });
   if (screen === 'arcade') return h(Suspense, { fallback: h('div', { style: { ...shell, alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800 } }, 'Loading Glowveld…') }, h(GlowveldPage, { onBack: () => setScreen('hub'), showToast }));
@@ -409,5 +440,5 @@ export default function PlanetEarthPage({ onBack, showToast }) {
       onNext: LEVELS[level.n] ? () => { setLevelId(LEVELS[level.n].id); } : null });
   }
   return h(Hub, { save, onLevel: (id) => { snd.unlock(); snd.sfx.next(); setLevelId(id); setScreen('level'); }, onArcade: () => { snd.unlock(); setScreen('arcade'); }, onCodex: () => setScreen('codex'), onBack: leave,
-    onMute: () => patch({ mute: !save.mute }), onName: () => setScreen('rename'), onStory: () => setScreen('prologue') });
+    onMute: () => patch({ mute: !save.mute }), onName: () => setScreen('rename'), onStory: () => setScreen('prologue'), onEpilogue: () => { snd.unlock(); setScreen('epilogue'); } });
 }

@@ -123,9 +123,27 @@ export const LEVELS = [
       { id: 'whyq', kind: 'choice', text: 'Why are predators like lions important for the grass?', choices: ['Lions fertilise the grass', 'They stop the antelope from eating all of it', 'Lions plant the seeds', 'They are not important'], answer: 1, hint: 'Remember what happened when you removed the lions.', done: 'Exactly: predators keep grazers in balance so plants survive.' },
     ],
     codex: ['A food chain moves energy from the Sun to plants, then plant-eaters, then meat-eaters. Only about 10% passes up each step.', 'Predator and prey numbers rise and fall in linked cycles.', 'Remove a predator and the whole web can collapse: this is called a trophic cascade.'] },
+
+
+  { id: 'weather', n: 8, icon: '🌪️', title: 'Wind & Weather', tagline: 'What makes the wind blow and storms form?', color: '#5ac8fa',
+    cards: [
+      { art: 'wind1', title: 'Wind is air on the move', text: 'Wind is just air moving from a place with high pressure to a place with low pressure.', why: 'The Sun heats the ground unevenly. Warm air rises, leaving a gap of low pressure. Cooler air rushes in to fill the gap, and that rush is WIND. Land heats up and cools down much faster than the sea, so beaches have a wind that changes direction every day.' },
+      { art: 'wind2', title: "Earth's spin bends the wind", text: 'Wind never travels in a straight line. Because Earth spins, moving air curves: to the RIGHT in the north and to the LEFT in the south.', why: "This is the Coriolis effect. At the equator there is no curve at all; near the poles it is strongest. It is why storms called cyclones spin one way in the north and the opposite way in the south." },
+      { art: 'storm', title: 'Hello, thunderstorm!', text: 'On a hot Highveld summer day, the sun-baked ground heats the air so fast it shoots upward and builds a giant cloud. Then... CRACK!', why: 'Ice and water drops rub together inside the cloud and build up electric charge. Lightning is a giant spark that heats the air to about 30,000°C, roughly five times hotter than the Sun’s surface. Thunder is the boom of that air. Light is faster than sound, so count the seconds between flash and bang: about 3 seconds for every kilometre.' },
+    ],
+    hands: 'Breeze Lab: let the day pass and watch the wind turn around. Spin Lab: throw a ball on a spinning planet from different latitudes.',
+    missions: [
+      { id: 'sea', text: 'Make a SEA breeze: wind blowing from the sea to the land at 5 m/s or more.', hint: 'Press play and let the morning pass. The land heats up faster than the sea.', check: (s) => s.wind >= 5, done: 'A sea breeze! Hot land makes air rise, and cooler sea air rushes in to take its place.' },
+      { id: 'land', text: 'Now make a LAND breeze: wind blowing from the land to the sea at 3 m/s or more.', hint: 'Keep playing into the evening and night. The land cools quickly, but the sea stays warm.', check: (s) => s.wind <= -3, done: 'The wind turned around! At night the land is colder than the sea, so air flows out to sea.' },
+      { id: 'spinN', text: 'Open the Spin Lab and HIT the target from 30°N or further north.', hint: 'In the north the ball curves to the RIGHT, so aim a little to the LEFT.', check: (s) => s.hit && s.hitLat >= 30, done: 'Hit! In the north, moving things curve right, so you had to aim left.' },
+      { id: 'spinS', text: 'Now HIT the target from the south: 30°S or further south.', hint: 'Down south it curves LEFT instead, so aim to the RIGHT.', check: (s) => s.hit && s.hitLat <= -30, done: 'Hit again! In the south, things curve left. Same planet, opposite curve.' },
+      { id: 'seaq', kind: 'choice', text: 'Why does a sea breeze blow in the daytime?', choices: ['Warm air over the land rises, and cooler sea air flows in to replace it', 'The sea breathes in', 'The Moon pulls the air inland', 'Air likes beaches'], answer: 0, hint: 'Remember which heats up faster: land or sea?', done: 'Exactly: rising warm air leaves a gap, and cool air rushes in.' },
+    ],
+    codex: ['Wind is air moving from high to low pressure. Land heats faster than sea, so beaches get a sea breeze by day and a land breeze by night.', 'Earth spins, so moving air curves right in the north and left in the south (the Coriolis effect): none at the equator, strongest at the poles.', 'Thunderstorms grow when hot, moist air rushes upward. Lightning heats air to about 30,000°C. Count about 3 seconds per kilometre between flash and thunder.'] },
 ];
 export const SOON = [
-  { n: 8, icon: '🌪️', title: 'Wind & Weather', tagline: 'What makes the wind blow and storms form?' },
+  { n: 9, icon: '🌊', title: 'The Living Oceans', tagline: 'Why is the sea salty, and what are tides?' },
+  { n: 10, icon: '🏙️', title: 'Cities & Food', tagline: 'How do people feed a whole planet?' },
 ];
 export const levelById = (id) => LEVELS.find((l) => l.id === id);
 export const flagAngle = 44;

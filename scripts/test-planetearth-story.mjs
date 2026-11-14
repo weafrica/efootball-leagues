@@ -1,5 +1,5 @@
 // Tests for the Planet Earth storyline, the Blend forms and the pre-recorded voice player.
-import { CAST, VARIANTS, FORMS, PROLOGUE, LEVEL_STORY, LINE_SFX, HEART_STAGES, heartStage, fill, hasVars, voiceKey, allLines, voiceJobs, wordCount } from '../src/planetearth/story.js';
+import { CAST, VARIANTS, FORMS, PROLOGUE, EPILOGUE, LEVEL_STORY, LINE_SFX, HEART_STAGES, heartStage, fill, hasVars, voiceKey, allLines, voiceJobs, wordCount } from '../src/planetearth/story.js';
 import { LEVELS } from '../src/planetearth/lessons.js';
 import { sfx } from '../src/planetearth/audio.js';
 import { configureVoice, loadManifest, hasVoice, voiceUrl, playLine, stopVoice, setVoiceMuted } from '../src/planetearth/voice.js';
@@ -9,7 +9,7 @@ let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error('FAIL', m
 const lines = allLines(), ids = lines.map((l) => l.id);
 ok(new Set(ids).size === ids.length, `every spoken line has a unique id (${ids.length} lines)`);
 ok(lines.every((l) => CAST[l.who]), 'every line is spoken by a known character'); ok(lines.every((l) => wordCount(l.text) <= 26), `every line is short (longest: ${Math.max(...lines.map((l) => wordCount(l.text)))} words)`);
-ok(lines.every((l) => /[.!?…]$/.test(l.text.trim())), 'every line ends like a sentence (so the voice sounds finished)');
+ok(lines.every((l) => /[.!?…]["”]?$/.test(l.text.trim())), 'every line ends like a sentence (so the voice sounds finished)');
 ok(PROLOGUE.length === 9 && PROLOGUE[0].after.type === 'setup' && PROLOGUE.every((s) => s.id && s.art && s.lines.length >= 1), 'the prologue has 9 scenes, starting with the setup');
 const types = new Set(PROLOGUE.filter((s) => s.after).map((s) => s.after.type)); ok(['setup', 'choice', 'oath', 'blend', 'launch'].every((t) => types.has(t)), 'prologue uses a choice, an oath, the Blend Lab and a launch');
 const cafe = PROLOGUE.find((s) => s.id === 'cafe'), council = PROLOGUE.find((s) => s.id === 'council');
@@ -25,8 +25,14 @@ ok(voiceKey(varLines[0], 'he') === varLines[0].id + '.he' && voiceKey(lines.find
 const words = jobs.reduce((a, j) => a + wordCount(j.text), 0); ok(words / 2.4 / 60 < 8, `all the speech is under 8 minutes (${(words / 2.4 / 60).toFixed(1)})`);
 ok(LEVELS.every((l) => LEVEL_STORY[l.id] && LEVEL_STORY[l.id].intro.length === 2 && LEVEL_STORY[l.id].outro.length === 2), 'every level has a 2-line transmission and a 2-line field report');
 ok(Object.keys(LINE_SFX).every((id) => ids.includes(id) && typeof sfx[LINE_SFX[id]] === 'function'), 'every line sound effect exists');
-ok(HEART_STAGES.length === 8 && heartStage(0).includes('frozen') && heartStage(99) === HEART_STAGES[7] && heartStage(-3) === HEART_STAGES[0] && /LOVE EXISTS/.test(heartStage(7)), 'the Heart-o-meter thaws from frozen to "love exists"');
+ok(HEART_STAGES.length === 9 && heartStage(0).includes('frozen') && heartStage(99) === HEART_STAGES[8] && heartStage(-3) === HEART_STAGES[0] && /LOVE EXISTS/.test(heartStage(8)) && !/LOVE EXISTS/.test(heartStage(7)), 'the Heart-o-meter thaws over 9 stages and says "love exists" only at the 8th crystal');
 ok(/Proxima b/.test(lines[1].text) && /four point two light-years/i.test(lines[1].text) && /eleven days/.test(lines[2].text), 'real facts: Proxima b, 4.2 light-years, an 11-day year');
+
+// ---- the ending ----
+ok(EPILOGUE.length === 4 && EPILOGUE.map((x) => x.id).join() === 'ship,report,ex,end' && EPILOGUE.every((x) => ['launch', 'council', 'cafe', 'home'].includes(x.art) && x.lines.length >= 1), 'the ending has 4 scenes: ship home, the report, the ex, the finale');
+ok(EPILOGUE[0].stx.back === true && EPILOGUE[0].after.type === 'launch' && EPILOGUE[1].after.options.length === 3 && EPILOGUE[2].after.options.length === 3 && EPILOGUE[2].after.options.every((o) => o.reply && o.text), 'the ending has its funny choices (report to the Elder, deal with the ex)');
+ok(EPILOGUE.flatMap((x) => [...x.lines, ...(x.after && x.after.reply ? [x.after.reply] : []), ...((x.after && x.after.options) || []).map((o) => o.reply)]).every((l) => ids.includes(l.id)), 'every ending line is in the recording list');
+ok(/cow/i.test(EPILOGUE[1].after.options[2].reply.text) && /toaster/i.test(EPILOGUE[3].lines[0].text), 'running gags come back: the cow and the toaster');
 
 // ---- the voice player ----
 const mkFetch = (manifest, status = 200) => async (url) => { if (String(url).endsWith('manifest.json')) { if (status !== 200) return { ok: false }; return { ok: true, json: async () => manifest }; } return { ok: true, blob: async () => ({}), clone() { return this; } }; };

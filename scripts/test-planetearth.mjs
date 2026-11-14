@@ -5,6 +5,7 @@ import { createWater, step as wstep, counts, FARM_A, FARM_B } from '../src/plane
 import { LEVELS, SOON, flagAngle, levelById } from '../src/planetearth/lessons.js';
 import { createClimate, stepClimate, eqTemp, toC, noAtmosphereTemp, isStable, warmingVsBase } from '../src/planetearth/greenhouse.js';
 import { createPlates, stepPlates, boundaryKind, heights, createQuakeLab, stepQuakeLab, magnitude } from '../src/planetearth/tectonics.js';
+import { createBreeze, stepBreeze, windSpeed, throwBall, solar } from '../src/planetearth/weather.js';
 import { createEco, stepEco, avgGrass, removeLions, addLions, addAnts } from '../src/planetearth/ecosystem.js';
 let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.error('FAIL', m); } else console.log('ok  ', m); };
 const near = (a, b, t) => Math.abs(a - b) <= t;
@@ -45,7 +46,7 @@ for (const o of [{ h: 0 }, { h: 150 }, { h: 80, sun: 1 }, { h: 80, sun: 0 }, { h
 { const w = createWater(5); let t25 = null; for (let i = 0; i < 90 * 30; i++) { wstep(w, 1 / 30); if (counts(w).c >= 25) { t25 = i / 30; break; } } ok(t25 !== null && t25 < 40, `clouds appear within 40 s with default settings (${t25} s)`); }
 
 // ---- every level and every mission ----
-ok(LEVELS.length === 7 && SOON.length === 1, 'seven playable levels plus one coming soon');
+ok(LEVELS.length === 8 && SOON.length === 2, 'eight playable levels plus two coming soon');
 for (const l of LEVELS) {
   ok(l.cards.length === 3 && l.cards.every((c) => c.title && c.text.length > 40 && c.why.length > 60 && c.art), `${l.title}: 3 story cards, each explains WHY`);
   ok(l.missions.every((m) => m.text && m.hint && m.done) && l.codex.length === 3, `${l.title}: missions have text, hint and feedback; codex has 3 lines`);
@@ -113,4 +114,22 @@ for (const l of LEVELS) {
   const S = (e, had) => ({ lions: e.lions.length, ants: e.ants.length, grass: avgGrass(e), hadRemoval: had }); const e0 = createEco(2); ok(!L.missions[1].check(S(e0, false)) && !L.missions[2].check(S(e0, false)), 'life: cascade and heal missions are not done at the start');
   const e1 = createEco(2); for (let i = 0; i < 300; i++) stepEco(e1, 0.1); removeLions(e1); let got = false; for (let i = 0; i < 2400 && !got; i++) { stepEco(e1, 0.1); if (L.missions[1].check(S(e1, true))) got = true; } ok(got, 'life: the cascade mission can be completed by removing the lions');
   addAnts(e1, 30); addLions(e1, 4); let healed = false; for (let i = 0; i < 6000 && !healed; i++) { stepEco(e1, 0.1); if (L.missions[2].check(S(e1, true))) healed = true; } ok(healed, 'life: the land can be healed by bringing the lions (and antelope) back'); }
+
+// ---- Level 8: wind and weather ----
+{ const b0 = createBreeze(); ok(windSpeed(b0) < -3, 'dawn: the land is colder than the sea, so air flows out to sea (a land breeze)');
+  const b = createBreeze(); let dayMax = -99, nightMax = -99, flips = 0, prev = Math.sign(windSpeed(b)); for (let i = 0; i < 24 * 10 * 3; i++) { stepBreeze(b, 0.1); const u = windSpeed(b); dayMax = Math.max(dayMax, u); nightMax = Math.max(nightMax, -u); const sg = Math.sign(u); if (sg !== prev && Math.abs(u) > 0.2) { flips++; prev = sg; } }
+  ok(dayMax >= 5 && nightMax >= 3, `by day a sea breeze (${dayMax.toFixed(1)} m/s), at night a land breeze (${nightMax.toFixed(1)} m/s)`); ok(flips >= 5, `the wind turns round every day (${flips} reversals in 3 days)`);
+  const c = createBreeze(); c.sun = 0.2; let cm = -99; for (let i = 0; i < 24 * 10 * 3; i++) { stepBreeze(c, 0.1); cm = Math.max(cm, windSpeed(c)); } ok(cm < 1, 'a cloudy day has no sea breeze (the land cannot out-heat the sea)');
+  ok(solar(12) === 1 && solar(0) === 0 && solar(18) < 0.01, 'the Sun is highest at noon and gone at night');
+  const ball = (lat, aim) => throwBall(lat, aim); ok(ball(0, 0).hit && Math.abs(ball(0, 0).pts.at(-1).x) < 0.01, 'at the equator a thrown ball flies straight');
+  ok(ball(45, 0).side > 0 && !ball(45, 0).hit && ball(-45, 0).side < 0 && !ball(-45, 0).hit, 'in the north the ball curves RIGHT, in the south LEFT');
+  ok(ball(90, 0).closest > ball(45, 0).closest && ball(45, 0).closest > ball(15, 0).closest, 'the curve is strongest at the poles and weakest near the equator');
+  let allSolvable = true, northLeft = true, southRight = true; for (const lat of [30, 45, 60, 75, 90, -30, -45, -60, -75, -90]) { let found = null; for (let a = -45; a <= 45; a += 0.5) if (ball(lat, a).hit) { found = a; break; } if (found === null) allSolvable = false; else if (lat > 0 && found >= 0) northLeft = false; else if (lat < 0 && found <= 0) southRight = false; }
+  ok(allSolvable && northLeft && southRight, 'every latitude can be solved with the aim slider: aim LEFT in the north, RIGHT in the south');
+  const L = levelById('weather'); const S = (o) => ({ wind: 0, hour: 6, hit: false, hitLat: 0, ...o });
+  ok(!L.missions[0].check(S({ wind: windSpeed(b0) })) && !L.missions[2].check(S()) && !L.missions[3].check(S()), 'weather: missions are not already done at the start');
+  ok(L.missions[0].check(S({ wind: 6 })) && !L.missions[0].check(S({ wind: 4 })) && L.missions[1].check(S({ wind: -3.5 })) && !L.missions[1].check(S({ wind: -1 })), 'weather: sea breeze and land breeze missions');
+  const b2 = createBreeze(); let seaDone = false, landAfter = false; for (let i = 0; i < 24 * 10 * 2; i++) { stepBreeze(b2, 0.1); const st = S({ wind: windSpeed(b2) }); if (!seaDone && L.missions[0].check(st)) seaDone = true; else if (seaDone && L.missions[1].check(st)) { landAfter = true; break; } } ok(seaDone && landAfter, 'weather: after the sea breeze, a land breeze follows within a day');
+  ok(L.missions[2].check(S({ hit: true, hitLat: 45 })) && !L.missions[2].check(S({ hit: true, hitLat: 10 })) && L.missions[3].check(S({ hit: true, hitLat: -45 })) && !L.missions[3].check(S({ hit: true, hitLat: 45 })), 'weather: spin missions need a hit in the right hemisphere');
+  ok(/Warm air over the land rises/.test(L.missions[4].choices[L.missions[4].answer]), 'weather: the quiz answer explains the sea breeze'); }
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED'); process.exit(fails ? 1 : 0);
