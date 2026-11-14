@@ -7,6 +7,7 @@ import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
 import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./ShopMessages.jsx";
+import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, latestReturn, returnIsOpen } from "./ShopReturns.jsx";
 import AdminSales from "./ShopSales.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
@@ -113,7 +114,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price), shop_return_requests(id, status, reason, admin_note, created_at)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -595,7 +596,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} business={business} eftDetails={eftDetails} c={c} />}
 
-      {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} c={c} />}
+      {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} onChanged={loadMyOrders} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} onOpenSales={() => setSubview("admin-sales")} requestConfirm={requestConfirm} c={c} />
@@ -1790,6 +1791,10 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
             <DocButtons status={result.status} c={c}
               onOpen={(kind) => setDoc({ order: normalizeOrder(result, paidAtFromHistory(result.history)), kind })} />
           </div>
+          <ReturnStatus ret={result.return_request} c={c} />
+          {RETURNABLE_STATUSES.includes(result.status) && !returnIsOpen(result.return_request) && result.return_request?.status !== "refunded" && (
+            <RequestReturn orderNumber={result.order_number} contact={contact} onDone={() => find()} c={c} />
+          )}
           {(result.history || []).length > 0 && (
             <ol className="mt-4 space-y-1.5">
               {result.history.map((h, i) => (
@@ -1807,7 +1812,7 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
   );
 }
 
-function MyOrders({ orders, business, eftDetails, c }) {
+function MyOrders({ orders, business, eftDetails, onChanged, c }) {
   const [doc, setDoc] = useState(null);
   if (orders === null) return <Spinner c={c} />;
   const openDoc = async (o, kind) => {
@@ -1846,6 +1851,10 @@ function MyOrders({ orders, business, eftDetails, c }) {
               {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
               {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
               <div className="flex items-center gap-1.5 mt-2 flex-wrap"><DocButtons status={o.status} onOpen={(kind) => openDoc(o, kind)} c={c} /></div>
+              <ReturnStatus ret={latestReturn(o.shop_return_requests)} c={c} />
+              {RETURNABLE_STATUSES.includes(o.status) && (!latestReturn(o.shop_return_requests) || latestReturn(o.shop_return_requests).status === "rejected") && (
+                <RequestReturn orderNumber={o.order_number} contact={o.buyer_email || o.contact_phone || ""} onDone={() => onChanged && onChanged()} c={c} />
+              )}
             </div>
           ))}
         </div>
@@ -2687,7 +2696,7 @@ function DeliverySettings({ showToast, c }) {
 
 const ADMIN_OPEN_STATUSES = ["pending_review", "whatsapp_sent", "paid", "packed", "shipped"];
 const ADMIN_FILTERS = [
-  ["open", "To handle"], ["pending_review", "Pending review"], ["whatsapp_sent", "WhatsApp"], ["paid", "Paid"],
+  ["open", "To handle"], ["returns", "Returns"], ["pending_review", "Pending review"], ["whatsapp_sent", "WhatsApp"], ["paid", "Paid"],
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
@@ -2738,9 +2747,10 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
 
   if (orders === null) return <Spinner c={c} />;
   const q = search.trim().toLowerCase();
-  const byFilter = filter === "all" ? orders : filter === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)) : orders.filter((o) => o.status === filter);
+  const hasOpenReturn = (o) => returnIsOpen(latestReturn(o.shop_return_requests));
+  const byFilter = filter === "all" ? orders : filter === "returns" ? orders.filter(hasOpenReturn) : filter === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)) : orders.filter((o) => o.status === filter);
   const filtered = q ? byFilter.filter((o) => [o.order_number, o.buyer_username, o.contact_phone].some((v) => (v || "").toLowerCase().includes(q))) : byFilter;
-  const countFor = (f) => f === "all" ? orders.length : f === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)).length : orders.filter((o) => o.status === f).length;
+  const countFor = (f) => f === "all" ? orders.length : f === "returns" ? orders.filter(hasOpenReturn).length : f === "open" ? orders.filter((o) => ADMIN_OPEN_STATUSES.includes(o.status)).length : orders.filter((o) => o.status === f).length;
 
   // What can happen next to an order, in the order a parcel moves.
   const actionsFor = (o) => {
@@ -2842,6 +2852,10 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 <TrackingEditor order={o} showToast={showToast} onSaved={load} c={c} />
               )}
 
+              {latestReturn(o.shop_return_requests) && (
+                <ReturnAdminPanel key={latestReturn(o.shop_return_requests).id + latestReturn(o.shop_return_requests).status} ret={latestReturn(o.shop_return_requests)}
+                  onChanged={(a) => { load(); if (a === "refund") onReloadProducts && onReloadProducts(); }} showToast={showToast} c={c} />
+              )}
               <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                 {o.payment_proof_path && (
                   <button onClick={() => viewProof(o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
