@@ -6,6 +6,7 @@ import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
+import AdminSales from "./ShopSales.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
@@ -594,10 +595,14 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
-        <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} requestConfirm={requestConfirm} c={c} />
+        <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} onOpenSales={() => setSubview("admin-sales")} requestConfirm={requestConfirm} c={c} />
       )}
+      {subview === "admin-sales" && isAdmin && (
+        <AdminSales products={products || []} onOpenOrders={() => setSubview("admin-orders")} onOpenProducts={() => setSubview("admin-products")} showToast={showToast} c={c} />
+      )}
+
       {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} c={c} />
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} c={c} />
       )}
 
       {activeProduct && (
@@ -1857,7 +1862,7 @@ function mainCategory(catIds, mainDeptId, categories) {
   return inMain || catIds[0] || null;
 }
 
-function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, requestConfirm, c }) {
+function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, onOpenSales, requestConfirm, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
   const [managingDepts, setManagingDepts] = useState(false);
   const [query, setQuery] = useState("");
@@ -1972,6 +1977,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
             <LayoutGrid size={12} /> Departments
           </button>
           <button onClick={onOpenOrders} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Orders</button>
+          <button onClick={onOpenSales} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Sales</button>
         </div>
       </div>
 
@@ -2682,7 +2688,7 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, business, policies, c }) {
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, c }) {
   const [doc, setDoc] = useState(null);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
@@ -2752,7 +2758,10 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
           <ClipboardList size={20} style={{ color: SHOP_GOLD }} />
           <h1 className="text-2xl font-extrabold tracking-tight leading-none">Orders</h1>
         </div>
-        <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>
+        <div className="flex gap-2">
+          <button onClick={onOpenSales} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Sales</button>
+          <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>
+        </div>
       </div>
 
       <div className="rounded-xl border mb-4" style={{ background: c.surface, borderColor: c.border }}>
