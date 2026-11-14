@@ -6,6 +6,7 @@ import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
+import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -109,7 +110,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -1261,7 +1262,10 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
           )}
 
           {outOfStock ? (
-            <div className="mt-4 font-body text-sm text-center py-2.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Out of stock</div>
+            <>
+              <div className="mt-4 font-body text-sm text-center py-2.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Out of stock</div>
+              <StockAlertForm productId={product.id} defaultContact={session?.user?.email || ""} c={c} />
+            </>
           ) : (
             <>
               <div className="flex items-center justify-center gap-4 mt-4">
@@ -1368,6 +1372,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   const [deliveryMethod, setDeliveryMethod] = useState("");
   const [addr, setAddr] = useState({ street: "", suburb: "", city: "", province: "", postal_code: "" });
   const [point, setPoint] = useState("");
+  const [discount, setDiscount] = useState(null); // { code, amount } once applied
 
   const cartKey = cart.map((it) => `${it.productId}:${it.variantId || ""}:${it.qty}`).join(",");
   useEffect(() => {
@@ -1384,7 +1389,8 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
 
   const chosenOption = (deliveryOptions || []).find((o) => o.method === deliveryMethod && o.available) || null;
   const deliveryFee = chosenOption ? Number(chosenOption.fee) || 0 : 0;
-  const grandTotal = total + deliveryFee;
+  const discountAmount = discount ? Math.min(total, discount.amount) : 0;
+  const grandTotal = total - discountAmount + deliveryFee;
   const deliveryRequired = (deliveryOptions || []).length > 0;
 
   const buyerUsername = profile?.efootball_username || session?.user?.email || guestName.trim() || "Shopper";
@@ -1413,6 +1419,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       p_email: email.trim() || null,
       p_note: note.trim() || null,
       p_proof_path: proofPath || null,
+      p_discount_code: discount?.code || null,
       p_delivery: deliveryRequired ? { method: deliveryMethod, address: deliveryMethod === "courier" ? addr : null, point: point.trim() || null } : null,
     });
     if (error) {
@@ -1442,7 +1449,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     setSubmitting(false);
     if (error) { showToast(error); return; }
     const delivLine = chosenOption ? `\nDelivery: ${chosenOption.label}${deliveryMethod === "courier" ? ` to ${[addr.street, addr.suburb, addr.city, addr.postal_code].filter(Boolean).join(", ")}` : (point.trim() ? ` (${point.trim()})` : "")} — ${Number(order.delivery_fee) ? formatMoney(order.delivery_fee) : "free"}` : "";
-    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${delivLine}\n\nTotal: ${formatMoney(order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
+    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${order.discount > 0 ? `\nDiscount (${discount?.code}): -${formatMoney(order.discount)}` : ""}${delivLine}\n\nTotal: ${formatMoney(order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
     window.open(waLink(SHOP_WHATSAPP_NUMBER, msg), "_blank", "noopener,noreferrer");
     onDone(order);
   };
@@ -1486,12 +1493,18 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         <span className="font-body text-sm font-semibold" style={{ color: c.textDim }}>{cart.reduce((s, it) => s + it.qty, 0)} item(s)</span>
         <span className="font-mono text-lg font-bold">{formatMoney(total)}</span>
       </div>
+      <DiscountBox cart={cart} applied={discount} onChange={setDiscount} c={c} />
+      {discountAmount > 0 && (
+        <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }} data-testid="discount-line">
+          <span>Discount ({discount.code})</span><span className="font-mono">-{formatMoney(discountAmount)}</span>
+        </div>
+      )}
       {deliveryFee > 0 && (
         <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }}>
           <span>Delivery</span><span className="font-mono">{formatMoney(deliveryFee)}</span>
         </div>
       )}
-      {deliveryRequired && (
+      {(deliveryRequired || discountAmount > 0) && (
         <div className="flex items-center justify-between mb-4 px-1 pt-1 border-t" style={{ borderColor: c.border }}>
           <span className="font-body text-sm font-semibold">Total to pay</span>
           <span className="font-mono text-lg font-bold" style={{ color: SHOP_GOLD }}>{formatMoney(grandTotal)}</span>
@@ -1724,7 +1737,7 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
           )}
           <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
             <span className="font-body text-sm font-semibold">Total</span>
-            <span className="font-mono text-base font-bold">{formatMoney(Number(result.subtotal) + Number(result.delivery_fee || 0))}</span>
+            <span className="font-mono text-base font-bold">{formatMoney(Number(result.subtotal) - Number(result.discount_amount || 0) + Number(result.delivery_fee || 0))}</span>
           </div>
           {result.delivery_method && (
             <div className="font-body text-xs mt-3" style={{ color: c.textDim }}>
@@ -1792,7 +1805,7 @@ function MyOrders({ orders, business, eftDetails, c }) {
               )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
                 <span className="font-body text-xs font-semibold">Total</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) + Number(o.delivery_fee || 0))}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0))}</span>
               </div>
               {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
               {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
@@ -2732,6 +2745,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
       </div>
 
       <BusinessDetailsPanel business={business} onSaved={onEftSaved} showToast={showToast} c={c} />
+      <DiscountCodesPanel showToast={showToast} c={c} />
+      <StockAlertsPanel showToast={showToast} c={c} />
 
       <DeliverySettings showToast={showToast} c={c} />
 
@@ -2779,7 +2794,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
               )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
                 <span className="font-body text-xs font-semibold">Total{Number(o.delivery_fee) > 0 ? " (with delivery)" : ""}</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) + Number(o.delivery_fee || 0))}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0))}</span>
               </div>
               {["packed", "shipped", "delivered"].includes(o.status) && o.delivery_method && o.delivery_method !== "collection" && (
                 <TrackingEditor order={o} showToast={showToast} onSaved={load} c={c} />
