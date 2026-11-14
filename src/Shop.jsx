@@ -6,6 +6,7 @@ import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
+import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./ShopMessages.jsx";
 import AdminSales from "./ShopSales.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
@@ -232,6 +233,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [eftDetails, setEftDetails] = useState("");
   const [business, setBusiness] = useState(() => parseBusiness(""));
   const [policies, setPolicies] = useState(() => parsePolicies(""));
+  const [msgTemplates, setMsgTemplates] = useState(() => parseTemplates(""));
   const wishlist = useWishlistState();
   const [toast, setToast] = useState(null);
   // Guards deleting a product, department, or category behind several
@@ -444,10 +446,11 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => { loadCategories(); }, []);
 
   const loadSettings = async () => {
-    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details", "shop_policies"]);
+    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details", "shop_policies", "shop_message_templates"]);
     setEftDetails((data || []).find((r) => r.key === "eft_details")?.value || "");
     setBusiness(parseBusiness((data || []).find((r) => r.key === "business_details")?.value));
     setPolicies(parsePolicies((data || []).find((r) => r.key === "shop_policies")?.value));
+    setMsgTemplates(parseTemplates((data || []).find((r) => r.key === "shop_message_templates")?.value));
   };
   useEffect(() => { loadSettings(); }, []);
 
@@ -602,7 +605,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} c={c} />
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} templates={msgTemplates} c={c} />
       )}
 
       {activeProduct && (
@@ -2688,7 +2691,7 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, c }) {
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, templates, c }) {
   const [doc, setDoc] = useState(null);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
@@ -2782,6 +2785,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       </div>
 
       <BusinessDetailsPanel business={business} onSaved={onEftSaved} showToast={showToast} c={c} />
+      <MessageTemplatesPanel templates={templates} onSaved={onEftSaved} showToast={showToast} c={c} />
       <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
       <StockAlertsPanel showToast={showToast} c={c} />
@@ -2844,6 +2848,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 )}
                 <DocButtons status={o.status} c={c}
                   onOpen={async (kind) => setDoc({ order: normalizeOrder(o, kind === "receipt" ? await fetchPaidAt(o.id) : null), kind })} />
+                <MessageCustomerButton order={o} business={business} templates={templates} c={c} />
                 {actionsFor(o).map(([status, label, tone]) => (
                   <button key={status} onClick={() => setStatus(o, status)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full"
                     style={tone === "good" ? { background: c.greenSoft, color: c.greenText } : { background: c.redSoft, color: c.red }}>
