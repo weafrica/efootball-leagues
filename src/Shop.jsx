@@ -6,11 +6,12 @@ import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
+import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
-  AlertTriangle, Facebook, Wand2,
+  AlertTriangle, Facebook, Wand2, FileText,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -56,6 +57,17 @@ const activeVariants = (p) => (p?.variants || []).filter((v) => v.active);
 // filled in by loadProducts); department_id / category_id are its main ones.
 const productDepts = (p) => p.dept_ids || (p.department_id ? [p.department_id] : []);
 const productCats = (p) => p.cat_ids || (p.category_id ? [p.category_id] : []);
+// "You may also like": other in-stock products from the same categories and
+// departments, closest match first.
+const relatedProducts = (product, products, limit = 8) => {
+  const cats = new Set(productCats(product)), depts = new Set(productDepts(product));
+  return (products || [])
+    .filter((p) => p.id !== product.id && p.active && p.stock_qty !== 0)
+    .map((p) => ({ p, score: productCats(p).filter((id) => cats.has(id)).length * 3 + productDepts(p).filter((id) => depts.has(id)).length }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || (b.p.rating_avg || 0) - (a.p.rating_avg || 0))
+    .slice(0, limit).map((x) => x.p);
+};
 const lineKey = (it) => `${it.productId}:${it.variantId || ""}`;
 const unitPriceFor = (product, variantId, totalQty) => {
   const v = variantId ? (product.variants || []).find((x) => x.id === variantId) : null;
@@ -97,7 +109,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -215,6 +227,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [myOrders, setMyOrders] = useState(null);
   const [lastOrderNumber, setLastOrderNumber] = useState(null);
   const [eftDetails, setEftDetails] = useState("");
+  const [business, setBusiness] = useState(() => parseBusiness(""));
   const [toast, setToast] = useState(null);
   // Guards deleting a product, department, or category behind several
   // sequential confirmations — same requestConfirm/advanceConfirm shape
@@ -426,8 +439,9 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => { loadCategories(); }, []);
 
   const loadSettings = async () => {
-    const { data } = await supabase.from("shop_settings").select("key, value").eq("key", "eft_details");
+    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details"]);
     setEftDetails((data || []).find((r) => r.key === "eft_details")?.value || "");
+    setBusiness(parseBusiness((data || []).find((r) => r.key === "business_details")?.value));
   };
   useEffect(() => { loadSettings(); }, []);
 
@@ -553,19 +567,19 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         </div>
       )}
 
-      {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} c={c} />}
+      {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} business={business} eftDetails={eftDetails} c={c} />}
 
-      {subview === "my-orders" && <MyOrders orders={myOrders} c={c} />}
+      {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} requestConfirm={requestConfirm} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} c={c} />
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} c={c} />
       )}
 
       {activeProduct && (
-        <ProductModal product={activeProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
+        <ProductModal key={activeProduct.id} product={activeProduct} related={relatedProducts(activeProduct, products)} onOpenRelated={setActiveProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
           session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth} showToast={showToast} onRatingsChanged={loadProducts} c={c} />
       )}
 
@@ -1174,7 +1188,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   );
 }
 
-function ProductModal({ product, onClose, onAdd, onShare, session, profile, isAdmin, onRequireAuth, showToast, onRatingsChanged, c }) {
+function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, onShare, session, profile, isAdmin, onRequireAuth, showToast, onRatingsChanged, c }) {
   const [qty, setQty] = useState(1);
   const variants = activeVariants(product);
   const [variantId, setVariantId] = useState(null);
@@ -1260,6 +1274,23 @@ function ProductModal({ product, onClose, onAdd, onShare, session, profile, isAd
                 {variants.length > 0 && !variant ? "Choose an option" : `Add to cart · ${formatMoney(unit * qty)}`}
               </button>
             </>
+          )}
+
+          {related.length > 0 && (
+            <div className="mt-5 pt-4 border-t" style={{ borderColor: c.border }} data-testid="related">
+              <div className="font-extrabold uppercase tracking-tight text-sm mb-2">You may also like</div>
+              <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
+                {related.map((r) => (
+                  <button key={r.id} onClick={() => onOpenRelated && onOpenRelated(r)} className="shrink-0 w-[110px] text-left" aria-label={`${r.name}, ${formatMoney(r.price)}`}>
+                    <span className="block w-[110px] h-[110px] rounded-xl overflow-hidden" style={{ background: c.surfaceHover }}>
+                      {r.image_url ? <img src={toProxiedUrl(r.image_url)} alt="" loading="lazy" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center"><ImageIcon size={22} style={{ color: c.textFaint }} /></span>}
+                    </span>
+                    <span className="block font-body text-xs leading-tight mt-1.5 line-clamp-2" style={{ color: c.text }}>{r.name}</span>
+                    <span className="block font-mono text-xs font-bold mt-0.5" style={{ color: SHOP_GOLD }}>{formatMoney(r.price)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <ProductReviews product={product} session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth}
@@ -1616,7 +1647,23 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
 // MY ORDERS
 // ════════════════════════════════════════════════════════════════════
 
-function TrackOrder({ initialNumber, c }) {
+// Invoice / receipt buttons for an order. Nothing is owed or paid on rejected,
+// cancelled or refunded orders, so they get none; a receipt needs a paid order.
+function DocButtons({ status, onOpen, c }) {
+  if (NO_DOCUMENT_STATUSES.includes(status)) return null;
+  const btn = { background: c.surfaceHover, color: c.text };
+  return (
+    <>
+      <button onClick={() => onOpen("invoice")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Invoice</button>
+      {RECEIPT_STATUSES.includes(status) && (
+        <button onClick={() => onOpen("receipt")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Receipt</button>
+      )}
+    </>
+  );
+}
+
+function TrackOrder({ initialNumber, business, eftDetails, c }) {
+  const [doc, setDoc] = useState(null);
   const [number, setNumber] = useState(initialNumber || "");
   const [contact, setContact] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1690,6 +1737,10 @@ function TrackOrder({ initialNumber, c }) {
               <div className="font-mono font-bold select-all">{result.tracking_number}</div>
             </div>
           )}
+          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+            <DocButtons status={result.status} c={c}
+              onOpen={(kind) => setDoc({ order: normalizeOrder(result, paidAtFromHistory(result.history)), kind })} />
+          </div>
           {(result.history || []).length > 0 && (
             <ol className="mt-4 space-y-1.5">
               {result.history.map((h, i) => (
@@ -1702,12 +1753,18 @@ function TrackOrder({ initialNumber, c }) {
           )}
         </div>
       )}
+      {doc && <OrderDocument order={doc.order} kind={doc.kind} business={business} eftDetails={eftDetails} onClose={() => setDoc(null)} />}
     </div>
   );
 }
 
-function MyOrders({ orders, c }) {
+function MyOrders({ orders, business, eftDetails, c }) {
+  const [doc, setDoc] = useState(null);
   if (orders === null) return <Spinner c={c} />;
+  const openDoc = async (o, kind) => {
+    const paidAt = kind === "receipt" ? await fetchPaidAt(o.id) : null;
+    setDoc({ order: normalizeOrder(o, paidAt), kind });
+  };
   return (
     <div>
       <div className="flex items-center gap-2 mb-5">
@@ -1739,10 +1796,12 @@ function MyOrders({ orders, c }) {
               </div>
               {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
               {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap"><DocButtons status={o.status} onOpen={(kind) => openDoc(o, kind)} c={c} /></div>
             </div>
           ))}
         </div>
       )}
+      {doc && <OrderDocument order={doc.order} kind={doc.kind} business={business} eftDetails={eftDetails} onClose={() => setDoc(null)} />}
     </div>
   );
 }
@@ -2582,7 +2641,8 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, c }) {
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, business, c }) {
+  const [doc, setDoc] = useState(null);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
   const [search, setSearch] = useState("");
@@ -2671,6 +2731,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
         )}
       </div>
 
+      <BusinessDetailsPanel business={business} onSaved={onEftSaved} showToast={showToast} c={c} />
+
       <DeliverySettings showToast={showToast} c={c} />
 
       <div className="relative mb-3">
@@ -2727,6 +2789,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
                 {o.payment_proof_path && (
                   <button onClick={() => viewProof(o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
                 )}
+                <DocButtons status={o.status} c={c}
+                  onOpen={async (kind) => setDoc({ order: normalizeOrder(o, kind === "receipt" ? await fetchPaidAt(o.id) : null), kind })} />
                 {actionsFor(o).map(([status, label, tone]) => (
                   <button key={status} onClick={() => setStatus(o, status)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full"
                     style={tone === "good" ? { background: c.greenSoft, color: c.greenText } : { background: c.redSoft, color: c.red }}>
@@ -2738,6 +2802,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
           ))}
         </div>
       )}
+      {doc && <OrderDocument order={doc.order} kind={doc.kind} business={business} eftDetails={eftDetails} onClose={() => setDoc(null)} />}
     </div>
   );
 }
