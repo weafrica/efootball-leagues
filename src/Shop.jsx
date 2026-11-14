@@ -6,13 +6,14 @@ import { uploadToR2 } from "./utils/r2Upload";
 import { ShopHeroBanner } from "./ShopHeroBanner.jsx";
 import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
+import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
   Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
-  AlertTriangle, Facebook, Wand2, FileText,
+  AlertTriangle, Facebook, Wand2, FileText, Heart,
 } from "lucide-react";
 
 // ════════════════════════════════════════════════════════════════════
@@ -229,6 +230,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [lastOrderNumber, setLastOrderNumber] = useState(null);
   const [eftDetails, setEftDetails] = useState("");
   const [business, setBusiness] = useState(() => parseBusiness(""));
+  const [policies, setPolicies] = useState(() => parsePolicies(""));
+  const wishlist = useWishlistState();
   const [toast, setToast] = useState(null);
   // Guards deleting a product, department, or category behind several
   // sequential confirmations — same requestConfirm/advanceConfirm shape
@@ -440,9 +443,10 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => { loadCategories(); }, []);
 
   const loadSettings = async () => {
-    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details"]);
+    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details", "shop_policies"]);
     setEftDetails((data || []).find((r) => r.key === "eft_details")?.value || "");
     setBusiness(parseBusiness((data || []).find((r) => r.key === "business_details")?.value));
+    setPolicies(parsePolicies((data || []).find((r) => r.key === "shop_policies")?.value));
   };
   useEffect(() => { loadSettings(); }, []);
 
@@ -484,6 +488,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const atShopRoot = subview === "browse" && !activeProduct && shopDept === "all" && shopCatPath.length === 0;
 
   return (
+    <WishlistProvider value={wishlist}>
     <div className={`pt-8 ${subview === "browse" && cartCount > 0 ? "pb-24" : "pb-10"}`}>
       <div className="flex items-center justify-between mb-5">
         {atShopRoot && !onBack ? (
@@ -515,6 +520,10 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
               <Settings2 size={14} />
             </button>
           )}
+          <button onClick={() => setSubview("saved")} title="Saved items" aria-label="Saved items" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={subview === "saved" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
+            <Heart size={14} />
+            {wishlist.ids.length > 0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center font-mono text-[9px] font-bold" style={{ background: "#ff5a6e", color: "#fff" }}>{wishlist.ids.length}</span>}
+          </button>
           <button onClick={() => setSubview("cart")} title="Cart" className="relative w-8 h-8 flex items-center justify-center rounded-full" style={subview === "cart" ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
             <ShoppingCart size={14} />
             {cartCount > 0 && (
@@ -534,6 +543,18 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
             onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
         </>
+      )}
+
+      {subview === "saved" && (
+        <div data-testid="saved-view">
+          <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none mb-4">Saved items</h1>
+          {(() => {
+            const saved = visibleProducts.filter((p) => wishlist.has(p.id));
+            return saved.length === 0 && products !== null
+              ? <div className="border border-dashed rounded-xl p-8 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>Tap the heart on a product to save it here for later.</div>
+              : <ProductGrid products={saved} loading={products === null} onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />;
+          })()}
+        </div>
       )}
 
       {subview === "cart" && (
@@ -576,7 +597,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} requestConfirm={requestConfirm} c={c} />
       )}
       {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} c={c} />
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} c={c} />
       )}
 
       {activeProduct && (
@@ -595,6 +616,10 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         </button>
       )}
 
+      {["browse", "saved", "cart", "track", "my-orders"].includes(subview) && (
+        <ShopFooter business={business} policies={policies} whatsapp={SHOP_WHATSAPP_NUMBER} c={c} />
+      )}
+
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
 
       {toast && (
@@ -603,6 +628,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         </div>
       )}
     </div>
+    </WishlistProvider>
   );
 }
 
@@ -1158,6 +1184,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
             className="text-left rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border, opacity: p.active ? 1 : 0.5 }}>
             <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
               {p.image_url ? <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ImageIcon size={28} style={{ color: c.textFaint }} />}
+              <HeartButton productId={p.id} name={p.name} className="absolute top-2 right-2" size={15} c={c} />
               {canQuickAdd && (
                 <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
                   className="absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -1209,6 +1236,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
         <div className="aspect-square relative flex items-center justify-center" style={{ background: c.surfaceHover }}>
           {photos[photoIdx] ? <img src={toProxiedUrl(photos[photoIdx])} alt={product.name} className="w-full h-full object-cover" /> : <ImageIcon size={40} style={{ color: c.textFaint }} />}
           <button onClick={onShare} aria-label="Share this product" title="Share this product" className="absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><Share2 size={15} /></button>
+          <HeartButton productId={product.id} name={product.name} className="absolute top-3 left-14" size={15} c={c} />
           <button onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)", color: "#fff" }}><X size={16} /></button>
         </div>
         {photos.length > 1 && (
@@ -2654,7 +2682,7 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, business, c }) {
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eftDetails, onEftSaved, business, policies, c }) {
   const [doc, setDoc] = useState(null);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
@@ -2745,6 +2773,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, eft
       </div>
 
       <BusinessDetailsPanel business={business} onSaved={onEftSaved} showToast={showToast} c={c} />
+      <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
       <StockAlertsPanel showToast={showToast} c={c} />
 
