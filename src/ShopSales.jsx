@@ -51,7 +51,7 @@ export function lowStockItems(products, threshold) {
   return out.sort((a, b) => a.qty - b.qty);
 }
 
-export default function AdminSales({ products, onOpenOrders, onOpenProducts, showToast, c }) {
+export default function AdminSales({ products, isAdmin = true, onOpenOrders, onOpenProducts, showToast, c }) {
   const [orders, setOrders] = useState(null);
   const [tab, setTab] = useState("overview");
   const [period, setPeriod] = useState("30");
@@ -114,7 +114,7 @@ export default function AdminSales({ products, onOpenOrders, onOpenProducts, sho
         <h1 className="text-2xl font-extrabold uppercase tracking-tight leading-none">Sales</h1>
         <div className="flex gap-2">
           <button onClick={onOpenOrders} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Orders</button>
-          <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>
+          {isAdmin && <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>}
         </div>
       </div>
 
@@ -191,7 +191,7 @@ export default function AdminSales({ products, onOpenOrders, onOpenProducts, sho
             ))}
           </ul>
         )}
-        {low.length > 0 && <button onClick={onOpenProducts} className="font-body text-xs underline mt-2" style={{ color: c.textDim }}>Restock in Products</button>}
+        {low.length > 0 && isAdmin && <button onClick={onOpenProducts} className="font-body text-xs underline mt-2" style={{ color: c.textDim }}>Restock in Products</button>}
       </div>
 
       <button onClick={exportCsv} disabled={!stats} className="w-full mt-4 font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: GOLD, color: "#1a1200", opacity: stats ? 1 : 0.6 }}>

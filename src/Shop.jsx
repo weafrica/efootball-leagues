@@ -8,6 +8,7 @@ import ProductReviews, { StarRow } from "./ShopReviews.jsx";
 import BackgroundRemover from "./BackgroundRemover.jsx";
 import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./ShopMessages.jsx";
 import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, latestReturn, returnIsOpen } from "./ShopReturns.jsx";
+import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
@@ -236,6 +237,15 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [policies, setPolicies] = useState(() => parsePolicies(""));
   const [msgTemplates, setMsgTemplates] = useState(() => parseTemplates(""));
   const wishlist = useWishlistState();
+  // Helpers (shop staff) get the order tools but not the owner's controls.
+  const [isStaff, setIsStaff] = useState(false);
+  useEffect(() => {
+    let off = false;
+    if (!session?.user?.id || isAdmin) { setIsStaff(false); return undefined; }
+    supabase.from("shop_staff").select("user_id").eq("user_id", session.user.id).maybeSingle().then(({ data }) => { if (!off) setIsStaff(!!data); });
+    return () => { off = true; };
+  }, [session?.user?.id, isAdmin]);
+  const isTeam = isAdmin || isStaff;
   const [toast, setToast] = useState(null);
   // Guards deleting a product, department, or category behind several
   // sequential confirmations — same requestConfirm/advanceConfirm shape
@@ -519,8 +529,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
               <ClipboardList size={14} />
             </button>
           )}
-          {isAdmin && (
-            <button onClick={() => setSubview("admin-products")} title="Manage shop"
+          {isTeam && (
+            <button onClick={() => setSubview(isAdmin ? "admin-products" : "admin-orders")} title="Manage shop"
               className="w-8 h-8 flex items-center justify-center rounded-full" style={subview.startsWith("admin") ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim }}>
               <Settings2 size={14} />
             </button>
@@ -601,12 +611,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       {subview === "admin-products" && isAdmin && (
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} onOpenSales={() => setSubview("admin-sales")} requestConfirm={requestConfirm} c={c} />
       )}
-      {subview === "admin-sales" && isAdmin && (
-        <AdminSales products={products || []} onOpenOrders={() => setSubview("admin-orders")} onOpenProducts={() => setSubview("admin-products")} showToast={showToast} c={c} />
+      {subview === "admin-sales" && isTeam && (
+        <AdminSales products={products || []} isAdmin={isAdmin} onOpenOrders={() => setSubview("admin-orders")} onOpenProducts={() => setSubview("admin-products")} showToast={showToast} c={c} />
       )}
 
-      {subview === "admin-orders" && isAdmin && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} templates={msgTemplates} c={c} />
+      {subview === "admin-orders" && isTeam && (
+        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} templates={msgTemplates} isAdmin={isAdmin} c={c} />
       )}
 
       {activeProduct && (
@@ -2573,7 +2583,7 @@ function TrackingEditor({ order, showToast, onSaved, c }) {
   const dirty = (courier.trim() || null) !== (order.courier_name || null) || (tracking.trim() || null) !== (order.tracking_number || null);
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from("shop_orders").update({ courier_name: courier.trim() || null, tracking_number: tracking.trim() || null }).eq("id", order.id);
+    const { error } = await supabase.rpc("admin_set_shop_order_tracking", { p_order_id: order.id, p_courier: courier.trim(), p_tracking: tracking.trim() });
     setSaving(false);
     if (error) { showToast(`Couldn't save tracking: ${error.message}`); return; }
     showToast("Tracking saved.");
@@ -2700,7 +2710,7 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, templates, c }) {
+function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, templates, isAdmin, c }) {
   const [doc, setDoc] = useState(null);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
@@ -2773,10 +2783,11 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
         </div>
         <div className="flex gap-2">
           <button onClick={onOpenSales} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Sales</button>
-          <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>
+          {isAdmin && <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>}
         </div>
       </div>
 
+      {isAdmin && <>
       <div className="rounded-xl border mb-4" style={{ background: c.surface, borderColor: c.border }}>
         <button onClick={() => setBankOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2.5 font-body text-sm font-semibold" aria-expanded={bankOpen}>
           <span>Bank details shown at checkout {!eftDetails && <span className="font-normal" style={{ color: c.red }}>(not set, hidden from shoppers)</span>}</span>
@@ -2798,9 +2809,12 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       <MessageTemplatesPanel templates={templates} onSaved={onEftSaved} showToast={showToast} c={c} />
       <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
-      <StockAlertsPanel showToast={showToast} c={c} />
+      <TeamPanel showToast={showToast} c={c} />
+      <ActivityLogPanel c={c} />
 
       <DeliverySettings showToast={showToast} c={c} />
+      </>}
+      <StockAlertsPanel showToast={showToast} c={c} />
 
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
@@ -2854,7 +2868,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
 
               {latestReturn(o.shop_return_requests) && (
                 <ReturnAdminPanel key={latestReturn(o.shop_return_requests).id + latestReturn(o.shop_return_requests).status} ret={latestReturn(o.shop_return_requests)}
-                  onChanged={(a) => { load(); if (a === "refund") onReloadProducts && onReloadProducts(); }} showToast={showToast} c={c} />
+                  canRefund={isAdmin} onChanged={(a) => { load(); if (a === "refund") onReloadProducts && onReloadProducts(); }} showToast={showToast} c={c} />
               )}
               <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                 {o.payment_proof_path && (

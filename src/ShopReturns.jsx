@@ -60,7 +60,7 @@ export function RequestReturn({ orderNumber, contact, onDone, c }) {
 }
 
 // Admin controls on an order card.
-export function ReturnAdminPanel({ ret, onChanged, showToast, c }) {
+export function ReturnAdminPanel({ ret, onChanged, showToast, canRefund = true, c }) {
   const [note, setNote] = useState(ret.admin_note || "");
   const [busy, setBusy] = useState(false);
   const [confirmRefund, setConfirmRefund] = useState(false);
@@ -85,12 +85,12 @@ export function ReturnAdminPanel({ ret, onChanged, showToast, c }) {
             className="w-full border rounded-lg px-2.5 py-1.5 mt-2 text-xs outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
           <div className="flex flex-wrap gap-1.5 mt-2">
             {ret.status === "requested" && <button disabled={busy} onClick={() => act("approve")} className="font-semibold px-3 py-1.5 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>Approve</button>}
-            <button disabled={busy} onClick={() => (confirmRefund ? act("refund") : setConfirmRefund(true))} className="font-semibold px-3 py-1.5 rounded-full" style={{ background: confirmRefund ? GOLD : c.greenSoft, color: confirmRefund ? "#1a1200" : c.greenText }}>
+            {canRefund && <button disabled={busy} onClick={() => (confirmRefund ? act("refund") : setConfirmRefund(true))} className="font-semibold px-3 py-1.5 rounded-full" style={{ background: confirmRefund ? GOLD : c.greenSoft, color: confirmRefund ? "#1a1200" : c.greenText }}>
               {confirmRefund ? "Tap again: refund + restock" : "Refund"}
-            </button>
+            </button>}
             <button disabled={busy} onClick={() => act("reject")} className="font-semibold px-3 py-1.5 rounded-full" style={{ background: c.redSoft, color: c.red }}>Decline</button>
           </div>
-          <div className="mt-1.5" style={{ color: c.textFaint }}>Refund marks the order Refunded and puts all its items back in stock. Send the money back yourself.</div>
+          <div className="mt-1.5" style={{ color: c.textFaint }}>{canRefund ? "Refund marks the order Refunded and puts all its items back in stock. Send the money back yourself." : "Only the shop owner can refund. Approve the return and let them know."}</div>
         </>
       )}
       {!open && ret.admin_note && <div className="mt-1" style={{ color: c.textDim }}>Note: {ret.admin_note}</div>}
