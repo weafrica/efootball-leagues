@@ -32,6 +32,9 @@ try {
   { const Wt = await import('../src/planetearth/weather.js'); for (const [w, h] of sizes) for (const hour of [0, 5, 6, 9, 12, 15, 18, 21]) for (const sun of [0.2, 1]) { const b = Wt.createBreeze(); b.sun = sun; for (let i = 0; i < 24 * 10; i++) Wt.stepBreeze(b, 0.1); b.hour = hour; const parcels = []; for (let f = 0; f < 10; f++) art.drawBreeze(ctx, w, h, f / 10, { b, parcels, dt: 0.03 }); }
     for (const [w, h] of sizes) for (const lat of [0, 45, -45, 90, -90]) { const fl = Wt.throwBall(lat, lat > 0 ? -20 : 20), end = fl.pts[fl.pts.length - 1].t; for (const t of [0, end / 2, end]) art.drawSpinLab(ctx, w, h, 1, { lat, aim: 5, flight: fl, t, color: 2 }); art.drawSpinLab(ctx, w, h, 2, { lat, aim: -10, flight: null, t: 0, color: 1 }); } }
   ok(true, 'Level 8 Breeze Lab (day, night, cloudy) and Spin Lab (both hemispheres) draw');
+  { const base = { name: 'Zorp', color: 1, crystals: 0, total: 8, stars: 0, maxStars: 24, heart: '🧊 Heart: frozen like a comet.', streak: 0, finished: false };
+    for (const [w, h] of [[300, 400], [900, 1200], [360, 700]]) for (const st of [base, { ...base, name: 'Glimmer Wobble Zeeb', crystals: 5, stars: 12, streak: 7, heart: '🥹 Even rocks and rivers keep coming back.' }, { ...base, crystals: 8, stars: 24, streak: 30, finished: true, heart: '❤️ Fine. LOVE EXISTS. Please tell nobody.' }]) for (const tm of [0, 1.5]) art.drawCertificate(ctx, w, h, tm, st); }
+  ok(true, 'the explorer certificate draws (empty, partly done, finished, long names)');
   for (let ci = 0; ci < art.ALIEN_COLORS.length; ci++) { art.drawAlien(ctx, 100, 100, 80, ci, 1.2, { x: 1, y: -1 }, ci % 2 ? 'wow' : 'happy'); }
   art.drawUfo(ctx, 100, 100, 100, 2, true); art.drawSun(ctx, 50, 50, 12, 1, 1); art.spaceBg(ctx, 300, 300, 4);
   ok(true, 'alien (all colours), UFO and sun draw');

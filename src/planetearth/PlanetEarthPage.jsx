@@ -1,9 +1,11 @@
 // Planet Earth — the hub, the story, the lessons and the games. Written with React.createElement (no JSX) so plain Node can syntax-check it.
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { LEVELS, SOON, SHIP_CRYSTALS, flagAngle } from './lessons.js';
-import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawGreenhouse, drawTectonics, drawQuakeLab, drawEcosystem, drawBreeze, drawSpinLab, sceneArt, drawForm, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
+import { cardArt, drawSpin, spinCityAt, drawSeasons, drawWater, drawCannon, drawGreenhouse, drawTectonics, drawQuakeLab, drawEcosystem, drawCertificate, drawBreeze, drawSpinLab, sceneArt, drawForm, drawAlien, drawUfo, spaceBg, drawSun, ALIEN_COLORS, ALIEN_NAMES } from './art.js';
 import { PROLOGUE, EPILOGUE, LEVEL_STORY, CAST, FORMS, VARIANTS, LINE_SFX, fill, voiceKey, heartStage } from './story.js';
 import { playLine, stopVoice, setVoiceMuted, preload } from './voice.js';
+import { dateKey, makeDaily, applyDaily, activeStreak, doneToday, newDaily } from './daily.js';
+import { certificateStats } from './progress.js';
 import { createBreeze, stepBreeze, windSpeed, throwBall } from './weather.js';
 import { drawGlobe } from './earthmap.js';
 import { CITIES, city, clockTime, elevationAt, isMorning, fmtTime, dayLength, declination, fmtDay, TILT } from './sky.js';
@@ -19,8 +21,8 @@ const h = React.createElement;
 const SAVE_KEY = 'planetearth-save-v1';
 const rname = () => ALIEN_NAMES[Math.floor(Math.random() * ALIEN_NAMES.length)];
 function loadSave() {
-  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || rname(), color: s.color ?? 0, levels: s.levels || {}, story: !!s.story, prologue: !!s.prologue, epilogue: !!s.epilogue, ex: s.ex === 'he' ? 'he' : 'she', mute: !!s.mute }; }
-  catch { return { name: rname(), color: 0, levels: {}, story: false, prologue: false, epilogue: false, ex: 'she', mute: false }; }
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); return { name: s.name || rname(), color: s.color ?? 0, levels: s.levels || {}, story: !!s.story, prologue: !!s.prologue, epilogue: !!s.epilogue, ex: s.ex === 'he' ? 'he' : 'she', sfx: s.sfx !== false && !s.mute, voice: s.voice !== false && !s.mute, daily: { ...newDaily(), ...(s.daily || {}) } }; }
+  catch { return { name: rname(), color: 0, levels: {}, story: false, prologue: false, epilogue: false, ex: 'she', sfx: true, voice: true, daily: newDaily() }; }
 }
 const store = (s) => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } };
 const btn = (bg, fg = '#fff') => ({ background: bg, color: fg, border: 'none', borderRadius: 16, padding: '12px 18px', fontSize: 17, fontWeight: 800, cursor: 'pointer', boxShadow: '0 4px 0 rgba(0,0,0,0.25)', fontFamily: 'inherit', touchAction: 'manipulation' });
@@ -385,7 +387,7 @@ function LevelShell({ level, save, onExit, onDone, onNext }) {
 }
 
 // ---------- the hub ----------
-function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onName, onStory, onEpilogue }) {
+function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onVoice, onName, onStory, onEpilogue, onDaily, onCert }) {
   const c = crystals(save), hold = useRef({ form: null, t: 0, i: 0 }).current, [joke, setJoke] = useState('');
   const draw = (ctx, w, hh, tm, dt) => { if (hold.form) { hold.t -= dt || 0; if (hold.t <= 0) hold.form = null; } spaceBg(ctx, w, hh, tm); const R = Math.min(78, hh * 0.38), cx = w * 0.5, cy = hh * 0.55; drawSun(ctx, w * 0.93, hh * 0.25, 10, tm, 0.3); drawGlobe(ctx, cx, cy, R, -tm * 6, 15, { sun: { lon: -tm * 6 + 90, lat: 0 }, grid: false }); (hold.form ? drawForm(ctx, hold.form, w * 0.17, hh * 0.68, 76, tm, save.color) : drawAlien(ctx, w * 0.17, hh * 0.68, 62, save.color, tm, { x: 1, y: -0.3 })); drawUfo(ctx, w * 0.82, hh * 0.58, 80, tm, c < SHIP_CRYSTALS); };
   return h('div', { style: shell },
@@ -393,14 +395,15 @@ function Hub({ save, onLevel, onArcade, onCodex, onBack, onMute, onName, onStory
       h('div', { style: { position: 'relative', height: 210 } }, h(CanvasView, { draw, onDown: (p) => { if (p.x < 150 && p.y > 90) { const f = FORMS[hold.i++ % FORMS.length]; hold.form = f.id; hold.t = 3.2; snd.unlock(); snd.sfx.pop(); setJoke(f.emoji + ' ' + f.line.text); playLine(f.line.id); } } }),
         h('div', { style: { position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', alignItems: 'center', gap: 8 } },
           h('button', { onClick: onBack, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 12px', fontSize: 14, boxShadow: 'none' } }, '← Back'), h('div', { style: { flex: 1, textAlign: 'center', fontWeight: 900, fontSize: 22, letterSpacing: 2, color: '#ffe27a', textShadow: '0 2px 0 rgba(0,0,0,0.5)' } }, 'PLANET EARTH'),
-          h('button', { onClick: onCodex, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 10px', fontSize: 16, boxShadow: 'none' }, 'aria-label': 'codex' }, '📖'), h('button', { onClick: onMute, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 10px', fontSize: 16, boxShadow: 'none' }, 'aria-label': 'sound' }, save.mute ? '🔇' : '🔊'))),
+          h('button', { onClick: onCodex, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 10px', fontSize: 16, boxShadow: 'none' }, 'aria-label': 'codex' }, '📖'), h('button', { onClick: onVoice, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 10px', fontSize: 16, boxShadow: 'none', opacity: save.voice ? 1 : 0.55 }, 'aria-label': 'voice' }, save.voice ? '🗣️' : '🤐'), h('button', { onClick: onMute, style: { ...btn('rgba(20,28,60,0.85)'), padding: '6px 10px', fontSize: 16, boxShadow: 'none' }, 'aria-label': 'sound' }, save.sfx ? '🔊' : '🔇'))),
       h('div', { style: { maxWidth: 560, margin: '0 auto', padding: '8px 12px 30px', boxSizing: 'border-box' } },
         h('div', { style: { ...panel, marginBottom: 10 } },
-          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } }, h('div', { style: { fontWeight: 900, fontSize: 18 } }, '👽 ' + save.name), h('button', { onClick: onName, style: { ...btn('#4a5580'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, 'Change'), h('button', { onClick: onStory, style: { ...btn('#7a5cff'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, '🎬 Story')),
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } }, h('div', { style: { fontWeight: 900, fontSize: 18 } }, '👽 ' + save.name), h('button', { onClick: onName, style: { ...btn('#4a5580'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, 'Change'), h('button', { onClick: onCert, style: { ...btn('#c9503a'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, '🏅 Certificate'), h('button', { onClick: onStory, style: { ...btn('#7a5cff'), padding: '4px 10px', fontSize: 12, boxShadow: 'none' } }, '🎬 Story')),
           h('div', { style: { margin: '8px 0 4px', fontSize: 14, fontWeight: 700, opacity: 0.9 } }, '🚀 Ship power: ' + c + ' / ' + SHIP_CRYSTALS + ' Discovery Crystals'),
           h('div', { style: { margin: '2px 0 6px', fontSize: 13, fontWeight: 800, color: '#ffb3c8' } }, '💘 ' + heartStage(c)),
           joke ? h('div', { style: { margin: '0 0 6px', fontSize: 13, fontWeight: 700, color: '#7fe9ff' } }, joke) : null,
           h('div', { style: { height: 12, borderRadius: 6, background: 'rgba(255,255,255,0.18)', overflow: 'hidden' } }, h('div', { style: { height: 12, background: 'linear-gradient(90deg,#7fe9ff,#ffe27a)', width: (c / SHIP_CRYSTALS * 100) + '%', transition: 'width .4s' } }))),
+        h('button', { onClick: onDaily, style: { ...panel, display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', border: 'none', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit', borderLeft: '6px solid #ff9f43' } }, h('div', { style: { fontSize: 34, width: 48, textAlign: 'center' } }, '🌍'), h('div', { style: { flex: 1 } }, h('div', { style: { fontSize: 12, opacity: 0.7, fontWeight: 800 } }, 'DAILY DISCOVERY'), h('div', { style: { fontSize: 19, fontWeight: 900 } }, doneToday(save.daily, dateKey()) ? 'Done today ✅' : 'Today’s 3 questions'), h('div', { style: { fontSize: 14, opacity: 0.85 } }, activeStreak(save.daily, dateKey()) > 0 ? '🔥 Streak: ' + activeStreak(save.daily, dateKey()) + (save.daily.best > 1 ? '  ·  best ' + save.daily.best : '') : 'Answer every day to build a streak!')), h('div', { style: { fontSize: 22 } }, '▶')),
         crystals(save) >= SHIP_CRYSTALS ? h('button', { onClick: onEpilogue, style: { ...panel, display: 'block', width: '100%', textAlign: 'left', border: 'none', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit', background: 'linear-gradient(90deg,#ff6a8d,#ffb020)', color: '#2a0a1a' } }, h('div', { style: { fontSize: 12, fontWeight: 900, opacity: 0.8 } }, save.epilogue ? '🏆 MISSION COMPLETE' : '🚀 YOUR SHIP IS FULLY POWERED!'), h('div', { style: { fontSize: 19, fontWeight: 900 } }, '🎬 ' + (save.epilogue ? 'Watch the ending again' : 'Chapter 3: Going Home')), h('div', { style: { fontSize: 14, fontWeight: 700 } }, save.epilogue ? 'You can keep exploring: more secrets are coming soon.' : 'Time to file your report... and face the toaster situation.')) : null,
         LEVELS.map((l) => { const open = unlocked(save, l), s = save.levels[l.id] ? save.levels[l.id].stars : 0;
           return h('button', { key: l.id, disabled: !open, onClick: () => onLevel(l.id), style: { ...panel, display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', border: 'none', marginBottom: 10, opacity: open ? 1 : 0.5, cursor: open ? 'pointer' : 'not-allowed', fontFamily: 'inherit', borderLeft: '6px solid ' + l.color } },
@@ -422,16 +425,53 @@ function Codex({ save, onClose }) {
         : h('div', { style: { ...panel, textAlign: 'center', fontSize: 17 } }, 'Nothing here yet! Finish a level to add what you discovered.')));
 }
 
+// ---------- Daily Discovery ----------
+function DailyScreen({ save, onFinish, onClose }) {
+  const key = dateKey(), q = useRef(makeDaily(key)).current.questions, was = doneToday(save.daily, key);
+  const [i, setI] = useState(0), [picked, setPicked] = useState(-1), [score, setScore] = useState(0), [fin, setFin] = useState(false);
+  const cur = q[i];
+  const pick = (k) => { if (picked >= 0) return; snd.unlock(); setPicked(k); if (k === cur.answer) { setScore((n) => n + 1); snd.sfx.ok(); } else snd.sfx.bad(); };
+  const next = () => { snd.sfx.next(); if (i + 1 >= q.length) { setFin(true); if (!was) onFinish(); } else { setI(i + 1); setPicked(-1); } };
+  const head = h('div', { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.3)' } }, h('button', { onClick: onClose, style: { ...btn('#4a5580'), padding: '6px 12px', fontSize: 14, boxShadow: 'none' } }, '← Map'), h('div', { style: { fontWeight: 900, fontSize: 17, flex: 1 } }, '🌍 Daily Discovery'));
+  if (fin) { const st = activeStreak(applyDaily(save.daily, key), key); return h('div', { style: shell }, head, h('div', { style: { flex: 1, overflowY: 'auto', padding: 14, maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' } }, h('div', { style: { ...panel, textAlign: 'center' } }, h('div', { style: { fontSize: 30, fontWeight: 900, color: '#ffe27a' } }, score === 3 ? '🏆 Perfect!' : score >= 2 ? '🎉 Great job!' : 'Nice try!'), h('div', { style: { fontSize: 18, fontWeight: 800, margin: '6px 0' } }, score + ' / 3 correct'), h('div', { style: { fontSize: 22, fontWeight: 900, color: '#ffb86a' } }, '🔥 Streak: ' + st), h('div', { style: { opacity: 0.8, marginTop: 8 } }, was ? 'You already did today’s challenge, so your streak is unchanged. Come back tomorrow!' : 'Come back tomorrow for 3 new questions!'))), h('div', { style: { padding: 14, maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' } }, h('button', { onClick: onClose, style: { ...btn('#2fc46b'), width: '100%' } }, 'Back to Earth'))); }
+  return h('div', { style: shell }, head,
+    h('div', { style: { flex: 1, overflowY: 'auto', padding: 14, maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' } },
+      h('div', { style: { fontSize: 12, fontWeight: 800, opacity: 0.7, marginBottom: 6 } }, 'Question ' + (i + 1) + ' of ' + q.length + (was ? '  ·  practice (already counted today)' : '')),
+      h('div', { style: { ...panel, fontSize: 19, fontWeight: 800, lineHeight: 1.35, marginBottom: 12 } }, cur.q),
+      cur.choices.map((c, k) => h('button', { key: k, onClick: () => pick(k), style: { ...btn(picked < 0 ? '#3a4580' : k === cur.answer ? '#2f9a5a' : k === picked ? '#c9503a' : '#2a3560'), display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, fontSize: 17 } }, c)),
+      picked >= 0 ? h('div', { style: { ...panel, background: 'rgba(255,226,122,0.13)', border: '2px solid rgba(255,226,122,0.4)', marginTop: 4 } }, h('div', { style: { fontWeight: 900, color: picked === cur.answer ? '#8dffb0' : '#ffb3b3', marginBottom: 4 } }, picked === cur.answer ? '✅ Correct!' : '❌ Not quite.'), h('div', { style: { fontSize: 15.5, lineHeight: 1.45 } }, cur.why)) : null),
+    picked >= 0 ? h('div', { style: { padding: 14, maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' } }, h('button', { onClick: next, style: { ...btn('#2fc46b'), width: '100%' } }, i + 1 >= q.length ? 'Finish ▶' : 'Next ▶')) : null);
+}
+
+// ---------- the explorer certificate: look at it, save it, share it ----------
+async function shareCertificate(stats, showToast) {
+  try {
+    const c = document.createElement('canvas'); c.width = 900; c.height = 1200; drawCertificate(c.getContext('2d'), 900, 1200, 0, stats);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png')); const file = new File([blob], 'planet-earth-explorer.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'My Planet Earth discoveries', text: 'I am discovering how Planet Earth works! 🌍' }); }
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); if (showToast) showToast('Picture saved to your downloads'); }
+  } catch (e) { if (showToast && !(e && e.name === 'AbortError')) showToast('Could not save the picture on this device'); }
+}
+function CertScreen({ save, onClose, showToast }) {
+  const stats = certificateStats(save, activeStreak(save.daily, dateKey()));
+  return h('div', { style: shell },
+    h('div', { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.3)' } }, h('button', { onClick: onClose, style: { ...btn('#4a5580'), padding: '6px 12px', fontSize: 14, boxShadow: 'none' } }, '← Map'), h('div', { style: { fontWeight: 900, fontSize: 17, flex: 1 } }, '🏅 My certificate')),
+    h('div', { style: { flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center', padding: 10 } }, h('div', { style: { height: '100%', aspectRatio: '3 / 4', maxWidth: '100%' } }, h(CanvasView, { draw: (ctx, w, hh, tm) => drawCertificate(ctx, w, hh, tm, stats) }))),
+    h('div', { style: { padding: 12, maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' } }, h('button', { onClick: () => shareCertificate(stats, showToast), style: { ...btn('#2fc46b'), width: '100%' } }, '📤 Share or save my picture')));
+}
+
 // ---------- the whole thing ----------
 export default function PlanetEarthPage({ onBack, showToast }) {
   const [save, setSave] = useState(loadSave), [screen, setScreen] = useState(() => (loadSave().prologue ? 'hub' : 'prologue')), [levelId, setLevelId] = useState(null);
   const patch = (p) => setSave((s) => { const n = { ...s, ...p }; store(n); return n; });
-  useEffect(() => { snd.setMuted(save.mute); setVoiceMuted(save.mute); }, [save.mute]);
+  useEffect(() => { snd.setMuted(!save.sfx); setVoiceMuted(!save.voice); }, [save.sfx, save.voice]);
   const leave = () => { try { if (/^\/planet/i.test(window.location.pathname)) window.history.pushState({}, '', '/'); } catch { /* */ } if (onBack) onBack(); };
   const level = LEVELS.find((l) => l.id === levelId);
   if (screen === 'prologue') return h(Prologue, { save, onDone: (me) => { patch({ ...me, prologue: true, story: true }); setScreen('hub'); } });
   if (screen === 'epilogue') return h(Prologue, { save, scenes: EPILOGUE, title: 'Chapter 3: Going Home', onDone: () => { patch({ epilogue: true }); setScreen('hub'); } });
   if (screen === 'rename') return h(SetupScreen, { save, onDone: (me) => { patch(me); setScreen('hub'); } });
+  if (screen === 'daily') return h(DailyScreen, { save, onClose: () => setScreen('hub'), onFinish: () => patch({ daily: applyDaily(save.daily, dateKey()) }) });
+  if (screen === 'cert') return h(CertScreen, { save, showToast, onClose: () => setScreen('hub') });
   if (screen === 'codex') return h(Codex, { save, onClose: () => setScreen('hub') });
   if (screen === 'arcade') return h(Suspense, { fallback: h('div', { style: { ...shell, alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800 } }, 'Loading Glowveld…') }, h(GlowveldPage, { onBack: () => setScreen('hub'), showToast }));
   if (screen === 'level' && level) {
@@ -440,5 +480,5 @@ export default function PlanetEarthPage({ onBack, showToast }) {
       onNext: LEVELS[level.n] ? () => { setLevelId(LEVELS[level.n].id); } : null });
   }
   return h(Hub, { save, onLevel: (id) => { snd.unlock(); snd.sfx.next(); setLevelId(id); setScreen('level'); }, onArcade: () => { snd.unlock(); setScreen('arcade'); }, onCodex: () => setScreen('codex'), onBack: leave,
-    onMute: () => patch({ mute: !save.mute }), onName: () => setScreen('rename'), onStory: () => setScreen('prologue'), onEpilogue: () => { snd.unlock(); setScreen('epilogue'); } });
+    onMute: () => patch({ sfx: !save.sfx }), onVoice: () => patch({ voice: !save.voice }), onDaily: () => { snd.unlock(); setScreen('daily'); }, onCert: () => { snd.unlock(); setScreen('cert'); }, onName: () => setScreen('rename'), onStory: () => setScreen('prologue'), onEpilogue: () => { snd.unlock(); setScreen('epilogue'); } });
 }

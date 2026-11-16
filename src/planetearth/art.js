@@ -348,3 +348,23 @@ export function drawSpinLab(ctx, w, h, tm, st) {
   if (st.flight) { const f = st.flight; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); let n = 0; for (const p of f.pts) { if (p.t > st.t) break; n ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); n++; } ctx.stroke(); const last = f.pts[Math.max(0, n - 1)]; ctx.fillStyle = '#ff9a2a'; ctx.beginPath(); ctx.arc(X(last.x), Y(last.y), 7, 0, 6.3); ctx.fill(); if (st.t >= f.pts[f.pts.length - 1].t) label(ctx, f.hit ? '🎯 HIT!' : f.side > 0 ? 'Missed: it curved RIGHT' : f.side < 0 ? 'Missed: it curved LEFT' : 'Missed', cx, h * 0.07, 20, f.hit ? '#8dffb0' : '#ff9a7a'); }
   label(ctx, `Latitude ${Math.abs(st.lat).toFixed(0)}°${st.lat >= 0 ? 'N' : 'S'} · spin effect ${Math.round(Math.abs(Math.sin((st.lat * Math.PI) / 180)) * 100)}%`, cx, h - 10, 13, '#fff');
 }
+
+// ---- the explorer certificate (also exported as a picture to share) ----
+export function drawCertificate(ctx, w, h, tm, st) {
+  const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#0b1240'); g.addColorStop(1, '#2a1560'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); drawStars(ctx, w, h, tm, 110);
+  ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = Math.max(4, w * 0.012); ctx.strokeRect(w * 0.04, w * 0.04, w * 0.92, h - w * 0.08); ctx.strokeStyle = 'rgba(255,210,74,0.45)'; ctx.lineWidth = 2; ctx.strokeRect(w * 0.06, w * 0.06, w * 0.88, h - w * 0.12);
+  const U = w / 100, fit = (t, base) => Math.max(10, Math.min(base, (w * 0.86) / (t.length * 0.56)));
+  label(ctx, 'CERTIFICATE OF DISCOVERY', w / 2, h * 0.1, fit('CERTIFICATE OF DISCOVERY', U * 6.2), '#ffe27a');
+  label(ctx, 'This certifies that the alien explorer', w / 2, h * 0.15, U * 3.6, '#cfd8ff');
+  label(ctx, st.name, w / 2, h * 0.215, fit(st.name, U * 9), '#fff');
+  label(ctx, 'from Proxima b, Alpha Centauri', w / 2, h * 0.255, U * 3.6, '#cfd8ff');
+  drawAlien(ctx, w / 2, h * 0.43, w * 0.4, st.color || 0, tm, { x: 0, y: -0.3 }, st.finished ? 'happy' : 'happy');
+  label(ctx, 'has discovered how Planet Earth works', w / 2, h * 0.62, U * 3.9, '#fff');
+  const n = st.total, gw = (w * 0.8) / n; for (let i = 0; i < n; i++) { const x = w * 0.1 + gw * (i + 0.5), y = h * 0.69, r = gw * 0.34; ctx.beginPath(); ctx.moveTo(x, y - r * 1.2); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r * 1.2); ctx.lineTo(x - r, y); ctx.closePath(); if (i < st.crystals) { ctx.fillStyle = '#7fe9ff'; ctx.fill(); ctx.strokeStyle = '#fff'; } else { ctx.strokeStyle = 'rgba(255,255,255,0.35)'; } ctx.lineWidth = 2; ctx.stroke(); }
+  label(ctx, `Discovery Crystals: ${st.crystals} / ${st.total}`, w / 2, h * 0.755, U * 4.2, '#7fe9ff');
+  label(ctx, `★ ${st.stars} / ${st.maxStars} stars`, w / 2, h * 0.8, U * 4.2, '#ffd93b');
+  label(ctx, st.heart, w / 2, h * 0.855, fit(st.heart, U * 3.6), '#ffb3c8');
+  if (st.streak > 0) label(ctx, `🔥 Daily streak: ${st.streak}`, w / 2, h * 0.9, U * 3.8, '#ffb86a');
+  if (st.finished) { ctx.save(); ctx.translate(w * 0.8, h * 0.12); ctx.rotate(0.25); ctx.fillStyle = '#ff4b6a'; ctx.fillRect(-w * 0.17, -w * 0.045, w * 0.34, w * 0.09); label(ctx, 'MISSION COMPLETE', 0, U * 1.4, U * 3.4, '#fff'); ctx.restore(); }
+  label(ctx, 'www.weafrica.co.za/planetearth', w / 2, h * 0.955, U * 3.2, 'rgba(255,255,255,0.8)');
+}
