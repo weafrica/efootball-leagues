@@ -97,7 +97,7 @@ export default async function handler(req, res) {
   };
   try {
     const [products, variants, images, departments, productDepts] = await Promise.all([
-      get("shop_products?active=eq.true&select=id,name,description,price,compare_at_price,stock_qty,image_url,department_id&order=created_at.desc&limit=5000"),
+      get("shop_products?active=eq.true&exclude_from_catalogue=eq.false&select=id,name,description,price,compare_at_price,stock_qty,image_url,department_id&order=created_at.desc&limit=5000"),
       get("shop_product_variants?active=eq.true&select=id,product_id,name,price,stock_qty,position&limit=10000"),
       get("shop_product_images?select=product_id,url,position&limit=20000"),
       get("shop_departments?select=id,name"),

@@ -436,7 +436,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -1959,6 +1959,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     }
     const hasVariants = (extras.variants || []).length > 0;
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
+      exclude_from_catalogue: !!form.exclude_from_catalogue,
       personalisable: !!form.personalisable, personalise_label: form.personalisable ? ((form.personalise_label || "").trim() || null) : null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
@@ -2070,7 +2071,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
-                {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}
+                {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
                 {(() => {
                   const ds = productDepts(p).filter((id) => deptById.has(id));
                   const cs = productCats(p).filter((id) => catById.has(id));
@@ -2101,6 +2102,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [deptIds, setDeptIds] = useState(productDepts(product));
   const [catIds, setCatIds] = useState(productCats(product));
   const [removerSource, setRemoverSource] = useState(null); // { kind: "main" | number (index in newImages), source }
+  const [excludeCatalogue, setExcludeCatalogue] = useState(!!product.exclude_from_catalogue);
   const [personalisable, setPersonalisable] = useState(!!product.personalisable);
   const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
@@ -2138,7 +2140,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2242,6 +2244,9 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               </div>
             );
           })}
+          <label className="font-body text-sm flex items-center gap-2" data-testid="catalogue-toggle">
+            <input type="checkbox" checked={excludeCatalogue} onChange={(e) => setExcludeCatalogue(e.target.checked)} /> Exclude from Facebook / Instagram catalogue
+          </label>
           <div data-testid="personalise-admin">
             <label className="font-body text-sm flex items-center gap-2"><input type="checkbox" checked={personalisable} onChange={(e) => setPersonalisable(e.target.checked)} /> Shoppers can personalise this item (name, number, print or embroidery wording)</label>
             {personalisable && <input value={personaliseLabel} onChange={(e) => setPersonaliseLabel(e.target.value)} placeholder="Label shown to shoppers, e.g. Name and number for the back" aria-label="Personalisation label" maxLength={80}

@@ -7,7 +7,8 @@ import { ChevronDown, ChevronUp, Copy, ExternalLink } from "lucide-react";
 export default function CatalogueFeedPanel({ products, photosOf, showToast, c }) {
   const [open, setOpen] = useState(false);
   const url = `${window.location.origin}/shop-feed.xml`;
-  const live = (products || []).filter((p) => p.active);
+  const live = (products || []).filter((p) => p.active && !p.exclude_from_catalogue);
+  const left = (products || []).filter((p) => p.active && p.exclude_from_catalogue).length;
   const noPhoto = live.filter((p) => photosOf(p).length === 0);
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); showToast("Feed link copied."); }
@@ -32,9 +33,9 @@ export default function CatalogueFeedPanel({ products, photosOf, showToast, c })
             <li>Choose "Scheduled feed", paste the link above, set it to update daily and the currency to ZAR.</li>
             <li>Save. Meta shows how many items it imported and flags any problems.</li>
           </ol>
-          <p><b style={{ color: c.text }}>{live.length - noPhoto.length}</b> of {live.length} live product{live.length === 1 ? "" : "s"} will be included.
+          <p><b style={{ color: c.text }}>{live.length - noPhoto.length}</b> of {live.length} product{live.length === 1 ? "" : "s"} will be included.{left > 0 && <> {left} you excluded in the product editor {left === 1 ? "is" : "are"} left out.</>}
             {noPhoto.length > 0 && <> Meta needs a photo on every item, so these are left out until they get one: {noPhoto.slice(0, 5).map((p) => p.name).join(", ")}{noPhoto.length > 5 ? ` and ${noPhoto.length - 5} more` : ""}.</>}
-            {" "}Products with sizes or colours appear once per option. Hidden products are never included.</p>
+            {" "}Products with sizes or colours appear once per option. Hidden products are never included. To keep one out, tick "Exclude from Facebook / Instagram catalogue" when editing it.</p>
         </div>
       )}
     </div>
