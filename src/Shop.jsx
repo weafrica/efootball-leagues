@@ -10,6 +10,7 @@ import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./
 import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, latestReturn, returnIsOpen } from "./ShopReturns.jsx";
 import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
+import { searchProducts, suggestWord } from "./ShopSearch.js";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
@@ -747,7 +748,9 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
   }
 
   const q = query.trim().toLowerCase();
-  let searchable = q ? products.filter((p) => p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)) : products;
+  const deptNameOf = (p) => departments.find((d) => d.id === p.department_id)?.name || "";
+  const searched = q ? searchProducts(products, q, deptNameOf) : products;
+  let searchable = searched;
   if (inStockOnly) searchable = searchable.filter((p) => p.stock_qty !== 0);
   if (sort === "price_asc") searchable = [...searchable].sort((a, b) => a.price - b.price);
   else if (sort === "price_desc") searchable = [...searchable].sort((a, b) => b.price - a.price);
@@ -920,7 +923,7 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
 
       {currentItems.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 text-center font-body mt-2" style={{ borderColor: c.borderStrong, color: c.textDim }}>
-          {q ? `Nothing matching "${query}".` : "Nothing here yet."}
+          {q ? <>Nothing matching "{query}".{(() => { const w = suggestWord(products, q); return w ? <> Did you mean <button onClick={() => setQuery(w)} className="underline font-semibold" style={{ color: c.text }}>{w}</button>?</> : null; })()}</> : "Nothing here yet."}
         </div>
       ) : selected === "all" ? (
         <div className="space-y-6 mt-1">
