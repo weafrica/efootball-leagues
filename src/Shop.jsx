@@ -2244,9 +2244,6 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               </div>
             );
           })}
-          <label className="font-body text-sm flex items-center gap-2" data-testid="catalogue-toggle">
-            <input type="checkbox" checked={excludeCatalogue} onChange={(e) => setExcludeCatalogue(e.target.checked)} /> Exclude from Facebook / Instagram catalogue
-          </label>
           <div data-testid="personalise-admin">
             <label className="font-body text-sm flex items-center gap-2"><input type="checkbox" checked={personalisable} onChange={(e) => setPersonalisable(e.target.checked)} /> Shoppers can personalise this item (name, number, print or embroidery wording)</label>
             {personalisable && <input value={personaliseLabel} onChange={(e) => setPersonaliseLabel(e.target.value)} placeholder="Label shown to shoppers, e.g. Name and number for the back" aria-label="Personalisation label" maxLength={80}
@@ -2300,6 +2297,13 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               {active && <CheckCircle2 size={11} color={c.accentText} strokeWidth={3} />}
             </span>
             <span className="font-body text-xs" style={{ color: c.textDim }}>Visible in the shop</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer select-none" data-testid="catalogue-toggle">
+            <span className="relative w-4 h-4 shrink-0 rounded flex items-center justify-center" style={{ background: excludeCatalogue ? c.accent : "transparent", border: `1px solid ${excludeCatalogue ? c.accent : c.borderStrong}` }}>
+              <input type="checkbox" checked={excludeCatalogue} onChange={(e) => setExcludeCatalogue(e.target.checked)} className="absolute inset-0 opacity-0 cursor-pointer" />
+              {excludeCatalogue && <CheckCircle2 size={11} color={c.accentText} strokeWidth={3} />}
+            </span>
+            <span className="font-body text-xs" style={{ color: c.textDim }}>Exclude from Facebook / Instagram catalogue</span>
           </label>
           <button onClick={submit} disabled={saving || !name.trim() || !price} className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: saving ? 0.6 : 1 }}>
             {saving ? "Saving..." : "Save product"}
