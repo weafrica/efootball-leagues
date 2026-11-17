@@ -116,7 +116,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price), shop_return_requests(id, status, reason, admin_note, created_at)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price, personalisation), shop_return_requests(id, status, reason, admin_note, created_at)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -435,7 +435,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -491,14 +491,14 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
   const visibleProducts = isAdmin ? (products || []) : (products || []).filter((p) => p.active);
 
-  const addToCart = (product, qty, variant = null) => {
+  const addToCart = (product, qty, variant = null, personalisation = "") => {
     const vid = variant?.id || null;
     setCart((prev) => {
       const key = `${product.id}:${vid || ""}`;
       const existing = prev.find((it) => lineKey(it) === key);
       const cap = (variant ? variant.stock_qty : product.stock_qty) ?? 99;
-      if (existing) return prev.map((it) => lineKey(it) === key ? { ...it, qty: Math.min(it.qty + qty, cap) } : it);
-      return [...prev, { productId: product.id, variantId: vid, variantName: variant?.name || null, name: product.name, price: product.price, image_url: product.image_url, qty: Math.min(qty, cap) }];
+      if (existing) return prev.map((it) => lineKey(it) === key ? { ...it, qty: Math.min(it.qty + qty, cap), personalisation: personalisation || it.personalisation || "" } : it);
+      return [...prev, { productId: product.id, variantId: vid, variantName: variant?.name || null, name: product.name, price: product.price, image_url: product.image_url, qty: Math.min(qty, cap), personalisation: product.personalisable ? personalisation : "" }];
     });
     showToast(`Added ${product.name}${variant ? ` (${variant.name})` : ""} to cart.`);
   };
@@ -646,7 +646,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal key={activeProduct.id} product={activeProduct} related={relatedProducts(activeProduct, products)} onOpenRelated={setActiveProduct} onClose={shopGoBack} onAdd={(qty, variant) => { addToCart(activeProduct, qty, variant); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
+        <ProductModal key={activeProduct.id} product={activeProduct} related={relatedProducts(activeProduct, products)} onOpenRelated={setActiveProduct} onClose={shopGoBack} onAdd={(qty, variant, text) => { addToCart(activeProduct, qty, variant, text); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
           session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth} showToast={showToast} onRatingsChanged={loadProducts} c={c} />
       )}
 
@@ -1267,6 +1267,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
   const [qty, setQty] = useState(1);
   const variants = activeVariants(product);
   const [variantId, setVariantId] = useState(null);
+  const [personal, setPersonal] = useState("");
   const [photoIdx, setPhotoIdx] = useState(0);
   const variant = variants.find((v) => v.id === variantId) || null;
   const photos = productPhotos(product);
@@ -1343,12 +1344,20 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
             </>
           ) : (
             <>
+              {product.personalisable && (
+                <div className="mt-4" data-testid="personalise">
+                  <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>{product.personalise_label || "Personalise (name, number or wording)"} <span style={{ color: c.textFaint, fontWeight: 400 }}>optional</span></label>
+                  <textarea value={personal} onChange={(e) => setPersonal(e.target.value.slice(0, 200))} rows={2} maxLength={200} placeholder="e.g. THABO 10" aria-label="Personalisation"
+                    className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+                  <p className="font-body text-[11px] mt-1" style={{ color: c.textFaint }}>Buying more than one? Write each name or number here.</p>
+                </div>
+              )}
               <div className="flex items-center justify-center gap-4 mt-4">
                 <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Minus size={14} /></button>
                 <span className="font-mono font-bold text-base w-6 text-center">{qty}</span>
                 <button onClick={() => setQty((q) => Math.min(cap || 99, q + 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Plus size={14} /></button>
               </div>
-              <button onClick={() => onAdd(qty, variant)} disabled={variants.length > 0 && !variant}
+              <button onClick={() => onAdd(qty, variant, personal.trim())} disabled={variants.length > 0 && !variant}
                 className="w-full mt-4 font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: variants.length > 0 && !variant ? 0.5 : 1 }}>
                 {variants.length > 0 && !variant ? "Choose an option" : `Add to cart · ${formatMoney(unit * qty)}`}
               </button>
@@ -1407,6 +1416,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-body text-xs font-semibold truncate">{it.name}</div>
+                  {it.personalisation && <div className="font-body text-[11px] truncate" style={{ color: c.textDim }}>Personalised: {it.personalisation}</div>}
                   <div className="font-mono text-xs" style={{ color: SHOP_GOLD }}>{formatMoney(it.price)}{it.price < it.listPrice && <span className="ml-1.5 line-through" style={{ color: c.textFaint }}>{formatMoney(it.listPrice)}</span>}</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1476,7 +1486,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     guestFolderId.current = (crypto.randomUUID ? crypto.randomUUID() : `guest-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   }
 
-  const orderLines = () => cart.map((it) => `${it.qty}x ${it.name} — ${formatMoney(it.qty * it.price)}`).join("\n");
+  const orderLines = () => cart.map((it) => `${it.qty}x ${it.name} — ${formatMoney(it.qty * it.price)}${it.personalisation ? ` [${it.personalisation}]` : ""}`).join("\n");
 
   const missingGuestName = !session && !guestName.trim();
   // Guests need some way to find their order again: a phone number or email.
@@ -1487,7 +1497,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   // { order } or { error }.
   const placeOrder = async (checkoutMethod, proofPath) => {
     const { data, error } = await supabase.rpc("place_shop_order", {
-      p_items: cart.map((it) => ({ product_id: it.productId, variant_id: it.variantId || null, qty: it.qty })),
+      p_items: cart.map((it) => ({ product_id: it.productId, variant_id: it.variantId || null, qty: it.qty, personalisation: it.personalisation || null })),
       p_method: checkoutMethod,
       p_buyer_name: buyerUsername,
       p_phone: contactPhone.trim() || null,
@@ -1804,7 +1814,7 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
           <div className="font-body text-xs mb-3" style={{ color: c.textFaint }}>Placed {new Date(result.created_at).toLocaleDateString()}</div>
           {(result.items || []).map((it, i) => (
             <div key={i} className="font-body text-sm flex items-center justify-between" style={{ color: c.textDim }}>
-              <span>{it.qty}x {it.product_name}</span>
+              <span>{it.qty}x {it.product_name}{it.personalisation && <span className="block text-xs" style={{ color: c.textFaint }}>Personalised: {it.personalisation}</span>}</span>
               <span>{formatMoney(it.qty * it.unit_price)}</span>
             </div>
           ))}
@@ -1878,7 +1888,7 @@ function MyOrders({ orders, business, eftDetails, onChanged, c }) {
               </div>
               {(o.shop_order_items || []).map((it) => (
                 <div key={it.id} className="font-body text-xs flex items-center justify-between" style={{ color: c.textDim }}>
-                  <span>{it.qty}x {it.product_name}</span>
+                  <span>{it.qty}x {it.product_name}{it.personalisation && <span className="block" style={{ color: c.text }} data-testid="item-personalisation"><b>Personalised:</b> {it.personalisation}</span>}</span>
                   <span>{formatMoney(it.qty * it.unit_price)}</span>
                 </div>
               ))}
@@ -1945,6 +1955,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     }
     const hasVariants = (extras.variants || []).length > 0;
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
+      personalisable: !!form.personalisable, personalise_label: form.personalisable ? ((form.personalise_label || "").trim() || null) : null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
     let error;
@@ -2084,6 +2095,8 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [deptIds, setDeptIds] = useState(productDepts(product));
   const [catIds, setCatIds] = useState(productCats(product));
   const [removerSource, setRemoverSource] = useState(null); // { kind: "main" | number (index in newImages), source }
+  const [personalisable, setPersonalisable] = useState(!!product.personalisable);
+  const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
   const [lengthCm, setLengthCm] = useState(product.length_cm ?? "");
   const [widthCm, setWidthCm] = useState(product.width_cm ?? "");
@@ -2119,7 +2132,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2223,6 +2236,11 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               </div>
             );
           })}
+          <div data-testid="personalise-admin">
+            <label className="font-body text-sm flex items-center gap-2"><input type="checkbox" checked={personalisable} onChange={(e) => setPersonalisable(e.target.checked)} /> Shoppers can personalise this item (name, number, print or embroidery wording)</label>
+            {personalisable && <input value={personaliseLabel} onChange={(e) => setPersonaliseLabel(e.target.value)} placeholder="Label shown to shoppers, e.g. Name and number for the back" aria-label="Personalisation label" maxLength={80}
+              className="w-full border rounded-lg px-3 py-2 mt-2 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />}
+          </div>
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Parcel weight and size (for delivery)</label>
             <div className="grid grid-cols-4 gap-2">
@@ -2879,7 +2897,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
               </div>
               {(o.shop_order_items || []).map((it) => (
                 <div key={it.id} className="font-body text-xs flex items-center justify-between" style={{ color: c.textDim }}>
-                  <span>{it.qty}x {it.product_name}</span>
+                  <span>{it.qty}x {it.product_name}{it.personalisation && <span className="block" style={{ color: c.text }} data-testid="item-personalisation"><b>Personalised:</b> {it.personalisation}</span>}</span>
                   <span>{formatMoney(it.qty * it.unit_price)}</span>
                 </div>
               ))}

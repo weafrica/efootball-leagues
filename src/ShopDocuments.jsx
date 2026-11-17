@@ -36,7 +36,7 @@ const DELIVERY_NAMES = { collection: "Collection", courier: "Courier delivery", 
 // the admin list, and the guest tracking lookup).
 export function normalizeOrder(o, paidAt = null) {
   const items = (o.shop_order_items || o.items || []).map((it) => ({
-    name: it.product_name, qty: Number(it.qty), unit: Number(it.unit_price),
+    name: it.product_name, qty: Number(it.qty), unit: Number(it.unit_price), personalisation: it.personalisation || "",
   }));
   return {
     number: o.order_number,
@@ -170,7 +170,7 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
           <tbody>
             {o.items.map((it, i) => (
               <tr key={i}>
-                <td style={cell}>{it.name}</td>
+                <td style={cell}>{it.name}{it.personalisation && <div data-testid="doc-personalisation" style={{ fontSize: isPacking ? 14 : 11, fontWeight: isPacking ? 800 : 400, color: isPacking ? "#111" : "#555", marginTop: 2 }}>Personalise: {it.personalisation}</div>}</td>
                 <td style={{ ...cell, textAlign: "right", fontWeight: isPacking ? 700 : 400 }}>{it.qty}</td>
                 {isPacking ? <td style={{ ...cell, textAlign: "center" }}><span style={{ display: "inline-block", width: 16, height: 16, border: "1.5px solid #333", borderRadius: 3 }} /></td> : <>
                 <td style={{ ...cell, textAlign: "right" }}>{money(it.unit)}</td>
