@@ -3,6 +3,7 @@
     { "source": "/ludo", "destination": "/ludo/", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/shop-feed.xml", "destination": "/api/shop-feed" },
     { "source": "/shop", "destination": "/api/shop-link" },
     { "source": "/shop/:id", "destination": "/api/shop-link?id=:id" },
     { "source": "/shop-app", "destination": "/shop-app/index.html" },

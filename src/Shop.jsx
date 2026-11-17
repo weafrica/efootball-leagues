@@ -10,6 +10,7 @@ import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./
 import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, latestReturn, returnIsOpen } from "./ShopReturns.jsx";
 import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
+import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
@@ -2054,6 +2055,8 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       <button onClick={() => setEditing({})} className="w-full mb-4 font-body text-sm font-semibold py-2.5 rounded-full flex items-center justify-center gap-1.5" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
         <Plus size={15} /> Add product
       </button>
+
+      <CatalogueFeedPanel products={products} photosOf={productPhotos} showToast={showToast} c={c} />
 
       <div className="space-y-1.5">
         {filtered.map((p) => (
