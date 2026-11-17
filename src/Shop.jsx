@@ -117,7 +117,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_name, unit_price, personalisation), shop_return_requests(id, status, reason, admin_note, created_at)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_id, variant_id, product_name, unit_price, personalisation), shop_return_requests(id, status, reason, admin_note, created_at)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -503,6 +503,28 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     });
     showToast(`Added ${product.name}${variant ? ` (${variant.name})` : ""} to cart.`);
   };
+  // Puts a past order's items back in the cart, using today's prices and
+  // stock. Anything that is gone, hidden or sold out is skipped and counted.
+  const buyAgain = (order) => {
+    let added = 0, skipped = 0;
+    (order.shop_order_items || []).forEach((it) => {
+      const p = (products || []).find((x) => x.id === it.product_id);
+      if (!p || !p.active) { skipped += 1; return; }
+      const vs = activeVariants(p);
+      let variant = null;
+      if (vs.length) {
+        variant = vs.find((v) => v.id === it.variant_id) || null;
+        if (!variant) { skipped += 1; return; }
+      }
+      const stock = variant ? variant.stock_qty : p.stock_qty;
+      if (stock !== null && stock !== undefined && stock <= 0) { skipped += 1; return; }
+      addToCart(p, Math.min(it.qty, stock ?? it.qty), variant, p.personalisable ? (it.personalisation || "") : "");
+      added += 1;
+    });
+    if (added === 0) { showToast("Those items aren't available right now."); return; }
+    showToast(skipped ? `Added ${added} item${added === 1 ? "" : "s"} to your cart. ${skipped} ${skipped === 1 ? "is" : "are"} no longer available.` : `Added ${added} item${added === 1 ? "" : "s"} to your cart.`);
+    setSubview("cart");
+  };
   const updateQty = (key, qty) => {
     setCart((prev) => qty <= 0 ? prev.filter((it) => lineKey(it) !== key) : prev.map((it) => lineKey(it) === key ? { ...it, qty } : it));
   };
@@ -633,7 +655,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} business={business} eftDetails={eftDetails} c={c} />}
 
-      {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} onChanged={loadMyOrders} c={c} />}
+      {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} onChanged={loadMyOrders} onBuyAgain={buyAgain} c={c} />}
 
       {subview === "admin-products" && isAdmin && (
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} onOpenSales={() => setSubview("admin-sales")} requestConfirm={requestConfirm} c={c} />
@@ -1751,13 +1773,16 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
 
 // Invoice / receipt buttons for an order. Nothing is owed or paid on rejected,
 // cancelled or refunded orders, so they get none; a receipt needs a paid order.
-function DocButtons({ status, onOpen, packing = false, c }) {
+function DocButtons({ status, onOpen, packing = false, hasLabel = false, c }) {
   if (NO_DOCUMENT_STATUSES.includes(status)) return null;
   const btn = { background: c.surfaceHover, color: c.text };
   return (
     <>
       {packing && ["paid", "packed", "shipped"].includes(status) && (
         <button onClick={() => onOpen("packing")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Packing slip</button>
+      )}
+      {packing && hasLabel && ["paid", "packed", "shipped"].includes(status) && (
+        <button onClick={() => onOpen("label")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Shipping label</button>
       )}
       <button onClick={() => onOpen("invoice")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Invoice</button>
       {RECEIPT_STATUSES.includes(status) && (
@@ -1867,7 +1892,7 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
   );
 }
 
-function MyOrders({ orders, business, eftDetails, onChanged, c }) {
+function MyOrders({ orders, business, eftDetails, onChanged, onBuyAgain, c }) {
   const [doc, setDoc] = useState(null);
   if (orders === null) return <Spinner c={c} />;
   const openDoc = async (o, kind) => {
@@ -1905,7 +1930,12 @@ function MyOrders({ orders, business, eftDetails, onChanged, c }) {
               </div>
               {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
               {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
-              <div className="flex items-center gap-1.5 mt-2 flex-wrap"><DocButtons status={o.status} onOpen={(kind) => openDoc(o, kind)} c={c} /></div>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                <DocButtons status={o.status} onOpen={(kind) => openDoc(o, kind)} c={c} />
+                {onBuyAgain && (o.shop_order_items || []).some((it) => it.product_id) && (
+                  <button onClick={() => onBuyAgain(o)} data-testid="buy-again" className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: c.surfaceHover, color: c.text }}><ShoppingCart size={12} /> Buy again</button>
+                )}
+              </div>
               <ReturnStatus ret={latestReturn(o.shop_return_requests)} c={c} />
               {RETURNABLE_STATUSES.includes(o.status) && (!latestReturn(o.shop_return_requests) || latestReturn(o.shop_return_requests).status === "rejected") && (
                 <RequestReturn orderNumber={o.order_number} contact={o.buyer_email || o.contact_phone || ""} onDone={() => onChanged && onChanged()} c={c} />
@@ -2938,7 +2968,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 {o.payment_proof_path && (
                   <button onClick={() => viewProof(o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
                 )}
-                <DocButtons status={o.status} c={c} packing
+                <DocButtons status={o.status} c={c} packing hasLabel={!!o.delivery_method && o.delivery_method !== "collection"}
                   onOpen={async (kind) => setDoc({ order: normalizeOrder(o, kind === "receipt" ? await fetchPaidAt(o.id) : null), kind })} />
                 <MessageCustomerButton order={o} business={business} templates={templates} c={c} />
                 {actionsFor(o).map(([status, label, tone]) => (

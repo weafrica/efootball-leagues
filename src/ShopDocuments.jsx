@@ -80,12 +80,13 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
   const o = order;
   const isReceipt = kind === "receipt";
   const isPacking = kind === "packing";
+  const isLabel = kind === "label";
   const paid = RECEIPT_STATUSES.includes(o.status);
   const total = Math.max(0, o.subtotal - o.discount) + o.deliveryFee;
   const rate = Number(b.vat_rate) || 15;
   const vatIncluded = b.vat_registered ? (total * rate) / (100 + rate) : 0;
-  const title = isPacking ? "Packing slip" : isReceipt ? "Payment receipt" : (b.vat_registered ? "Tax invoice" : "Invoice");
-  const docNumber = `${isPacking ? "PKG" : isReceipt ? "REC" : "INV"}-${String(o.number || "").replace(/^WA-/, "")}`;
+  const title = isLabel ? "Shipping label" : isPacking ? "Packing slip" : isReceipt ? "Payment receipt" : (b.vat_registered ? "Tax invoice" : "Invoice");
+  const docNumber = `${isLabel ? "LBL" : isPacking ? "PKG" : isReceipt ? "REC" : "INV"}-${String(o.number || "").replace(/^WA-/, "")}`;
   const addr = o.deliveryAddress || {};
   const addrLine = [addr.street, addr.suburb, addr.city, addr.province, addr.postal_code].filter(Boolean).join(", ");
 
@@ -107,7 +108,7 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
           #order-doc-portal { position: static !important; background: #fff !important; overflow: visible !important; }
           #order-doc-portal .no-print { display: none !important; }
           #order-doc-paper { box-shadow: none !important; margin: 0 !important; max-width: none !important; padding: 0 !important; }
-          @page { size: A4; margin: 14mm; }
+          @page { size: ${isLabel ? "105mm 148mm" : "A4"}; margin: ${isLabel ? "6mm" : "14mm"}; }
         }
       `}</style>
       <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-2.5" style={{ background: "#111", color: "#fff" }}>
@@ -121,7 +122,8 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
       </div>
 
       <div id="order-doc-paper" data-testid="order-doc" className="mx-auto my-4 bg-white shadow-xl"
-        style={{ maxWidth: 760, padding: "28px 26px", color: "#111", fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" }}>
+        style={{ maxWidth: isLabel ? 400 : 760, padding: isLabel ? "18px 16px" : "28px 26px", color: "#111", fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" }}>
+        {isLabel ? <ShippingLabel o={o} b={b} addrLine={addrLine} /> : <>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800 }}>{b.name}</div>
@@ -221,9 +223,43 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
         <div style={{ marginTop: 28, paddingTop: 12, borderTop: "1px solid #e5e5e5", fontSize: 11, color: "#666" }}>
           Thank you for shopping with {b.name}.{b.footer_note ? ` ${b.footer_note}` : ""}
         </div>
+        </>}
       </div>
     </div>,
     document.body,
+  );
+}
+
+// A6 parcel label: who it goes to (big), who it's from, the order number and
+// any courier waybill. Print it and stick it on the parcel.
+function ShippingLabel({ o, b, addrLine }) {
+  const dest = addrLine || o.deliveryPoint;
+  const parts = o.items.reduce((n, it) => n + it.qty, 0);
+  return (
+    <div data-testid="shipping-label" style={{ border: "2px solid #111", borderRadius: 6, padding: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#555" }}>From</div>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>{b.name}</div>
+      {b.address && <div style={{ fontSize: 11, whiteSpace: "pre-line", color: "#333" }}>{b.address}</div>}
+      {b.phone && <div style={{ fontSize: 11, color: "#333" }}>{b.phone}</div>}
+      <div style={{ borderTop: "2px dashed #111", margin: "12px 0" }} />
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#555" }}>Deliver to</div>
+      <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1, marginTop: 2 }}>{o.buyerName || "Customer"}</div>
+      {o.buyerPhone && <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>{o.buyerPhone}</div>}
+      {dest && <div style={{ fontSize: 15, marginTop: 6, lineHeight: 1.3 }}>{dest}</div>}
+      {o.deliveryMethod && <div style={{ fontSize: 12, marginTop: 6, fontWeight: 600 }}>{DELIVERY_NAMES[o.deliveryMethod] || o.deliveryMethod}</div>}
+      <div style={{ borderTop: "2px dashed #111", margin: "12px 0" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#555" }}>Order</div>
+          <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "ui-monospace, Menlo, monospace" }}>{o.number}</div>
+        </div>
+        <div style={{ textAlign: "right", fontSize: 11 }}>
+          <div>{parts} item{parts === 1 ? "" : "s"}</div>
+          {(o.courierName || o.trackingNumber) && <div style={{ fontWeight: 700 }}>{[o.courierName, o.trackingNumber].filter(Boolean).join(" · ")}</div>}
+        </div>
+      </div>
+      {o.deliveryNote && <div style={{ marginTop: 8, fontSize: 11, color: "#333" }}>Note: {o.deliveryNote}</div>}
+    </div>
   );
 }
 
