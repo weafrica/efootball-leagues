@@ -3901,6 +3901,7 @@ export default function App() {
   const [ladderChallengeOpen, setLadderChallengeOpen] = useState(false); // the "who can I challenge" sheet
   const [confirmFlow, setConfirmFlow] = useState(null); // { steps: string[], step: number, action: () => void }
   const [authPrompt, setAuthPrompt] = useState(null); // reason string, shown in the "sign in to continue" modal for guests
+  const [authFromShop, setAuthFromShop] = useState(false); // the prompt was opened from inside the shop, so sign-in should return there
   // True when the page was opened at plain /shop (the shop's front door, e.g.
   // www.weafrica.co.za/shop) — read once at load, URL left as-is.
   const [shopHomeLink] = useState(() => /^\/shop\/?$/.test(window.location.pathname));
@@ -8639,12 +8640,12 @@ export default function App() {
       <>
         <PublicHome c={c} theme={theme} toggleTheme={toggleTheme} accentKey={accentKey} setAccent={setAccent}
           onSignIn={(stay, fromShop) => signInWithGoogle(stay, fromShop)}
-          onRequireAuth={(reason) => setAuthPrompt(reason)}
+          onRequireAuth={(reason, fromShop) => { setAuthFromShop(!!fromShop); setAuthPrompt(reason); }}
           initialShopProductId={shopDeepLinkProductId} startInShop={shopHomeLink} />
         {authPrompt && (
           <AuthPromptModal reason={authPrompt} c={c}
             onCancel={() => { try { localStorage.removeItem(CREATE_LEAGUE_SIGNIN_KEY); } catch (e) { /* ignore */ } setAuthPrompt(null); }}
-            onSignIn={(stay) => signInWithGoogle(stay)} />
+            onSignIn={(stay) => signInWithGoogle(stay, authFromShop)} />
         )}
         {/* No app-install nag on the guest/landing page — appPromoOpen is
             gated on `session` above and can never be true here. A visitor
@@ -9383,7 +9384,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
               // opened from a /shop link, put the address back to the plain site too.
               setShopOpen(false);
               try { if (window.location.pathname.startsWith("/shop")) window.history.replaceState(window.history.state, "", "/"); } catch (e) { /* ignore */ }
-            }} onRequireAuth={onRequireAuth} initialProductId={initialShopProductId} />
+            }} onRequireAuth={(reason) => onRequireAuth(reason, true)} initialProductId={initialShopProductId} />
           </Suspense>
         ) : ludoOpen ? (
           <Suspense fallback={<Loader c={c} />}>

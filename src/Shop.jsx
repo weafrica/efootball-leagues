@@ -581,7 +581,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
               </div>
             ) : null;
           })()}
-          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
+          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null} signedIn={!!session}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
             onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
         </>
@@ -720,7 +720,7 @@ function flattenCategoryTree(categories, parentId = null, depth = 0) {
 //  - search that narrows within whichever department is selected
 //  - "All" groups products into a section per department, like walking
 //    the floor; a specific department (or a search) shows just its grid
-function DepartmentBrowser({ products, departments, categories, loading, selected, setSelected, catPath, setCatPath, onOpen, onQuickAdd, c }) {
+function DepartmentBrowser({ products, departments, categories, loading, signedIn = false, selected, setSelected, catPath, setCatPath, onOpen, onQuickAdd, c }) {
   const [catFilter, setCatFilter] = useState("all"); // "all" | "direct" — within the current tree level
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
@@ -808,8 +808,11 @@ function DepartmentBrowser({ products, departments, categories, loading, selecte
       {/* The same big banner as the login page, on top of the shop home. */}
       {selected === "all" && !query.trim() && (
         <div className="-mt-1 mb-5">
-          <ShopHeroBanner c={c} cta="Start shopping"
-            onOpen={() => document.getElementById("shop-search")?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+          <ShopHeroBanner c={c} cta={signedIn ? "Go through the department you want" : "Start shopping"}
+            tagline={signedIn ? "Welcome back. Pick a department below to start." : undefined}
+            onOpen={() => (signedIn && document.getElementById("shop-departments")
+              ? document.getElementById("shop-departments")
+              : document.getElementById("shop-search"))?.scrollIntoView({ behavior: "smooth", block: "center" })} />
         </div>
       )}
       {/* Search leads: it is the fastest way to a product. */}
@@ -994,7 +997,7 @@ function DepartmentStrip({ groups, onSelect, deptNum, c }) {
     return () => { cancelAnimationFrame(raf); evs.forEach((e) => el.removeEventListener(e, onUser)); el.style.scrollSnapType = ""; };
   }, [groups.length]);
   return (
-    <section className="mb-6" aria-label="Shop by department">
+    <section id="shop-departments" className="mb-6" aria-label="Shop by department">
       <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">Shop by department</h2>
       <div ref={stripRef} className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
         {groups.map(({ dept, items }) => {

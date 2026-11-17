@@ -132,7 +132,7 @@ export function BouncingProducts() {
 // Same gold store identity as ShopBanner (SHOP_GOLD) but much larger and
 // title-led, so the shop is the first thing a visitor sees. The whole card
 // is the tap target; open to guests, no account needed.
-export function ShopHeroBanner({ onOpen, c, cta = "Shop now" }) {
+export function ShopHeroBanner({ onOpen, c, cta = "Shop now", tagline = "Kits, jerseys & gear — open to everyone, no account needed." }) {
   return (
     <section onClick={onOpen} role="button" tabIndex={0} aria-label={`Open ${SHOP_NAME}`}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
@@ -148,7 +148,7 @@ export function ShopHeroBanner({ onOpen, c, cta = "Shop now" }) {
         <div className="font-extrabold uppercase tracking-tight leading-[0.95] text-[2.6rem] sm:text-6xl" style={{ color: c.text }}>
           WeAfrica<br /><span style={{ color: SHOP_GOLD }}>Shop</span>
         </div>
-        <p className="font-body text-sm sm:text-base mt-3 max-w-xs" style={{ color: c.textDim }}>Kits, jerseys & gear — open to everyone, no account needed.</p>
+        <p className="font-body text-sm sm:text-base mt-3 max-w-xs" style={{ color: c.textDim }}>{tagline}</p>
         <span className="inline-flex items-center gap-2 mt-5 font-body text-sm font-bold px-6 py-3 rounded-full shadow-lg" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
           {cta} <ChevronRight size={16} />
         </span>
