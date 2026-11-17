@@ -54,6 +54,9 @@ export function normalizeOrder(o, paidAt = null) {
     deliveryMethod: o.delivery_method || null,
     deliveryAddress: o.delivery_address || null,
     deliveryPoint: o.delivery_point || "",
+    deliveryNote: o.delivery_note || "",
+    courierName: o.courier_name || "",
+    trackingNumber: o.tracking_number || "",
     paidAt,
   };
 }
@@ -76,12 +79,13 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
   const b = business || DEFAULT_BUSINESS;
   const o = order;
   const isReceipt = kind === "receipt";
+  const isPacking = kind === "packing";
   const paid = RECEIPT_STATUSES.includes(o.status);
   const total = Math.max(0, o.subtotal - o.discount) + o.deliveryFee;
   const rate = Number(b.vat_rate) || 15;
   const vatIncluded = b.vat_registered ? (total * rate) / (100 + rate) : 0;
-  const title = isReceipt ? "Payment receipt" : (b.vat_registered ? "Tax invoice" : "Invoice");
-  const docNumber = `${isReceipt ? "REC" : "INV"}-${String(o.number || "").replace(/^WA-/, "")}`;
+  const title = isPacking ? "Packing slip" : isReceipt ? "Payment receipt" : (b.vat_registered ? "Tax invoice" : "Invoice");
+  const docNumber = `${isPacking ? "PKG" : isReceipt ? "REC" : "INV"}-${String(o.number || "").replace(/^WA-/, "")}`;
   const addr = o.deliveryAddress || {};
   const addrLine = [addr.street, addr.suburb, addr.city, addr.province, addr.postal_code].filter(Boolean).join(", ");
 
@@ -132,14 +136,14 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
             <div style={{ fontSize: 13, marginTop: 4 }}><b>{docNumber}</b></div>
             <div style={{ fontSize: 12, color: "#444" }}>Order {o.number}</div>
             <div style={{ fontSize: 12, color: "#444" }}>
-              {isReceipt ? `Date paid: ${fmtDate(o.paidAt || o.createdAt)}` : `Date: ${fmtDate(o.createdAt)}`}
+              {isReceipt ? `Date paid: ${fmtDate(o.paidAt || o.createdAt)}` : `Date: ${fmtDate(isPacking ? new Date().toISOString() : o.createdAt)}`}
             </div>
           </div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginTop: 22 }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#777", marginBottom: 3 }}>Billed to</div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#777", marginBottom: 3 }}>{isPacking ? "Ship to" : "Billed to"}</div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{o.buyerName || "Customer"}</div>
             {o.buyerPhone && <div style={{ fontSize: 12, color: "#444" }}>{o.buyerPhone}</div>}
             {o.buyerEmail && <div style={{ fontSize: 12, color: "#444" }}>{o.buyerEmail}</div>}
@@ -158,22 +162,36 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
             <tr style={{ background: "#f3f0e6" }}>
               <th style={{ ...cell, textAlign: "left", fontSize: 11, textTransform: "uppercase" }}>Description</th>
               <th style={{ ...cell, textAlign: "right", fontSize: 11, textTransform: "uppercase" }}>Qty</th>
+              {isPacking ? <th style={{ ...cell, textAlign: "center", fontSize: 11, textTransform: "uppercase", width: 60 }}>Packed</th> : <>
               <th style={{ ...cell, textAlign: "right", fontSize: 11, textTransform: "uppercase" }}>Unit price</th>
-              <th style={{ ...cell, textAlign: "right", fontSize: 11, textTransform: "uppercase" }}>Amount</th>
+              <th style={{ ...cell, textAlign: "right", fontSize: 11, textTransform: "uppercase" }}>Amount</th></>}
             </tr>
           </thead>
           <tbody>
             {o.items.map((it, i) => (
               <tr key={i}>
                 <td style={cell}>{it.name}</td>
-                <td style={{ ...cell, textAlign: "right" }}>{it.qty}</td>
+                <td style={{ ...cell, textAlign: "right", fontWeight: isPacking ? 700 : 400 }}>{it.qty}</td>
+                {isPacking ? <td style={{ ...cell, textAlign: "center" }}><span style={{ display: "inline-block", width: 16, height: 16, border: "1.5px solid #333", borderRadius: 3 }} /></td> : <>
                 <td style={{ ...cell, textAlign: "right" }}>{money(it.unit)}</td>
-                <td style={{ ...cell, textAlign: "right" }}>{money(it.qty * it.unit)}</td>
+                <td style={{ ...cell, textAlign: "right" }}>{money(it.qty * it.unit)}</td></>}
               </tr>
             ))}
           </tbody>
         </table>
 
+        {isPacking && (
+          <div data-testid="packing-extra" style={{ marginTop: 18, fontSize: 13 }}>
+            <div><b>Total items:</b> {o.items.reduce((n, it) => n + it.qty, 0)}</div>
+            {(o.courierName || o.trackingNumber) && <div style={{ marginTop: 4 }}><b>Courier:</b> {[o.courierName, o.trackingNumber && `waybill ${o.trackingNumber}`].filter(Boolean).join(" · ")}</div>}
+            {o.deliveryNote && <div style={{ marginTop: 8, padding: "8px 10px", background: "#f7f7f4", borderRadius: 8 }}><b>Customer note:</b> {o.deliveryNote}</div>}
+            <div style={{ marginTop: 22, display: "flex", gap: 40, fontSize: 12, color: "#444" }}>
+              <span>Packed by: ____________________</span><span>Date: ______________</span>
+            </div>
+          </div>
+        )}
+
+        {!isPacking && <>
         <div style={{ marginLeft: "auto", width: 280, marginTop: 14, fontSize: 13 }}>
           <Row label="Subtotal" value={money(o.subtotal)} />
           {o.discount > 0 && <Row label={`Discount${o.discountCode ? ` (${o.discountCode})` : ""}`} value={`-${money(o.discount)}`} />}
@@ -197,6 +215,8 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
             )
           )}
         </div>
+
+        </>}
 
         <div style={{ marginTop: 28, paddingTop: 12, borderTop: "1px solid #e5e5e5", fontSize: 11, color: "#666" }}>
           Thank you for shopping with {b.name}.{b.footer_note ? ` ${b.footer_note}` : ""}

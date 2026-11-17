@@ -137,6 +137,8 @@ function buildProductLink(product) {
 function loadCart() {
   try { return JSON.parse(localStorage.getItem(CART_KEY)) || []; } catch { return []; }
 }
+const RECENT_KEY = "weafrica_shop_recent";
+
 function persistCart(items) {
   try { localStorage.setItem(CART_KEY, JSON.stringify(items)); } catch { /* storage unavailable */ }
 }
@@ -230,6 +232,20 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [categories, setCategories] = useState(null);
   const [cart, setCart] = useState(loadCart);
   const [activeProduct, setActiveProduct] = useState(null);
+  // Product ids this shopper opened lately (newest first), kept on this
+  // device only. Powers the "Recently viewed" row on the shop home.
+  const [recentIds, setRecentIds] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string" || typeof x === "number").slice(0, 12) : []; } catch { return []; }
+  });
+  useEffect(() => {
+    const id = activeProduct?.id;
+    if (id == null) return;
+    setRecentIds((prev) => {
+      const next = [id, ...prev.filter((x) => x !== id)].slice(0, 12);
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+  }, [activeProduct]);
   const [myOrders, setMyOrders] = useState(null);
   const [lastOrderNumber, setLastOrderNumber] = useState(null);
   const [eftDetails, setEftDetails] = useState("");
@@ -554,6 +570,15 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
             <h1 className="text-[1.75rem] font-extrabold tracking-tight leading-none">WeAfrica Shop</h1>
             <p className="font-body text-sm mt-1.5" style={{ color: c.textDim }}>Clothing, bags, gear, toys and more. Order in minutes, no account needed.</p>
           </div>
+          {shopDept === "all" && shopCatPath.length === 0 && (() => {
+            const byId = new Map(visibleProducts.map((p) => [p.id, p]));
+            const recent = recentIds.map((id) => byId.get(id)).filter((p) => p && p.id !== activeProduct?.id).slice(0, 8);
+            return recent.length > 0 ? (
+              <div data-testid="recently-viewed">
+                <NewArrivals title="Recently viewed" products={recent} onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
+              </div>
+            ) : null;
+          })()}
           <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
             onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
@@ -612,7 +637,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         <AdminProducts products={products} departments={departments || []} categories={categories || []} onReload={loadProducts} onReloadDepartments={loadDepartments} onReloadCategories={loadCategories} showToast={showToast} onOpenOrders={() => setSubview("admin-orders")} onOpenSales={() => setSubview("admin-sales")} requestConfirm={requestConfirm} c={c} />
       )}
       {subview === "admin-sales" && isTeam && (
-        <AdminSales products={products || []} isAdmin={isAdmin} onOpenOrders={() => setSubview("admin-orders")} onOpenProducts={() => setSubview("admin-products")} showToast={showToast} c={c} />
+        <AdminSales products={products || []} departments={departments || []} isAdmin={isAdmin} onOpenOrders={() => setSubview("admin-orders")} onOpenProducts={() => setSubview("admin-products")} showToast={showToast} c={c} />
       )}
 
       {subview === "admin-orders" && isTeam && (
@@ -987,10 +1012,10 @@ function DepartmentStrip({ groups, onSelect, deptNum, c }) {
 }
 
 // Newest products across every department, as a swipeable row.
-function NewArrivals({ products, onOpen, onQuickAdd, c }) {
+function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }) {
   return (
-    <section className="mb-7" aria-label="New arrivals">
-      <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">New arrivals</h2>
+    <section className="mb-7" aria-label={title}>
+      <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">{title}</h2>
       <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
         {products.map((p) => {
           const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0;
@@ -1709,11 +1734,14 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
 
 // Invoice / receipt buttons for an order. Nothing is owed or paid on rejected,
 // cancelled or refunded orders, so they get none; a receipt needs a paid order.
-function DocButtons({ status, onOpen, c }) {
+function DocButtons({ status, onOpen, packing = false, c }) {
   if (NO_DOCUMENT_STATUSES.includes(status)) return null;
   const btn = { background: c.surfaceHover, color: c.text };
   return (
     <>
+      {packing && ["paid", "packed", "shipped"].includes(status) && (
+        <button onClick={() => onOpen("packing")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Packing slip</button>
+      )}
       <button onClick={() => onOpen("invoice")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Invoice</button>
       {RECEIPT_STATUSES.includes(status) && (
         <button onClick={() => onOpen("receipt")} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={btn}><FileText size={12} /> Receipt</button>
@@ -2874,7 +2902,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 {o.payment_proof_path && (
                   <button onClick={() => viewProof(o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surfaceHover, color: c.text }}>View proof</button>
                 )}
-                <DocButtons status={o.status} c={c}
+                <DocButtons status={o.status} c={c} packing
                   onOpen={async (kind) => setDoc({ order: normalizeOrder(o, kind === "receipt" ? await fetchPaidAt(o.id) : null), kind })} />
                 <MessageCustomerButton order={o} business={business} templates={templates} c={c} />
                 {actionsFor(o).map(([status, label, tone]) => (

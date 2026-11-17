@@ -51,7 +51,7 @@ export function lowStockItems(products, threshold) {
   return out.sort((a, b) => a.qty - b.qty);
 }
 
-export default function AdminSales({ products, isAdmin = true, onOpenOrders, onOpenProducts, showToast, c }) {
+export default function AdminSales({ products, departments = [], isAdmin = true, onOpenOrders, onOpenProducts, showToast, c }) {
   const [orders, setOrders] = useState(null);
   const [tab, setTab] = useState("overview");
   const [period, setPeriod] = useState("30");
@@ -83,15 +83,26 @@ export default function AdminSales({ products, isAdmin = true, onOpenOrders, onO
       const k = i.product_name; const e = byProduct[k] || (byProduct[k] = { name: k, units: 0, revenue: 0 });
       e.units += i.qty; e.revenue += i.qty * Number(i.unit_price || 0);
     }));
+    // Paid revenue per department. Order lines only keep the product's name,
+    // so we match back to today's catalogue; anything unmatched is "Other".
+    const deptOf = new Map((products || []).map((pr) => [pr.name, pr.department_id]));
+    const deptName = new Map((departments || []).map((d) => [d.id, d.name]));
+    const byDept = {};
+    Object.values(byProduct).forEach((e) => {
+      const name = deptName.get(deptOf.get(e.name)) || "Other";
+      const d = byDept[name] || (byDept[name] = { name, units: 0, revenue: 0 });
+      d.units += e.units; d.revenue += e.revenue;
+    });
+    const depts = Object.values(byDept).sort((a, b) => b.revenue - a.revenue);
     const top = Object.values(byProduct).sort((a, b) => b.units - a.units || b.revenue - a.revenue).slice(0, 5);
     // Last 14 days of paid revenue.
     const days = [];
     for (let i = 13; i >= 0; i--) days.push({ date: startOfDay(new Date(Date.now() - i * 86400000)), key: "", value: 0 });
     days.forEach((d) => { d.key = dayKey(d.date); });
     orders.filter((o) => RECEIPT_STATUSES.includes(o.status)).forEach((o) => { const d = days.find((x) => x.key === dayKey(o.created_at)); if (d) d.value += orderTotal(o); });
-    return { inPeriod, sold, awaiting, revenue, discounts, top, days, avg: sold.length ? revenue / sold.length : 0,
+    return { inPeriod, sold, awaiting, revenue, discounts, top, depts, days, avg: sold.length ? revenue / sold.length : 0,
       awaitingValue: awaiting.reduce((s, o) => s + orderTotal(o), 0) };
-  }, [orders, period]);
+  }, [orders, period, products, departments]);
 
   const low = useMemo(() => lowStockItems(products, threshold), [products, threshold]);
 
@@ -168,6 +179,20 @@ export default function AdminSales({ products, isAdmin = true, onOpenOrders, onO
                   </li>
                 ))}
               </ol>
+            )}
+          </div>
+
+          <div className="rounded-xl p-3 mt-4" style={card}>
+            <div className="font-body text-xs font-semibold mb-2" style={{ color: c.textDim }}>Sales by department</div>
+            {stats.depts.length === 0 ? <div className="font-body text-xs" style={{ color: c.textDim }}>No paid orders in this period.</div> : (
+              <ul className="space-y-2" data-testid="by-dept">
+                {stats.depts.map((d) => (
+                  <li key={d.name} className="font-body text-sm">
+                    <div className="flex items-center justify-between gap-2"><span className="truncate">{d.name}</span><span className="shrink-0 font-mono text-xs" style={{ color: c.textDim }}>{d.units} sold · {money0(d.revenue)}</span></div>
+                    <div className="h-1.5 rounded mt-1" style={{ background: c.border }}><div className="h-full rounded" style={{ width: `${Math.max(3, (d.revenue / Math.max(1, stats.depts[0].revenue)) * 100)}%`, background: GOLD }} /></div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </>
