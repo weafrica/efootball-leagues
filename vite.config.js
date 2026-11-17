@@ -18,6 +18,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         shop: resolve(__dirname, "shop-app/index.html"),
+        stories: resolve(__dirname, "stories/index.html"),
         ludo: resolve(__dirname, "ludo/index.html"),
       },
     },

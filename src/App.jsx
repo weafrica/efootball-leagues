@@ -8791,7 +8791,7 @@ export default function App() {
     { icon: PlanetEarthIcon, label: "Planet Earth", tourId: "qa-planetearth", onClick: () => { setView("planetearth"); try { window.history.pushState({}, "", "/planetearth"); } catch (e) { /* ignore */ } } },
     { icon: Gamepad2, label: "Ludo", onClick: openLudoApp },
     { icon: BookOpen, label: "Language Learning", onClick: () => setView("sesothoMatch") },
-    { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => setView("stories") },
+    { icon: Gamepad2, label: "Stories", tourId: "qa-stories", onClick: () => window.location.assign("/stories/") }, // standalone Stories app
     { icon: Shuffle, label: "Random", tourId: "qa-random", badge: grabbableCount || null, onClick: openChallengesScreen },
     { icon: TrendingUp, label: "Ladder", onClick: openLadderScreen },
     { icon: Trophy, label: "Leaderboard", onClick: () => setView("leaderboard") },
@@ -9432,7 +9432,7 @@ function PublicHome({ c, theme, toggleTheme, accentKey, setAccent, onSignIn, onR
           <GuestMenuTile icon={Dice5} label="Ludo" onClick={openLudoApp} c={c} />
           <GuestMenuTile icon={PlanetEarthIcon} label="Planet Earth" onClick={() => setGuestApp("planetearth")} c={c} />
           <GuestMenuTile icon={BookOpen} label="Language Learning" onClick={() => setGuestApp("sesothoMatch")} c={c} />
-          <GuestMenuTile icon={Volume2} label="Stories" onClick={() => setGuestApp("stories")} c={c} />
+          <GuestMenuTile icon={Volume2} label="Stories" external onClick={() => window.location.assign("/stories/")} c={c} />
           <GuestMenuTile icon={Plus} label="New league" locked onClick={() => { try { localStorage.setItem(CREATE_LEAGUE_SIGNIN_KEY, "1"); } catch (e) { /* ignore */ } onRequireAuth("Sign in to create your own league."); }} c={c} />
         </section>
 

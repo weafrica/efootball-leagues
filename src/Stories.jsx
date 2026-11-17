@@ -3,6 +3,8 @@ import { ArrowLeft, Play, Globe, RotateCcw, Volume2, VolumeX, Download } from "l
 import { supabase } from "./supabaseClient";
 import Stage from "./Stage.jsx";
 import PenaltyGame from "./PenaltyGame.jsx";
+import ReadAlong from "./ReadAlong.jsx";
+import { StoriesHome } from "./StoriesHome.jsx";
 
 // Pre-generated narration (Piper TTS, synthesized offline — see
 // synthesize_story.py / upload_story_audio.py) lives as plain files in
@@ -141,7 +143,7 @@ function languageLabel(code) {
   return LANGUAGE_LABELS[code] || code.toUpperCase();
 }
 
-export default function StoriesPage({ session, showToast, onBack, c }) {
+export default function StoriesPage({ session, showToast, onBack, c, standalone = false }) {
   // Guests (session == null) can listen and play; progress just isn't saved.
   const userId = session?.user?.id || null;
   const [stories, setStories] = useState(null); // null = loading
@@ -585,9 +587,10 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
           <Stage node={node} playerPose={node.scene?.pose} accentColor={c.accent} playerId={content.graph.player || "player"} />
         </div>
         <div className="rounded-2xl p-5 mb-4" style={{ background: c.surface, border: `1px solid ${c.border}` }}>
-          <p className="text-base leading-relaxed text-center">
-            {node.lines ? node.lines.map((l) => l.text).join(" ") : node.text}
-          </p>
+          {/* Green read-along: the line being narrated is softly highlighted and
+              the word being spoken is solid green (see ReadAlong.jsx). With
+              narration off, or no audio for this page, it's plain text. */}
+          <ReadAlong node={node} nodeKey={`${activeStory.id}/${language}/${nodeId}`} audioRef={audioRef} enabled={narrationOn} c={c} />
         </div>
         {node.minigame === "penalty" ? (
           <PenaltyGame c={c} onResult={(result) => {
@@ -639,6 +642,11 @@ export default function StoriesPage({ session, showToast, onBack, c }) {
   }
 
   // List screen
+  // The standalone Stories app (src/StoriesApp.jsx, served at /stories/) has
+  // its own homepage; the in-Matchday version keeps the compact list below.
+  if (standalone) {
+    return <StoriesHome stories={stories} progressByStory={progressByStory} openStory={openStory} session={session} audiobookBase={AUDIOBOOK_BASE} onMatchday={onBack} c={c} />;
+  }
   return (
     <div className="max-w-md mx-auto pt-6">
       <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-semibold mb-4" style={{ color: c.textDim }}>

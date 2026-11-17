@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>WeAfrica Stories</title>
+    <meta name="description" content="Short stories where you make the choices. Listen to every page, follow the words as they light up, and play in your own language." />
+    <meta property="og:title" content="WeAfrica Stories" />
+    <meta property="og:description" content="Read it, hear it, play it. Stories narrated by a full cast, in your language." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/stories/icon-512.png" />
+
+    <!-- Standalone Stories PWA, served at /stories/ (weafrica.co.za/stories
+         once the domain points at this deployment). Same origin and same
+         Supabase account as the main Matchday app, but its own manifest/id/
+         scope so it installs as a separate app with its own icon and opens
+         straight into Stories. Modelled on shop-app/index.html.
+         Entry: src/stories-main.jsx -> src/StoriesApp.jsx (does NOT import
+         App.jsx, so Stories doesn't download the whole league app). -->
+    <link rel="manifest" href="/stories/manifest.webmanifest" />
+    <meta name="theme-color" content="#0B1F17" />
+    <link rel="icon" type="image/png" href="/stories/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/stories/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Stories" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/stories-main.jsx"></script>
+  </body>
+</html>
