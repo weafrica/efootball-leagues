@@ -7,6 +7,7 @@ import { supabase } from "./supabaseClient";
 
 const GOLD = "#D4A017";
 const rand = (n) => `R${Number(n || 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const QUOTE_LINK_BASE = "https://weafrica.co.za/shop";
 const STATUS = { new: "New", quoted: "Quoted", ordered: "Ordered", closed: "Closed" };
 
 export function QuoteRequestForm({ product, session, profile, c }) {
@@ -146,7 +147,7 @@ function QuoteRow({ r, isAdmin, business, showToast, onChanged, onOrderCreated, 
     onChanged();
   };
   const text = r.quote_amount
-    ? `Hi ${r.buyer_name}, here is your quote ${r.ref} from ${business?.name || "WeAfrica Shop"}: ${r.qty} x ${r.product_name} = ${rand(r.quote_amount)}.${r.admin_note ? ` ${r.admin_note.trim().replace(/[.!?]*$/, ".")}` : ""} Reply YES to go ahead.`
+    ? `Hi ${r.buyer_name}, here is your quote ${r.ref} from ${business?.name || "WeAfrica Shop"}: ${r.qty} x ${r.product_name} = ${rand(r.quote_amount)}.${r.admin_note ? ` ${r.admin_note.trim().replace(/[.!?]*$/, ".")}` : ""} You can see and accept it online: ${QUOTE_LINK_BASE}?quote=${r.ref} (use this phone number or email to open it). Or reply YES to go ahead.`
     : `Hi ${r.buyer_name}, thanks for your request ${r.ref} for ${r.qty} x ${r.product_name}. We're working on your quote and will send it shortly.`;
   const wa = waNumber(r.contact_phone);
   const link = wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}`
@@ -180,6 +181,110 @@ function QuoteRow({ r, isAdmin, business, showToast, onChanged, onOrderCreated, 
           : <button onClick={() => update({ status: r.quote_amount ? "quoted" : "new" }, `${r.ref} reopened.`)} disabled={busy} className="underline">Reopen</button>}
         {isAdmin && <button onClick={remove} aria-label={`Delete ${r.ref}`} className="ml-auto"><Trash2 size={13} style={{ color: c.red }} /></button>}
       </div>
+    </div>
+  );
+}
+
+// Customer side: look up a quote with its reference plus the phone or email
+// given when asking, then accept it. Accepting creates a normal order that
+// then waits for payment.
+export function QuoteLookup({ initialRef, eftDetails, onAccepted, onTrack, c }) {
+  const [ref, setRef] = useState(initialRef || "");
+  const [contact, setContact] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [quote, setQuote] = useState(undefined); // undefined = not searched, null = not found
+  const [error, setError] = useState("");
+  const [placed, setPlaced] = useState(null); // { order_number, total }
+  const input = "w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none";
+  const style = { background: c.surface, borderColor: c.border, color: c.text };
+  const ready = ref.trim() && contact.trim();
+
+  const find = async (e) => {
+    e && e.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true); setError(""); setPlaced(null);
+    const { data, error: err } = await supabase.rpc("lookup_shop_quote", { p_ref: ref, p_contact: contact });
+    setBusy(false);
+    setQuote(err ? null : data);
+  };
+  const accept = async () => {
+    if (!window.confirm(`Accept this quote for ${rand(quote.quote_amount)}? We'll create your order and you can pay.`)) return;
+    setBusy(true); setError("");
+    const { data, error: err } = await supabase.rpc("accept_shop_quote", { p_ref: ref, p_contact: contact });
+    setBusy(false);
+    if (err) { setError(err.message || "Couldn't accept the quote."); return; }
+    setPlaced(data); onAccepted && onAccepted(data.order_number);
+  };
+
+  return (
+    <div data-testid="quote-lookup">
+      <div className="flex items-center gap-2 mb-1.5">
+        <FileText size={20} style={{ color: GOLD }} />
+        <h1 className="text-2xl font-extrabold tracking-tight leading-none">Your quote</h1>
+      </div>
+      <p className="font-body text-sm mb-5" style={{ color: c.textDim }}>Enter your quote reference and the phone number or email you gave when you asked for it.</p>
+      <form onSubmit={find} className="space-y-3 mb-5">
+        <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="QT-1001" aria-label="Quote reference" autoCapitalize="characters" className={input} style={style} />
+        <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone number or email" aria-label="Phone or email" className={input} style={style} />
+        <button type="submit" disabled={busy || !ready} className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: GOLD, color: "#1a1200", opacity: busy || !ready ? 0.6 : 1 }}>
+          {busy && !placed ? "Looking…" : "Find my quote"}
+        </button>
+      </form>
+
+      {quote === null && <div className="font-body text-sm text-center py-4" style={{ color: c.textDim }}>We couldn't find that quote. Check the reference and the phone or email you used.</div>}
+
+      {quote && !placed && (
+        <div className="rounded-xl p-4 border font-body" style={{ background: c.surface, borderColor: c.border }} data-testid="quote-card">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono font-bold text-base" style={{ color: GOLD }}>{quote.ref}</span>
+            <span className="text-xs font-semibold" style={{ color: c.textDim }}>{STATUS[quote.status]}</span>
+          </div>
+          <div className="font-semibold text-sm mt-1.5">{quote.qty} x {quote.product_name}</div>
+          <div className="text-xs mt-1 whitespace-pre-wrap break-words" style={{ color: c.textDim }}>{quote.details}</div>
+          {quote.status === "new" && <div className="text-sm mt-3" style={{ color: c.textDim }}>We're still working on your price. We'll message you as soon as it's ready.</div>}
+          {quote.status === "closed" && <div className="text-sm mt-3" style={{ color: c.textDim }}>This quote has been closed. Message us if you'd still like it.</div>}
+          {(quote.status === "quoted" || quote.status === "ordered") && quote.quote_amount > 0 && (
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: c.border }}>
+              <div className="text-xs" style={{ color: c.textDim }}>Our price</div>
+              <div className="font-mono text-2xl font-bold" style={{ color: c.text }} data-testid="quote-price">{rand(quote.quote_amount)}</div>
+              {quote.admin_note && <div className="text-xs mt-1" style={{ color: c.textDim }}>{quote.admin_note}</div>}
+            </div>
+          )}
+          {quote.status === "quoted" && quote.quote_amount > 0 && (
+            <>
+              {error && <div role="alert" className="text-xs mt-3" style={{ color: c.red }}>{error}</div>}
+              <button onClick={accept} disabled={busy} data-testid="accept-quote" className="w-full mt-3 font-body text-sm font-semibold py-3 rounded-full" style={{ background: GOLD, color: "#1a1200", opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Working…" : `Accept quote · ${rand(quote.quote_amount)}`}
+              </button>
+              <div className="text-[11px] text-center mt-2" style={{ color: c.textFaint }}>Nothing is charged until you pay. Questions? Reply to our message.</div>
+            </>
+          )}
+          {quote.status === "ordered" && (
+            <div className="mt-3 text-sm" style={{ color: c.greenText }}>
+              Order <b className="font-mono">{quote.order_number}</b> was created from this quote.
+              {onTrack && <button onClick={onTrack} className="block underline mt-1.5" style={{ color: c.text }}>Track this order</button>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {placed && (
+        <div className="rounded-xl p-4 border font-body text-center" style={{ background: c.surface, borderColor: c.border }} data-testid="quote-accepted">
+          <CheckCircle2 size={30} className="mx-auto mb-2" style={{ color: c.greenText }} />
+          <div className="font-bold text-base">Quote accepted</div>
+          <div className="text-xs mt-2" style={{ color: c.textFaint }}>Your order number</div>
+          <div className="font-mono text-xl font-bold" style={{ color: GOLD }}>{placed.order_number}</div>
+          <div className="text-sm mt-1">Total {rand(placed.total)}</div>
+          {eftDetails ? (
+            <div className="text-left text-xs mt-3 rounded-lg p-3 whitespace-pre-line" style={{ background: c.bg, color: c.textDim }}>
+              <div className="font-semibold mb-1" style={{ color: c.text }}>How to pay</div>
+              {eftDetails.replace(/Reference:.*$/im, `Reference: ${placed.order_number}`)}
+            </div>
+          ) : <p className="text-xs mt-3" style={{ color: c.textDim }}>We'll send you the payment details on WhatsApp.</p>}
+          <p className="text-xs mt-3" style={{ color: c.textDim }}>Send your proof of payment to us, quoting the order number. We start once it's confirmed.</p>
+          {onTrack && <button onClick={onTrack} className="mt-3 text-sm font-semibold underline">Track my order</button>}
+        </div>
+      )}
     </div>
   );
 }

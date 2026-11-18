@@ -11,7 +11,7 @@ import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, lat
 import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
 import OrderNotes from "./ShopOrderNotes.jsx";
-import { QuoteRequestForm, QuotesPanel } from "./ShopQuotes.jsx";
+import { QuoteRequestForm, QuotesPanel, QuoteLookup } from "./ShopQuotes.jsx";
 import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
@@ -232,7 +232,9 @@ function ConfirmStepModal({ flow, onCancel, onAdvance, c }) {
 }
 
 export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequireAuth, initialProductId }) {
-  const [subview, setSubview] = useState(() => (window.history.state?.shopNav ? window.history.state.shopSubview : null) || "browse");
+  // A link like weafrica.co.za/shop?quote=QT-1001 opens the customer's quote screen.
+  const [quoteRef] = useState(() => { try { return (new URLSearchParams(window.location.search).get("quote") || "").slice(0, 20).toUpperCase(); } catch { return ""; } });
+  const [subview, setSubview] = useState(() => (window.history.state?.shopNav ? window.history.state.shopSubview : null) || (quoteRef ? "quote" : "browse"));
   const [products, setProducts] = useState(null);
   const [departments, setDepartments] = useState(null);
   const [categories, setCategories] = useState(null);
@@ -658,7 +660,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         </div>
       )}
 
-      {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} business={business} eftDetails={eftDetails} c={c} />}
+      {subview === "track" && <TrackOrder initialNumber={lastOrderNumber || ""} business={business} eftDetails={eftDetails} onOpenQuote={() => setSubview("quote")} c={c} />}
+      {subview === "quote" && <QuoteLookup initialRef={quoteRef} eftDetails={eftDetails} onAccepted={(n) => setLastOrderNumber(n)} onTrack={() => setSubview("track")} c={c} />}
 
       {subview === "my-orders" && <MyOrders orders={myOrders} business={business} eftDetails={eftDetails} onChanged={loadMyOrders} onBuyAgain={buyAgain} c={c} />}
 
@@ -1812,7 +1815,7 @@ function DocButtons({ status, onOpen, packing = false, hasLabel = false, c }) {
   );
 }
 
-function TrackOrder({ initialNumber, business, eftDetails, c }) {
+function TrackOrder({ initialNumber, business, eftDetails, onOpenQuote, c }) {
   const [doc, setDoc] = useState(null);
   const [number, setNumber] = useState(initialNumber || "");
   const [contact, setContact] = useState("");
@@ -1848,6 +1851,7 @@ function TrackOrder({ initialNumber, business, eftDetails, c }) {
           style={{ background: SHOP_GOLD, color: "#1a1200", opacity: (busy || !number.trim() || !contact.trim()) ? 0.6 : 1 }}>
           {busy ? "Looking..." : "Find my order"}
         </button>
+        {onOpenQuote && <button type="button" onClick={onOpenQuote} className="w-full font-body text-xs underline pt-1" style={{ color: c.textDim }}>Asked for a quote? Look it up here</button>}
       </form>
       {result === null && (
         <div className="border border-dashed rounded-xl p-5 text-center font-body text-sm" style={{ borderColor: c.borderStrong, color: c.textDim }}>
