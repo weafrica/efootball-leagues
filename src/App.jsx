@@ -1682,11 +1682,35 @@ const LEAGUE_DETAIL_ONLY_KEYS = ["comments", "ladder_cup_walkover_claims", "ladd
 // ladder-cup sub-tables the instant it landed, even though the player is
 // looking right at that data. If `existing` has no `_detailLoadedAt` yet,
 // there's nothing to protect — the summary row is returned as-is.
+// LEAGUE_SUMMARY_SELECT now fetches a few FEWER columns on these two
+// collections than LEAGUE_SELECT (the full per-league shape) does — see the
+// comment above LEAGUE_FIXTURES_SUMMARY_COLUMNS in App.jsx. They're listed
+// here so a summary refresh landing on an already-open league merges row by
+// row (fresh values win, columns only the detail shape carries are kept)
+// instead of replacing the whole array with the narrower rows.
+const LEAGUE_NARROWED_ROW_KEYS = ["fixtures", "members"];
+
 function mergeSummaryPreservingDetail(existing, summaryRow) {
   if (!existing?._detailLoadedAt) return summaryRow;
   const preserved = {};
   LEAGUE_DETAIL_ONLY_KEYS.forEach((key) => { preserved[key] = existing[key]; });
-  return { ...summaryRow, ...preserved, _detailLoadedAt: existing._detailLoadedAt };
+  const mergedRows = {};
+  let sawUnknownRow = false;
+  LEAGUE_NARROWED_ROW_KEYS.forEach((key) => {
+    const prevById = new Map((existing[key] || []).map((r) => [r.id, r]));
+    mergedRows[key] = (summaryRow[key] || []).map((row) => {
+      const prev = prevById.get(row.id);
+      if (!prev) { sawUnknownRow = true; return row; }
+      return { ...prev, ...row };
+    });
+  });
+  const merged = { ...summaryRow, ...preserved, ...mergedRows, _detailLoadedAt: existing._detailLoadedAt };
+  // A row that's brand new in this refresh only exists in its narrow form.
+  // Dropping the marker makes the open-league effect fetch the full detail
+  // again (and any later refresh use the summary shape), so a detail screen
+  // never ends up holding a mix of full and narrow rows for long.
+  if (sawUnknownRow) delete merged._detailLoadedAt;
+  return merged;
 }
 
 export function computeStandings(teams, fixtures, league) {
@@ -4107,9 +4131,16 @@ export default function App() {
   // result_submissions check, LeagueReactionBar's compact reaction bar,
   // computeMyUpcomingFixtures/computeMyProgress's fixtures scan, the
   // platform-wide Leaderboard/season/head-to-head passes), so teams,
-  // fixtures, members, ladder_cup_entries and ladder_cup_matches stay
-  // full-width — audited and genuinely touched Home-wide, narrowing them
+  // ladder_cup_entries and ladder_cup_matches stay full-width — audited and
+  // genuinely touched Home-wide (ladder_cup_entries' status also decides who
+  // gets crowned champion, so it must never be missing), narrowing them
   // would just break those screens.
+  // fixtures and members are narrowed, but ONLY by columns a full-codebase
+  // audit found are never read by any screen or handler (see
+  // LEAGUE_FIXTURES_SUMMARY_COLUMNS / LEAGUE_MEMBERS_SUMMARY_COLUMNS below).
+  // Everything else on those two tables — including pens_home/pens_away/leg/
+  // starts_at, which computeStandings and the knockout logic read for EVERY
+  // league — is deliberately kept.
   // Three collections are confirmed read *only* through a single
   // already-open league object (`activeLeague.X` / `league.X` inside a
   // click/action handler) and never via a `(leagues || []).forEach`-style
@@ -4118,10 +4149,28 @@ export default function App() {
   // `comments`, they're also unbounded/fast-growing for a long-running
   // Ladder Cup, so they're the ones split out of the bulk load and fetched
   // lazily instead, per opened league, via LEAGUE_DETAIL_SELECT below.
-  const LEAGUE_SUMMARY_SELECT =
-    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
+  // Every column EXCEPT: fixtures.ladder_points_home_at_report,
+  // ladder_points_away_at_report, contact_made_at (never referenced anywhere)
+  // — measured ~157 KB of the bulk load. A column added to either table later
+  // must be added to these lists too if anything reads it from the Home-level
+  // (summary) shape; the full per-league shape (LEAGUE_SELECT) still uses (*)
+  // so a newly added column always reaches the screen that opens a league.
+  const LEAGUE_FIXTURES_SUMMARY_COLUMNS =
+    "id, league_id, round, home_team_id, away_team_id, played, home_score, away_score, stage, due_at, leg, played_at, pens_home, pens_away, starts_at, forfeited";
+  // Every column EXCEPT: members.phone (never read — team/opponent/profile
+  // phones are separate), joined_at, payment_reviewed_at, payment_reviewed_by
+  // (the last two are only ever written). payment_proof_path and
+  // wa_reminder_due_at are kept even though only the open league's admin row
+  // reads them: the screen renders from this shape for a moment before the
+  // full detail arrives, and dropping them would flash that row wrong.
+  const LEAGUE_MEMBERS_SUMMARY_COLUMNS =
+    "id, league_id, user_id, display_name, team_id, entry_fee, payment_status, payment_proof_path, wa_reminder_due_at";
+  const LEAGUE_SELECT_SHARED_TAIL =
     "result_submissions(id, fixture_id, status, created_at, submitted_by, submitted_by_username, photo_path, home_score, away_score, pens_home, pens_away), " +
     "league_reactions(id, user_id, reaction)";
+  const LEAGUE_SUMMARY_SELECT =
+    "*, teams!teams_league_id_fkey(*), fixtures(" + LEAGUE_FIXTURES_SUMMARY_COLUMNS + "), members(" + LEAGUE_MEMBERS_SUMMARY_COLUMNS + "), ladder_cup_entries(*), ladder_cup_matches(*), " +
+    LEAGUE_SELECT_SHARED_TAIL;
 
   const LEAGUE_COMMENTS_SELECT =
     "id, league_id, parent_comment_id, user_id, username, body, created_at, photo_url, is_result, voice_url, voice_duration, fixture_id, ladder_cup_match_id, " +
@@ -4135,8 +4184,12 @@ export default function App() {
   // mergeSummaryPreservingDetail) is the list of object keys this adds on
   // top of the summary shape — keep the two in sync if this select string
   // changes.
+  // Deliberately NOT built from LEAGUE_SUMMARY_SELECT any more: it spells out
+  // the same wide (*) tables the summary used to, so opening a league fetches
+  // exactly what it always did even though the bulk load is narrower.
   const LEAGUE_SELECT =
-    LEAGUE_SUMMARY_SELECT +
+    "*, teams!teams_league_id_fkey(*), fixtures(*), members(*), ladder_cup_entries(*), ladder_cup_matches(*), " +
+    LEAGUE_SELECT_SHARED_TAIL +
     ", ladder_cup_walkover_claims(*), ladder_cup_second_life_offers(*), ladder_cup_pool_sightings(*)" +
     ", comments(" + LEAGUE_COMMENTS_SELECT + ")";
 
