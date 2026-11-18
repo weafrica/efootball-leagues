@@ -34,6 +34,8 @@ import {
 // South African number would be "27821234567". Leave blank to hide that
 // checkout option entirely.
 export const SHOP_WHATSAPP_NUMBER = "+27694362789";
+// From this many of one product, shoppers can ask for a bulk price on WhatsApp.
+const BULK_QUOTE_MIN = 6;
 
 // EFT / bank-transfer details are no longer hard-coded: the admin edits them
 // in Orders > "Bank details shown at checkout" and they're stored in the
@@ -1392,6 +1394,19 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
                 className="w-full mt-4 font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: variants.length > 0 && !variant ? 0.5 : 1 }}>
                 {variants.length > 0 && !variant ? "Choose an option" : `Add to cart · ${formatMoney(unit * qty)}`}
               </button>
+              {(() => {
+                // Bulk orders: from BULK_QUOTE_MIN items the shopper can ask for a price on WhatsApp.
+                // The message arrives pre-written with the product link and the quantity they chose.
+                const n = Math.max(qty, BULK_QUOTE_MIN);
+                const msg = `Hi! I'd like a quote for ${n} x ${product.name}${variant ? ` (${variant.name})` : ""}${personal.trim() ? `, personalised: ${personal.trim()}` : ""}.\n${buildProductLink(product)}`;
+                const link = waLink(SHOP_WHATSAPP_NUMBER, msg);
+                return link ? (
+                  <a href={link} target="_blank" rel="noopener noreferrer" data-testid="bulk-quote"
+                    className="w-full mt-2.5 font-body text-sm font-semibold py-2.5 rounded-full flex items-center justify-center gap-2 border" style={{ borderColor: c.borderStrong, color: c.text }}>
+                    <MessageCircle size={15} /> {qty >= BULK_QUOTE_MIN ? `Ask for a quote for ${qty} on WhatsApp` : `Buying ${BULK_QUOTE_MIN} or more? Ask for a quote`}
+                  </a>
+                ) : null;
+              })()}
             </>
           )}
 
