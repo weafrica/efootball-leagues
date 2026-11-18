@@ -7,7 +7,7 @@ import { supabase } from "./supabaseClient";
 
 const GOLD = "#D4A017";
 const rand = (n) => `R${Number(n || 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const STATUS = { new: "New", quoted: "Quoted", closed: "Closed" };
+const STATUS = { new: "New", quoted: "Quoted", ordered: "Ordered", closed: "Closed" };
 
 export function QuoteRequestForm({ product, session, profile, c }) {
   const [name, setName] = useState(profile?.username || "");
@@ -68,14 +68,14 @@ export function QuoteRequestForm({ product, session, profile, c }) {
 
 const waNumber = (phone) => { const d = (phone || "").replace(/\D/g, ""); return d ? (d.startsWith("0") ? `27${d.slice(1)}` : d) : ""; };
 
-export function QuotesPanel({ isAdmin, business, showToast, c }) {
+export function QuotesPanel({ isAdmin, business, showToast, onOrderCreated, c }) {
   const [rows, setRows] = useState(null);
   const [filter, setFilter] = useState("new");
   const [open, setOpen] = useState(false);
 
   const load = async () => {
     const { data, error } = await supabase.from("shop_quote_requests")
-      .select("id, ref, product_name, qty, details, buyer_name, contact_phone, contact_email, status, quote_amount, admin_note, created_at")
+      .select("id, ref, product_name, qty, details, buyer_name, contact_phone, contact_email, status, quote_amount, admin_note, created_at, order:shop_orders(order_number)")
       .order("created_at", { ascending: false }).limit(300);
     if (error) { showToast("Couldn't load quote requests."); setRows([]); return; }
     setRows(data || []);
@@ -83,7 +83,7 @@ export function QuotesPanel({ isAdmin, business, showToast, c }) {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const counts = useMemo(() => {
-    const n = { all: (rows || []).length, new: 0, quoted: 0, closed: 0 };
+    const n = { all: (rows || []).length, new: 0, quoted: 0, ordered: 0, closed: 0 };
     (rows || []).forEach((r) => { n[r.status] = (n[r.status] || 0) + 1; });
     return n;
   }, [rows]);
@@ -99,14 +99,14 @@ export function QuotesPanel({ isAdmin, business, showToast, c }) {
       {open && (
         <div className="mt-3">
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {[["new", "New"], ["quoted", "Quoted"], ["closed", "Closed"], ["all", "All"]].map(([k, l]) => (
+            {[["new", "New"], ["quoted", "Quoted"], ["ordered", "Ordered"], ["closed", "Closed"], ["all", "All"]].map(([k, l]) => (
               <button key={k} onClick={() => setFilter(k)} aria-pressed={filter === k} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={chip(filter === k)}>{l} {counts[k] || 0}</button>
             ))}
           </div>
           {rows === null && <div className="font-body text-xs" style={{ color: c.textDim }}>Loading…</div>}
           {rows && shown.length === 0 && <div className="font-body text-xs" style={{ color: c.textDim }}>Nothing here.</div>}
           <div className="space-y-2.5">
-            {shown.map((r) => <QuoteRow key={r.id + r.status + (r.quote_amount ?? "")} r={r} isAdmin={isAdmin} business={business} showToast={showToast} onChanged={load} c={c} />)}
+            {shown.map((r) => <QuoteRow key={r.id + r.status + (r.quote_amount ?? "")} r={r} isAdmin={isAdmin} business={business} showToast={showToast} onChanged={load} onOrderCreated={onOrderCreated} c={c} />)}
           </div>
         </div>
       )}
@@ -114,7 +114,7 @@ export function QuotesPanel({ isAdmin, business, showToast, c }) {
   );
 }
 
-function QuoteRow({ r, isAdmin, business, showToast, onChanged, c }) {
+function QuoteRow({ r, isAdmin, business, showToast, onChanged, onOrderCreated, c }) {
   const [amount, setAmount] = useState(r.quote_amount ?? "");
   const [note, setNote] = useState(r.admin_note || "");
   const [busy, setBusy] = useState(false);
@@ -129,6 +129,15 @@ function QuoteRow({ r, isAdmin, business, showToast, onChanged, c }) {
     const n = Number(amount);
     if (!(n > 0)) { showToast("Enter the quoted price first."); return; }
     update({ status: "quoted", quote_amount: n, admin_note: note.trim() || null }, `${r.ref} marked quoted.`);
+  };
+  const createOrder = async () => {
+    if (!window.confirm(`Create an order for ${rand(r.quote_amount)} from ${r.ref}? The customer then pays you as usual.`)) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("admin_create_order_from_quote", { p_quote_id: r.id });
+    setBusy(false);
+    if (error) { showToast(error.message || "Couldn't create the order."); return; }
+    showToast(`Order ${data?.order_number || ""} created from ${r.ref}.`);
+    onChanged(); onOrderCreated && onOrderCreated();
   };
   const remove = async () => {
     if (!window.confirm(`Delete ${r.ref}?`)) return;
@@ -153,7 +162,7 @@ function QuoteRow({ r, isAdmin, business, showToast, onChanged, c }) {
       <div className="font-semibold text-sm mt-1">{r.qty} x {r.product_name}</div>
       <div className="whitespace-pre-wrap break-words mt-1" style={{ color: c.text }}>{r.details}</div>
       <div className="mt-1.5" style={{ color: c.textDim }}>{r.buyer_name} · {[r.contact_phone, r.contact_email].filter(Boolean).join(" · ")} · {new Date(r.created_at).toLocaleDateString("en-ZA")}</div>
-      {r.status !== "closed" && (
+      {(r.status === "new" || r.status === "quoted") && (
         <div className="flex flex-wrap items-center gap-2 mt-2.5">
           <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Quote R" aria-label={`Quote amount for ${r.ref}`} className="w-28 border rounded-lg px-2.5 py-1.5 outline-none" style={inputStyle} />
           <input value={note} onChange={(e) => setNote(e.target.value.slice(0, 500))} placeholder="Note to customer (optional)" aria-label={`Note for ${r.ref}`} className="flex-1 min-w-[8rem] border rounded-lg px-2.5 py-1.5 outline-none" style={inputStyle} />
@@ -162,7 +171,11 @@ function QuoteRow({ r, isAdmin, business, showToast, onChanged, c }) {
       )}
       <div className="flex flex-wrap items-center gap-3 mt-2.5">
         {link && <a href={link} target="_blank" rel="noopener noreferrer" className="underline font-semibold">{r.quote_amount ? "Send quote" : "Reply"}</a>}
-        {r.status !== "closed"
+        {r.status === "quoted" && r.quote_amount > 0 && (
+          <button onClick={createOrder} disabled={busy} data-testid="create-order" className="font-semibold px-3 py-1.5 rounded-full" style={{ background: c.greenSoft, color: c.greenText }}>Create order</button>
+        )}
+        {r.status === "ordered" && <span className="font-semibold" data-testid="quote-order-number" style={{ color: c.greenText }}>Order {r.order?.order_number || ""} created ({rand(r.quote_amount)})</span>}
+        {r.status === "ordered" ? null : r.status !== "closed"
           ? <button onClick={() => update({ status: "closed" }, `${r.ref} closed.`)} disabled={busy} className="underline">Close</button>
           : <button onClick={() => update({ status: r.quote_amount ? "quoted" : "new" }, `${r.ref} reopened.`)} disabled={busy} className="underline">Reopen</button>}
         {isAdmin && <button onClick={remove} aria-label={`Delete ${r.ref}`} className="ml-auto"><Trash2 size={13} style={{ color: c.red }} /></button>}

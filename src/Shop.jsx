@@ -2938,7 +2938,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       <DeliverySettings showToast={showToast} c={c} />
       </>}
       <StockAlertsPanel showToast={showToast} c={c} />
-      <QuotesPanel isAdmin={isAdmin} business={business} showToast={showToast} c={c} />
+      <QuotesPanel isAdmin={isAdmin} business={business} showToast={showToast} onOrderCreated={load} c={c} />
 
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
