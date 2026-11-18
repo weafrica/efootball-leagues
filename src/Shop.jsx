@@ -10,6 +10,7 @@ import { MessageCustomerButton, MessageTemplatesPanel, parseTemplates } from "./
 import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, latestReturn, returnIsOpen } from "./ShopReturns.jsx";
 import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
+import OrderNotes from "./ShopOrderNotes.jsx";
 import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
@@ -2814,9 +2815,14 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
   const [bankDraft, setBankDraft] = useState(eftDetails || "");
   const [savingBank, setSavingBank] = useState(false);
 
+  const [noteCounts, setNoteCounts] = useState({});
   const load = async () => {
     const { data, error } = await supabase.from("shop_orders").select(SHOP_ORDER_SELECT).order("created_at", { ascending: false });
     if (!error) setOrders(data || []);
+    // How many private notes each order has, for the "Notes (n)" badge.
+    const { data: nrows } = await supabase.from("shop_order_notes").select("order_id").limit(5000);
+    const counts = {}; (nrows || []).forEach((r) => { counts[r.order_id] = (counts[r.order_id] || 0) + 1; });
+    setNoteCounts(counts);
   };
   useEffect(() => { load(); }, []);
   useEffect(() => { setBankDraft(eftDetails || ""); }, [eftDetails]);
@@ -2947,6 +2953,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 </div>
               ))}
               {o.delivery_note && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Note: {o.delivery_note}</div>}
+              <OrderNotes orderId={o.id} count={noteCounts[o.id] || 0} userId={session?.user?.id} isAdmin={isAdmin} showToast={showToast}
+                onCountChange={(id, n) => setNoteCounts((m) => ({ ...m, [id]: n }))} c={c} />
               {o.delivery_method && (
                 <div className="font-body text-xs mt-1.5 rounded-lg px-2.5 py-1.5" style={{ background: c.bg, color: c.textDim }}>
                   {deliverySummary(o)}{Number(o.delivery_fee) > 0 ? ` · ${formatMoney(o.delivery_fee)}` : " · free"}
