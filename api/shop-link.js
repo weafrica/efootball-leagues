@@ -101,17 +101,19 @@ export default async function handler(req, res) {
   // preview. Falls back to generic shop branding if the id is missing,
   // the product's gone, or Supabase is unreachable.
   let product = null;
+  let lookedUp = false; // true once Supabase answered, so a missing product is a real 404
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
   if (id && supabaseUrl && supabaseAnonKey) {
     try {
-      const query = `${supabaseUrl}/rest/v1/shop_products?id=eq.${encodeURIComponent(id)}&select=name,price,description,image_url`;
+      const query = `${supabaseUrl}/rest/v1/shop_products?id=eq.${encodeURIComponent(id)}&select=name,price,description,image_url,stock_qty,quote_only,compare_at_price`;
       const dataRes = await fetch(query, {
         headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` },
       });
       if (dataRes.ok) {
         const rows = await dataRes.json();
         product = Array.isArray(rows) ? rows[0] || null : null;
+        lookedUp = true;
       }
     } catch {
       // Network hiccup talking to Supabase — fall through to the generic preview below.
@@ -126,12 +128,40 @@ export default async function handler(req, res) {
   const fullTitle = product && priceText ? `${title} — ${priceText}` : title;
   const image = absoluteProxiedImage(product?.image_url, supabaseUrl, proto, host) || `${proto}://${host}/hero-emblem.png`;
 
+  // Product details for Google: price, stock and photo as schema.org JSON-LD,
+  // which is what lets a product show up with its price in search results.
+  // Price-on-request products have no price, so they get no offer.
+  const jsonLd = product ? {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: String(product.description || `${product.name} at WeAfrica Shop`).slice(0, 5000),
+    image: [image],
+    sku: String(id),
+    brand: { "@type": "Brand", name: "WeAfrica" },
+    ...(product.quote_only || product.price == null ? {} : {
+      offers: {
+        "@type": "Offer", url: pageUrl, priceCurrency: "ZAR", price: Number(product.price).toFixed(2),
+        itemCondition: "https://schema.org/NewCondition",
+        availability: Number(product.stock_qty) > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      },
+    }),
+  } : null;
+  // "<" is escaped so product text can never close the script tag early.
+  const jsonLdTag = jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : "";
+  // A real 404 (plus noindex) only for search engines, so Google drops dead product pages.
+  // Chat apps still get the normal shop preview for a link to a product that has gone.
+  const isSearchBot = /Googlebot|bingbot|Applebot|DuckDuckBot|YandexBot|Baiduspider/i.test(userAgent);
+  const missing = Boolean(id) && lookedUp && !product && isSearchBot;
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>${escapeHtml(fullTitle)}</title>
 <meta name="description" content="${escapeHtml(description)}" />
+<link rel="canonical" href="${escapeHtml(pageUrl)}" />
+${missing ? '<meta name="robots" content="noindex" />\n' : ""}${jsonLdTag}
 
 <meta property="og:type" content="${product ? "product" : "website"}" />
 <meta property="og:title" content="${escapeHtml(fullTitle)}" />
@@ -151,5 +181,5 @@ export default async function handler(req, res) {
 </html>`;
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.status(200).send(html);
+  res.status(missing ? 404 : 200).send(html);
 }
