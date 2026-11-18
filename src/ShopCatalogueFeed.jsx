@@ -7,7 +7,7 @@ import { ChevronDown, ChevronUp, Copy, ExternalLink } from "lucide-react";
 export default function CatalogueFeedPanel({ products, photosOf, showToast, c }) {
   const [open, setOpen] = useState(false);
   const url = `${window.location.origin}/shop-feed.xml`;
-  const live = (products || []).filter((p) => p.active && !p.exclude_from_catalogue);
+  const live = (products || []).filter((p) => p.active && !p.exclude_from_catalogue && !p.quote_only);
   const left = (products || []).filter((p) => p.active && p.exclude_from_catalogue).length;
   const noPhoto = live.filter((p) => photosOf(p).length === 0);
   const copy = async () => {

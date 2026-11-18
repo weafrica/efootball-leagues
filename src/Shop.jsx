@@ -11,6 +11,7 @@ import { ReturnStatus, RequestReturn, ReturnAdminPanel, RETURNABLE_STATUSES, lat
 import { TeamPanel, ActivityLogPanel } from "./ShopTeam.jsx";
 import AdminSales from "./ShopSales.jsx";
 import OrderNotes from "./ShopOrderNotes.jsx";
+import { QuoteRequestForm, QuotesPanel } from "./ShopQuotes.jsx";
 import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
@@ -437,7 +438,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -494,6 +495,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const visibleProducts = isAdmin ? (products || []) : (products || []).filter((p) => p.active);
 
   const addToCart = (product, qty, variant = null, personalisation = "") => {
+    if (product.quote_only) { showToast("This item is priced on request. Ask for a quote on its page."); return; }
     const vid = variant?.id || null;
     setCart((prev) => {
       const key = `${product.id}:${vid || ""}`;
@@ -510,7 +512,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     let added = 0, skipped = 0;
     (order.shop_order_items || []).forEach((it) => {
       const p = (products || []).find((x) => x.id === it.product_id);
-      if (!p || !p.active) { skipped += 1; return; }
+      if (!p || !p.active || p.quote_only) { skipped += 1; return; }
       const vs = activeVariants(p);
       let variant = null;
       if (vs.length) {
@@ -1048,7 +1050,7 @@ function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }
       <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">{title}</h2>
       <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
         {products.map((p) => {
-          const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0;
+          const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0 && !p.quote_only;
           return (
             <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
               className="shrink-0 w-[150px] snap-start rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border }}>
@@ -1063,7 +1065,7 @@ function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }
               </div>
               <div className="p-3">
                 <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
-                <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{formatMoney(p.price)}</div>
+                <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{p.quote_only ? "Price on request" : formatMoney(p.price)}</div>
               </div>
             </div>
           );
@@ -1251,7 +1253,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       {products.map((p) => {
-        const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0;
+        const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0 && !p.quote_only;
         return (
           <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)}
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
@@ -1269,7 +1271,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
             <div className="p-3">
               <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
               <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>
-                {(() => { const vp = activeVariants(p).map((v) => Number(v.price ?? p.price)); const lo = vp.length ? Math.min(...vp) : Number(p.price);
+                {p.quote_only ? "Price on request" : (() => { const vp = activeVariants(p).map((v) => Number(v.price ?? p.price)); const lo = vp.length ? Math.min(...vp) : Number(p.price);
                   return <>{vp.length && Math.max(...vp) > lo ? "From " : ""}{formatMoney(lo)}{p.compare_at_price > lo && <span className="ml-1.5 text-xs font-semibold line-through" style={{ color: c.textFaint }}>{formatMoney(p.compare_at_price)}</span>}</>; })()}
               </div>
               {p.rating_count > 0 && (
@@ -1280,8 +1282,8 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
               )}
               {(p.breaks || []).length > 0 && <div className="font-body text-xs mt-0.5" style={{ color: SHOP_GOLD }}>Buy more, pay less</div>}
               {!p.active && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Hidden from shoppers</div>}
-              {p.active && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
-              {p.active && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
+              {p.active && !p.quote_only && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
+              {p.active && !p.quote_only && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
             </div>
           </div>
         );
@@ -1326,9 +1328,9 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
         <div className="p-4">
           <div className="font-extrabold uppercase tracking-tight text-lg leading-tight">{product.name}</div>
           <div className="font-mono text-sm font-semibold mt-1" style={{ color: SHOP_GOLD }}>
-            {formatMoney(unit)}
-            {unit < listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(listUnit)}</span>}
-            {unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
+            {product.quote_only ? "Price on request" : formatMoney(unit)}
+            {!product.quote_only && unit < listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(listUnit)}</span>}
+            {!product.quote_only && unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
           </div>
           {product.description && <p className="font-body text-sm mt-2.5" style={{ color: c.textDim }}>{product.description}</p>}
           {/^https:\/\//i.test(product.facebook_url || "") && (
@@ -1364,7 +1366,9 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
             </div>
           )}
 
-          {outOfStock ? (
+          {product.quote_only ? (
+            <QuoteRequestForm product={product} session={session} profile={profile} c={c} />
+          ) : outOfStock ? (
             <>
               <div className="mt-4 font-body text-sm text-center py-2.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Out of stock</div>
               <StockAlertForm productId={product.id} defaultContact={session?.user?.email || ""} c={c} />
@@ -1990,7 +1994,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     }
     const hasVariants = (extras.variants || []).length > 0;
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
-      exclude_from_catalogue: !!form.exclude_from_catalogue,
+      exclude_from_catalogue: !!form.exclude_from_catalogue || !!form.quote_only, quote_only: !!form.quote_only,
       personalisable: !!form.personalisable, personalise_label: form.personalisable ? ((form.personalise_label || "").trim() || null) : null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
@@ -2102,7 +2106,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
-                {formatMoney(p.price)} · {p.stock_qty} in stock {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
+                {p.quote_only ? "Price on request" : `${formatMoney(p.price)} · ${p.stock_qty} in stock`} {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
                 {(() => {
                   const ds = productDepts(p).filter((id) => deptById.has(id));
                   const cs = productCats(p).filter((id) => catById.has(id));
@@ -2134,6 +2138,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [catIds, setCatIds] = useState(productCats(product));
   const [removerSource, setRemoverSource] = useState(null); // { kind: "main" | number (index in newImages), source }
   const [excludeCatalogue, setExcludeCatalogue] = useState(!!product.exclude_from_catalogue);
+  const [quoteOnly, setQuoteOnly] = useState(!!product.quote_only);
   const [personalisable, setPersonalisable] = useState(!!product.personalisable);
   const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
@@ -2167,11 +2172,11 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const toggleCat = (id) => setCatIds((cs) => (cs.includes(id) ? cs.filter((x) => x !== id) : [...cs, id]));
 
   const submit = async () => {
-    if (!name.trim() || !price) return;
+    if (!name.trim() || (!price && !quoteOnly)) return;
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2275,6 +2280,9 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
               </div>
             );
           })}
+          <label className="font-body text-sm flex items-center gap-2" data-testid="quote-only-toggle">
+            <input type="checkbox" checked={quoteOnly} onChange={(e) => setQuoteOnly(e.target.checked)} /> Price on request (shoppers ask for a quote instead of adding to cart)
+          </label>
           <div data-testid="personalise-admin">
             <label className="font-body text-sm flex items-center gap-2"><input type="checkbox" checked={personalisable} onChange={(e) => setPersonalisable(e.target.checked)} /> Shoppers can personalise this item (name, number, print or embroidery wording)</label>
             {personalisable && <input value={personaliseLabel} onChange={(e) => setPersonaliseLabel(e.target.value)} placeholder="Label shown to shoppers, e.g. Name and number for the back" aria-label="Personalisation label" maxLength={80}
@@ -2915,6 +2923,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       <DeliverySettings showToast={showToast} c={c} />
       </>}
       <StockAlertsPanel showToast={showToast} c={c} />
+      <QuotesPanel isAdmin={isAdmin} business={business} showToast={showToast} c={c} />
 
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
