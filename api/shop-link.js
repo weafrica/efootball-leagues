@@ -115,6 +115,21 @@ export default async function handler(req, res) {
         product = Array.isArray(rows) ? rows[0] || null : null;
         lookedUp = true;
       }
+      // Star rating summary, so Google can show stars next to the price.
+      if (product) {
+        try {
+          const rRes = await fetch(`${supabaseUrl}/rest/v1/shop_product_rating_summary?product_id=eq.${encodeURIComponent(id)}&select=rating_avg,rating_count`, {
+            headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` },
+          });
+          if (rRes.ok) {
+            const r = await rRes.json();
+            if (Array.isArray(r) && r[0] && Number(r[0].rating_count) > 0) {
+              product.rating_avg = Number(r[0].rating_avg);
+              product.rating_count = Number(r[0].rating_count);
+            }
+          }
+        } catch { /* no stars is fine */ }
+      }
     } catch {
       // Network hiccup talking to Supabase — fall through to the generic preview below.
     }
@@ -139,6 +154,9 @@ export default async function handler(req, res) {
     image: [image],
     sku: String(id),
     brand: { "@type": "Brand", name: "WeAfrica" },
+    ...(product.rating_count > 0 ? {
+      aggregateRating: { "@type": "AggregateRating", ratingValue: product.rating_avg.toFixed(1), reviewCount: product.rating_count, bestRating: 5, worstRating: 1 },
+    } : {}),
     ...(product.quote_only || product.price == null ? {} : {
       offers: {
         "@type": "Offer", url: pageUrl, priceCurrency: "ZAR", price: Number(product.price).toFixed(2),
