@@ -5,6 +5,7 @@
 // for card payments specifically. Two things can land here:
 //   - a league entry fee (create-entry-payment), row lives in `members`
 //   - a Nets top-up (create-nets-payment), row lives in `nets_purchases`
+//   - a shop order (create-shop-payment), row lives in `shop_orders`
 //
 // The externalTransactionID in the payload IS that row's id, whichever
 // table it belongs to — this handler tries `members` first, then
@@ -174,7 +175,31 @@ serve(async (req) => {
     return new Response("lookup failed", { status: 500 });
   }
   if (!purchase) {
-    return new Response("transaction not found", { status: 404 });
+    // Not a Nets top-up either — it may be a shop order (create-shop-payment).
+    const { data: shopOrder, error: shopError } = await supabase
+      .from("shop_orders")
+      .select("id, status")
+      .eq("id", externalTransactionID)
+      .maybeSingle();
+    if (shopError) {
+      return new Response("lookup failed", { status: 500 });
+    }
+    if (!shopOrder) {
+      return new Response("transaction not found", { status: 404 });
+    }
+    // Only an order still waiting for payment moves to 'paid'; retries and
+    // orders the team already handled are left alone.
+    if (status === "SUCCESS" && shopOrder.status === "pending_review") {
+      const { error } = await supabase
+        .from("shop_orders")
+        .update({ status: "paid" })
+        .eq("id", shopOrder.id)
+        .eq("status", "pending_review");
+      if (error) {
+        return new Response("failed to mark order paid", { status: 500 });
+      }
+    }
+    return new Response("ok", { status: 200 });
   }
 
   // Idempotency guard — ignore retries once already resolved.
