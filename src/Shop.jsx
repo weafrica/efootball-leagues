@@ -56,7 +56,8 @@ export const SHOP_GATEWAY_ENABLED = false;
 // same as the WhatsApp flow, since a static link has no automatic
 // payment-confirmation callback back into this app. Leave blank to hide
 // this checkout option.
-export const SHOP_IKHOKHA_LINK = "https://pay.ikhokha.com/weafrica/mpr/weafrica";
+// Card payments run through the create-shop-payment edge function (iKhokha API).
+export const SHOP_CARD_ENABLED = true;
 
 const SHOP_GOLD = "#D4A017";
 const CURRENCY_PREFIX = "R"; // South African Rand — change if selling elsewhere
@@ -256,6 +257,19 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   }, [activeProduct]);
   const [myOrders, setMyOrders] = useState(null);
   const [lastOrderNumber, setLastOrderNumber] = useState(null);
+  // Coming back from the card page: weafrica.co.za/shop?paid=success&order=WA-10020
+  useEffect(() => {
+    let paid = "", order = "";
+    try { const q = new URLSearchParams(window.location.search); paid = q.get("paid") || ""; order = (q.get("order") || "").slice(0, 20); } catch { return; }
+    if (!paid) return;
+    if (order) setLastOrderNumber(order);
+    setSubview("track");
+    showToast(paid === "success"
+      ? `Payment received. Order ${order} is confirmed. You can follow it under Track order.`
+      : `Payment ${paid === "cancel" ? "cancelled" : "didn't go through"}. Order ${order} is saved but unpaid. Contact us to pay another way.`);
+    try { window.history.replaceState(window.history.state, "", window.location.pathname); } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [eftDetails, setEftDetails] = useState("");
   const [business, setBusiness] = useState(() => parseBusiness(""));
   const [policies, setPolicies] = useState(() => parsePolicies(""));
@@ -1493,7 +1507,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
 // ════════════════════════════════════════════════════════════════════
 
 function CheckoutView({ cart, total, session, profile, eftDetails, onStockChanged, onDone, onBack, showToast, c }) {
-  const [method, setMethod] = useState(SHOP_IKHOKHA_LINK ? "ikhokha" : (SHOP_WHATSAPP_NUMBER ? "whatsapp" : "manual_proof"));
+  const [method, setMethod] = useState(SHOP_CARD_ENABLED ? "ikhokha" : (SHOP_WHATSAPP_NUMBER ? "whatsapp" : "manual_proof"));
   const [submitting, setSubmitting] = useState(false);
   const [proofFile, setProofFile] = useState(null);
   const [note, setNote] = useState("");
@@ -1605,15 +1619,20 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   };
 
   const submitIkhokha = async () => {
-    if (!SHOP_IKHOKHA_LINK) { showToast("Card payments aren't set up yet."); return; }
     if (!precheck()) return;
     setSubmitting(true);
     const { order, error } = await placeOrder("ikhokha_link");
+    if (error) { setSubmitting(false); showToast(error); return; }
+    // The order is saved; now ask the server for the card payment page.
+    const { data: pay, error: payErr } = await supabase.functions.invoke("create-shop-payment", { body: { order_id: order.id } });
     setSubmitting(false);
-    if (error) { showToast(error); return; }
-    window.open(SHOP_IKHOKHA_LINK, "_blank", "noopener,noreferrer");
-    showToast(`Order ${order.order_number} saved. Pay ${formatMoney(order.total ?? order.subtotal)} on the card page and use ${order.order_number} as the reference.`);
+    if (payErr || !pay?.paylinkUrl) {
+      showToast(`Order ${order.order_number} is saved, but the card page didn't open. Contact us to pay another way, quoting ${order.order_number}.`);
+      onDone(order);
+      return;
+    }
     onDone(order);
+    window.location.href = pay.paylinkUrl;
   };
 
   return (
@@ -1646,10 +1665,10 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       )}
 
       <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
-        <button onClick={() => SHOP_IKHOKHA_LINK && setMethod("ikhokha")} disabled={!SHOP_IKHOKHA_LINK}
+        <button onClick={() => SHOP_CARD_ENABLED && setMethod("ikhokha")} disabled={!SHOP_CARD_ENABLED}
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
-          style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_IKHOKHA_LINK ? 1 : 0.4 }}>
-          {SHOP_IKHOKHA_LINK ? <CreditCard size={13} /> : <Lock size={13} />} Card
+          style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_CARD_ENABLED ? 1 : 0.4 }}>
+          {SHOP_CARD_ENABLED ? <CreditCard size={13} /> : <Lock size={13} />} Card
         </button>
         <button onClick={() => setMethod("whatsapp")} disabled={!SHOP_WHATSAPP_NUMBER}
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
@@ -1767,10 +1786,10 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         </div>
       )}
 
-      {method === "ikhokha" && SHOP_IKHOKHA_LINK && (
+      {method === "ikhokha" && SHOP_CARD_ENABLED && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
-            You'll be taken to a secure card checkout page to pay {formatMoney(grandTotal)}. Once you've paid, come back here — we'll confirm your order shortly after.
+            You'll be taken to a secure iKhokha card page to pay {formatMoney(grandTotal)}. Your order is confirmed automatically as soon as the payment goes through.
           </p>
           <CardBrandsBadge c={c} />
           <div>
