@@ -10553,6 +10553,13 @@ function ActivityLogPanel({ activityLog, summary, onBack, c }) {
                 <div className="font-mono text-xs capitalize" style={{ color: c.textFaint }}>
                   {formatEvent(row.event_type)}
                 </div>
+                {(row.metadata?.product_name || row.metadata?.order_number) && (
+                  <div className="font-body text-xs truncate" style={{ color: c.textDim }}>
+                    {row.metadata.product_name || row.metadata.order_number}
+                    {row.metadata.qty ? ` × ${row.metadata.qty}` : ""}
+                    {row.metadata.total != null ? ` · R${Number(row.metadata.total).toLocaleString("en-ZA")}` : ""}
+                  </div>
+                )}
               </div>
               <div className="font-mono text-xs shrink-0 pl-3" style={{ color: c.textFaint }}>
                 {new Date(row.created_at).toLocaleString()}

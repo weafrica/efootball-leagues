@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import { logActivity } from "./activityLog";
 import { compressImage } from "./utils/imageCompress";
 import { toProxiedUrl } from "./utils/mediaUrl";
 import { uploadToR2 } from "./utils/r2Upload";
@@ -256,6 +257,15 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       return next;
     });
   }, [activeProduct]);
+  // Shop activity goes into the same log Matchday uses, so the admin can see it
+  // (signed-in shoppers only; logActivity skips anyone not signed in).
+  useEffect(() => {
+    if (activeProduct?.id == null) return;
+    logActivity("shop_product_viewed", { product_id: activeProduct.id, product_name: activeProduct.name });
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (subview === "checkout") logActivity("shop_checkout_started");
+  }, [subview]);
   const [myOrders, setMyOrders] = useState(null);
   const [lastOrderNumber, setLastOrderNumber] = useState(null);
   // Coming back from the card page: weafrica.co.za/shop?paid=success&order=WA-10020
@@ -516,6 +526,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const addToCart = (product, qty, variant = null, personalisation = "") => {
     if (product.quote_only) { showToast("This item is priced on request. Ask for a quote on its page."); return; }
     const vid = variant?.id || null;
+    logActivity("shop_added_to_cart", { product_id: product.id, product_name: product.name, qty });
     setCart((prev) => {
       const key = `${product.id}:${vid || ""}`;
       const existing = prev.find((it) => lineKey(it) === key);
@@ -649,7 +660,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {subview === "checkout" && (
         <CheckoutView cart={pricedCart} total={cartTotal} session={session} profile={profile} eftDetails={eftDetails} onStockChanged={loadProducts}
-          onDone={(order) => { setLastOrderNumber(order?.order_number || null); clearCart(); loadProducts(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
+          onDone={(order) => { logActivity("shop_order_placed", { order_number: order?.order_number || null, total: order?.total ?? order?.subtotal ?? null }); setLastOrderNumber(order?.order_number || null); clearCart(); loadProducts(); setSubview("confirm"); }} onBack={shopGoBack} showToast={showToast} c={c} />
       )}
 
       {subview === "confirm" && (
