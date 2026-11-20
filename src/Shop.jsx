@@ -769,6 +769,8 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
 
   // catFilter is a sub-filter within whichever level selected/catPath already
   // point at (not itself a drill-down layer worth a back-navigation step),
@@ -797,6 +799,10 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
   const searched = q ? searchProducts(products, q, deptNameOf) : products;
   let searchable = searched;
   if (inStockOnly) searchable = searchable.filter((p) => p.stock_qty !== 0);
+  const lo = minPrice === "" ? null : Number(minPrice);
+  const hi = maxPrice === "" ? null : Number(maxPrice);
+  if (lo != null && !Number.isNaN(lo)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) >= lo);
+  if (hi != null && !Number.isNaN(hi)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) <= hi);
   if (sort === "price_asc") searchable = [...searchable].sort((a, b) => a.price - b.price);
   else if (sort === "price_desc") searchable = [...searchable].sort((a, b) => b.price - a.price);
   else if (sort === "name") searchable = [...searchable].sort((a, b) => a.name.localeCompare(b.name));
@@ -913,6 +919,13 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
           style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
           In stock only
         </button>
+        {[["min", "From R", minPrice, setMinPrice], ["max", "To R", maxPrice, setMaxPrice]].map(([k, ph, val, set]) => (
+          <input key={k} type="number" inputMode="numeric" min="0" value={val} onChange={(e) => set(e.target.value)} placeholder={ph} aria-label={k === "min" ? "Minimum price" : "Maximum price"} data-testid={`price-${k}`}
+            className="shrink-0 w-[84px] font-body text-xs font-semibold px-3 py-2 rounded-full outline-none" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+        ))}
+        {(minPrice !== "" || maxPrice !== "") && (
+          <button onClick={() => { setMinPrice(""); setMaxPrice(""); }} className="shrink-0 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ color: c.textDim }}>Clear price</button>
+        )}
       </div>
 
       {departments.length > 0 && (selected !== "all" || q) && (
