@@ -8824,10 +8824,9 @@ export default function App() {
           onShareApp={shareApp} />
       )}
       {tutorialOpen && <TutorialTour onClose={() => setTutorialOpen(false)} onSetQuickActionsOpen={setQuickActionsOpen} c={c} />}
-      {/* Quick actions — floating on every screen (not gated behind
-          `view !== "shop"` the way Header is above), so it's reachable no
-          matter where in the app someone is. */}
-      <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)} items={quickActionItems} c={c} />
+      {/* Quick actions — floating on every Matchday screen. Hidden in the
+          shop, where it only got in the way of shoppers. */}
+      {view !== "shop" && <QuickActionsDock open={quickActionsOpen} onToggle={() => setQuickActionsOpen((v) => !v)} items={quickActionItems} c={c} />}
       <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
         <ErrorBoundary resetKey={view} onGoHome={() => setView("home")}>
         {view === "accounts" && isAdmin ? (
