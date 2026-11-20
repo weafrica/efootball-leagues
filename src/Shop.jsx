@@ -14,6 +14,7 @@ import OrderNotes from "./ShopOrderNotes.jsx";
 import { QuoteRequestForm, QuotesPanel, QuoteLookup } from "./ShopQuotes.jsx";
 import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
+import ShopAssistant from "./ShopAssistant.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
@@ -708,6 +709,11 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
 
       {["browse", "saved", "cart", "track", "my-orders"].includes(subview) && (
         <ShopFooter business={business} policies={policies} whatsapp={SHOP_WHATSAPP_NUMBER} c={c} />
+      )}
+
+      {["browse", "saved", "cart", "track", "my-orders"].includes(subview) && !activeProduct && (
+        <ShopAssistant products={products || []} policies={policies} business={business} whatsapp={SHOP_WHATSAPP_NUMBER} formatMoney={formatMoney}
+          onTrack={() => setSubview("track")} onOpenProduct={(p) => setActiveProduct(p)} c={c} />
       )}
 
       <ConfirmStepModal flow={confirmFlow} onCancel={cancelConfirm} onAdvance={advanceConfirm} c={c} />
