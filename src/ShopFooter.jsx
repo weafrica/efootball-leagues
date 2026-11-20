@@ -117,6 +117,24 @@ export function PoliciesPanel({ policies, onSaved, showToast, c }) {
   useEffect(() => { setDraft(policies); }, [policies]);
   const st = { background: c.bg, borderColor: c.border, color: c.text };
 
+  // Saves what is on screen as a plain text file, so the admin can keep or print it.
+  const downloadText = (filename, text) => {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const fileBase = (label) => `WeAfrica-${label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const downloadOne = ({ key, label }) => {
+    if (!(draft[key] || "").trim()) { showToast(`${label} is empty.`); return; }
+    downloadText(`${fileBase(label)}.txt`, `${label}\n\n${draft[key].trim()}\n`);
+  };
+  const downloadAll = () => {
+    const parts = POLICY_KINDS.filter(({ key }) => (draft[key] || "").trim()).map(({ key, label }) => `${label.toUpperCase()}\n\n${draft[key].trim()}`);
+    if (!parts.length) { showToast("There are no policies to download."); return; }
+    downloadText("WeAfrica-Shop-Policies.txt", `${parts.join("\n\n\n")}\n`);
+  };
+
   const save = async () => {
     setSaving(true);
     const { error } = await supabase.from("shop_settings").upsert({ key: "shop_policies", value: JSON.stringify(draft), updated_at: new Date().toISOString() });
@@ -137,12 +155,16 @@ export function PoliciesPanel({ policies, onSaved, showToast, c }) {
             <div key={key}>
               <div className="flex items-center justify-between mb-1">
                 <label className="font-body text-xs font-semibold" style={{ color: c.textDim }}>{label}</label>
-                {!(draft[key] || "").trim() && <button onClick={() => setDraft((d) => ({ ...d, [key]: STARTERS[key] }))} className="font-body text-xs underline" style={{ color: GOLD }}>Use starter text</button>}
+                <span className="flex items-center gap-3">
+                  {!(draft[key] || "").trim() && <button onClick={() => setDraft((d) => ({ ...d, [key]: STARTERS[key] }))} className="font-body text-xs underline" style={{ color: GOLD }}>Use starter text</button>}
+                  <button onClick={() => downloadOne({ key, label })} className="font-body text-xs underline" style={{ color: GOLD }} data-testid={`download-${key}`}>Download</button>
+                </span>
               </div>
-              <textarea value={draft[key] || ""} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} rows={4} aria-label={label}
+              <textarea value={draft[key] || ""} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} rows={8} aria-label={label}
                 className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none resize-y" style={st} />
             </div>
           ))}
+          <button onClick={downloadAll} className="w-full font-body text-sm font-semibold py-2.5 rounded-full border" style={{ borderColor: c.border, color: c.text }} data-testid="download-all-policies">Download all policies</button>
           <button onClick={save} disabled={saving} className="w-full font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: GOLD, color: "#1a1200", opacity: saving ? 0.6 : 1 }}>{saving ? "Saving…" : "Save policies"}</button>
         </div>
       )}
