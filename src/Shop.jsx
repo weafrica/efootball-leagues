@@ -897,6 +897,11 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
       {selected === "all" && !q && grouped.length > 0 && (
         <DepartmentStrip groups={grouped} onSelect={selectDept} deptNum={deptNum} c={c} />
       )}
+      {selected === "all" && !q && (() => {
+        const deals = products.filter((p) => p.active && p.stock_qty !== 0 && dealPercent(p) > 0)
+          .sort((a, b) => dealPercent(b) - dealPercent(a)).slice(0, 10);
+        return deals.length > 0 ? <NewArrivals products={deals} onOpen={onOpen} onQuickAdd={onQuickAdd} title="Today's deals" c={c} /> : null;
+      })()}
       {selected === "all" && !q && sort === "default" && !inStockOnly && searchable.length >= 6 && (
         <NewArrivals products={searchable.slice(0, 8)} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
       )}
@@ -1095,6 +1100,12 @@ function DepartmentStrip({ groups, onSelect, deptNum, c }) {
   );
 }
 
+// Percentage off when a product has a higher "was" price, otherwise 0.
+const dealPercent = (p) => {
+  const was = Number(p.compare_at_price), now = Number(p.price);
+  return !p.quote_only && was > now && now > 0 ? Math.round(((was - now) / was) * 100) : 0;
+};
+
 // Newest products across every department, as a swipeable row.
 function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }) {
   return (
@@ -1108,6 +1119,9 @@ function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }
               className="shrink-0 w-[150px] snap-start rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border }}>
               <div className="aspect-square relative" style={{ background: c.surfaceHover }}>
                 {p.image_url && <img src={toProxiedUrl(p.image_url)} alt={p.name} loading="lazy" className="w-full h-full object-cover" />}
+                {dealPercent(p) > 0 && (
+                  <span className="absolute top-2 left-2 font-body text-[11px] font-extrabold px-2 py-0.5 rounded-md" style={{ background: "#C4293A", color: "#fff" }} data-testid="deal-badge">-{dealPercent(p)}%</span>
+                )}
                 {canQuickAdd && (
                   <button onClick={(e) => { e.stopPropagation(); onQuickAdd(p); }} aria-label={`Add ${p.name} to cart`}
                     className="absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center shadow-md" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -1117,7 +1131,10 @@ function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }
               </div>
               <div className="p-3">
                 <div className="font-body text-sm leading-snug line-clamp-2 min-h-[2.5rem]" style={{ color: c.text }}>{p.name}</div>
-                <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>{p.quote_only ? "Price on request" : formatMoney(p.price)}</div>
+                <div className="font-body text-base font-extrabold mt-1" style={{ color: c.text }}>
+                  {p.quote_only ? "Price on request" : formatMoney(p.price)}
+                  {dealPercent(p) > 0 && <span className="ml-1.5 text-xs font-normal line-through" style={{ color: c.textFaint }}>{formatMoney(p.compare_at_price)}</span>}
+                </div>
               </div>
             </div>
           );
