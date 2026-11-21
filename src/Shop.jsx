@@ -1167,7 +1167,7 @@ function DepartmentShowcase({ groups, uncategorizedCount, onSelect, deptNum, c }
         </div>
         <div className="font-body text-xs mt-0.5" style={{ color: c.textDim }}>Step onto the floor — pick a department and dive in.</div>
       </div>
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
         {groups.map(({ dept, items }, idx) => {
           const num = deptNum.get(dept.id);
           // The first department gets a full-width hero tile once there are
@@ -1257,7 +1257,7 @@ function DeptTileCollage({ photos }) {
 function CategoryShowcase({ categories, allCategories, itemsForCat, onSelect, c }) {
   if (categories.length === 0) return null;
   return (
-    <div className="grid grid-cols-2 gap-2 mb-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-4">
       {categories.map((cat) => {
         const items = itemsForCat(cat.id);
         const photos = [...new Set(items.map((it) => toProxiedUrl(it.image_url)).filter(Boolean))].slice(0, 4);
@@ -1300,7 +1300,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
     );
   }
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       {products.map((p) => {
         const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0 && !p.quote_only;
         return (
