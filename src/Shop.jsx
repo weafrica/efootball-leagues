@@ -16,6 +16,7 @@ import { QuoteRequestForm, QuotesPanel, QuoteLookup } from "./ShopQuotes.jsx";
 import CatalogueFeedPanel from "./ShopCatalogueFeed.jsx";
 import { searchProducts, suggestWord } from "./ShopSearch.js";
 import ShopAssistant from "./ShopAssistant.jsx";
+import { TrustStrip, trustItems, parseDeliveryConfig } from "./ShopTrustStrip.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
@@ -284,6 +285,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [eftDetails, setEftDetails] = useState("");
   const [business, setBusiness] = useState(() => parseBusiness(""));
   const [policies, setPolicies] = useState(() => parsePolicies(""));
+  const [deliveryCfg, setDeliveryCfg] = useState({});
   const [msgTemplates, setMsgTemplates] = useState(() => parseTemplates(""));
   const wishlist = useWishlistState();
   // Helpers (shop staff) get the order tools but not the owner's controls.
@@ -506,11 +508,12 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   useEffect(() => { loadCategories(); }, []);
 
   const loadSettings = async () => {
-    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details", "shop_policies", "shop_message_templates"]);
+    const { data } = await supabase.from("shop_settings").select("key, value").in("key", ["eft_details", "business_details", "shop_policies", "shop_message_templates", "delivery_config"]);
     setEftDetails((data || []).find((r) => r.key === "eft_details")?.value || "");
     setBusiness(parseBusiness((data || []).find((r) => r.key === "business_details")?.value));
     setPolicies(parsePolicies((data || []).find((r) => r.key === "shop_policies")?.value));
     setMsgTemplates(parseTemplates((data || []).find((r) => r.key === "shop_message_templates")?.value));
+    setDeliveryCfg(parseDeliveryConfig((data || []).find((r) => r.key === "delivery_config")?.value));
   };
   useEffect(() => { loadSettings(); }, []);
 
@@ -636,7 +639,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
               </div>
             ) : null;
           })()}
-          <DepartmentBrowser products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null} signedIn={!!session}
+          <DepartmentBrowser trust={trustItems({ deliveryConfig: deliveryCfg, policies, whatsapp: SHOP_WHATSAPP_NUMBER, money: formatMoney })} products={visibleProducts} departments={departments || []} categories={categories || []} loading={products === null} signedIn={!!session}
             selected={shopDept} setSelected={setShopDept} catPath={shopCatPath} setCatPath={setShopCatPath}
             onOpen={setActiveProduct} onQuickAdd={(p) => (activeVariants(p).length ? setActiveProduct(p) : addToCart(p, 1))} c={c} />
         </>
@@ -781,7 +784,7 @@ function flattenCategoryTree(categories, parentId = null, depth = 0) {
 //  - search that narrows within whichever department is selected
 //  - "All" groups products into a section per department, like walking
 //    the floor; a specific department (or a search) shows just its grid
-function DepartmentBrowser({ products, departments, categories, loading, signedIn = false, selected, setSelected, catPath, setCatPath, onOpen, onQuickAdd, c }) {
+function DepartmentBrowser({ trust = [], products, departments, categories, loading, signedIn = false, selected, setSelected, catPath, setCatPath, onOpen, onQuickAdd, c }) {
   const [catFilter, setCatFilter] = useState("all"); // "all" | "direct" — within the current tree level
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
@@ -894,6 +897,7 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
               : document.getElementById("shop-search"))?.scrollIntoView({ behavior: "smooth", block: "center" })} />
         </div>
       )}
+      {selected === "all" && !q && <TrustStrip items={trust} c={c} />}
       {selected === "all" && !q && grouped.length > 0 && (
         <DepartmentStrip groups={grouped} onSelect={selectDept} deptNum={deptNum} c={c} />
       )}
