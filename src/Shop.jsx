@@ -925,23 +925,26 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
         );
       })()}
 
-      <div className="flex items-center gap-1.5 mb-4 overflow-x-auto no-scrollbar">
-        <select value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 mb-5 px-3 py-2.5 rounded-xl border" style={{ background: c.surface, borderColor: c.border }} data-testid="shop-toolbar">
+        <span className="font-body text-sm font-semibold mr-auto" style={{ color: c.text }} data-testid="toolbar-count">
+          {searchable.length} {searchable.length === 1 ? "product" : "products"}
+        </span>
+        <select value={sort} onChange={(e) => setSort(e.target.value)} className="font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
           <option value="default">Sort: Newest</option>
           <option value="price_asc">Price: low to high</option>
           <option value="price_desc">Price: high to low</option>
           <option value="name">Name: A to Z</option>
         </select>
-        <button onClick={() => setInStockOnly((v) => !v)} aria-pressed={inStockOnly} className="shrink-0 font-body text-xs font-semibold px-3.5 py-2 rounded-full"
-          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>
+        <button onClick={() => setInStockOnly((v) => !v)} aria-pressed={inStockOnly} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full"
+          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
           In stock only
         </button>
         {[["min", "From R", minPrice, setMinPrice], ["max", "To R", maxPrice, setMaxPrice]].map(([k, ph, val, set]) => (
           <input key={k} type="number" inputMode="numeric" min="0" value={val} onChange={(e) => set(e.target.value)} placeholder={ph} aria-label={k === "min" ? "Minimum price" : "Maximum price"} data-testid={`price-${k}`}
-            className="shrink-0 w-[84px] font-body text-xs font-semibold px-3 py-2 rounded-full outline-none" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }} />
+            className="w-[84px] font-body text-xs font-semibold px-3 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} />
         ))}
         {(minPrice !== "" || maxPrice !== "") && (
-          <button onClick={() => { setMinPrice(""); setMaxPrice(""); }} className="shrink-0 font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ color: c.textDim }}>Clear price</button>
+          <button onClick={() => { setMinPrice(""); setMaxPrice(""); }} className="font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ color: c.textDim }}>Clear price</button>
         )}
       </div>
 
