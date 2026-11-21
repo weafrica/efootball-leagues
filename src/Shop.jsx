@@ -872,18 +872,8 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
 
   return (
     <div>
-      {/* The same big banner as the login page, on top of the shop home. */}
-      {selected === "all" && !query.trim() && (
-        <div className="-mt-1 mb-5">
-          <ShopHeroBanner c={c} cta={signedIn ? "Go through the department you want" : "Start shopping"}
-            tagline={signedIn ? "Welcome back. Pick a department below to start." : undefined}
-            onOpen={() => (signedIn && document.getElementById("shop-departments")
-              ? document.getElementById("shop-departments")
-              : document.getElementById("shop-search"))?.scrollIntoView({ behavior: "smooth", block: "center" })} />
-        </div>
-      )}
       {/* Search leads: it is the fastest way to a product. */}
-      <div className="relative mb-5">
+      <div className="relative mb-4">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
         <input id="shop-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products"
           className="w-full border rounded-xl pl-10 pr-10 py-3 font-body text-sm outline-none focus:ring-2" style={{ background: c.surface, borderColor: c.border, color: c.text, "--tw-ring-color": SHOP_GOLD }} />
@@ -894,6 +884,16 @@ function DepartmentBrowser({ products, departments, categories, loading, signedI
         )}
       </div>
 
+      {/* A slim banner under the search bar. */}
+      {selected === "all" && !query.trim() && (
+        <div className="mb-5">
+          <ShopHeroBanner compact c={c} cta={signedIn ? "Go through the department you want" : "Start shopping"}
+            tagline={signedIn ? "Welcome back. Pick a department below to start." : undefined}
+            onOpen={() => (signedIn && document.getElementById("shop-departments")
+              ? document.getElementById("shop-departments")
+              : document.getElementById("shop-search"))?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+        </div>
+      )}
       {selected === "all" && !q && grouped.length > 0 && (
         <DepartmentStrip groups={grouped} onSelect={selectDept} deptNum={deptNum} c={c} />
       )}

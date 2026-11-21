@@ -132,17 +132,30 @@ export function BouncingProducts() {
 // Same gold store identity as ShopBanner (SHOP_GOLD) but much larger and
 // title-led, so the shop is the first thing a visitor sees. The whole card
 // is the tap target; open to guests, no account needed.
-export function ShopHeroBanner({ onOpen, c, cta = "Shop now", tagline = "Kits, jerseys & gear — open to everyone, no account needed." }) {
+export function ShopHeroBanner({ onOpen, c, cta = "Shop now", tagline = "Kits, jerseys & gear — open to everyone, no account needed.", compact = false }) {
   return (
     <section onClick={onOpen} role="button" tabIndex={0} aria-label={`Open ${SHOP_NAME}`}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
-      className="relative mt-4 rounded-3xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+      className={`relative ${compact ? "mt-0 rounded-2xl" : "mt-4 rounded-3xl"} overflow-hidden cursor-pointer active:scale-[0.98] transition-transform`}
       style={{ background: `linear-gradient(135deg, ${SHOP_GOLD}55, ${SHOP_GOLD}1A 55%, ${c.surface})`, border: `1.5px solid ${SHOP_GOLD}99` }}>
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="animate-glow-drift absolute -top-20 -right-12 w-56 h-56 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.35 }} />
         <div className="animate-glow-drift absolute -bottom-24 -left-16 w-48 h-48 rounded-full blur-3xl" style={{ background: SHOP_GOLD, opacity: 0.18, animationDelay: "2s" }} />
         <BouncingProducts />
       </div>
+      {compact ? (
+        <div className="relative px-5 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="font-extrabold uppercase tracking-tight leading-none text-3xl sm:text-4xl" style={{ color: c.text }}>
+              WeAfrica <span style={{ color: SHOP_GOLD }}>Shop</span>
+            </div>
+            <p className="font-body text-sm mt-1.5 max-w-md" style={{ color: c.textDim }}>{tagline}</p>
+          </div>
+          <span className="inline-flex self-start sm:self-auto shrink-0 items-center gap-2 font-body text-sm font-bold px-5 py-2.5 rounded-full shadow-lg" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
+            {cta} <ChevronRight size={16} />
+          </span>
+        </div>
+      ) : (
       <div className="relative px-5 py-7 sm:py-9">
         <div className="font-mono text-[11px] tracking-[0.25em] uppercase mb-2" style={{ color: SHOP_GOLD }}>Official store</div>
         <div className="font-extrabold uppercase tracking-tight leading-[0.95] text-[2.6rem] sm:text-6xl" style={{ color: c.text }}>
@@ -153,6 +166,7 @@ export function ShopHeroBanner({ onOpen, c, cta = "Shop now", tagline = "Kits, j
           {cta} <ChevronRight size={16} />
         </span>
       </div>
+      )}
     </section>
   );
 }
