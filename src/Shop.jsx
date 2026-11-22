@@ -19,6 +19,7 @@ import ShopAssistant from "./ShopAssistant.jsx";
 import { TrustStrip, trustItems, parseDeliveryConfig } from "./ShopTrustStrip.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
+import { GiftCardsPanel } from "./ShopGiftCards.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -3040,6 +3041,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       <MessageTemplatesPanel templates={templates} onSaved={onEftSaved} showToast={showToast} c={c} />
       <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
+      <GiftCardsPanel showToast={showToast} c={c} />
       <TeamPanel showToast={showToast} c={c} />
       <ActivityLogPanel c={c} />
 
