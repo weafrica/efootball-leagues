@@ -78,14 +78,15 @@ serve(async (req) => {
 
   const { data: order, error: orderError } = await supabase
     .from("shop_orders")
-    .select("id, order_number, status, checkout_method, subtotal, discount_amount, delivery_fee, buyer_email")
+    .select("id, order_number, status, checkout_method, subtotal, discount_amount, delivery_fee, gift_card_amount, buyer_email")
     .eq("id", orderId)
     .maybeSingle();
   if (orderError || !order) return json({ error: "order not found" }, 404);
   if (order.checkout_method !== "ikhokha_link") return json({ error: "this order is not a card order" }, 409);
   if (order.status !== "pending_review") return json({ error: "this order is no longer waiting for payment" }, 409);
 
-  const rand = Number(order.subtotal || 0) - Number(order.discount_amount || 0) + Number(order.delivery_fee || 0);
+  // What is still owed after any discount code and gift card.
+  const rand = Number(order.subtotal || 0) - Number(order.discount_amount || 0) + Number(order.delivery_fee || 0) - Number(order.gift_card_amount || 0);
   const amountInCents = Math.round(rand * 100);
   if (!(amountInCents > 0)) return json({ error: "invalid amount" }, 400);
 
