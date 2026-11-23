@@ -50,6 +50,7 @@ export function normalizeOrder(o, paidAt = null) {
     subtotal: Number(o.subtotal || 0),
     discount: Number(o.discount_amount || 0),
     discountCode: o.discount_code || "",
+    giftCard: Number(o.gift_card_amount || 0),
     deliveryFee: Number(o.delivery_fee || 0),
     deliveryMethod: o.delivery_method || null,
     deliveryAddress: o.delivery_address || null,
@@ -83,6 +84,7 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
   const isLabel = kind === "label";
   const paid = RECEIPT_STATUSES.includes(o.status);
   const total = Math.max(0, o.subtotal - o.discount) + o.deliveryFee;
+  const due = Math.max(0, total - o.giftCard);
   const rate = Number(b.vat_rate) || 15;
   const vatIncluded = b.vat_registered ? (total * rate) / (100 + rate) : 0;
   const title = isLabel ? "Shipping label" : isPacking ? "Packing slip" : isReceipt ? "Payment receipt" : (b.vat_registered ? "Tax invoice" : "Invoice");
@@ -201,11 +203,12 @@ export function OrderDocument({ order, kind, business, eftDetails, onClose }) {
           {o.deliveryMethod && o.deliveryFee === 0 && <Row label="Delivery" value="Free" />}
           <Row label="Total" value={money(total)} bold border />
           {b.vat_registered && <Row label={`Includes VAT @ ${rate}%`} value={money(vatIncluded)} muted />}
-          {paid ? <Row label="Paid" value={money(total)} bold /> : <Row label="Amount due" value={money(total)} bold />}
+          {o.giftCard > 0 && <Row label="Gift card" value={`-${money(o.giftCard)}`} />}
+          {paid ? (due > 0 ? <Row label="Paid" value={money(due)} bold /> : <Row label="Paid by gift card" value={money(total)} bold />) : <Row label="Amount due" value={money(due)} bold />}
         </div>
 
         <div style={{ marginTop: 24, fontSize: 12, color: "#333" }}>
-          <div><b>Payment method:</b> {METHOD_LABELS[o.method] || o.method}</div>
+          <div><b>Payment method:</b> {o.giftCard > 0 && due === 0 ? "Gift card" : (METHOD_LABELS[o.method] || o.method)}{o.giftCard > 0 && due > 0 ? " and gift card" : ""}</div>
           {paid ? (
             <div style={{ marginTop: 10, display: "inline-block", border: "2px solid #1f7a45", color: "#1f7a45", fontWeight: 800, letterSpacing: 2, padding: "4px 14px", borderRadius: 6, transform: "rotate(-4deg)" }}>PAID</div>
           ) : (

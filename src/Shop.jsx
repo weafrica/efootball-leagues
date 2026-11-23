@@ -19,7 +19,7 @@ import ShopAssistant from "./ShopAssistant.jsx";
 import { TrustStrip, trustItems, parseDeliveryConfig } from "./ShopTrustStrip.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
-import { GiftCardsPanel } from "./ShopGiftCards.jsx";
+import { GiftCardsPanel, GiftCardBox } from "./ShopGiftCards.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -126,7 +126,7 @@ const numOrNull = (v) => (v === "" || v == null || Number.isNaN(Number(v)) ? nul
 // queries below used to select("*, shop_order_items(*)"). Narrowed to
 // exactly the fields this file reads (verified against every `o.` / `it.`
 // property access in MyOrders and AdminOrders below).
-const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, courier_name, tracking_number, shop_order_items(id, qty, product_id, variant_id, product_name, unit_price, personalisation), shop_return_requests(id, status, reason, admin_note, created_at)";
+const SHOP_ORDER_SELECT = "id, order_number, created_at, status, subtotal, buyer_username, buyer_email, checkout_method, contact_phone, delivery_note, payment_proof_path, delivery_method, delivery_address, delivery_point, delivery_fee, discount_code, discount_amount, gift_card_amount, courier_name, tracking_number, shop_order_items(id, qty, product_id, variant_id, product_name, unit_price, personalisation), shop_return_requests(id, status, reason, admin_note, created_at)";
 
 function waLink(phone, text) {
   const digits = (phone || "").replace(/\D/g, "");
@@ -1600,6 +1600,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   const [addr, setAddr] = useState({ street: "", suburb: "", city: "", province: "", postal_code: "" });
   const [point, setPoint] = useState("");
   const [discount, setDiscount] = useState(null); // { code, amount } once applied
+  const [gift, setGift] = useState(null); // { code, balance } once a gift card is applied
 
   const cartKey = cart.map((it) => `${it.productId}:${it.variantId || ""}:${it.qty}`).join(",");
   useEffect(() => {
@@ -1618,6 +1619,9 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
   const deliveryFee = chosenOption ? Number(chosenOption.fee) || 0 : 0;
   const discountAmount = discount ? Math.min(total, discount.amount) : 0;
   const grandTotal = total - discountAmount + deliveryFee;
+  const giftAmount = gift ? Math.max(0, Math.min(gift.balance, grandTotal)) : 0;
+  const amountDue = grandTotal - giftAmount;
+  const covered = giftAmount > 0 && amountDue <= 0; // the gift card pays for everything
   const deliveryRequired = (deliveryOptions || []).length > 0;
 
   const buyerUsername = profile?.efootball_username || session?.user?.email || guestName.trim() || "Shopper";
@@ -1647,6 +1651,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       p_note: note.trim() || null,
       p_proof_path: proofPath || null,
       p_discount_code: discount?.code || null,
+      p_gift_code: gift?.code || null,
       p_delivery: deliveryRequired ? { method: deliveryMethod, address: deliveryMethod === "courier" ? addr : null, point: point.trim() || null } : null,
     });
     if (error) {
@@ -1676,8 +1681,19 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     setSubmitting(false);
     if (error) { showToast(error); return; }
     const delivLine = chosenOption ? `\nDelivery: ${chosenOption.label}${deliveryMethod === "courier" ? ` to ${[addr.street, addr.suburb, addr.city, addr.postal_code].filter(Boolean).join(", ")}` : (point.trim() ? ` (${point.trim()})` : "")} — ${Number(order.delivery_fee) ? formatMoney(order.delivery_fee) : "free"}` : "";
-    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${order.discount > 0 ? `\nDiscount (${discount?.code}): -${formatMoney(order.discount)}` : ""}${delivLine}\n\nTotal: ${formatMoney(order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
+    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${order.discount > 0 ? `\nDiscount (${discount?.code}): -${formatMoney(order.discount)}` : ""}${delivLine}${order.gift_card > 0 ? `\nGift card: -${formatMoney(order.gift_card)}` : ""}\n\nTotal to pay: ${formatMoney(order.amount_due ?? order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
     window.open(waLink(SHOP_WHATSAPP_NUMBER, msg), "_blank", "noopener,noreferrer");
+    onDone(order);
+  };
+
+  // The gift card pays for the whole order: nothing to upload or pay.
+  const submitCovered = async () => {
+    if (!precheck()) return;
+    setSubmitting(true);
+    const { order, error } = await placeOrder("manual_proof", null);
+    setSubmitting(false);
+    if (error) { showToast(error); return; }
+    showToast("Order placed and paid with your gift card.");
     onDone(order);
   };
 
@@ -1726,6 +1742,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         <span className="font-mono text-lg font-bold">{formatMoney(total)}</span>
       </div>
       <DiscountBox cart={cart} applied={discount} onChange={setDiscount} c={c} />
+      <GiftCardBox applied={gift} onChange={setGift} c={c} />
       {discountAmount > 0 && (
         <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }} data-testid="discount-line">
           <span>Discount ({discount.code})</span><span className="font-mono">-{formatMoney(discountAmount)}</span>
@@ -1736,14 +1753,19 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
           <span>Delivery</span><span className="font-mono">{formatMoney(deliveryFee)}</span>
         </div>
       )}
-      {(deliveryRequired || discountAmount > 0) && (
+      {giftAmount > 0 && (
+        <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }} data-testid="gift-line">
+          <span>Gift card ({gift.code})</span><span className="font-mono">-{formatMoney(giftAmount)}</span>
+        </div>
+      )}
+      {(deliveryRequired || discountAmount > 0 || giftAmount > 0) && (
         <div className="flex items-center justify-between mb-4 px-1 pt-1 border-t" style={{ borderColor: c.border }}>
           <span className="font-body text-sm font-semibold">Total to pay</span>
-          <span className="font-mono text-lg font-bold" style={{ color: SHOP_GOLD }}>{formatMoney(grandTotal)}</span>
+          <span className="font-mono text-lg font-bold" style={{ color: SHOP_GOLD }} data-testid="amount-due">{formatMoney(amountDue)}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
+      {!covered && <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
         <button onClick={() => SHOP_CARD_ENABLED && setMethod("ikhokha")} disabled={!SHOP_CARD_ENABLED}
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
           style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_CARD_ENABLED ? 1 : 0.4 }}>
@@ -1759,7 +1781,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
           style={method === "manual_proof" ? { background: c.text, color: c.bg } : { color: c.textDim }}>
           <Upload size={13} /> EFT proof
         </button>
-      </div>
+      </div>}
 
       {!session && (
         <div className="mb-4">
@@ -1824,7 +1846,21 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         </fieldset>
       )}
 
-      {method === "whatsapp" && (
+      {covered && (
+        <div className="space-y-3" data-testid="gift-covered">
+          <p className="font-body text-sm" style={{ color: c.textDim }}>Your gift card covers this whole order, so there is nothing to pay.</p>
+          <div>
+            <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Delivery or collection note (optional)</label>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2.5 font-body text-sm outline-none resize-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+          </div>
+          <button onClick={submitCovered} disabled={submitting || missingGuestName} data-testid="place-covered"
+            className="w-full font-body text-sm font-semibold py-3 rounded-full" style={{ background: c.accent, color: c.accentText, opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
+            {submitting ? "Placing order..." : "Place order"}
+          </button>
+        </div>
+      )}
+
+      {!covered && method === "whatsapp" && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
             Your order summary will be sent to us on WhatsApp, and we'll confirm payment and delivery with you directly there.
@@ -1836,7 +1872,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         </div>
       )}
 
-      {method === "manual_proof" && (
+      {!covered && method === "manual_proof" && (
         <div className="space-y-3">
           {eftDetails && (
             <div className="rounded-xl p-3 border font-mono text-xs whitespace-pre-line" style={{ background: c.surface, borderColor: c.border, color: c.textDim }}>
@@ -1865,10 +1901,10 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         </div>
       )}
 
-      {method === "ikhokha" && SHOP_CARD_ENABLED && (
+      {!covered && method === "ikhokha" && SHOP_CARD_ENABLED && (
         <div className="space-y-3">
           <p className="font-body text-sm" style={{ color: c.textDim }}>
-            You'll be taken to a secure iKhokha card page to pay {formatMoney(grandTotal)}. Your order is confirmed automatically as soon as the payment goes through.
+            You'll be taken to a secure iKhokha card page to pay {formatMoney(amountDue)}. Your order is confirmed automatically as soon as the payment goes through.
           </p>
           <CardBrandsBadge c={c} />
           <div>
@@ -1878,7 +1914,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
           </div>
           <button onClick={submitIkhokha} disabled={submitting || missingGuestName}
             className="w-full font-body text-sm font-semibold py-3 rounded-full flex items-center justify-center gap-2" style={{ background: c.accent, color: c.accentText, opacity: (submitting || missingGuestName) ? 0.6 : 1 }}>
-            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(grandTotal)}`}
+            <CreditCard size={15} /> {submitting ? "Submitting..." : `Pay ${formatMoney(amountDue)}`}
           </button>
         </div>
       )}
@@ -1974,9 +2010,14 @@ function TrackOrder({ initialNumber, business, eftDetails, onOpenQuote, c }) {
               <span>Delivery</span><span>{formatMoney(result.delivery_fee)}</span>
             </div>
           )}
+          {Number(result.gift_card_amount) > 0 && (
+            <div className="font-body text-sm flex items-center justify-between" style={{ color: c.textDim }}>
+              <span>Gift card</span><span>-{formatMoney(result.gift_card_amount)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: c.border }}>
             <span className="font-body text-sm font-semibold">Total</span>
-            <span className="font-mono text-base font-bold">{formatMoney(Number(result.subtotal) - Number(result.discount_amount || 0) + Number(result.delivery_fee || 0))}</span>
+            <span className="font-mono text-base font-bold">{formatMoney(Number(result.subtotal) - Number(result.discount_amount || 0) + Number(result.delivery_fee || 0) - Number(result.gift_card_amount || 0))}</span>
           </div>
           {result.delivery_method && (
             <div className="font-body text-xs mt-3" style={{ color: c.textDim }}>
@@ -2046,9 +2087,12 @@ function MyOrders({ orders, business, eftDetails, onChanged, onBuyAgain, c }) {
               {Number(o.delivery_fee) > 0 && (
                 <div className="font-body text-xs flex items-center justify-between" style={{ color: c.textDim }}><span>Delivery</span><span>{formatMoney(o.delivery_fee)}</span></div>
               )}
+              {Number(o.gift_card_amount) > 0 && (
+                <div className="font-body text-xs flex items-center justify-between" style={{ color: c.textDim }}><span>Gift card</span><span>-{formatMoney(o.gift_card_amount)}</span></div>
+              )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
                 <span className="font-body text-xs font-semibold">Total</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0))}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0) - Number(o.gift_card_amount || 0))}</span>
               </div>
               {o.delivery_method && <div className="font-body text-xs mt-1.5" style={{ color: c.textFaint }}>{deliverySummary(o)}</div>}
               {o.tracking_number && <div className="font-body text-xs mt-1" style={{ color: c.textDim }}>{o.courier_name ? `${o.courier_name}: ` : "Tracking: "}<span className="font-mono font-bold select-all">{o.tracking_number}</span></div>}
@@ -3095,8 +3139,8 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
                 </div>
               )}
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t" style={{ borderColor: c.border }}>
-                <span className="font-body text-xs font-semibold">Total{Number(o.delivery_fee) > 0 ? " (with delivery)" : ""}</span>
-                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0))}</span>
+                <span className="font-body text-xs font-semibold">{Number(o.gift_card_amount) > 0 ? `To collect (after gift card ${formatMoney(o.gift_card_amount)})` : `Total${Number(o.delivery_fee) > 0 ? " (with delivery)" : ""}`}</span>
+                <span className="font-mono text-sm font-bold">{formatMoney(Number(o.subtotal) - Number(o.discount_amount || 0) + Number(o.delivery_fee || 0) - Number(o.gift_card_amount || 0))}</span>
               </div>
               {["packed", "shipped", "delivered"].includes(o.status) && o.delivery_method && o.delivery_method !== "collection" && (
                 <TrackingEditor order={o} showToast={showToast} onSaved={load} c={c} />

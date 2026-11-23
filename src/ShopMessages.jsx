@@ -46,7 +46,7 @@ export function parseTemplates(raw) {
 const rand = (n) => `R${Number(n || 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function renderMessage(template, order, business) {
-  const total = Number(order.subtotal || 0) - Number(order.discount_amount || 0) + Number(order.delivery_fee || 0);
+  const total = Number(order.subtotal || 0) - Number(order.discount_amount || 0) + Number(order.delivery_fee || 0) - Number(order.gift_card_amount || 0);
   const tracking = order.tracking_number
     ? `\n${order.courier_name ? `${order.courier_name} tracking number` : "Tracking number"}: ${order.tracking_number}` : "";
   const first = String(order.buyer_username || "").trim().split(/\s+/)[0] || "there";

@@ -99,3 +99,40 @@ export function GiftCardsPanel({ showToast, c }) {
     </div>
   );
 }
+
+// "Have a gift card?" in checkout. Calls onChange({code, balance}) or null.
+// The server checks the card again when the order is placed.
+export function GiftCardBox({ applied, onChange, c }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const apply = async () => {
+    const t = code.trim();
+    if (!t) return;
+    setBusy(true); setMsg("");
+    const { data, error } = await supabase.rpc("shop_check_gift_card", { p_code: t });
+    setBusy(false);
+    if (error) return setMsg("Couldn't check that card. Try again.");
+    if (!data?.valid) return setMsg(data?.message || "That gift card isn't valid.");
+    onChange({ code: data.code, balance: Number(data.balance) });
+    setCode("");
+  };
+  if (applied) {
+    return (
+      <div className="flex items-center justify-between mb-3 rounded-lg px-3 py-2 font-body text-sm" style={{ background: c.surface, border: `1px solid ${c.border}` }} data-testid="giftcard-applied">
+        <span><Gift size={14} className="inline mr-1.5" style={{ color: GOLD }} />Gift card <span className="font-mono font-bold">{applied.code}</span> ({money(applied.balance)} available)</span>
+        <button onClick={() => onChange(null)} className="underline text-xs">Remove</button>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-3">
+      <div className="flex gap-2">
+        <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && apply()} placeholder="Gift card code" aria-label="Gift card code" data-testid="giftcard-code"
+          className="flex-1 border rounded-lg px-3 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+        <button onClick={apply} disabled={busy || !code.trim()} className="font-body text-sm font-semibold px-4 rounded-lg" style={{ background: GOLD, color: "#1a1200", opacity: busy || !code.trim() ? 0.6 : 1 }}>{busy ? "…" : "Apply"}</button>
+      </div>
+      {msg && <div className="font-body text-xs mt-1.5" style={{ color: c.red || "#e5484d" }} data-testid="giftcard-msg">{msg}</div>}
+    </div>
+  );
+}
