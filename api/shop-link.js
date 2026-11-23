@@ -106,7 +106,7 @@ export default async function handler(req, res) {
   const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
   if (id && supabaseUrl && supabaseAnonKey) {
     try {
-      const query = `${supabaseUrl}/rest/v1/shop_products?id=eq.${encodeURIComponent(id)}&select=name,price,description,image_url,stock_qty,quote_only,compare_at_price`;
+      const query = `${supabaseUrl}/rest/v1/shop_products?id=eq.${encodeURIComponent(id)}&select=name,price,description,image_url,stock_qty,quote_only,compare_at_price,sku,barcode`;
       const dataRes = await fetch(query, {
         headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` },
       });
@@ -150,6 +150,8 @@ export default async function handler(req, res) {
     "@context": "https://schema.org",
     "@type": "Product",
     name: product.name,
+    ...(product.sku ? { sku: product.sku } : {}),
+    ...(/^\d{8,14}$/.test(product.barcode || "") ? { gtin: product.barcode } : {}),
     description: String(product.description || `${product.name} at WeAfrica Shop`).slice(0, 5000),
     image: [image],
     sku: String(id),

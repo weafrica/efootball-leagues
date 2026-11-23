@@ -470,7 +470,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only, tags")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only, tags, sku, barcode")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -816,7 +816,7 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
   }
 
   const q = query.trim().toLowerCase();
-  const deptNameOf = (p) => `${departments.find((d) => d.id === p.department_id)?.name || ""} ${(p.tags || []).join(" ")}`;
+  const deptNameOf = (p) => `${departments.find((d) => d.id === p.department_id)?.name || ""} ${(p.tags || []).join(" ")} ${p.sku || ""} ${p.barcode || ""}`;
   const searched = q ? searchProducts(products, q, deptNameOf) : products;
   let searchable = searched;
   if (inStockOnly) searchable = searchable.filter((p) => p.stock_qty !== 0);
@@ -1425,6 +1425,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
             {!product.quote_only && unit < listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(listUnit)}</span>}
             {!product.quote_only && unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
           </div>
+          {product.sku && <div className="font-body text-[11px] mt-1.5" style={{ color: c.textFaint }} data-testid="product-sku">SKU: {product.sku}</div>}
           {product.description && <p className="font-body text-sm mt-2.5" style={{ color: c.textDim }}>{product.description}</p>}
           {(product.tags || []).length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2.5" data-testid="product-tags">
@@ -2155,7 +2156,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     }
     const hasVariants = (extras.variants || []).length > 0;
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
-      exclude_from_catalogue: !!form.exclude_from_catalogue || !!form.quote_only, quote_only: !!form.quote_only, tags: parseTags(form.tags),
+      exclude_from_catalogue: !!form.exclude_from_catalogue || !!form.quote_only, quote_only: !!form.quote_only, tags: parseTags(form.tags), sku: (form.sku || "").trim() || null, barcode: (form.barcode || "").trim() || null,
       personalisable: !!form.personalisable, personalise_label: form.personalisable ? ((form.personalise_label || "").trim() || null) : null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
@@ -2166,7 +2167,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
       const res = await supabase.from("shop_products").insert(hasVariants ? { ...payload, stock_qty: 0 } : payload).select("id").single();
       error = res.error; productId = res.data?.id;
     }
-    if (error) { showToast(`Couldn't save product: ${error.message}`); return false; }
+    if (error) { showToast(/shop_products_sku_uniq/.test(error.message) ? "That SKU is already used by another product." : `Couldn't save product: ${error.message}`); return false; }
 
     // Every department and category the product is listed under.
     const deptRows = (extras.departmentIds || []).map((id) => ({ product_id: productId, department_id: id }));
@@ -2303,6 +2304,8 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [personalisable, setPersonalisable] = useState(!!product.personalisable);
   const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [tagsText, setTagsText] = useState((product.tags || []).join(", "));
+  const [skuText, setSkuText] = useState(product.sku || "");
+  const [barcodeText, setBarcodeText] = useState(product.barcode || "");
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
   const [lengthCm, setLengthCm] = useState(product.length_cm ?? "");
   const [widthCm, setWidthCm] = useState(product.width_cm ?? "");
@@ -2338,7 +2341,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText, sku: skuText, barcode: barcodeText }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2445,6 +2448,18 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
           <label className="font-body text-sm flex items-center gap-2" data-testid="quote-only-toggle">
             <input type="checkbox" checked={quoteOnly} onChange={(e) => setQuoteOnly(e.target.checked)} /> Price on request (shoppers ask for a quote instead of adding to cart)
           </label>
+          <div className="grid grid-cols-2 gap-3" data-testid="sku-admin">
+            <div>
+              <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>SKU (optional)</label>
+              <input value={skuText} onChange={(e) => setSkuText(e.target.value)} placeholder="e.g. HOOD-BLK-M" aria-label="SKU" data-testid="sku-input"
+                className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+            </div>
+            <div>
+              <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Barcode (optional)</label>
+              <input value={barcodeText} onChange={(e) => setBarcodeText(e.target.value)} placeholder="EAN / UPC" aria-label="Barcode" data-testid="barcode-input" inputMode="numeric"
+                className="w-full border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+            </div>
+          </div>
           <div>
             <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>Tags (optional, separated by commas)</label>
             <input value={tagsText} onChange={(e) => setTagsText(e.target.value)} placeholder="e.g. hoodie, winter, school" aria-label="Tags" data-testid="tags-input"
