@@ -24,7 +24,7 @@ import DraftOrderModal from "./ShopDraftOrder.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
-  Package, Settings2, MessageCircle, CreditCard, ShoppingCart, ShoppingBag,
+  Package, Settings2, MessageCircle, CreditCard, ShoppingCart, ShoppingBag, SlidersHorizontal,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
   AlertTriangle, Facebook, Wand2, FileText, Heart,
 } from "lucide-react";
@@ -800,6 +800,8 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("default");
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [onSale, setOnSale] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
 
@@ -830,6 +832,7 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
   const searched = q ? searchProducts(products, q, deptNameOf) : products;
   let searchable = searched;
   if (inStockOnly) searchable = searchable.filter((p) => p.preorder || p.stock_qty !== 0);
+  if (onSale) searchable = searchable.filter((p) => dealPercent(p) > 0);
   const lo = minPrice === "" ? null : Number(minPrice);
   const hi = maxPrice === "" ? null : Number(maxPrice);
   if (lo != null && !Number.isNaN(lo)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) >= lo);
@@ -934,7 +937,7 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
           .sort((a, b) => dealPercent(b) - dealPercent(a)).slice(0, 10);
         return deals.length > 0 ? <NewArrivals products={deals} onOpen={onOpen} onQuickAdd={onQuickAdd} title="Today's deals" c={c} /> : null;
       })()}
-      {selected === "all" && !q && sort === "default" && !inStockOnly && searchable.length >= 6 && (
+      {selected === "all" && !q && sort === "default" && !inStockOnly && !onSale && searchable.length >= 6 && (
         <NewArrivals products={searchable.slice(0, 8)} onOpen={onOpen} onQuickAdd={onQuickAdd} c={c} />
       )}
 
@@ -962,29 +965,43 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
         );
       })()}
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 mb-5 px-3 py-2.5 rounded-xl border" style={{ background: c.surface, borderColor: c.border }} data-testid="shop-toolbar">
-        <span className="font-body text-sm font-semibold mr-auto" style={{ color: c.text }} data-testid="toolbar-count">
-          {searchable.length} {searchable.length === 1 ? "product" : "products"}
-        </span>
-        <select value={sort} onChange={(e) => setSort(e.target.value)} className="font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
-          <option value="default">{q ? "Sort: Best match" : "Sort: Newest"}</option>
-          {(q || sort === "newest") && <option value="newest">Newest first</option>}
-          <option value="price_asc">Price: low to high</option>
-          <option value="price_desc">Price: high to low</option>
-          <option value="name">Name: A to Z</option>
-        </select>
-        <button onClick={() => setInStockOnly((v) => !v)} aria-pressed={inStockOnly} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full"
-          style={inStockOnly ? { background: c.text, color: c.bg } : { background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
-          In stock only
-        </button>
-        {[["min", "From R", minPrice, setMinPrice], ["max", "To R", maxPrice, setMaxPrice]].map(([k, ph, val, set]) => (
-          <input key={k} type="number" inputMode="numeric" min="0" value={val} onChange={(e) => set(e.target.value)} placeholder={ph} aria-label={k === "min" ? "Minimum price" : "Maximum price"} data-testid={`price-${k}`}
-            className="w-[84px] font-body text-xs font-semibold px-3 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} />
-        ))}
-        {(minPrice !== "" || maxPrice !== "") && (
-          <button onClick={() => { setMinPrice(""); setMaxPrice(""); }} className="font-body text-xs font-semibold px-3 py-2 rounded-full" style={{ color: c.textDim }}>Clear price</button>
-        )}
-      </div>
+      {(() => {
+        const activeFilters = (inStockOnly ? 1 : 0) + (minPrice !== "" || maxPrice !== "" ? 1 : 0) + (onSale ? 1 : 0) + (sort !== "default" ? 1 : 0);
+        const chip = (on) => (on ? { background: c.text, color: c.bg } : { background: c.bg, color: c.textDim, border: `1px solid ${c.border}` });
+        return (
+          <div className="mb-5 rounded-xl border" style={{ background: c.surface, borderColor: c.border }} data-testid="shop-toolbar">
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              <span className="font-body text-sm font-semibold mr-auto" style={{ color: c.text }} data-testid="toolbar-count">
+                {searchable.length} {searchable.length === 1 ? "product" : "products"}
+              </span>
+              {activeFilters > 0 && (
+                <button onClick={() => { setInStockOnly(false); setMinPrice(""); setMaxPrice(""); setOnSale(false); setSort("default"); }} className="font-body text-xs font-semibold px-2 py-2" style={{ color: c.textDim }} data-testid="filter-clear">Clear</button>
+              )}
+              <button onClick={() => setFilterOpen((v) => !v)} aria-expanded={filterOpen} data-testid="filter-toggle"
+                className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={chip(filterOpen || activeFilters > 0)}>
+                <SlidersHorizontal size={13} /> Filter{activeFilters > 0 ? ` (${activeFilters})` : ""}
+              </button>
+            </div>
+            {filterOpen && (
+              <div className="px-3 pb-3 pt-1 border-t flex flex-wrap items-center gap-2" style={{ borderColor: c.border }} data-testid="filter-panel">
+                <button onClick={() => setInStockOnly((v) => !v)} aria-pressed={inStockOnly} data-testid="filter-instock" className="font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={chip(inStockOnly)}>In stock only</button>
+                <button onClick={() => setOnSale((v) => !v)} aria-pressed={onSale} data-testid="filter-onsale" className="font-body text-xs font-semibold px-3.5 py-2 rounded-full" style={chip(onSale)}>On sale</button>
+                {[["min", "From R", minPrice, setMinPrice], ["max", "To R", maxPrice, setMaxPrice]].map(([k, ph, val, set]) => (
+                  <input key={k} type="number" inputMode="numeric" min="0" value={val} onChange={(e) => set(e.target.value)} placeholder={ph} aria-label={k === "min" ? "Minimum price" : "Maximum price"} data-testid={`price-${k}`}
+                    className="w-[84px] font-body text-xs font-semibold px-3 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }} />
+                ))}
+                <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order results" data-testid="filter-order" className="font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
+                  <option value="default">{q ? "Order: Best match" : "Order: Newest"}</option>
+                  {(q || sort === "newest") && <option value="newest">Newest first</option>}
+                  <option value="price_asc">Price: low to high</option>
+                  <option value="price_desc">Price: high to low</option>
+                  <option value="name">Name: A to Z</option>
+                </select>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {departments.length > 0 && (selected !== "all" || q) && (
         <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 pt-1" style={{ background: c.bg }}>
