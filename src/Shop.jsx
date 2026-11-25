@@ -18,6 +18,7 @@ import { searchProducts, suggestWord } from "./ShopSearch.js";
 import ShopAssistant from "./ShopAssistant.jsx";
 import { TrustStrip, trustItems, parseDeliveryConfig } from "./ShopTrustStrip.jsx";
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
+import { useAutoDiscounts, bestAutoDiscount, AutoDiscountNudge, AutoDiscountsPanel } from "./ShopAutoDiscounts.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { GiftCardsPanel, GiftCardBox } from "./ShopGiftCards.jsx";
 import DraftOrderModal from "./ShopDraftOrder.jsx";
@@ -1575,6 +1576,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
 
 function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
   const total = cart.reduce((sum, it) => sum + it.qty * it.price, 0);
+  const autoRules = useAutoDiscounts();
   return (
     <div>
       <div className="flex items-center gap-2 mb-5">
@@ -1608,6 +1610,7 @@ function CartView({ cart, onUpdateQty, onRemove, onCheckout, onContinue, c }) {
               </div>
             ))}
           </div>
+          <AutoDiscountNudge rules={autoRules} total={total} c={c} />
           <div className="flex items-center justify-between mb-4 px-1">
             <span className="font-body text-sm font-semibold" style={{ color: c.textDim }}>Total</span>
             <span className="font-mono text-lg font-bold">{formatMoney(total)}</span>
@@ -1655,7 +1658,12 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
 
   const chosenOption = (deliveryOptions || []).find((o) => o.method === deliveryMethod && o.available) || null;
   const deliveryFee = chosenOption ? Number(chosenOption.fee) || 0 : 0;
-  const discountAmount = discount ? Math.min(total, discount.amount) : 0;
+  const autoRules = useAutoDiscounts();
+  const codeAmount = discount ? Math.min(total, discount.amount) : 0;
+  const autoBest = bestAutoDiscount(autoRules, total);
+  const autoWins = !!autoBest && autoBest.amount > codeAmount; // the server applies the better of the two
+  const discountAmount = autoWins ? autoBest.amount : codeAmount;
+  const discountLabel = autoWins ? autoBest.name : discount?.code;
   const grandTotal = total - discountAmount + deliveryFee;
   const giftAmount = gift ? Math.max(0, Math.min(gift.balance, grandTotal)) : 0;
   const amountDue = grandTotal - giftAmount;
@@ -1719,7 +1727,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     setSubmitting(false);
     if (error) { showToast(error); return; }
     const delivLine = chosenOption ? `\nDelivery: ${chosenOption.label}${deliveryMethod === "courier" ? ` to ${[addr.street, addr.suburb, addr.city, addr.postal_code].filter(Boolean).join(", ")}` : (point.trim() ? ` (${point.trim()})` : "")} — ${Number(order.delivery_fee) ? formatMoney(order.delivery_fee) : "free"}` : "";
-    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${order.discount > 0 ? `\nDiscount (${discount?.code}): -${formatMoney(order.discount)}` : ""}${delivLine}${order.gift_card > 0 ? `\nGift card: -${formatMoney(order.gift_card)}` : ""}\n\nTotal to pay: ${formatMoney(order.amount_due ?? order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
+    const msg = `Hi, I'd like to order from WeAfrica Shop:\n\nOrder ${order.order_number}\n${orderLines()}${order.discount > 0 ? `\nDiscount (${discountLabel}): -${formatMoney(order.discount)}` : ""}${delivLine}${order.gift_card > 0 ? `\nGift card: -${formatMoney(order.gift_card)}` : ""}\n\nTotal to pay: ${formatMoney(order.amount_due ?? order.total ?? order.subtotal)}\n\nName: ${buyerUsername}`;
     window.open(waLink(SHOP_WHATSAPP_NUMBER, msg), "_blank", "noopener,noreferrer");
     onDone(order);
   };
@@ -1783,7 +1791,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
       <GiftCardBox applied={gift} onChange={setGift} c={c} />
       {discountAmount > 0 && (
         <div className="flex items-center justify-between mb-1 px-1 font-body text-sm" style={{ color: c.textDim }} data-testid="discount-line">
-          <span>Discount ({discount.code})</span><span className="font-mono">-{formatMoney(discountAmount)}</span>
+          <span>Discount ({discountLabel})</span><span className="font-mono">-{formatMoney(discountAmount)}</span>
         </div>
       )}
       {deliveryFee > 0 && (
@@ -3204,6 +3212,7 @@ function AdminOrders({ session, products, showToast, onReloadProducts, onOpenPro
       <MessageTemplatesPanel templates={templates} onSaved={onEftSaved} showToast={showToast} c={c} />
       <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
+      {isAdmin && <AutoDiscountsPanel showToast={showToast} c={c} />}
       <GiftCardsPanel showToast={showToast} c={c} />
       {drafting && <DraftOrderModal products={products} onClose={() => setDrafting(false)} onCreated={() => { load(); onReloadProducts && onReloadProducts(); }} showToast={showToast} c={c} />}
       <TeamPanel showToast={showToast} c={c} />
