@@ -23,7 +23,7 @@ import { GiftCardsPanel, GiftCardBox } from "./ShopGiftCards.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
-  Package, Settings2, MessageCircle, CreditCard, Lock, ShoppingCart, ShoppingBag,
+  Package, Settings2, MessageCircle, CreditCard, ShoppingCart, ShoppingBag,
   Search, ClipboardList, Image as ImageIcon, Truck, LayoutGrid, ChevronUp, ChevronDown, Share2, Trophy, ChevronRight,
   AlertTriangle, Facebook, Wand2, FileText, Heart,
 } from "lucide-react";
@@ -61,7 +61,9 @@ export const SHOP_GATEWAY_ENABLED = false;
 // payment-confirmation callback back into this app. Leave blank to hide
 // this checkout option.
 // Card payments run through the create-shop-payment edge function (iKhokha API).
-export const SHOP_CARD_ENABLED = true;
+// Card payments (iKhokha) are switched off until the live keys are in place.
+// Set to true to show the Card tab at checkout again.
+export const SHOP_CARD_ENABLED = false;
 
 const SHOP_GOLD = "#D4A017";
 const CURRENCY_PREFIX = "R"; // South African Rand — change if selling elsewhere
@@ -1781,12 +1783,11 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
         </div>
       )}
 
-      {!covered && <div className="grid grid-cols-3 gap-1.5 mb-5 p-1 rounded-full" style={{ background: c.surface }}>
-        <button onClick={() => SHOP_CARD_ENABLED && setMethod("ikhokha")} disabled={!SHOP_CARD_ENABLED}
-          className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
-          style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_CARD_ENABLED ? 1 : 0.4 }}>
-          {SHOP_CARD_ENABLED ? <CreditCard size={13} /> : <Lock size={13} />} Card
-        </button>
+      {!covered && <div className={`grid ${SHOP_CARD_ENABLED ? "grid-cols-3" : "grid-cols-2"} gap-1.5 mb-5 p-1 rounded-full`} style={{ background: c.surface }}>
+        {SHOP_CARD_ENABLED && <button onClick={() => setMethod("ikhokha")} className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
+          style={method === "ikhokha" ? { background: c.text, color: c.bg } : { color: c.textDim }}>
+          <CreditCard size={13} /> Card
+        </button>}
         <button onClick={() => setMethod("whatsapp")} disabled={!SHOP_WHATSAPP_NUMBER}
           className="font-body text-[11px] font-semibold py-2 rounded-full flex flex-col items-center gap-0.5"
           style={method === "whatsapp" ? { background: c.text, color: c.bg } : { color: c.textDim, opacity: SHOP_WHATSAPP_NUMBER ? 1 : 0.4 }}>
