@@ -20,6 +20,7 @@ import { TrustStrip, trustItems, parseDeliveryConfig } from "./ShopTrustStrip.js
 import { ShopFooter, PoliciesPanel, parsePolicies, WishlistProvider, useWishlist, useWishlistState, HeartButton } from "./ShopFooter.jsx";
 import { DiscountBox, StockAlertForm, DiscountCodesPanel, StockAlertsPanel } from "./ShopPromos.jsx";
 import { GiftCardsPanel, GiftCardBox } from "./ShopGiftCards.jsx";
+import DraftOrderModal from "./ShopDraftOrder.jsx";
 import { OrderDocument, BusinessDetailsPanel, normalizeOrder, fetchPaidAt, paidAtFromHistory, parseBusiness, RECEIPT_STATUSES, NO_DOCUMENT_STATUSES } from "./ShopDocuments.jsx";
 import {
   ArrowLeft, X, Plus, Minus, Trash2, Upload, CheckCircle2, XCircle, Clock,
@@ -712,7 +713,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {subview === "admin-orders" && isTeam && (
-        <AdminOrders session={session} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} templates={msgTemplates} isAdmin={isAdmin} c={c} />
+        <AdminOrders session={session} products={products || []} showToast={showToast} onReloadProducts={loadProducts} onOpenProducts={() => setSubview("admin-products")} onOpenSales={() => setSubview("admin-sales")} eftDetails={eftDetails} onEftSaved={loadSettings} business={business} policies={policies} templates={msgTemplates} isAdmin={isAdmin} c={c} />
       )}
 
       {activeProduct && (
@@ -3078,8 +3079,9 @@ const ADMIN_FILTERS = [
   ["packed", "Packed"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"], ["rejected", "Rejected"], ["all", "All"],
 ];
 
-function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, templates, isAdmin, c }) {
+function AdminOrders({ session, products, showToast, onReloadProducts, onOpenProducts, onOpenSales, eftDetails, onEftSaved, business, policies, templates, isAdmin, c }) {
   const [doc, setDoc] = useState(null);
+  const [drafting, setDrafting] = useState(false);
   const [orders, setOrders] = useState(null);
   const [filter, setFilter] = useState("open");
   const [search, setSearch] = useState("");
@@ -3155,6 +3157,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
           <h1 className="text-2xl font-extrabold tracking-tight leading-none">Orders</h1>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setDrafting(true)} data-testid="new-order" className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200" }}>+ New order</button>
           <button onClick={onOpenSales} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Sales</button>
           {isAdmin && <button onClick={onOpenProducts} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.textDim }}>Products</button>}
         </div>
@@ -3183,6 +3186,7 @@ function AdminOrders({ session, showToast, onReloadProducts, onOpenProducts, onO
       <PoliciesPanel policies={policies} onSaved={onEftSaved} showToast={showToast} c={c} />
       <DiscountCodesPanel showToast={showToast} c={c} />
       <GiftCardsPanel showToast={showToast} c={c} />
+      {drafting && <DraftOrderModal products={products} onClose={() => setDrafting(false)} onCreated={() => { load(); onReloadProducts && onReloadProducts(); }} showToast={showToast} c={c} />}
       <TeamPanel showToast={showToast} c={c} />
       <ActivityLogPanel c={c} />
 
