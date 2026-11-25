@@ -468,7 +468,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   };
 
   const loadProducts = async () => {
-    const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
+    const [prod, vars, brks, imgs, rats, pdeps, pcats, bndl] = await Promise.all([
       supabase.from("shop_products")
         .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only, tags, sku, barcode, preorder, preorder_note")
         .order("created_at", { ascending: false }),
@@ -478,6 +478,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       supabase.from("shop_product_rating_summary").select("product_id, rating_avg, rating_count"),
       supabase.from("shop_product_departments").select("product_id, department_id"),
       supabase.from("shop_product_categories").select("product_id, category_id"),
+      supabase.from("shop_bundle_items").select("bundle_id, product_id, qty"),
     ]);
     if (prod.error) return;
     const group = (res) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r); }); return m; };
@@ -486,7 +487,13 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     const idsOf = (res, key) => { const m = new Map(); (res.data || []).forEach((r) => { if (!m.has(r.product_id)) m.set(r.product_id, []); m.get(r.product_id).push(r[key]); }); return m; };
     const gd = idsOf(pdeps, "department_id"), gc = idsOf(pcats, "category_id");
     const union = (list, main) => [...new Set([...(main ? [main] : []), ...(list || [])])];
-    setProducts((prod.data || []).map((p) => ({ ...p, dept_ids: union(gd.get(p.id), p.department_id), cat_ids: union(gc.get(p.id), p.category_id), variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [],
+    // Bundles: stock is how many complete sets the components allow.
+    const byId = new Map((prod.data || []).map((p) => [p.id, p]));
+    const bundles = new Map();
+    (bndl.data || []).forEach((r) => { if (!bundles.has(r.bundle_id)) bundles.set(r.bundle_id, []); bundles.get(r.bundle_id).push(r); });
+    const bundleOf = (id) => (bundles.get(id) || []).filter((r) => byId.has(r.product_id)).map((r) => ({ product_id: r.product_id, qty: r.qty, name: byId.get(r.product_id).name, stock: byId.get(r.product_id).stock_qty }));
+    const bundleStock = (items) => items.reduce((m, it) => Math.min(m, Math.floor((it.stock || 0) / it.qty)), Infinity);
+    setProducts((prod.data || []).map((p) => ({ ...p, ...(bundles.has(p.id) ? (() => { const items = bundleOf(p.id); return { bundle: items, stock_qty: items.length ? bundleStock(items) : 0 }; })() : {}), dept_ids: union(gd.get(p.id), p.department_id), cat_ids: union(gc.get(p.id), p.category_id), variants: gv.get(p.id) || [], breaks: gb.get(p.id) || [], images: gi.get(p.id) || [],
       rating_avg: Number(rs.get(p.id)?.rating_avg || 0), rating_count: rs.get(p.id)?.rating_count || 0 })));
   };
   useEffect(() => { loadProducts(); }, []);
@@ -1426,6 +1433,12 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
             {!product.quote_only && unit < listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(listUnit)}</span>}
             {!product.quote_only && unit >= listUnit && product.compare_at_price > listUnit && <span className="ml-2 line-through" style={{ color: c.textFaint }}>{formatMoney(product.compare_at_price)}</span>}
           </div>
+          {(product.bundle || []).length > 0 && (
+            <div className="mt-2.5 font-body text-xs rounded-lg px-3 py-2" style={{ background: c.surface, border: `1px solid ${c.border}`, color: c.textDim }} data-testid="bundle-includes">
+              <div className="font-semibold mb-1" style={{ color: c.text }}>This bundle includes</div>
+              {product.bundle.map((b) => <div key={b.product_id}>{b.qty} × {b.name}</div>)}
+            </div>
+          )}
           {product.sku && <div className="font-body text-[11px] mt-1.5" style={{ color: c.textFaint }} data-testid="product-sku">SKU: {product.sku}</div>}
           {product.description && <p className="font-body text-sm mt-2.5" style={{ color: c.textDim }}>{product.description}</p>}
           {(product.tags || []).length > 0 && (
@@ -1659,7 +1672,7 @@ function CheckoutView({ cart, total, session, profile, eftDetails, onStockChange
     });
     if (error) {
       onStockChanged && onStockChanged(); // stock may have changed under the shopper
-      return { error: error.message };
+      return { error: /stock_qty_check/.test(error.message || "") ? "Some items in your cart just sold out. Please check your cart and try again." : error.message };
     }
     return { order: data };
   };
@@ -2198,6 +2211,13 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     const breakRows = (extras.breaks || []).filter((b) => Number(b.min_qty) >= 2 && b.unit_price !== "" && b.unit_price != null)
       .map((b) => ({ product_id: productId, min_qty: Math.floor(Number(b.min_qty)), unit_price: Number(b.unit_price) }));
     if (breakRows.length) { const { error: e } = await supabase.from("shop_price_breaks").insert(breakRows); if (e) return fail("quantity prices", e); }
+    if (extras.bundle) {
+      if (editing?.id || extras.bundle.length) { const { error: e } = await supabase.from("shop_bundle_items").delete().eq("bundle_id", productId); if (e) return fail("bundle contents", e); }
+      const seen = new Set();
+      const rows = extras.bundle.filter((b) => b.product_id !== productId && !seen.has(b.product_id) && seen.add(b.product_id))
+        .map((b) => ({ bundle_id: productId, product_id: b.product_id, qty: Math.min(99, Math.floor(Number(b.qty))) }));
+      if (rows.length) { const { error: e } = await supabase.from("shop_bundle_items").insert(rows); if (e) return fail("bundle contents", e); }
+    }
     const keepImg = (extras.keptImages || []).map((i) => i.id);
     const oldImg = (editing?.images || []).map((i) => i.id).filter((id) => !keepImg.includes(id));
     if (oldImg.length) { const { error: e } = await supabase.from("shop_product_images").delete().in("id", oldImg); if (e) return fail("removing photos", e); }
@@ -2287,12 +2307,12 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
         ))}
       </div>
 
-      {editing && <ProductFormModal product={editing} departments={departments} categories={categories} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
+      {editing && <ProductFormModal product={editing} allProducts={products} departments={departments} categories={categories} onClose={() => setEditing(null)} onSave={saveProduct} c={c} />}
     </div>
   );
 }
 
-function ProductFormModal({ product, departments, categories, onClose, onSave, c }) {
+function ProductFormModal({ product, allProducts = [], departments, categories, onClose, onSave, c }) {
   const [name, setName] = useState(product.name || "");
   const [description, setDescription] = useState(product.description || "");
   const [price, setPrice] = useState(product.price ?? "");
@@ -2306,6 +2326,8 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [personalisable, setPersonalisable] = useState(!!product.personalisable);
   const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [tagsText, setTagsText] = useState((product.tags || []).join(", "));
+  const [bundle, setBundle] = useState((product.bundle || []).map((b) => ({ product_id: b.product_id, qty: b.qty })));
+  const bundleChoices = allProducts.filter((p) => p.id !== product.id && !(p.bundle || []).length && !(p.variants || []).length);
   const [preorder, setPreorder] = useState(!!product.preorder);
   const [preorderNote, setPreorderNote] = useState(product.preorder_note || "");
   const [skuText, setSkuText] = useState(product.sku || "");
@@ -2345,7 +2367,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText, sku: skuText, barcode: barcodeText, preorder, preorder_note: preorderNote }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText, sku: skuText, barcode: barcodeText, preorder, preorder_note: preorderNote }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, bundle: bundle.filter((b) => b.product_id && Number(b.qty) >= 1), categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2452,6 +2474,24 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
           <label className="font-body text-sm flex items-center gap-2" data-testid="quote-only-toggle">
             <input type="checkbox" checked={quoteOnly} onChange={(e) => setQuoteOnly(e.target.checked)} /> Price on request (shoppers ask for a quote instead of adding to cart)
           </label>
+          <div data-testid="bundle-admin">
+            <div className="font-body text-xs font-semibold mb-1.5" style={{ color: c.textDim }}>Bundle contents (optional)</div>
+            {bundle.map((b, i) => (
+              <div key={i} className="flex gap-2 mb-2">
+                <select value={b.product_id} onChange={(e) => setBundle((bs) => bs.map((x, j) => j === i ? { ...x, product_id: e.target.value } : x))} aria-label="Bundle item" className="flex-1 min-w-0 border rounded-lg px-2 py-2 font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.text }}>
+                  <option value="">Choose a product…</option>
+                  {bundleChoices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <input type="number" min="1" max="99" value={b.qty} onChange={(e) => setBundle((bs) => bs.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} aria-label="Bundle item quantity" className="w-16 border rounded-lg px-2 py-2 font-body text-sm" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+                <button type="button" onClick={() => setBundle((bs) => bs.filter((_, j) => j !== i))} className="font-body text-xs px-2" style={{ color: c.red }}>Remove</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setBundle((bs) => [...bs, { product_id: "", qty: 1 }])} data-testid="bundle-add" className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: c.surface, color: c.text, border: `1px solid ${c.border}` }}>+ Add a product to this bundle</button>
+            {bundle.length > 0 && (() => {
+              const worth = bundle.reduce((n, b) => n + (Number(allProducts.find((p) => p.id === b.product_id)?.price) || 0) * (Number(b.qty) || 0), 0);
+              return <div className="font-body text-[11px] mt-1.5" style={{ color: c.textFaint }}>Bought separately these cost {formatMoney(worth)}. Set the bundle price above. Stock comes from the products inside, so you don't set it here.</div>;
+            })()}
+          </div>
           <div data-testid="preorder-admin">
             <label className="font-body text-sm flex items-center gap-2">
               <input type="checkbox" checked={preorder} onChange={(e) => setPreorder(e.target.checked)} data-testid="preorder-toggle" /> Pre-order (take orders without stock)
