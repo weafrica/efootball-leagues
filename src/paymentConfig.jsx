@@ -45,6 +45,10 @@ export const MUKURU_DETAILS = {
 // TODO: replace payLink with your real iKhokha Pay-by-Link URL if this
 // ever needs to fall back to a static link instead of the create-*-payment
 // edge functions.
+// Card payments are switched off until the live iKhokha keys are in place.
+// Set to true to show "Pay by card" again (Matchday entries and Buy Nets).
+export const CARD_PAYMENTS_ENABLED = false;
+
 export const IKHOKHA_DETAILS = {
   payLink: "https://pay.ikhokha.com/weafrica/mpr/weafrica",
 };

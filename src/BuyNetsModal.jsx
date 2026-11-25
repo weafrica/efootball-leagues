@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { CreditCard, Upload, X } from "lucide-react";
 import NetCoinIcon, { NetsAmount } from "./NetCoinIcon";
 import {
-  BANK_DETAILS, MUKURU_DETAILS, IKHOKHA_DETAILS, CardBrandsBadge,
+  BANK_DETAILS, MUKURU_DETAILS, IKHOKHA_DETAILS, CARD_PAYMENTS_ENABLED, CardBrandsBadge,
   ENTRY_FEE_MIN, ENTRY_FEE_MAX, ENTRY_FEE_STEP, ENTRY_FEE_PRESETS,
   formatRand, clampFee,
 } from "./paymentConfig.jsx";
@@ -52,7 +52,7 @@ export default function BuyNetsModal({ onCancel, onSubmit, onPayByCard, c }) {
         <div className="font-body text-sm mb-4" style={{ color: c.textDim }}>Top up your balance to enter leagues, spend in the Shop, or bid in The Kit Room.</div>
 
         <div className="rounded-lg p-3 mb-3 font-body text-xs" style={{ background: c.surface, color: c.textDim }}>
-          {IKHOKHA_DETAILS.payLink && (
+          {CARD_PAYMENTS_ENABLED && IKHOKHA_DETAILS.payLink && (
             <>
               <div className="flex items-center gap-2 mb-2">
                 <CreditCard size={14} style={{ color: c.accent }} />
@@ -73,7 +73,7 @@ export default function BuyNetsModal({ onCancel, onSubmit, onPayByCard, c }) {
           )}
           <div className="flex items-center gap-2 mb-2">
             <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
-            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>Or via bank transfer</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: c.textFaint }}>{CARD_PAYMENTS_ENABLED ? "Or via bank transfer" : "Pay via bank transfer"}</span>
           </div>
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
             <span style={{ color: c.textFaint }}>Bank</span><span>{BANK_DETAILS.bank}</span>

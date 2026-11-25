@@ -12,7 +12,7 @@ import { Wallet, CreditCard, ChevronDown, Sparkles, ArrowLeft, Trophy, Users, Pi
 import { supabase } from "./supabaseClient";
 import { compressImage } from "./utils/imageCompress";
 import { logActivity } from "./activityLog";
-import { BANK_DETAILS, MUKURU_DETAILS, CardBrandsBadge } from "./paymentConfig";
+import { BANK_DETAILS, MUKURU_DETAILS, CARD_PAYMENTS_ENABLED, CardBrandsBadge } from "./paymentConfig";
 import { resolvePlayerLocation } from "./utils/timezone";
 
 const goats = (n) => `${n}G`;
@@ -401,8 +401,8 @@ export default function CashLadder({ session, profile, c, onBack }) {
             </div>
           </Panel>
 
-          {/* Pay by card — primary action */}
-          <button
+          {/* Pay by card — primary action (hidden while CARD_PAYMENTS_ENABLED is false) */}
+          {CARD_PAYMENTS_ENABLED && <button
             onClick={payByCard} disabled={saving}
             className="cl-btn cl-glow-btn w-full flex items-center justify-center gap-2 font-body text-base font-extrabold py-3.5 rounded-2xl mb-2 disabled:opacity-50"
             style={{ background: c.accent, color: c.accentText }}
@@ -413,22 +413,22 @@ export default function CashLadder({ session, profile, c, onBack }) {
               : approxAmount(amount)
               ? `Pay ${rand(amount || 0)} (${approxAmount(amount)}) by card`
               : `Pay ${rand(amount || 0)} by card`}
-          </button>
-          <div className="flex justify-center mb-4">
+          </button>}
+          {CARD_PAYMENTS_ENABLED && <div className="flex justify-center mb-4">
             <CardBrandsBadge />
-          </div>
+          </div>}
 
           {/* Manual payment — secondary, collapsed by default */}
-          <button
+          {CARD_PAYMENTS_ENABLED && <button
             onClick={() => setManualOpen((v) => !v)}
             className="w-full flex items-center justify-between font-body text-xs mb-2 px-1"
             style={{ color: c.textFaint }}
           >
             <span>Prefer to pay by EFT or Mukuru instead?</span>
             <ChevronDown size={13} style={{ transform: manualOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
-          </button>
+          </button>}
 
-          {manualOpen && (
+          {(manualOpen || !CARD_PAYMENTS_ENABLED) && (
             <Panel c={c} className="cl-fade-up">
               <div className="flex items-center gap-2 mb-2">
                 <img src="/capitec-logo.png" alt="Capitec Bank" className="h-4 w-auto object-contain" />
