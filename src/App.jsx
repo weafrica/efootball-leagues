@@ -88,6 +88,7 @@ const LeaderboardPage = lazy(() => import("./Leaderboard.jsx"));
 const openLudoApp = () => { window.location.assign("/ludo/"); };
 const LudoPage = () => null;
 const ChessPage = lazy(() => import("./ChessGame.jsx"));
+import { WelcomeGate, AppHub } from "./WelcomeScreens.jsx";
 const GlowveldPage = lazy(() => import("./glowveld/GlowveldPage.jsx"));
 const PlanetEarthPage = lazy(() => import("./planetearth/PlanetEarthPage.jsx"));
 const PlanetEarthIcon = ({ size = 20, color = "currentColor", strokeWidth = 2 }) => (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>);
@@ -3908,6 +3909,18 @@ export default function App() {
   // True when the page was opened at plain /shop (the shop's front door, e.g.
   // www.weafrica.co.za/shop) — read once at load, URL left as-is.
   const [shopHomeLink] = useState(() => /^\/shop\/?$/.test(window.location.pathname));
+  // Opening the bare site address always starts on the welcome screen, even
+  // when already signed in (once per browser session). Deep links such as
+  // /shop, /planetearth or shared product links skip it.
+  const [welcomeDone, setWelcomeDone] = useState(() => {
+    try { if (sessionStorage.getItem("wa_welcome_done") === "1") return true; } catch (e) { /* storage unavailable */ }
+    const loc = window.location;
+    return !(loc.pathname === "/" || loc.pathname === "") || loc.search.length > 1 || loc.hash.length > 1;
+  });
+  const finishWelcome = () => { try { sessionStorage.setItem("wa_welcome_done", "1"); } catch (e) { /* ignore */ } setWelcomeDone(true); };
+  // A signed-in person with no game username can use the shop and the other
+  // games straight away; the username form only appears once they pick Matchday.
+  const [wantsMatchdayProfile, setWantsMatchdayProfile] = useState(false);
   const shopHomeHandledRef = useRef(false);
   const [shopDeepLinkProductId, setShopDeepLinkProductId] = useState(null); // from a shared /shop/<id> link — works signed in or as a guest
   const [handledShopDeepLink, setHandledShopDeepLink] = useState(false);
@@ -8638,6 +8651,9 @@ export default function App() {
   if (session === undefined) {
     return <div className="min-h-screen flex items-center justify-center" style={{ background: THEMES.dark.bg }}><Loader c={THEMES.dark} /></div>;
   }
+  if (session && !welcomeDone) {
+    return <WelcomeGate c={c} session={session} profile={profile} onContinue={finishWelcome} onSwitch={async () => { finishWelcome(); await signOut(); }} />;
+  }
   if (!session) {
     return (
       <>
@@ -8676,6 +8692,24 @@ export default function App() {
           </main>
         </div>
       );
+    }
+    // Other games need no username either, so they open without the form.
+    const liteShell = (node) => (
+      <div className="min-h-screen" style={{ background: c.bg, color: c.text, fontFamily: "'Barlow Condensed', 'Oswald', sans-serif" }}>
+        <main className="max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 pb-24">
+          <ErrorBoundary><Suspense fallback={<Loader c={c} />}>{node}</Suspense></ErrorBoundary>
+        </main>
+      </div>
+    );
+    const backToHub = () => setView("home");
+    if (view === "chess") return liteShell(<ChessPage c={c} session={session} onBack={backToHub} showToast={showToast} />);
+    if (view === "planetearth") return liteShell(<PlanetEarthPage c={c} session={session} profile={null} onBack={backToHub} showToast={showToast} />);
+    if (view === "glowveld") return liteShell(<GlowveldPage c={c} session={session} profile={null} onBack={backToHub} showToast={showToast} />);
+    if (view === "sesothoMatch") return liteShell(<SesothoMatchPage onBack={backToHub} c={c} />);
+    if (view === "terms") return liteShell(<TermsPage c={c} onBack={backToHub} />);
+    if (!wantsMatchdayProfile) {
+      return <AppHub c={c} session={session} onSignOut={signOut} onMatchday={() => setWantsMatchdayProfile(true)}
+        onOpen={(key) => { if (key === "ludo") openLudoApp(); else if (key === "stories") window.location.assign("/stories/"); else setView(key); }} />;
     }
     return <ProfileGate c={c} theme={theme} toggleTheme={toggleTheme} onSubmit={completeProfile} userEmail={session.user.email} onSignOut={signOut} />;
   }

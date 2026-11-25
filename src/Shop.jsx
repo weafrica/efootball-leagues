@@ -834,7 +834,8 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
   const hi = maxPrice === "" ? null : Number(maxPrice);
   if (lo != null && !Number.isNaN(lo)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) >= lo);
   if (hi != null && !Number.isNaN(hi)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) <= hi);
-  if (sort === "price_asc") searchable = [...searchable].sort((a, b) => a.price - b.price);
+  if (sort === "newest") searchable = [...searchable].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  else if (sort === "price_asc") searchable = [...searchable].sort((a, b) => a.price - b.price);
   else if (sort === "price_desc") searchable = [...searchable].sort((a, b) => b.price - a.price);
   else if (sort === "name") searchable = [...searchable].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -966,7 +967,8 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
           {searchable.length} {searchable.length === 1 ? "product" : "products"}
         </span>
         <select value={sort} onChange={(e) => setSort(e.target.value)} className="font-body text-xs font-semibold pl-3 pr-2 py-2 rounded-full outline-none" style={{ background: c.bg, color: c.textDim, border: `1px solid ${c.border}` }}>
-          <option value="default">Sort: Newest</option>
+          <option value="default">{q ? "Sort: Best match" : "Sort: Newest"}</option>
+          {(q || sort === "newest") && <option value="newest">Newest first</option>}
           <option value="price_asc">Price: low to high</option>
           <option value="price_desc">Price: high to low</option>
           <option value="name">Name: A to Z</option>
