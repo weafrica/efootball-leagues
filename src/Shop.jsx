@@ -79,7 +79,7 @@ const productCats = (p) => p.cat_ids || (p.category_id ? [p.category_id] : []);
 const relatedProducts = (product, products, limit = 8) => {
   const cats = new Set(productCats(product)), depts = new Set(productDepts(product));
   return (products || [])
-    .filter((p) => p.id !== product.id && p.active && p.stock_qty !== 0)
+    .filter((p) => p.id !== product.id && p.active && (p.preorder || p.stock_qty !== 0))
     .map((p) => ({ p, score: productCats(p).filter((id) => cats.has(id)).length * 3 + productDepts(p).filter((id) => depts.has(id)).length }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score || (b.p.rating_avg || 0) - (a.p.rating_avg || 0))
@@ -470,7 +470,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const loadProducts = async () => {
     const [prod, vars, brks, imgs, rats, pdeps, pcats] = await Promise.all([
       supabase.from("shop_products")
-        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only, tags, sku, barcode")
+        .select("id, name, description, price, compare_at_price, facebook_url, stock_qty, image_url, active, department_id, category_id, weight_kg, length_cm, width_cm, height_cm, personalisable, personalise_label, exclude_from_catalogue, quote_only, tags, sku, barcode, preorder, preorder_note")
         .order("created_at", { ascending: false }),
       supabase.from("shop_product_variants").select("id, product_id, name, price, stock_qty, position, active").order("position"),
       supabase.from("shop_price_breaks").select("id, product_id, min_qty, unit_price").order("min_qty"),
@@ -534,7 +534,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
     setCart((prev) => {
       const key = `${product.id}:${vid || ""}`;
       const existing = prev.find((it) => lineKey(it) === key);
-      const cap = (variant ? variant.stock_qty : product.stock_qty) ?? 99;
+      const cap = product.preorder ? 99 : ((variant ? variant.stock_qty : product.stock_qty) ?? 99);
       if (existing) return prev.map((it) => lineKey(it) === key ? { ...it, qty: Math.min(it.qty + qty, cap), personalisation: personalisation || it.personalisation || "" } : it);
       return [...prev, { productId: product.id, variantId: vid, variantName: variant?.name || null, name: product.name, price: product.price, image_url: product.image_url, qty: Math.min(qty, cap), personalisation: product.personalisable ? personalisation : "" }];
     });
@@ -553,7 +553,7 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
         variant = vs.find((v) => v.id === it.variant_id) || null;
         if (!variant) { skipped += 1; return; }
       }
-      const stock = variant ? variant.stock_qty : p.stock_qty;
+      const stock = p.preorder ? null : (variant ? variant.stock_qty : p.stock_qty);
       if (stock !== null && stock !== undefined && stock <= 0) { skipped += 1; return; }
       addToCart(p, Math.min(it.qty, stock ?? it.qty), variant, p.personalisable ? (it.personalisation || "") : "");
       added += 1;
@@ -819,7 +819,7 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
   const deptNameOf = (p) => `${departments.find((d) => d.id === p.department_id)?.name || ""} ${(p.tags || []).join(" ")} ${p.sku || ""} ${p.barcode || ""}`;
   const searched = q ? searchProducts(products, q, deptNameOf) : products;
   let searchable = searched;
-  if (inStockOnly) searchable = searchable.filter((p) => p.stock_qty !== 0);
+  if (inStockOnly) searchable = searchable.filter((p) => p.preorder || p.stock_qty !== 0);
   const lo = minPrice === "" ? null : Number(minPrice);
   const hi = maxPrice === "" ? null : Number(maxPrice);
   if (lo != null && !Number.isNaN(lo)) searchable = searchable.filter((p) => p.quote_only || Number(p.price) >= lo);
@@ -919,7 +919,7 @@ function DepartmentBrowser({ trust = [], products, departments, categories, load
         <DepartmentStrip groups={grouped} onSelect={selectDept} deptNum={deptNum} c={c} />
       )}
       {selected === "all" && !q && (() => {
-        const deals = products.filter((p) => p.active && p.stock_qty !== 0 && dealPercent(p) > 0)
+        const deals = products.filter((p) => p.active && (p.preorder || p.stock_qty !== 0) && dealPercent(p) > 0)
           .sort((a, b) => dealPercent(b) - dealPercent(a)).slice(0, 10);
         return deals.length > 0 ? <NewArrivals products={deals} onOpen={onOpen} onQuickAdd={onQuickAdd} title="Today's deals" c={c} /> : null;
       })()}
@@ -1137,7 +1137,7 @@ function NewArrivals({ products, onOpen, onQuickAdd, title = "New arrivals", c }
       <h2 className="font-extrabold tracking-tight text-xl leading-none mb-3">{title}</h2>
       <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 snap-x" style={{ scrollPaddingLeft: 16 }}>
         {products.map((p) => {
-          const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0 && !p.quote_only;
+          const canQuickAdd = onQuickAdd && p.active && (p.preorder || p.stock_qty !== 0) && !p.quote_only;
           return (
             <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
               className="shrink-0 w-[150px] snap-start rounded-xl overflow-hidden border cursor-pointer" style={{ background: c.surface, borderColor: c.border }}>
@@ -1346,7 +1346,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       {products.map((p) => {
-        const canQuickAdd = onQuickAdd && p.active && p.stock_qty !== 0 && !p.quote_only;
+        const canQuickAdd = onQuickAdd && p.active && (p.preorder || p.stock_qty !== 0) && !p.quote_only;
         return (
           <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p)}
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen(p)}
@@ -1375,8 +1375,9 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
               )}
               {(p.breaks || []).length > 0 && <div className="font-body text-xs mt-0.5" style={{ color: SHOP_GOLD }}>Buy more, pay less</div>}
               {!p.active && <div className="font-body text-xs mt-1" style={{ color: c.textFaint }}>Hidden from shoppers</div>}
-              {p.active && !p.quote_only && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
-              {p.active && !p.quote_only && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
+              {p.active && !p.quote_only && p.preorder && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }} data-testid="preorder-badge">Pre-order{p.preorder_note ? ` · ${p.preorder_note}` : ""}</div>}
+              {p.active && !p.quote_only && !p.preorder && p.stock_qty === 0 && <div className="font-body text-xs font-semibold mt-1" style={{ color: c.red }}>Out of stock</div>}
+              {p.active && !p.quote_only && !p.preorder && p.stock_qty > 0 && p.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1" style={{ color: SHOP_GOLD }}>Only {p.stock_qty} left</div>}
             </div>
           </div>
         );
@@ -1393,13 +1394,13 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
   const [photoIdx, setPhotoIdx] = useState(0);
   const variant = variants.find((v) => v.id === variantId) || null;
   const photos = productPhotos(product);
-  const stock = variants.length ? (variant ? variant.stock_qty : null) : (product.stock_qty ?? 0);
-  const outOfStock = (product.stock_qty ?? 0) === 0;
+  const stock = product.preorder ? null : (variants.length ? (variant ? variant.stock_qty : null) : (product.stock_qty ?? 0));
+  const outOfStock = !product.preorder && (product.stock_qty ?? 0) === 0;
   const unit = unitPriceFor(product, variantId, qty);
   const listUnit = Number(variant?.price ?? product.price);
   const breaks = (product.breaks || []).slice().sort((a, b) => a.min_qty - b.min_qty);
   const cap = stock ?? 99;
-  const pick = (v) => { setVariantId(v.id); setQty((q) => Math.min(q, Math.max(1, v.stock_qty))); };
+  const pick = (v) => { setVariantId(v.id); setQty((q) => product.preorder ? q : Math.min(q, Math.max(1, v.stock_qty))); };
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div className="w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl overflow-hidden max-h-[85vh] overflow-y-auto" style={{ background: c.bg }} onClick={(e) => e.stopPropagation()}>
@@ -1444,7 +1445,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
               <div className="font-body text-xs font-semibold mb-1.5" style={{ color: c.textDim }}>Choose an option</div>
               <div className="flex flex-wrap gap-2">
                 {variants.map((v) => {
-                  const sold = v.stock_qty <= 0; const on = v.id === variantId;
+                  const sold = !product.preorder && v.stock_qty <= 0; const on = v.id === variantId;
                   return (
                     <button key={v.id} disabled={sold} onClick={() => pick(v)} aria-pressed={on}
                       className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border"
@@ -1454,7 +1455,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
                   );
                 })}
               </div>
-              {variant && variant.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1.5" style={{ color: SHOP_GOLD }}>Only {variant.stock_qty} left</div>}
+              {variant && !product.preorder && variant.stock_qty <= 5 && <div className="font-body text-xs font-semibold mt-1.5" style={{ color: SHOP_GOLD }}>Only {variant.stock_qty} left</div>}
             </div>
           )}
 
@@ -1482,6 +1483,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
                   <p className="font-body text-[11px] mt-1" style={{ color: c.textFaint }}>Buying more than one? Write each name or number here.</p>
                 </div>
               )}
+              {product.preorder && <div className="mt-4 font-body text-xs rounded-lg px-3 py-2" style={{ background: c.surface, color: c.textDim, border: `1px solid ${SHOP_GOLD}` }} data-testid="preorder-note"><b style={{ color: SHOP_GOLD }}>Pre-order.</b> {product.preorder_note || "This item ships once it arrives."} You pay now and we send it when it is in.</div>}
               <div className="flex items-center justify-center gap-4 mt-4">
                 <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: c.surface, color: c.text }}><Minus size={14} /></button>
                 <span className="font-mono font-bold text-base w-6 text-center">{qty}</span>
@@ -1489,7 +1491,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
               </div>
               <button onClick={() => onAdd(qty, variant, personal.trim())} disabled={variants.length > 0 && !variant}
                 className="w-full mt-4 font-body text-sm font-semibold py-2.5 rounded-full" style={{ background: SHOP_GOLD, color: "#1a1200", opacity: variants.length > 0 && !variant ? 0.5 : 1 }}>
-                {variants.length > 0 && !variant ? "Choose an option" : `Add to cart · ${formatMoney(unit * qty)}`}
+                {variants.length > 0 && !variant ? "Choose an option" : `${product.preorder ? "Pre-order" : "Add to cart"} · ${formatMoney(unit * qty)}`}
               </button>
               {(() => {
                 // Bulk orders: from BULK_QUOTE_MIN items the shopper can ask for a price on WhatsApp.
@@ -2156,7 +2158,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     }
     const hasVariants = (extras.variants || []).length > 0;
     const payload = { name: form.name, description: form.description || null, price: Number(form.price) || 0, compare_at_price: numOrNull(form.compare_at_price), facebook_url: /^https:\/\//i.test((form.facebook_url || "").trim()) ? form.facebook_url.trim() : null, ...(hasVariants ? {} : { stock_qty: Number(form.stock_qty) || 0 }), active: form.active, image_url, department_id: (extras.departmentIds || [])[0] || null, category_id: mainCategory(extras.categoryIds || [], (extras.departmentIds || [])[0], categories),
-      exclude_from_catalogue: !!form.exclude_from_catalogue || !!form.quote_only, quote_only: !!form.quote_only, tags: parseTags(form.tags), sku: (form.sku || "").trim() || null, barcode: (form.barcode || "").trim() || null,
+      exclude_from_catalogue: !!form.exclude_from_catalogue || !!form.quote_only, quote_only: !!form.quote_only, tags: parseTags(form.tags), sku: (form.sku || "").trim() || null, preorder: !!form.preorder, preorder_note: form.preorder ? ((form.preorder_note || "").trim() || null) : null, barcode: (form.barcode || "").trim() || null,
       personalisable: !!form.personalisable, personalise_label: form.personalisable ? ((form.personalise_label || "").trim() || null) : null,
       weight_kg: numOrNull(form.weight_kg), length_cm: numOrNull(form.length_cm), width_cm: numOrNull(form.width_cm), height_cm: numOrNull(form.height_cm) };
     let productId = editing?.id;
@@ -2268,7 +2270,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
-                {p.quote_only ? "Price on request" : `${formatMoney(p.price)} · ${p.stock_qty} in stock`} {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
+                {p.quote_only ? "Price on request" : p.preorder ? `${formatMoney(p.price)} · pre-order` : `${formatMoney(p.price)} · ${p.stock_qty} in stock`} {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
                 {(() => {
                   const ds = productDepts(p).filter((id) => deptById.has(id));
                   const cs = productCats(p).filter((id) => catById.has(id));
@@ -2304,6 +2306,8 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
   const [personalisable, setPersonalisable] = useState(!!product.personalisable);
   const [personaliseLabel, setPersonaliseLabel] = useState(product.personalise_label ?? "");
   const [tagsText, setTagsText] = useState((product.tags || []).join(", "));
+  const [preorder, setPreorder] = useState(!!product.preorder);
+  const [preorderNote, setPreorderNote] = useState(product.preorder_note || "");
   const [skuText, setSkuText] = useState(product.sku || "");
   const [barcodeText, setBarcodeText] = useState(product.barcode || "");
   const [weightKg, setWeightKg] = useState(product.weight_kg ?? "");
@@ -2341,7 +2345,7 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
     if (variants.some((v) => !v.name.trim())) return;
     setSaving(true);
     const ok = await onSave({ name: name.trim(), description, price, compare_at_price: compareAt, facebook_url: facebookUrl, stock_qty: stockQty, active,
-      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText, sku: skuText, barcode: barcodeText }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
+      weight_kg: weightKg, length_cm: lengthCm, width_cm: widthCm, height_cm: heightCm, personalisable, personalise_label: personaliseLabel, exclude_from_catalogue: excludeCatalogue, quote_only: quoteOnly, tags: tagsText, sku: skuText, barcode: barcodeText, preorder, preorder_note: preorderNote }, file, { variants, breaks, keptImages, newImages, departmentIds: deptIds, categoryIds: catIds });
     setSaving(false);
     if (ok) onClose();
   };
@@ -2448,6 +2452,16 @@ function ProductFormModal({ product, departments, categories, onClose, onSave, c
           <label className="font-body text-sm flex items-center gap-2" data-testid="quote-only-toggle">
             <input type="checkbox" checked={quoteOnly} onChange={(e) => setQuoteOnly(e.target.checked)} /> Price on request (shoppers ask for a quote instead of adding to cart)
           </label>
+          <div data-testid="preorder-admin">
+            <label className="font-body text-sm flex items-center gap-2">
+              <input type="checkbox" checked={preorder} onChange={(e) => setPreorder(e.target.checked)} data-testid="preorder-toggle" /> Pre-order (take orders without stock)
+            </label>
+            {preorder && (
+              <input value={preorderNote} onChange={(e) => setPreorderNote(e.target.value.slice(0, 80))} placeholder="e.g. Arrives mid-December" aria-label="Pre-order note" data-testid="preorder-note-input"
+                className="w-full mt-2 border rounded-lg px-3 py-2 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+            )}
+            <div className="font-body text-[11px] mt-1" style={{ color: c.textFaint }}>Stock is not counted for pre-orders. Untick it when the stock arrives and enter the new stock level.</div>
+          </div>
           <div className="grid grid-cols-2 gap-3" data-testid="sku-admin">
             <div>
               <label className="font-body text-xs font-semibold block mb-1.5" style={{ color: c.textDim }}>SKU (optional)</label>
