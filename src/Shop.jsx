@@ -2142,14 +2142,33 @@ function mainCategory(catIds, mainDeptId, categories) {
   return inMain || catIds[0] || null;
 }
 
+// Stock health for the admin inventory filter. Pre-orders and price-on-request
+// items are never "low". Products with options are judged per option.
+export const LOW_STOCK_AT = 5;
+export function stockStatus(p, at = LOW_STOCK_AT) {
+  if (!p || p.preorder || p.quote_only) return { level: "ok", detail: "" };
+  const vs = (p.variants || []).filter((v) => v.active !== false);
+  const units = vs.length ? vs.map((v) => ({ label: v.name, qty: Number(v.stock_qty) || 0 })) : [{ label: "", qty: Number(p.stock_qty) || 0 }];
+  const out = units.every((u) => u.qty <= 0);
+  const lowUnits = units.filter((u) => u.qty <= at);
+  if (out) return { level: "out", detail: "Out of stock" };
+  if (!lowUnits.length) return { level: "ok", detail: "" };
+  return { level: "low", detail: vs.length ? lowUnits.map((u) => `${u.label} ${u.qty}`).join(", ") : `Only ${lowUnits[0].qty} left` };
+}
+
 function AdminProducts({ products, departments, categories, onReload, onReloadDepartments, onReloadCategories, showToast, onOpenOrders, onOpenSales, requestConfirm, c }) {
   const [editing, setEditing] = useState(null); // product being edited, or {} for new
   const [managingDepts, setManagingDepts] = useState(false);
   const [query, setQuery] = useState("");
+  const [stockFilter, setStockFilter] = useState("all"); // all | low | out
 
   if (products === null) return <Spinner c={c} />;
   const q = query.trim().toLowerCase();
-  const filtered = q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
+  const statusOf = new Map(products.map((p) => [p.id, stockStatus(p)]));
+  const lowCount = products.filter((p) => statusOf.get(p.id).level === "low").length;
+  const outCount = products.filter((p) => statusOf.get(p.id).level === "out").length;
+  const bySearch = q ? products.filter((p) => [p.name, p.sku, p.barcode].some((v) => (v || "").toLowerCase().includes(q))) : products;
+  const filtered = stockFilter === "all" ? bySearch : bySearch.filter((p) => statusOf.get(p.id).level === stockFilter || (stockFilter === "low" && statusOf.get(p.id).level === "out"));
   const deptById = new Map(departments.map((d) => [d.id, d]));
   const catById = new Map(categories.map((cat) => [cat.id, cat]));
 
@@ -2272,8 +2291,16 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
 
       <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: c.textFaint }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products..."
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products, SKU or barcode..."
           className="w-full border rounded-lg pl-9 pr-4 py-2.5 font-body text-sm outline-none" style={{ background: c.surface, borderColor: c.border, color: c.text }} />
+      </div>
+
+      <div className="flex gap-1.5 mb-3 overflow-x-auto no-scrollbar" data-testid="stock-filters">
+        {[["all", `All (${products.length})`], ["low", `Low or out (${lowCount + outCount})`], ["out", `Out of stock (${outCount})`]].map(([key, label]) => (
+          <button key={key} onClick={() => setStockFilter(key)} aria-pressed={stockFilter === key} data-testid={`stock-filter-${key}`}
+            className="font-body text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
+            style={stockFilter === key ? { background: c.text, color: c.bg } : { background: c.surface, color: c.textDim, border: `1px solid ${c.border}` }}>{label}</button>
+        ))}
       </div>
 
       <button onClick={() => setEditing({})} className="w-full mb-4 font-body text-sm font-semibold py-2.5 rounded-full flex items-center justify-center gap-1.5" style={{ background: SHOP_GOLD, color: "#1a1200" }}>
@@ -2291,7 +2318,7 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
             <div className="min-w-0 flex-1">
               <div className="font-body text-xs font-semibold truncate">{p.name}</div>
               <div className="font-mono text-[10px]" style={{ color: c.textDim }}>
-                {p.quote_only ? "Price on request" : p.preorder ? `${formatMoney(p.price)} · pre-order` : `${formatMoney(p.price)} · ${p.stock_qty} in stock`} {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
+                {statusOf.get(p.id).level !== "ok" && <span className="font-semibold mr-1" style={{ color: c.red }} data-testid="stock-flag">{statusOf.get(p.id).level === "out" ? "OUT" : "LOW"}{statusOf.get(p.id).level === "low" ? ` (${statusOf.get(p.id).detail})` : ""} ·</span>}{p.quote_only ? "Price on request" : p.preorder ? `${formatMoney(p.price)} · pre-order` : `${formatMoney(p.price)} · ${p.stock_qty} in stock`} {!p.active && "· hidden"}{p.exclude_from_catalogue && " · not on Facebook"}
                 {(() => {
                   const ds = productDepts(p).filter((id) => deptById.has(id));
                   const cs = productCats(p).filter((id) => catById.has(id));
