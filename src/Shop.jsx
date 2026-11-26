@@ -249,6 +249,18 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
   const [categories, setCategories] = useState(null);
   const [cart, setCart] = useState(loadCart);
   const [activeProduct, setActiveProduct] = useState(null);
+  // "Customers also bought": products that real orders contain alongside this one.
+  const [alsoBoughtIds, setAlsoBoughtIds] = useState([]);
+  useEffect(() => {
+    const id = activeProduct?.id;
+    setAlsoBoughtIds([]);
+    if (!id) return undefined;
+    let cancelled = false;
+    supabase.rpc("shop_also_bought", { p_product_id: id, p_limit: 6 }).then(({ data, error }) => {
+      if (!cancelled) setAlsoBoughtIds(!error && Array.isArray(data) ? data : []);
+    });
+    return () => { cancelled = true; };
+  }, [activeProduct?.id]);
   // Product ids this shopper opened lately (newest first), kept on this
   // device only. Powers the "Recently viewed" row on the shop home.
   const [recentIds, setRecentIds] = useState(() => {
@@ -718,7 +730,8 @@ export default function ShopPage({ c, session, profile, isAdmin, onBack, onRequi
       )}
 
       {activeProduct && (
-        <ProductModal key={activeProduct.id} product={activeProduct} related={relatedProducts(activeProduct, products)} onOpenRelated={setActiveProduct} onClose={shopGoBack} onAdd={(qty, variant, text) => { addToCart(activeProduct, qty, variant, text); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
+        <ProductModal key={activeProduct.id} product={activeProduct} alsoBought={alsoBoughtIds.map((id) => (products || []).find((x) => x.id === id)).filter((x) => x && x.active && (x.preorder || x.stock_qty !== 0) && !x.quote_only)}
+          related={relatedProducts(activeProduct, products).filter((r) => !alsoBoughtIds.includes(r.id))} onOpenRelated={setActiveProduct} onClose={shopGoBack} onAdd={(qty, variant, text) => { addToCart(activeProduct, qty, variant, text); shopGoBack(); }} onShare={() => shareProduct(activeProduct)}
           session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth} showToast={showToast} onRatingsChanged={loadProducts} c={c} />
       )}
 
@@ -1416,7 +1429,7 @@ function ProductGrid({ products, loading, onOpen, onQuickAdd, c }) {
   );
 }
 
-function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, onShare, session, profile, isAdmin, onRequireAuth, showToast, onRatingsChanged, c }) {
+function ProductModal({ product, related = [], alsoBought = [], onOpenRelated, onClose, onAdd, onShare, session, profile, isAdmin, onRequireAuth, showToast, onRatingsChanged, c }) {
   const [qty, setQty] = useState(1);
   const variants = activeVariants(product);
   const [variantId, setVariantId] = useState(null);
@@ -1545,11 +1558,11 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
             </>
           )}
 
-          {related.length > 0 && (
-            <div className="mt-5 pt-4 border-t" style={{ borderColor: c.border }} data-testid="related">
-              <div className="font-extrabold uppercase tracking-tight text-sm mb-2">You may also like</div>
+          {[["also-bought", "Customers also bought", alsoBought], ["related", "You may also like", related]].map(([tid, title, list]) => list.length > 0 && (
+            <div key={tid} className="mt-5 pt-4 border-t" style={{ borderColor: c.border }} data-testid={tid}>
+              <div className="font-extrabold uppercase tracking-tight text-sm mb-2">{title}</div>
               <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
-                {related.map((r) => (
+                {list.map((r) => (
                   <button key={r.id} onClick={() => onOpenRelated && onOpenRelated(r)} className="shrink-0 w-[110px] text-left" aria-label={`${r.name}, ${formatMoney(r.price)}`}>
                     <span className="block w-[110px] h-[110px] rounded-xl overflow-hidden" style={{ background: c.surfaceHover }}>
                       {r.image_url ? <img src={toProxiedUrl(r.image_url)} alt="" loading="lazy" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center"><ImageIcon size={22} style={{ color: c.textFaint }} /></span>}
@@ -1560,7 +1573,7 @@ function ProductModal({ product, related = [], onOpenRelated, onClose, onAdd, on
                 ))}
               </div>
             </div>
-          )}
+          ))}
 
           <ProductReviews product={product} session={session} profile={profile} isAdmin={isAdmin} onRequireAuth={onRequireAuth}
             showToast={showToast} onRatingsChanged={onRatingsChanged} c={c} />
