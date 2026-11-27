@@ -34,30 +34,40 @@ const KNOWN_BUCKETS = new Set([
 // almost entirely budget for the PUT.
 const UPLOAD_TIMEOUT_MS = 55000;
 
+const FRIENDLY = "Couldn't upload the photo. Check your connection and try again.";
+
+// Same-origin fallback: send the bytes to our own server, which puts them in
+// R2. Used when the direct browser-to-R2 request fails to even connect.
+async function uploadViaServer(pathname, file, contentType) {
+  const res = await fetch(`/api/r2-upload-proxy?pathname=${encodeURIComponent(pathname)}&contentType=${encodeURIComponent(contentType)}`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || FRIENDLY);
+  return body.publicUrl;
+}
+
 async function uploadToR2Inner(bucket, path, file, contentType) {
   const pathname = `${bucket}/${path}`;
   const resolvedContentType = contentType || file.type || "application/octet-stream";
-
-  const tokenRes = await fetch("/api/r2-upload", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pathname, contentType: resolvedContentType }),
-  });
-  if (!tokenRes.ok) {
-    const body = await tokenRes.json().catch(() => ({}));
-    throw new Error(body.error || "Couldn't authorize the upload.");
+  let publicUrl, url;
+  try {
+    const tokenRes = await fetch("/api/r2-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pathname, contentType: resolvedContentType }) });
+    if (!tokenRes.ok) { const body = await tokenRes.json().catch(() => ({})); throw new Error(body.error || "Couldn't authorize the upload."); }
+    ({ url, publicUrl } = await tokenRes.json());
+  } catch (e) {
+    if (e instanceof TypeError) return uploadViaServer(pathname, file, resolvedContentType); // network-level failure
+    throw e;
   }
-  const { url, publicUrl } = await tokenRes.json();
-
-  const putRes = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": resolvedContentType },
-    body: file,
-  });
-  if (!putRes.ok) {
-    throw new Error(`Upload failed (${putRes.status}).`);
+  try {
+    const putRes = await fetch(url, { method: "PUT", headers: { "Content-Type": resolvedContentType }, body: file });
+    if (putRes.ok) return publicUrl;
+  } catch (e) { /* "Failed to fetch": CORS or network. Fall through to the server route. */ }
+  try {
+    return await uploadViaServer(pathname, file, resolvedContentType);
+  } catch (e) {
+    throw new Error(e instanceof TypeError || /failed to fetch/i.test(e.message || "") ? FRIENDLY : e.message);
   }
-  return publicUrl;
 }
 
 export async function uploadToR2(bucket, path, file, contentType) {
