@@ -2283,14 +2283,29 @@ function AdminProducts({ products, departments, categories, onReload, onReloadDe
     const oldImg = (editing?.images || []).map((i) => i.id).filter((id) => !keepImg.includes(id));
     if (oldImg.length) { const { error: e } = await supabase.from("shop_product_images").delete().in("id", oldImg); if (e) return fail("removing photos", e); }
     let ipos = keepImg.length;
+    // One bad photo must not stop the rest: each gets a second attempt, and the
+    // ones that still fail are reported together after the others are saved.
+    const failedPhotos = [];
+    let lastPhotoError = "";
     for (const raw of extras.newImages || []) {
-      try {
-        const file2 = await compressImage(raw, { maxDimension: 1000, quality: 0.85 });
-        const ext2 = (file2.name.split(".").pop() || "jpg").toLowerCase();
-        const url = await uploadToR2("shop-photos", `${Date.now()}-${ipos}.${ext2}`, file2);
-        const { error: e } = await supabase.from("shop_product_images").insert({ product_id: productId, url, position: ipos++ });
-        if (e) return fail("saving photos", e);
-      } catch (err) { return fail("uploading photos", err); }
+      let saved = false;
+      for (let attempt = 0; attempt < 2 && !saved; attempt++) {
+        try {
+          const isPng = (raw.name || "").startsWith("nobg-");
+          const file2 = await compressImage(raw, { maxDimension: 1000, quality: 0.85, mimeType: isPng ? "image/png" : "image/jpeg" });
+          const ext2 = (file2.name.split(".").pop() || "jpg").toLowerCase();
+          const url = await uploadToR2("shop-photos", `${Date.now()}-${ipos}-${attempt}.${ext2}`, file2);
+          const { error: e } = await supabase.from("shop_product_images").insert({ product_id: productId, url, position: ipos });
+          if (e) throw e;
+          ipos++; saved = true;
+        } catch (err) { lastPhotoError = err.message || String(err); }
+      }
+      if (!saved) failedPhotos.push(raw.name || "photo");
+    }
+    if (failedPhotos.length) {
+      showToast(`Product saved, but ${failedPhotos.length} extra photo${failedPhotos.length > 1 ? "s" : ""} didn't upload (${lastPhotoError}). Open the product and add ${failedPhotos.length > 1 ? "them" : "it"} again.`);
+      await onReload();
+      return false;
     }
     showToast(editing?.id ? "Product updated." : "Product added.");
     await onReload();
